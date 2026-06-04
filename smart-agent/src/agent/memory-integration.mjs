@@ -1,0 +1,195 @@
+// memory-integration.mjs — Smart Agent memory auto-integration
+//
+// Automatically decides when to store tool results into memory-store,
+// and when to query memory before executing diagnostic tools.
+//
+// Usage:
+//   import { shouldRemember, queryWithMemory, formatMemoryResult } from 'smart-agent/memory-integration';
+//   const decision = shouldRemember('smart_error_diagnose', args, result);
+//   if (decision) { /* auto-store result */ }
+
+// ---------------------------------------------------------------------------
+// Memory-worthy event detectors
+// ---------------------------------------------------------------------------
+
+const MEMORY_RULES = [
+  // Failed error diagnosis → highly valuable to remember
+  {
+    test: (toolName, args, result) =>
+      toolName === 'smart_error_diagnose' &&
+      !result.ok &&
+      (args.error || args._error),
+    type: 'resolution',
+    score: 0.9,
+    reason: 'Failed error diagnosis: remember this error pattern to avoid repeating',
+  },
+  // Successful cross-file edit → valuable refactoring pattern
+  {
+    test: (toolName, args, result) =>
+      toolName === 'smart_cross_file_edit' &&
+      result.ok === true,
+    type: 'refactor-success',
+    score: 0.8,
+    reason: 'Successful cross-file refactor: store pattern for similar future refactors',
+  },
+  // Failed cross-file edit → what not to do
+  {
+    test: (toolName, args, result) =>
+      toolName === 'smart_cross_file_edit' &&
+      !result.ok,
+    type: 'refactor-failure',
+    score: 0.7,
+    reason: 'Failed cross-file edit: remember what went wrong to avoid future conflicts',
+  },
+  // Security finding confirmed → important to track
+  {
+    test: (toolName, args, result) =>
+      toolName === 'smart_security' &&
+      result.ok === true &&
+      result.findings &&
+      result.findings.length > 0,
+    type: 'security-pattern',
+    score: 0.75,
+    reason: 'Security vulnerability found: remember the pattern for future audits',
+  },
+  // Successful fix via debug → valuable debugging pattern
+  {
+    test: (toolName, args, result) =>
+      toolName === 'smart_debug' &&
+      result.ok === true &&
+      result.rootCause,
+    type: 'debug-pattern',
+    score: 0.7,
+    reason: 'Root cause identified: store debugging pattern for similar issues',
+  },
+  // Test failure resolution
+  {
+    test: (toolName, args, result) =>
+      toolName === 'smart_test' &&
+      !result.ok &&
+      args.focus === 'all',
+    type: 'test-failure',
+    score: 0.6,
+    reason: 'Test suite failure: remember failing test patterns',
+  },
+  // Successful TOON optimization
+  {
+    test: (toolName, args, result) =>
+      toolName === 'smart_toonify' &&
+      result.ok !== false,
+    type: 'optimization',
+    score: 0.5,
+    reason: 'Successful token optimization: store pattern for similar optimization tasks',
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Determine if a tool result is worth remembering.
+ * @param {string} toolName - Name of the tool that was called
+ * @param {object} args - Arguments passed to the tool
+ * @param {object} result - Result from the tool
+ * @returns {{ shouldStore: boolean, type: string, score: number, reason: string } | null}
+ */
+export function shouldRemember(toolName, args, result) {
+  for (const rule of MEMORY_RULES) {
+    if (rule.test(toolName, args, result)) {
+      return {
+        shouldStore: true,
+        type: rule.type,
+        score: rule.score,
+        reason: rule.reason,
+        category: inferCategory(toolName, args),
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Generate the smart_memory_store command to store a result.
+ * @param {string} toolName - Tool that was executed
+ * @param {object} args - Tool arguments
+ * @param {object} result - Tool result
+ * @param {object} memoryDecision - Output from shouldRemember()
+ * @returns {{ command: string, storeArgs: object }}
+ */
+export function buildStoreCommand(toolName, args, result, memoryDecision) {
+  const resolution = buildResolution(toolName, args, result);
+  const toolsUsed = [toolName];
+
+  const storeArgs = {
+    command: 'store',
+    resolution,
+    tools: toolsUsed.join(','),
+    category: memoryDecision.category || inferCategory(toolName, args),
+    success: result.ok !== false,
+  };
+
+  return {
+    command: `smart_memory_store store --resolution "${resolution.replace(/"/g, '\\"')}" --tools "${toolsUsed.join(',')}" --category "${storeArgs.category}" --success ${storeArgs.success}`,
+    storeArgs,
+  };
+}
+
+/**
+ * Format a memory search result for display to the agent.
+ * @param {object} memoryResult - Result from smart_memory_store search
+ * @returns {string} Formatted string
+ */
+export function formatMemoryResult(memoryResult) {
+  if (!memoryResult || memoryResult.ok === false) {
+    return 'No relevant memories found.';
+  }
+
+  const entries = memoryResult.results || memoryResult.entries || [];
+  if (entries.length === 0) {
+    return 'No relevant memories found.';
+  }
+
+  let output = `**Found ${entries.length} relevant memory entr${entries.length === 1 ? 'y' : 'ies'}:**\n\n`;
+  for (const entry of entries.slice(0, 5)) {
+    output += `- **${entry.category || 'general'}** (confidence: ${Math.round((entry.score || entry.hitCount || 0) * 100)}%)\n`;
+    output += `  Resolution: ${entry.resolution || 'N/A'}\n`;
+    output += `  Tools used: ${(entry.tools || entry.toolsUsed || []).join(', ')}\n`;
+    if (entry.hitCount) output += `  Previously used: ${entry.hitCount} time(s)\n`;
+    output += '\n';
+  }
+  return output;
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+function inferCategory(toolName, args) {
+  const categoryMap = {
+    smart_error_diagnose: 'runtime',
+    smart_cross_file_edit: 'refactor',
+    smart_security: 'security',
+    smart_debug: 'runtime',
+    smart_test: 'test',
+    smart_toonify: 'optimization',
+    smart_grep: 'search',
+    smart_learn: 'build',
+    smart_git_commit: 'git',
+    smart_git_review: 'git',
+  };
+  return categoryMap[toolName] || 'unknown';
+}
+
+function buildResolution(toolName, args, result) {
+  const parts = [];
+  if (args.error || args._error) parts.push(`Error: ${args.error || args._error}`);
+  if (result.rootCause) parts.push(`Root cause: ${result.rootCause}`);
+  if (result.fix) parts.push(`Fix: ${result.fix}`);
+  if (result.summary) parts.push(result.summary);
+  if (args.pattern) parts.push(`Pattern: ${args.pattern}`);
+
+  return parts.length > 0
+    ? parts.join('; ')
+    : `${toolName} executed with ${JSON.stringify(args)}`;
+}

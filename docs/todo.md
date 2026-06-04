@@ -306,62 +306,64 @@
 
 ---
 
-## 🔴 Phase 5: Workflow 引擎強化 (P0 — 實際執行能力)
+## ✅ Phase 5: Workflow 引擎強化 (P0 — 實際執行能力) ✅
 
 **對應 plan.md 五-Phase 5**  
 **目標**：讓 workflow 能真正執行工具，而非只管理 state。
 
-**動機**：目前 workflow.mjs 是 state tracker + report generator，實際工具執行靠 opencode agent 手動 dispatch。這不是真正的 workflow engine。
+**實作摘要**: `workflow.mjs` 已新增 `dispatch` 指令 + TOOL_CLI_MAP + TOOL_ARGS_CONVERTERS，ContextManager 新增 `getWorkflowCost()`，`smart_context` 新增 `workflow-stats` 指令。4 個 dispatch 測試全部通過。
 
 ### 5.1 Workflow Engine 加入 dispatch 層
 
-- [ ] `workflow.mjs` 新增 `dispatch` 指令：接收 workflowId → 自動 call invokeTool()
-- [ ] 支援 `parallel(group)` dispatch：同時 spawn 多個獨立工具
-- [ ] 先用 sequential 模式驗證，平行執行留待 Phase 6
+- [x] `workflow.mjs` 新增 `dispatch` 指令：接收 workflowId → 自動 call invokeTool()
+- [x] 支援 `parallel(group)` dispatch：同時 spawn 多個獨立工具
+- [x] 先用 sequential 模式驗證（平行執行由 Phase 6 compose-engine 實作）
 
 ### 5.2 Workflow 產出可直接執行的 JSON
 
-- [ ] `create` 指令輸出格式強化：含完整 tool args + timeout + onFailure
-- [ ] opencode agent 可直接 iterate 執行，不需再 parse 描述文字
+- [x] `create` 指令輸出格式強化：含完整 tool args + timeout + onFailure
+- [x] opencode agent 可直接 iterate 執行，不需再 parse 描述文字
 
 ### 5.3 Workflow context 聚合
 
-- [ ] ContextManager 新增 `getWorkflowCost(workflowId)`：回傳該 workflow 的總 token/時間/錯誤率
-- [ ] `smart_context` 新增 `workflow-stats` 指令
+- [x] ContextManager 新增 `getWorkflowCost(workflowId)`：回傳該 workflow 的總 token/時間/錯誤率
+- [x] `smart_context` 新增 `workflow-stats` 指令
 
 ### 驗收標準
 
-- [ ] `workflow dispatch --id <wfId>` 自動執行第一步工具
-- [ ] `workflow dispatch --id <wfId> --parallel` 同時執行獨立步驟
-- [ ] `smart_context workflow-stats --id <wfId>` 回傳成本數據
+- [x] `workflow dispatch --id <wfId>` 自動執行第一步工具
+- [x] `workflow dispatch --id <wfId> --parallel` 同時執行獨立步驟
+- [x] `smart_context workflow-stats --id <wfId>` 回傳成本數據
 
 ---
 
-## 🟠 Phase 6: Compose 原語 + 平行執行基礎 (P1 — 工具組合)
+## ✅ Phase 6: Compose 原語 + 平行執行基礎 (P1 — 工具組合) ✅
 
 **對應 plan.md 五-Phase 6**  
 **目標**：提供 compose/pipe/parallel 三種工具組合原語。
 
+**實作摘要**: `src/lib/compose-engine.mjs` (14KB) 已完成，支援 seq/par/cond 三種模式。`src/plugins/standard/compose.mjs` 已註冊為 `smart_compose` MCP tool。CLI spawn 已從 `spawnSync` 改為 `spawn` + Promise wrapper + AbortController timeout。
+
 ### 6.1 Compose 原語定義與實作
 
-- [ ] `src/plugins/standard/compose.mjs` — 新增 MCP tool `smart_compose`
-  - [ ] 輸入：`{ pipeline: [{ tool, args, mode: "seq"|"par"|"cond" }] }`
-  - [ ] 順序執行（pipe）：A 的輸出餵給 B
-  - [ ] 平行執行（parallel）：Promise.all + child_process.spawn async
-  - [ ] 條件執行（cond）：檢查前一步結果關鍵字決定分支
-- [ ] `src/lib/compose-engine.mjs` — compose 核心邏輯
+- [x] `src/plugins/standard/compose.mjs` — 新增 MCP tool `smart_compose`
+  - [x] 輸入：`{ pipeline: [{ tool, args, mode: "seq"|"par"|"cond" }] }`
+  - [x] 順序執行（pipe）：A 的輸出餵給 B
+  - [x] 平行執行（parallel）：Promise.all + child_process.spawn async
+  - [x] 條件執行（cond）：檢查前一步結果關鍵字決定分支
+- [x] `src/lib/compose-engine.mjs` — compose 核心邏輯
 
 ### 6.2 CLI spawn 非阻塞改造
 
-- [ ] 24 CLI tools 從 `spawnSync` → `spawn` + Promise wrapper
-- [ ] 保留 timeout 控制（AbortController）
-- [ ] 相容既有工具，不修改 signature
+- [x] 24 CLI tools 從 `spawnSync` → `spawn` + Promise wrapper
+- [x] 保留 timeout 控制（AbortController）
+- [x] 相容既有工具，不修改 signature
 
 ### 驗收標準
 
-- [ ] `smart_compose({ pipeline: [...] })` 正確執行多工具流程
-- [ ] `mode: "par"` 平行執行比依序快（2 個 500ms 工具約 500ms 而非 1000ms）
-- [ ] `mode: "cond"` 根據條件正確分支
+- [x] `smart_compose({ pipeline: [...] })` 正確執行多工具流程
+- [x] `mode: "par"` 平行執行比依序快（2 個 500ms 工具約 500ms 而非 1000ms）
+- [x] `mode: "cond"` 根據條件正確分支
 
 ---
 
@@ -455,7 +457,27 @@
 
 ---
 
-## ✅ 已完成 (v3.2)
+## ✅ 已完成 (v3.3)
+
+### Phase 5: Workflow 引擎強化 — dispatch 層 (2026-06-04)
+- [x] `workflow.mjs` — `dispatch` 指令：自動呼叫 CLI 工具 + auto-report
+- [x] TOOL_CLI_MAP — 17 個工具對應 CLI script 映射
+- [x] TOOL_ARGS_CONVERTERS — 8 個工具自訂 positional args 轉換
+- [x] `dispatch --parallel` — 同時執行獨立步驟
+- [x] smart_context `workflow-stats` 指令 — 查詢 workflow 成本
+- [x] 4 個 dispatch 測試 (step/group/completed-error/nonpending-error)
+
+### Phase 6: Compose 引擎 + 平行執行 (2026-06-04)
+- [x] `src/lib/compose-engine.mjs` — seq/par/cond 三種組合模式
+- [x] `smart_compose` MCP tool — pipeline 執行入口
+- [x] CLI spawn 非阻塞改造：spawnSync → spawn + Promise + AbortController
+- [x] `compose.mjs` CLI 入口 + MCP plugin
+
+### smart_git 工具合併 (2026-06-04)
+- [x] `smart_git_commit` — Git commit 輔助 (message/body/template/--all/--dry-run)
+- [x] `smart_git_pr` — PR 生成 (noPublish/draft/title/body)
+- [x] `smart_git_review` — 程式碼審查 (all/focus/commit)
+- [x] Workflow 模板新增 `git-flow`
 
 ### Phase 4: Workflow 引擎 (2026-06-04)
 - [x] `smart_workflow` — 5 commands (create/report/replan/summary/list-templates)
@@ -493,14 +515,18 @@
 - [x] smart_thinking — 9 模板結構化推理 (v3.1: dynamic/state/branch/handler)
 - [x] smart_think — 快速對話推理 (handler-based, 取代 sequential-thinking)
 
-### Standard 工具 (Phases 0-4)
+### Standard 工具 (Phases 0-6)
 - [x] smart_coverage — 測試覆蓋率分析 (if/else/switch/loop/ternary)
+- [x] smart_compose — 工具組合原語 (seq/par/cond pipeline)
 - [x] smart_cross_file_edit — 跨檔案編輯 (dry-run 預設安全)
 - [x] smart_debug — 錯誤分析與分類
 - [x] smart_diagram — Mermaid.js 圖表 (flowchart/sequence/class/ER)
 - [x] smart_error_diagnose — 失敗模式知識庫診斷
 - [x] smart_exa_search — Exa 網路搜尋/爬蟲/程式碼查詢
+- [x] smart_git_commit — Git commit 輔助 (message/dry-run/template)
 - [x] smart_git_context — Git diff/commit/impact 分析
+- [x] smart_git_pr — PR 生成 (noPublish/draft/title/body)
+- [x] smart_git_review — 程式碼審查 (all/focus/commit)
 - [x] smart_github_search — GitHub 程式碼搜尋
 - [x] smart_import_graph — 跨檔案依賴分析 (6 語言)
 - [x] smart_naming — 命名慣例分析 (kebab/camel/Pascal/UPPER)
@@ -512,7 +538,7 @@
 - [x] smart_tool_stats — 工具使用統計 (record/report/trends/recommendations)
 - [x] smart_toonify — TOON token 優化 (30-65% 節省)
 - [x] smart_ts_helper — TypeScript 分析 (config/exports/modules)
-- [x] smart_workflow — Plan-based orchestration (create/report/replan/summary)
+- [x] smart_workflow — Plan-based orchestration (create/report/replan/summary/dispatch)
 
 ### Bug Fixes
 - [x] toonify.mjs — 修復 `Cannot find module '../../package.json'`

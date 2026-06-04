@@ -20,6 +20,7 @@ reports/*.html
 
 # Test artifacts
 .test-memory-*/
+.test-git-*/
 
 # Runtime opencode data (machine-specific, not for sharing)
 .opencode/memory-core/
