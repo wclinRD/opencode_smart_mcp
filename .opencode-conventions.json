@@ -5,16 +5,16 @@
         "kebabCase": 21,
         "camelCase": 21,
         "snake_case": 12,
-        "other": 1
+        "other": 3
       },
       "variable": {
-        "UPPER_CASE": 41,
-        "camelCase": 1492,
-        "other": 6,
+        "UPPER_CASE": 49,
+        "camelCase": 1639,
+        "other": 8,
         "PascalCase": 5
       },
       "function": {
-        "camelCase": 351
+        "camelCase": 374
       },
       "class": {
         "camelCase": 4,
@@ -23,7 +23,7 @@
     },
     "imports": {
       "commonjs": 4,
-      "esm": 33,
+      "esm": 35,
       "mixed": true
     },
     "testing": {
@@ -46,5 +46,5 @@
     }
   },
   "preferences": {},
-  "lastAnalyzed": "2026-06-04T02:46:00.816Z"
+  "lastAnalyzed": "2026-06-04T03:08:12.170Z"
 }

@@ -188,34 +188,58 @@
 
 ---
 
-## 🟠 Phase 3: 狀態管理 + Context 傳遞 (P1)
+## ✅ Phase 3: 狀態管理 + Context 傳遞 (P1)
 
 **對應 plan.md 五-Phase 3**
 **目標**：工具間共享上下文，消除重複描述。
 
-### 3.1 Context Schema 定義
+### 3.1 Context Schema 定義 ✅
 
-- [ ] 定義統一 context object
+- [x] 定義統一 context object
   ```json
   {
-    "projectRoot": "/path",
     "sessionId": "uuid",
-    "toolHistory": [{ "tool": "smart_grep", "result": "...", "duration": 123 }],
-    "accumulatedErrors": [],
-    "lastResult": null
+    "projectRoot": "/path",
+    "toolHistory": [{ "tool": "smart_grep", "args": {...}, "result": "...", "duration": 123, "timestamp": "ISO" }],
+    "accumulatedFindings": [{ "source", "finding", "category", "severity", "timestamp" }],
+    "lastResult": { "tool", "summary", "ok" },
+    "metadata": { "createdAt", "updatedAt", "toolCount", "errorCount" }
   }
   ```
-- [ ] 寫入 src/server/index.mjs 作為 internal state
+- [x] `src/lib/context-manager.mjs` — ContextManager class
 
-### 3.2 自動 Context 維護
+### 3.2 自動 Context 維護 ✅
 
-- [ ] 每次工具呼叫自動注入 context（不須各工具手動處理）
-- [ ] 工具輸出自動包含 contextUpdate
-- [ ] Context 序列化/反序列化支援跨 session 恢復
+- [x] **自動注入**: handler-based tool 透過 args `_context`，CLI tool 透過 env var `SMART_CONTEXT`
+- [x] **自動捕獲**: 每次 `invokeTool()` 呼叫自動記錄結果到 context history（`captureAndReturn`）
+- [x] **smart_run 保留命令也捕獲**: help/describe/warmUp 透過 handleDevtoolRun wrapper 記錄
+- [x] **自動發現提取**: scanning tool output for security/error/quality/dependency findings
+- [x] **FIFO eviction**: history 上限 50 筆，findings 上限 100 筆，自動淘汰最舊
+- [x] **持久化**: 自動儲存到 `~/.smart/context/<sessionId>.json`，支援跨 session 恢復
+
+### 3.3 新增的 MCP 工具
+
+- [x] `smart_context` — 8 種指令：
+  - `get` — 完整 session 摘要（含 recent 5 筆 + findings）
+  - `summary` — 緊湊 JSON 摘要（供注入用）
+  - `history` — 完整工具呼叫歷史
+  - `findings` — 累積的發現列表
+  - `reset` — 清除歷史（保留 sessionId）
+  - `sessions` — 列出所有持久化 session
+  - `delete` — 刪除指定 session
+  - `inject` — 查看注入資訊
+
+### 3.4 端點擴充
+
+- [x] `smart/health` — 回傳 context sessionId/toolCount/errorCount
+- [x] `smart/context` — 程式端點支援 get/summary/reset
 
 ### 驗收標準
-- [ ] 連續呼叫 grep → debug → test，test 自動知道 grep/debug 的結果
-- [ ] 重啟 smart server 後可恢復 context
+- [x] 連續呼叫 smart_run help 兩次，context history 記錄兩筆
+- [x] smart_context 可查詢完整調用歷史
+- [x] 自動 findings 提取（security/error/quality patterns）
+- [x] 跨 session 恢復（指定 sessionId 可 resume）
+- [x] 13 整合測試 + 29 單元測試全部通過
 
 ---
 

@@ -7,14 +7,15 @@
 
 ## 一、現狀摘要
 
-Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 23 個開發工具。當前版本 3.1.0（Plugin Loader + Router 架構 + 動態多輪推理）。
+Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 27 個開發工具。當前版本 3.2.0（Plugin Loader + Router 架構 + 動態多輪推理 + Context 管理）。
 
 ### 核心數據
-- **工具總數**：26（6 原生 + 20 經 router）
+- **工具總數**：27（7 原生 + 20 經 router）
 - **架構**：Plugin Loader → src/plugins/core/（原生）/ src/plugins/standard/（router 分發）
 - **語言**：JavaScript (ESM)
 - **輸出保護**：512KB buffer / 200K chars soft limit
-- **Health Endpoint**：`smart/health`
+- **Health Endpoint**：`smart/health`（含 context 資訊）
+- **Context 管理**：`smart_context` MCP tool + `smart/context` 端點 + 自動注入/捕獲/持久化
 - **動態推理**：thinking v3.1 — state persistence, branching, multi-round, context accumulation
 
 ---
@@ -315,29 +316,36 @@ thinking.mjs
    - **Context accumulation**: 前序結果自動注入後續 prompt
    - **plan_execute 模板**: 與 planner 輸出整合
 
-### Phase 3: 狀態管理 + Context 傳遞（P1）
+### Phase 3: 狀態管理 + Context 傳遞（P1）✅
 
-**目標**：工具間能共享上下文，減少重複描述。
+**目標**：工具間能共享上下文，減少重複描述。2026-06-04 完成。
 
 ```
-┌─ Context Layer ─────────────────────────────┐
-│  每次工具呼叫自動附加 context object:         │
-│  {                                           │
-│    projectRoot: "/path",                     │
-│    lastResults: { toolX: {...} },            │
-│    sessionId: "uuid",                        │
-│    accumulatedErrors: [...]                  │
-│  }                                           │
-│                                              │
-│  工具輸出自動包含 context 更新:               │
-│  { result: "...", contextUpdate: {...} }     │
-└──────────────────────────────────────────────┘
+┌─ Context Layer ──────────────────────────────┐
+│  src/lib/context-manager.mjs                  │
+│  每次工具呼叫自動記錄到 context history:       │
+│  {                                            │
+│    sessionId: "uuid",                         │
+│    projectRoot: "/path",                      │
+│    toolHistory: [ { tool, args, result } ],   │
+│    accumulatedFindings: [...],                │
+│    lastResult: { tool, summary, ok },         │
+│    metadata: { toolCount, errorCount }        │
+│  }                                            │
+│                                               │
+│  注入: handler 透過 args._context             │
+│        CLI 透過 env SMART_CONTEXT             │
+│  捕獲: invokeTool() + handleDevtoolRun()      │
+│  持久化: ~/.smart/context/<sessionId>.json    │
+└───────────────────────────────────────────────┘
 ```
 
 **具體實作**：
-1. 定義 context schema → 所有工具統一遵守
-2. src/server/index.mjs 層自動維護 context（不須各工具實作）
-3. 支援 context 序列化/反序列化（跨 session 恢復）
+1. ✅ `src/lib/context-manager.mjs` — ContextManager class（schema/注入/捕獲/持久化）
+2. ✅ `src/server/index.mjs` — `captureAndReturn()` + `ensureContext()` + context env inj
+3. ✅ `smart_context` MCP tool — 8 指令（get/summary/history/findings/reset/sessions/delete/inject）
+4. ✅ 自動 findings 提取 — security/error/quality/dependency patterns
+5. ✅ 42 測試通過（29 unit + 13 integration）
 
 ### Phase 4: Workflow 引擎（P1）
 

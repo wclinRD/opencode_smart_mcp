@@ -27,6 +27,7 @@ import { createInterface } from 'node:readline';
 import { stdin, stdout, stderr, env } from 'node:process';
 import { argv } from 'node:process';
 import { toolMap, nativeTools, routerTools } from './loader.mjs';
+import { ContextManager } from '../lib/context-manager.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -65,6 +66,20 @@ function gracefulShutdown(signal) {
 // Usage stats
 // ---------------------------------------------------------------------------
 const stats = { startTime: Date.now(), totalCalls: 0, totalErrors: 0, totalDurationMs: 0, byTool: new Map() };
+
+// ---------------------------------------------------------------------------
+// Session context
+// ---------------------------------------------------------------------------
+const contextManager = new ContextManager({ autoSave: true, extractFindings: true });
+let contextInitialized = false;
+
+function ensureContext() {
+  if (!contextInitialized) {
+    contextManager.init({ projectRoot: env.PWD || env.CWD || process.cwd() });
+    contextInitialized = true;
+    debugLog('Context initialized:', contextManager.get()?.sessionId);
+  }
+}
 
 function recordStats(toolName, durationMs, success) {
   stats.totalCalls++;
@@ -294,44 +309,51 @@ function toolUsage(toolName, def) {
 }
 
 /** Handle smart_run dispatch */
-function handleDevtoolRun(id, params, signal) {
+function handleDevtoolRun(id, params, signal, callerArgs) {
   const args = (params?.arguments || {});
   const subTool = String(args.tool || '');
   const subArgs = (args.args || {});
   const timeout = typeof args.timeout === 'number' ? args.timeout : null;
 
+  // Wrapper to capture context for reserved commands that bypass invokeTool
+  function capture(subToolName, result) {
+    recordStats(`smart_${subToolName}`, 0, result.ok === true);
+    ensureContext();
+    contextManager.capture(`smart_${subToolName}`, callerArgs || args, result, 0);
+    return result;
+  }
+
   // Reserved commands
   if (subTool === 'help') {
-    // Return all router tools grouped by category
     const byCategory = {};
     for (const [name, def] of ROUTER_MAP) {
       const cat = def.category || 'other';
       if (!byCategory[cat]) byCategory[cat] = {};
       byCategory[cat][name] = { description: def.description, schema: def.inputSchema };
     }
-    return { ok: true, output: JSON.stringify({
+    return capture('help', { ok: true, output: JSON.stringify({
       categories: Object.keys(byCategory).sort(),
       tools: byCategory,
       usage: 'smart_run(tool, args, timeout)',
       hint: 'Use describe(name) for detailed schema. Use help for this overview.',
-    }, null, 2) };
+    }, null, 2) });
   }
 
   if (subTool === 'describe') {
     const target = String(subArgs.name || '');
     const def = ROUTER_MAP.get(target);
-    if (!def) return { ok: false, error: `Unknown tool: ${target}. Available: ${[...ROUTER_MAP.keys()].join(', ')}` };
-    return { ok: true, output: JSON.stringify({
+    if (!def) return capture('describe', { ok: false, error: `Unknown tool: ${target}. Available: ${[...ROUTER_MAP.keys()].join(', ')}` });
+    return capture('describe', { ok: true, output: JSON.stringify({
       name: def.name, category: def.category, description: def.description,
       schema: def.inputSchema,
       usage: toolUsage(target, def),
-    }, null, 2) };
+    }, null, 2) });
   }
 
   if (subTool === 'warmUp') {
     const targets = (subArgs.tools || []);
     if (!Array.isArray(targets) || targets.length === 0) {
-      return { ok: false, error: 'warmUp needs tools: string[] in args' };
+      return capture('warmUp', { ok: false, error: 'warmUp needs tools: string[] in args' });
     }
     const result = { loaded: [], missing: [] };
     for (const t of targets) {
@@ -339,18 +361,18 @@ function handleDevtoolRun(id, params, signal) {
       if (def) result.loaded.push({ name: t, description: def.description, schema: def.inputSchema, usage: toolUsage(t, def) });
       else result.missing.push(t);
     }
-    return { ok: true, output: JSON.stringify(result, null, 2) };
+    return capture('warmUp', { ok: true, output: JSON.stringify(result, null, 2) });
   }
 
-  // Dispatch to standard tool
+  // Dispatch to standard tool — invokeTool handles its own capture
   const def = ROUTER_MAP.get(subTool);
   if (!def) {
     const available = [...ROUTER_MAP.keys()].join(', ');
     const fix = getErrorFix(subTool, 'notFound', `Unknown tool '${subTool}'`);
-    return {
+    return capture(subTool, {
       ok: false,
       error: `Unknown tool '${subTool}'. Available: ${available}. Use help to list all.\nFix: ${fix}`,
-    };
+    });
   }
 
   // Auto-validate required args
@@ -359,13 +381,13 @@ function handleDevtoolRun(id, params, signal) {
   if (missing.length > 0) {
     const suggestion = toolUsage(subTool.replace('smart_', ''), def);
     const fix = getErrorFix(subTool, 'missing', `Missing required args: ${missing.join(', ')}`);
-    return {
+    return capture(subTool, {
       ok: false,
       error: `Missing required args for '${subTool}': [${missing.join(', ')}]\nUsage: ${suggestion}. Use describe('${subTool}') for full schema.\nFix: ${fix}`,
-    };
+    });
   }
 
-  // Execute
+  // Execute — invokeTool captures internally via captureAndReturn
   debugLog('Router dispatch:', subTool, 'args:', JSON.stringify(subArgs));
   const result = invokeTool(def, subArgs, timeout || null, signal);
   return result;
@@ -374,6 +396,18 @@ function handleDevtoolRun(id, params, signal) {
 // ---------------------------------------------------------------------------
 // Tool invocation (CLI spawn)
 // ---------------------------------------------------------------------------
+
+/**
+ * Capture context result and record stats, then return.
+ * Shared helper to avoid repeating the capture/record pattern in every return path.
+ */
+function captureAndReturn(toolName, args, result, elapsedMs) {
+  const success = result.ok === true;
+  recordStats(toolName, elapsedMs, success);
+  ensureContext();
+  contextManager.capture(toolName, args, result, elapsedMs);
+  return result;
+}
 
 /**
  * Invoke a tool — either via direct handler (no spawn) or via `node <cli>.mjs <args>`.
@@ -386,10 +420,12 @@ function invokeTool(def, args, timeoutOverride, signal) {
   const startTime = process.hrtime.bigint();
 
   // Direct handler path — no process spawn overhead
+  // Inject context summary into args for handler-based tools
+  const contextArgs = contextManager.inject(def.name, args);
   if (typeof def.handler === 'function') {
-    debugLog('Handler:', def.name, 'args:', JSON.stringify(args));
+    debugLog('Handler:', def.name, 'args:', JSON.stringify(contextArgs));
     try {
-      const handlerOutput = def.handler(args);
+      const handlerOutput = def.handler(contextArgs);
       // Handler returns null to signal "fall back to CLI" (e.g. interactive mode)
       if (handlerOutput === null) {
         debugLog('Handler returned null, falling back to CLI for:', def.name);
@@ -397,22 +433,19 @@ function invokeTool(def, args, timeoutOverride, signal) {
         const output = String(handlerOutput ?? '');
         const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
         if (signal?.aborted) {
-          recordStats(def.name, elapsedMs, false);
-          return { ok: false, error: `Tool ${def.name} was cancelled` };
+          return captureAndReturn(def.name, args, { ok: false, error: `Tool ${def.name} was cancelled` }, elapsedMs);
         }
-        recordStats(def.name, elapsedMs, true);
-        return { ok: true, output };
+        return captureAndReturn(def.name, args, { ok: true, output }, elapsedMs);
       }
     } catch (err) {
       const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
-      recordStats(def.name, elapsedMs, false);
       const fix = getErrorFix(def.name, 'generic', err.message);
-      return { ok: false, error: `Handler error in ${def.name}: ${err.message}\nFix: ${fix}` };
+      return captureAndReturn(def.name, args, { ok: false, error: `Handler error in ${def.name}: ${err.message}\nFix: ${fix}` }, elapsedMs);
     }
   }
 
   const cliPath = def._cliPath;
-  if (!cliPath) return { ok: false, error: `No CLI path or handler for ${def.name}` };
+  if (!cliPath) return captureAndReturn(def.name, args, { ok: false, error: `No CLI path or handler for ${def.name}` }, 0);
 
   const cliArgs = def.mapArgs(args);
   const allArgs = [cliPath, ...cliArgs];
@@ -425,11 +458,14 @@ function invokeTool(def, args, timeoutOverride, signal) {
 
   debugLog('Invoke:', def.name, 'args:', JSON.stringify(allArgs));
 
+  // Inject context into environment for CLI tools
+  const contextEnv = contextManager.getEnv();
   const spawnOpts = {
     encoding: 'utf-8',
     maxBuffer: runtimeConfig.maxOutputSize,
     windowsHide: true,
     timeout: msTimeout,
+    env: { ...env, ...contextEnv },
   };
   if (signal) spawnOpts.signal = signal;
 
@@ -439,8 +475,7 @@ function invokeTool(def, args, timeoutOverride, signal) {
   // Check abort
   if (signal?.aborted) {
     debugLog('Cancelled:', def.name);
-    recordStats(def.name, elapsedMs, false);
-    return { ok: false, error: `Tool ${def.name} was cancelled` };
+    return captureAndReturn(def.name, args, { ok: false, error: `Tool ${def.name} was cancelled` }, elapsedMs);
   }
 
   if (result.error) {
@@ -450,8 +485,7 @@ function invokeTool(def, args, timeoutOverride, signal) {
     else { errMsg = `Failed to spawn ${def.name}: ${result.error.message}`; errorType = 'generic'; }
     const fix = getErrorFix(def.name.replace('smart_', ''), errorType, errMsg);
     debugLog('Error:', errMsg);
-    recordStats(def.name, elapsedMs, false);
-    return { ok: false, error: `${errMsg}\nFix: ${fix}` };
+    return captureAndReturn(def.name, args, { ok: false, error: `${errMsg}\nFix: ${fix}` }, elapsedMs);
   }
 
   const capturedStderr = (result.stderr || '').trim();
@@ -468,13 +502,11 @@ function invokeTool(def, args, timeoutOverride, signal) {
     const errMsg = `Tool ${def.name} failed: exit ${result.status}${capturedStderr ? ': ' + capturedStderr : ''}`;
     const fix = getErrorFix(def.name.replace('smart_', ''), 'exit', errMsg);
     debugLog('Error:', errMsg);
-    recordStats(def.name, elapsedMs, false);
-    return { ok: false, error: `${errMsg}\nFix: ${fix}` };
+    return captureAndReturn(def.name, args, { ok: false, error: `${errMsg}\nFix: ${fix}` }, elapsedMs);
   }
 
   if (elapsedMs > 5000) output = output.trimEnd() + `\n\n[Completed in ${(elapsedMs / 1000).toFixed(1)}s]`;
-  recordStats(def.name, elapsedMs, true);
-  return { ok: true, output };
+  return captureAndReturn(def.name, args, { ok: true, output }, elapsedMs);
 }
 
 // ---------------------------------------------------------------------------
@@ -488,6 +520,117 @@ function respondError(id, code, message, data) {
   const err = { code, message };
   if (data !== undefined) err.data = data;
   writeMsg({ jsonrpc: '2.0', id, error: err });
+}
+
+// ---------------------------------------------------------------------------
+// smart_context — MCP tool for context query/management
+// ---------------------------------------------------------------------------
+
+const CONTEXT_TOOL_DESCRIPTION =
+  'Query or manage session context. Use this to see what tools have been called, what findings accumulated, or to reset/list sessions.\n' +
+  '  command: "get" (default) | "summary" | "history" | "findings" | "reset" | "sessions" | "delete" | "inject"\n' +
+  '  sessionId: optional, for resume/delete operations';
+
+/**
+ * Handle smart_context tool call.
+ * @param {number|string} id - request id
+ * @param {object} args - { command?, sessionId?, projectRoot? }
+ */
+function handleSmartContext(id, args) {
+  const cmd = (args.command || 'get').toLowerCase();
+  ensureContext();
+
+  try {
+    let result;
+    switch (cmd) {
+      case 'get': {
+        const ctx = contextManager.get();
+        if (!ctx) { respond(id, { content: [{ type: 'text', text: 'No active session.' }] }); return; }
+        // Return a cleaned version (omit large history for readability)
+        const { toolHistory, accumulatedFindings, ...rest } = ctx;
+        result = JSON.stringify({
+          ...rest,
+          historyCount: toolHistory.length,
+          findingCount: accumulatedFindings.length,
+          recentCalls: toolHistory.slice(-5).map(h => ({
+            tool: h.tool, ok: h.ok, duration: h.duration, timestamp: h.timestamp,
+          })),
+          recentFindings: accumulatedFindings.slice(-10),
+        }, null, 2);
+        break;
+      }
+
+      case 'summary': {
+        result = contextManager.getSummary();
+        if (!result) result = 'No active session.';
+        break;
+      }
+
+      case 'history': {
+        const ctx = contextManager.get();
+        if (!ctx || ctx.toolHistory.length === 0) { result = 'No tool history.'; break; }
+        result = JSON.stringify(ctx.toolHistory.map(h => ({
+          tool: h.tool,
+          ok: h.ok,
+          duration: h.duration,
+          timestamp: h.timestamp,
+          resultPreview: h.result ? h.result.slice(0, 300) : null,
+          errorPreview: h.error ? h.error.slice(0, 300) : null,
+        })), null, 2);
+        break;
+      }
+
+      case 'findings': {
+        const ctx = contextManager.get();
+        if (!ctx || ctx.accumulatedFindings.length === 0) { result = 'No findings yet.'; break; }
+        result = JSON.stringify(ctx.accumulatedFindings, null, 2);
+        break;
+      }
+
+      case 'reset': {
+        contextManager.reset();
+        result = `Session reset. SessionId: ${contextManager.get()?.sessionId}`;
+        break;
+      }
+
+      case 'sessions': {
+        const sessions = contextManager.listSessionsSummary();
+        if (sessions.length === 0) { result = 'No persisted sessions.'; break; }
+        result = JSON.stringify(sessions, null, 2);
+        break;
+      }
+
+      case 'delete': {
+        const sid = args.sessionId;
+        if (!sid) { result = 'sessionId required for delete.'; break; }
+        const deleted = contextManager.deleteSession(sid);
+        result = deleted ? `Session ${sid} deleted.` : `Session ${sid} not found.`;
+        break;
+      }
+
+      case 'inject': {
+        const ctx = contextManager.get();
+        if (!ctx) { result = 'No active session. Use init first.'; break; }
+        result = JSON.stringify({
+          env: contextManager.getEnv(),
+          args: `_context: ${contextManager.getSummary()}`,
+          hint: 'Context is auto-injected into every tool call. No manual injection needed.',
+        }, null, 2);
+        break;
+      }
+
+      default:
+        result = `Unknown command: ${cmd}. Available: get, summary, history, findings, reset, sessions, delete, inject`;
+    }
+
+    respond(id, { content: [{ type: 'text', text: result }] });
+  } catch (err) {
+    const fix = getErrorFix('smart_context', 'generic', err.message);
+    respondError(id, -32603, `smart_context error: ${err.message}`, {
+      tool: 'smart_context', args: JSON.stringify(args),
+      error: err.message, type: 'execution', suggestion: fix,
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -533,6 +676,19 @@ function handleRequest(req) {
         description: ROUTER_DESCRIPTION,
         inputSchema: ROUTER_SCHEMA,
       });
+      // Add the context tool
+      tools.push({
+        name: 'smart_context',
+        description: CONTEXT_TOOL_DESCRIPTION,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            command: { type: 'string', description: 'Command: get (default), summary, history, findings, reset, sessions, delete, inject', enum: ['get', 'summary', 'history', 'findings', 'reset', 'sessions', 'delete', 'inject'] },
+            sessionId: { type: 'string', description: 'Session ID (for resume/delete)' },
+            projectRoot: { type: 'string', description: 'Project root path' },
+          },
+        },
+      });
       respond(id, { tools });
       break;
     }
@@ -543,12 +699,18 @@ function handleRequest(req) {
       const args = (p.arguments || {});
       debugLog('tools/call:', toolName);
 
+      // smart_context → context query/dispatch
+      if (toolName === 'smart_context') {
+        handleSmartContext(id, args);
+        break;
+      }
+
       // smart_run → router dispatch
       if (toolName === 'smart_run') {
         const controller = new AbortController();
         if (id != null) pendingCalls.set(String(id), controller);
         try {
-          const result = handleDevtoolRun(id, p, controller.signal);
+          const result = handleDevtoolRun(id, p, controller.signal, args);
           if (result.ok) {
             respond(id, { content: [{ type: 'text', text: result.output }] });
           } else {
@@ -602,11 +764,18 @@ function handleRequest(req) {
     case 'ping': { respond(id, {}); break; }
 
     case 'smart/health': {
+      const ctx = contextManager.get();
       respond(id, {
-        status: 'ok', version: '3.0.0',
+        status: 'ok', version: '3.1.0',
         toolsRegistered: toolMap.size, toolNames: Array.from(toolMap.keys()),
         nativeCount: nativeTools.length, routerCount: routerTools.length,
         debug: DEBUG, pid: process.pid, uptime: process.uptime(),
+        context: ctx ? {
+          sessionId: ctx.sessionId,
+          toolCount: ctx.metadata.toolCount,
+          errorCount: ctx.metadata.errorCount,
+          findingCount: ctx.accumulatedFindings.length,
+        } : null,
       });
       break;
     }
@@ -635,6 +804,31 @@ function handleRequest(req) {
       break;
     }
 
+    case 'smart/context': {
+      const p4 = (params || {});
+      const cmd = (p4.command || 'get').toLowerCase();
+      ensureContext();
+
+      try {
+        let result;
+        switch (cmd) {
+          case 'get': {
+            const ctx = contextManager.get();
+            const { toolHistory, accumulatedFindings, ...rest } = ctx || {};
+            result = rest ? { ...rest, historyCount: toolHistory?.length || 0, findingCount: accumulatedFindings?.length || 0 } : { status: 'no_session' };
+            break;
+          }
+          case 'summary': result = { summary: contextManager.getSummary() }; break;
+          case 'reset': contextManager.reset(); result = { status: 'reset', sessionId: contextManager.get()?.sessionId }; break;
+          default: result = { status: 'unknown_command', available: ['get', 'summary', 'reset'] };
+        }
+        respond(id, result);
+      } catch (err) {
+        respondError(id, -32603, `smart/context error: ${err.message}`);
+      }
+      break;
+    }
+
     // -----------------------------------------------------------------------
     // opencode startup queries — required to avoid "Unexpected server error"
     // opencode sends these to ALL MCP servers during init;
@@ -649,7 +843,7 @@ function handleRequest(req) {
       if (!isNotification) {
         respondError(id, -32601, `Method not found: ${method}`, {
           availableMethods: ['initialize', 'notifications/initialized', 'notifications/cancelled',
-            'tools/list', 'tools/call', 'ping', 'smart/health', 'smart/stats', 'smart/config'],
+            'tools/list', 'tools/call', 'ping', 'smart/health', 'smart/stats', 'smart/config', 'smart/context'],
         });
       }
       break;

@@ -18,6 +18,9 @@ reports/*.html
 # Logs
 *.log
 
+# Test artifacts
+.test-memory-*/
+
 # Runtime opencode data (machine-specific, not for sharing)
 .opencode/memory-core/
 .opencode/memory-working/
