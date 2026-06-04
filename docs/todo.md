@@ -437,17 +437,23 @@
 
 ---
 
-## 🟡 Phase 8: 程式碼生成輔助 (P2)
+## ✅ Phase 8: 程式碼生成輔助 (P2) ✅
 
 **對應 plan.md 五-Phase 8**
 **目標**：分析問題後不僅報告，還能自動產出修復 patch。
+**狀態**：✅ 已完成（2026-06-05）
 
-- [ ] `src/plugins/standard/patch-gen.mjs`
-  - [ ] 輸入：error-diagnose 結果 / thinking 分析結果
-  - [ ] 輸出：edit 指令序列（可直接餵給 edit tool）
-  - [ ] patch preview（diff format）供人審查
-- [ ] 整合 error-diagnose → patch-gen → cross-file-edit 一鍵流程
-- [ ] 安全閘門：重大修改（跨檔案 >3 個）需人批准
+**實作摘要**: `src/plugins/standard/patch-gen.mjs` → `smart_patch_gen` handler-based MCP tool。從 error_diagnose/debug/thinking/manual 等分析結果自動萃取變更資訊（file + line + pattern + replacement），輸出 text/json/diff 格式 patch plan。安全閘門：3+ 檔案需 apply=true 明確授權。14 項測試全部通過。
+
+- [x] `src/plugins/standard/patch-gen.mjs` — handler-based MCP tool
+  - [x] 輸入：analysis tool output (error_diagnose / debug / thinking / manual)
+  - [x] 自動萃取 file path、line number、fix description（多 regex 策略）
+  - [x] 支援 explicit file/pattern/replacement 參數強制指定
+  - [x] 輸出：text/json/diff 三種格式
+  - [x] patch preview（plan text）供人審查
+- [x] 整合 error-diagnose → patch-gen → cross-file-edit 一鍵流程（apply 模式）
+- [x] 安全閘門：3+ 檔案變更需 `apply: true` 明確授權
+- [x] 14 項測試全部通過（`node --test tests/patch-gen.test.mjs`）
 
 ---
 
@@ -741,7 +747,16 @@
 
 ---
 
-## ✅ 已完成 (v3.7.0)
+## ✅ 已完成 (v3.7.1)
+
+### Phase 8: 程式碼生成輔助 (2026-06-05)
+- [x] `src/plugins/standard/patch-gen.mjs` → `smart_patch_gen` (handler-based, ~270 行)
+  - 從 error_diagnose/debug/thinking 輸出自動萃取變更資訊
+  - 支援 file/pattern/replacement explicit 參數
+  - text/json/diff 三種格式輸出
+  - 安全閘門：3+ 檔案需 apply=true 授權
+- [x] `tests/patch-gen.test.mjs` — 14 項測試全部通過，0 regression
+- [x] 工具總數: 36 standard (6 core + 35 standard + 3 agent)
 
 ### Phase 13: Change-Impact Pipeline (2026-06-05)
 - [x] `src/lib/impact-engine.mjs` — ImpactEngine class (710 行)

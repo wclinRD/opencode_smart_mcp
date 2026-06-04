@@ -7,10 +7,10 @@
 
 ## 一、現狀摘要
 
-Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 41 個開發工具 + 專屬 agent personality。當前版本 3.7.0（Plugin Loader + Router 架構 + 動態多輪推理 + Context 管理 + Workflow 引擎 + Compose 引擎 + LSP 程式碼語義分析 + CKG 程式碼知識圖譜 + Hybrid Reasoning Engine + Change-Impact Pipeline + Agent 人格定義 + 全面非阻塞 CLI + auto-toonify 輸出攔截器）。
+Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 42 個開發工具 + 專屬 agent personality。當前版本 3.7.1（Plugin Loader + Router 架構 + 動態多輪推理 + Context 管理 + Workflow 引擎 + Compose 引擎 + LSP 程式碼語義分析 + CKG 程式碼知識圖譜 + Hybrid Reasoning Engine + Change-Impact Pipeline + Patch Generation + Agent 人格定義 + 全面非阻塞 CLI + auto-toonify 輸出攔截器）。
 
 ### 核心數據
-- **工具總數**：41（6 原生 + 35 經 router — 含 4 Phase 10 程式碼語義工具 + 1 Phase 11 CKG 查詢工具 + 1 Phase 12 Hybrid Router + 1 Phase 13 Impact Flow + 3 Phase D agent 輔助工具）
+- **工具總數**：42（6 原生 + 36 經 router — 含 1 Phase 8 patch-gen + 4 Phase 10 程式碼語義工具 + 1 Phase 11 CKG 查詢工具 + 1 Phase 12 Hybrid Router + 1 Phase 13 Impact Flow + 3 Phase D agent 輔助工具）
 - **架構**：Plugin Loader → src/plugins/core/（6 原生 handler）/ src/plugins/standard/（24 router CLI — 全部非阻塞 async spawn）
 - **Workflow 引擎**：Phase 4-6 完成 — dispatch 實際執行 + 5 模板 + compose/pipe/parallel 三種原語 + replan + summary
 - **語言**：JavaScript (ESM) — 6 核心 handler + 24 CLI 全數非阻塞化 (Phase 6)
@@ -163,7 +163,7 @@ src/
 | **🟠 程式碼語義推理 (AST/call-graph/type/impact)** | 高 | 無原生程式碼理解 | Phase 10 ✅ | **已解決** |
 | **🟠 無持久化程式碼圖譜 (CKG)** | 高 | 無跨 session 程式碼知識 | Phase 11 ✅ | **已解決** |
 | **🟠 Memory 僅 resolution** | 中 | 無 vector search / pattern abstraction / 跨 session context 合併 | Phase 7 ✅ | **已解決** |
-| **🟡 無程式生成** | 中 | 純分析工具，不能寫 code / 產生 patch | Phase 8 | ❌ 未完成 |
+| **🟡 無程式生成** | 中 | 純分析工具，不能寫 code / 產生 patch | Phase 8 ✅ | **已解決** |
 | **🟡 Planner 無 LLM-based 分解** | 中 | 模板僅關鍵字比對，複雜目標（如「修復 memory leak」）match 不到 | Phase 2 | 部分完成 |
 | **🟢 語言覆蓋不足** | 低 | 只有 Python/TS 助手，缺 Rust/Go/Java | Phase 9 | ❌ 未完成 |
 
@@ -665,14 +665,20 @@ thinking.mjs
 | 7.3 Cross-session context 合併 | ✅ | ContextManager.mergeSessions() + smart_context merge |
 | 測試 | ✅ | memory-store 10/10, thinking 27/27, hybrid 31/31 |
 
-### Phase 8: 程式碼生成輔助（P2）
+### Phase 8: 程式碼生成輔助（P2）✅
 
 **目標**：分析問題後不僅報告，還能自動產出修復 patch。
+**狀態**：✅ 已完成（2026-06-05）
 
 **具體實作**：
-1. `src/plugins/standard/patch-gen.mjs` — 根據分析結果生成 edit 指令
-2. 整合 error-diagnose → patch-gen → cross-file-edit 流程
-3. 安全閘門：重大修改需人批准（patch preview）
+1. `src/plugins/standard/patch-gen.mjs` → `smart_patch_gen` — 根據分析結果生成 edit 指令 ✅
+   - 輸入：error-diagnose / debug / thinking / manual 等分析結果
+   - 輸出：text/json/diff 格式的 patch plan
+   - 自動萃取 file path、line number、fix description
+   - 支援 explicit file/pattern/replacement 參數強制指定
+   - 14 項測試全部通過
+2. 整合 error-diagnose → patch-gen → cross-file-edit 一鍵流程 ✅
+3. 安全閘門：3+ 檔案變更需 `apply: true` 明確授權 ✅
 
 ### Phase 9: 語言助手擴充（P3）
 
@@ -1221,7 +1227,7 @@ src/server/index.mjs
   │   ├── workflow.mjs        → smart_workflow         ← Phase 5 (dispatch)
   │   ├── compose.mjs         → smart_compose          ← Phase 6
   │   ├── memory_store.mjs    → smart_memory_store     ← Phase 7 升級 (vector)
-  │   ├── patch-gen.mjs       → smart_patch_gen        ← Phase 8 新增
+  │   ├── patch-gen.mjs       → smart_patch_gen        ← Phase 8 ✅
   │   ├── hybrid-router.mjs   → smart_hybrid_router    ← Phase 12 新增
   │   ├── impact-flow.mjs     → smart_impact_flow      ← Phase 13 新增
   │   ├── model-router.mjs    → smart_model_router     ← Phase 14 新增
@@ -1246,7 +1252,7 @@ src/server/index.mjs
 | 輸出內容 | 真實推理 + 工具鏈計畫 | 真實推理 + action 指令 |
 | Workflow 策略 | ✅ dispatch + compose (Phase 5/6) | dispatch + 自動 replan |
 | 工具組合原語 | ✅ compose/pipe/parallel (Phase 6) | ✅ 強化 |
-| 工具數量 | 40 (6 core + 34 router — 含 Phase 10 code tools + Phase 11 CKG + Phase 12 Hybrid) | 42+ (含 impact-flow, model-router 等) |
+| 工具數量 | 40+ (6 core + 35 standard — 含 Phase 8 patch-gen + Phase 10-13 code tools + CKG + Hybrid + Impact) | 42+ (含 model-router 等) |
 | Agent 人格定義 | ✅ smart-mcp.md (240 行) | ✅ 持續強化 |
 | 小模型兜底 | ✅ 3 個 agent MCP tools | ✅ 持續強化 |
 | Memory 搜尋 | Fuzzy string match | Vector semantic search + code-fact |
