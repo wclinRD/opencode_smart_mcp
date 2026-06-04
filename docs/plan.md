@@ -35,8 +35,9 @@ src/
 │   ├── security.mjs          → smart_security
 │   ├── test.mjs              → smart_test
 │   └── thinking.mjs          → smart_thinking (深層分析, handler-based)
+│   │   ├── workflow.mjs          ✨新
 │
-├── plugins/standard/    (20 standard tools, 經 smart_run router)
+├── plugins/standard/    (24 standard tools, 經 smart_run router)
 │   ├── coverage.mjs          → smart_coverage
 │   ├── cross_file_edit.mjs   → smart_cross_file_edit
 │   ├── debug.mjs             → smart_debug
@@ -56,13 +57,15 @@ src/
 │   ├── test_suggest.mjs      → smart_test_suggest
 │   ├── tool_stats.mjs        → smart_tool_stats
 │   ├── toonify.mjs           → smart_toonify
-│   └── ts_helper.mjs         → smart_ts_helper
+│   ├── ts_helper.mjs         → smart_ts_helper
+│   └── workflow.mjs          → smart_workflow  ✨新
 │
 ├── cli/                 (各 tool CLI 實作)
 │   ├── contextual-grep.mjs
 │   ├── coverage-check.mjs
 │   ├── thinking.mjs          (also used as lib by plugins)
-│   └── ... (25 CLI files)
+│   ├── workflow.mjs          ✨新
+│   └── ... (26 CLI files)
 │
 ├── lib/
 │   └── utils.mjs        (shared utilities)
@@ -165,10 +168,13 @@ src/
 ## 五、強化路線圖
 
 ### Phase 0: thinking.mjs 改造 + smart_think 新增（P0 — 推理引擎革新）
+│   │   ├── workflow.mjs          ✨新
 
 **目標**：將 thinking.mjs 從「批次分析 CLI」改造為「推理引擎」，新增 handler-based 快速思考工具 `smart_think`，最終取代 opencode 的 sequential-thinking。
+│   │   ├── workflow.mjs          ✨新
 
 **動機**：目前 smart_thinking 透過 `cli: 'thinking.mjs'` 每次 spawn Node.js process，延遲 ~100ms+，且輸出模板骨架而非推理內容。這使其無法取代 sequential-thinking（in-process, sub-ms, 對話原生）。
+│   │   ├── workflow.mjs          ✨新
 
 ```
 現狀：
@@ -181,11 +187,14 @@ src/
 ```
 
 #### 0.1 thinking.mjs 重構（共享推理引擎）
+│   │   ├── workflow.mjs          ✨新
 
 將 `thinking.mjs` 從純 CLI 改造為可程式化呼叫的模組：
+│   │   ├── workflow.mjs          ✨新
 
 ```
 thinking.mjs
+│   │   ├── workflow.mjs          ✨新
 ├── export quickThink(args)    → 供 smart_think 呼叫
 │     ├── 4 參數: thought/nextThoughtNeeded/thoughtNumber/totalThoughts
 │     ├── 回傳格式化推理文字（相容 sequential-thinking 輸出）
@@ -216,12 +225,47 @@ thinking.mjs
 #### 0.3 現有 smart_thinking 改造（handler 化）
 
 將 `src/plugins/core/thinking.mjs` 的 `cli` 改為 `handler`，消除 process spawn overhead，同時保留所有既有功能（9 模板、state persistence、branching、context accumulation）。
+│   │   ├── workflow.mjs          ✨新
+
+### Phase 4 完成摘要 (2026-06-04)
+
+| 項目 | 狀態 | 備註 |
+|------|------|------|
+| 4.1 Planner 增強 — computeParallelHints + WORKFLOW_TEMPLATES + export | ✅ | `generatePlan/computeParallelHints/WORKFLOW_TEMPLATES/analyzeToolSequence` 已 export |
+| 4.2 ContextManager 增強 — workflowId 維度 | ✅ | `capture()` 新增 `workflowId` 參數 + `getWorkflowHistory()` 過濾方法 |
+| 4.3 src/cli/workflow.mjs — CLI 實作 | ✅ | 4 commands: create/report/replan/summary + list-templates |
+| 4.4 src/plugins/standard/workflow.mjs — MCP plugin | ✅ | `smart_workflow` 工具，4 commands via smart_run router |
+| 4.5 5 built-in templates | ✅ | debug-flow / refactor-flow / security-flow / research-flow / default-flow |
+| 4.6 平行提示 | ✅ | `computeParallelHints()` 依 dependsOn 自動分群 |
+| 4.7 測試 | ✅ | 9 tests pass: create/report/fail/replan/summary/parallel/context/list/lifecycle |
+| 4.8 回歸測試 | ✅ | 36 既有 tests 全部 pass，0 regression |
+| **工具總數** | **30 (6 core + 24 standard)** | workflow.mjs 加入 standard, 從 26 增至 30 |
+
+**使用流程驗證**：
+```
+1. node workflow.mjs create "debug login error" --template debug-flow --state wf.json
+   → 5 steps: [memory_search, grep, error_diagnose, cross_file_edit, test]
+   → Parallel: [0,1] → [2,3] → [4] → [5]
+
+2. node workflow.mjs report --state wf.json --step 0 --status ok --result "..." --duration 200
+   → Workflow 前進
+
+3. node workflow.mjs report --state wf.json --step 1 --status fail --error "Grep timed out"
+   → onFailure=skip → 自動跳過，繼續
+
+4. node workflow.mjs replan --state wf.json --context "new context"
+   → 呼叫 planner 重新規劃剩餘步驟
+
+5. node workflow.mjs summary --state wf.json --json
+   → 完整工作流報告：狀態/步驟/findings/toolStats
+```
 
 #### Phase 0 完成摘要 (2026-06-04)
 
 | 項目 | 狀態 | 備註 |
 |------|------|------|
 | 0.1 thinking.mjs 重構 | ✅ | `quickThought` / `quickThink` / `deepAnalyze` / `main` 全部匯出 |
+│   │   ├── workflow.mjs          ✨新
 | 0.2 quick-think.mjs 新增 | ✅ | handler-based, 2 required params, 支援 hypothesis/verification/branching |
 | 0.3 smart_thinking handler 化 | ✅ | 9 模板 + dynamic/state/branch, iterative 模式 fallback 到 CLI |
 | 0.4 輸出改造 | ✅ | 無 emoji/分隔線, topic 內嵌, header 簡潔, summary 推理鏈 |
@@ -309,6 +353,7 @@ thinking.mjs
    - onFailure='warn' → 自動觸發 replan：重新產生 plan 取代剩餘步驟
    - 累積已完成的 context 作為新 plan 的輸入
 4. `thinking.mjs` 升級（v3.1 ✅）— 從靜態模板 → 動態多輪推理
+│   │   ├── workflow.mjs          ✨新
    - **State persistence**: JSON 狀態檔案 (`--state <path>`)
    - **Step-by-step dynamic mode**: `--dynamic` 一次只顯示當前步驟
    - **Result recording**: `--record <idx> <result>`
@@ -347,32 +392,69 @@ thinking.mjs
 4. ✅ 自動 findings 提取 — security/error/quality/dependency patterns
 5. ✅ 42 測試通過（29 unit + 13 integration）
 
-### Phase 4: Workflow 引擎（P1）
+### Phase 4: Workflow 引擎（P1）— Plan-Based Orchestration
 
-**目標**：定義可復用的多工具工作流，一鍵執行。
+**動機**：2026-05 月 Claude Code 推出 Dynamic Workflows（JS script + runtime + multi-agent orchestration）。但 Smart MCP 是 MCP server，無法直接 spawn agent / 管理 worktree / 控制 agent loop——這些是 host（opencode）的責任。Smart MCP 的 workflow 策略應改為 **plan-based orchestration**：產生 JSON plan 讓 opencode 執行，MCP 端管理 state/context/replan，26 工具提供執行能力。
 
 ```
-┌─ Workflow Layer ────────────────────────────┐
-│  格式：YAML / JSON                           │
-│                                              │
-│  example: debug-workflow.yaml                │
-│  steps:                                      │
-│    - tool: smart_grep                      │
-│      args: { pattern: "error" }             │
-│    - if: result.count > 0                    │
-│      then:                                  │
-│        - tool: smart_debug                 │
-│          args: { error: result.first }       │
-│    - tool: smart_test                      │
-│      args: {}                               │
-└──────────────────────────────────────────────┘
+┌─ opencode ───────┐   ┌─ Smart MCP (MCP protocol) ────────┐
+│  agent loop      │←──│  smart_workflow_create → JSON plan  │
+│  Task spawn      │   │  smart_workflow_report → context     │
+│  決定順序/並行    │   │  smart_workflow_replan → 新計畫    │
+│  管理 worktree   │   │  smart_workflow_summary → 報告     │
+└──────────────────┘   └────────────────────────────────────┘
+   執行步驟                 動態規劃 + 狀態管理
+   spawn subagent           追蹤累積 findings
+   呼叫 26 工具             記憶過往經驗
 ```
+
+**與 Claude Code Dynamic Workflows 的核心差異**：
+
+| 面向 | Claude Code | opencode + Smart MCP |
+|------|-------------|---------------------|
+| 計畫載體 | JS script（Claude 即席撰寫） | JSON plan（planner 動態生成） |
+| 執行者 | Workflow Runtime spawn subagents | opencode agent/subagent |
+| Context 管理 | script 變數（conversation 之外） | ContextManager 自動注入/捕獲/持久化 |
+| 工具調用 | 基礎 4 工具（Read/Write/Bash/Grep） | 26 專業工具（security/thinking/test...） |
+| 記憶 | 無（每次新 script） | memory-store 跨 session 累積 |
+| 驗證機制 | Adversarial verification agent | planner onFailure + report-based |
 
 **具體實作**：
-1. 定義 workflow YAML schema
-2. `src/plugins/standard/workflow-runner.mjs` — 解析 + 執行 workflow
-3. 支援 `smart_workflow_run <file>` MCP 工具
-4. 內建常用 workflow：debug-flow, refactor-flow, security-scan-flow
+
+1. `src/plugins/standard/workflow.mjs` — 4 個新 MCP tool：
+   - `smart_workflow_create` — 動態產生執行計畫（整合 planner + thinking + context + memory）
+   - `smart_workflow_report` — 回報步驟結果，更新 context，觸發 replan
+   - `smart_workflow_replan` — 步驟失敗時動態重新規劃剩餘步驟
+   - `smart_workflow_summary` — 工作流最終報告（含 findings/memory/toolStats）
+
+2. `src/cli/workflow.mjs` — CLI 實作（workflow lifecycle management）
+
+3. ContextManager 強化 — 支援 workflowId 維度查詢
+
+4. planner 強化 — 支援 workflow template + parallel hint 輸出
+
+**內建 workflow templates**：
+- `debug-flow` — memory_search → grep → error_diagnose → cross_file_edit → test
+- `refactor-flow` — import_graph → naming → rename_safety → cross_file_edit → test
+- `security-flow` — security_scan → grep(高風險pattern) → cross_file_edit → test
+- `research-flow` — exa_search → thinking(synthesize) → report
+
+**使用流程**：
+```
+1. user: 找出並修復安全漏洞
+2. opencode → smart_workflow_create(goal)
+   ← JSON plan: [security_scan, grep, thinking, cross_file_edit, test]
+3. opencode 執行 Step 1 → smart_workflow_report
+4. 失敗 → smart_workflow_replan → 新 plan
+5. 完成 → smart_workflow_summary → 報告
+```
+
+**已具備的前置條件**（不需重寫）：
+- ✅ planner.mjs — 1387 行，plan generation + condition + DAG + replan
+- ✅ context-manager.mjs — 363 行，context 注入/捕獲/持久化
+- ✅ invokeTool/captureAndReturn — 自動 context 記錄
+- ✅ 9 任務模板 + 條件分支
+- ✅ 26 CLI tools
 
 ### Phase 5: 程式碼生成輔助（P2）
 
@@ -402,6 +484,7 @@ thinking.mjs
 src/server/index.mjs
   ├── plugins/core/ (6 原生 — 全部 handler-based)
   │   ├── thinking.mjs   → smart_thinking (深層模板分析，handler 化)
+│   │   ├── workflow.mjs          ✨新
   │   └── quick-think.mjs → smart_think (快速推理，取代 sequential-thinking)
   └── plugins/standard/ (20 router)
 ```
@@ -411,17 +494,19 @@ src/server/index.mjs
 ```
 src/server/index.mjs
   ├── plugins/core/ (6 原生 — 全部 handler-based)
-  │   ├── thinking.mjs   → smart_thinking (深層模板分析，handler 化)
-  │   └── quick-think.mjs → smart_think (快速推理，取代 sequential-thinking)
-  ├── standard/ (18+ router)
-  ├── memory/          ← Phase 1 新增
-  │   └── memory-store.mjs
-  ├── planner/         ← Phase 2 新增
-  │   └── planner.mjs
-  ├── context/         ← Phase 3 新增
-  │   └── context-manager.mjs
-  └── workflow/        ← Phase 4 新增
-      └── workflow-runner.mjs
+  │   ├── grep.mjs         → smart_grep
+  │   ├── learn.mjs        → smart_learn
+  │   ├── quick-think.mjs  → smart_think
+  │   ├── security.mjs     → smart_security
+  │   ├── test.mjs         → smart_test
+  │   └── thinking.mjs     → smart_thinking
+│   │   ├── workflow.mjs          ✨新
+  ├── plugins/standard/ (21 router)
+  │   ├── ... (既有 20 工具)
+  │   └── workflow.mjs     → smart_workflow_*     ← Phase 4 新增
+  └── lib/
+      ├── utils.mjs
+      └── context-manager.mjs
 ```
 
 #### v3.0 → v4.0 關鍵轉變
@@ -431,7 +516,9 @@ src/server/index.mjs
 | 推理工具架構 | CLI spawn (process per call) | handler (in-process) |
 | 輸出內容 | 模板骨架 | 真實推理 |
 | 對話支援 | ❌ 批次導向 | ✅ 對話原生 |
-| 工具數量 core | 5 | 6 (+smart_think) |
+| 工具數量 | 26 (6 core + 20 standard) | 30 (6 core + 24 standard) |
+| Workflow 策略 | YAML 靜態定義 | Plan-based dynamic orchestration |
+| Context 傳遞 | ❌ 無 | ✅ ContextManager 自動 |
 
 ---
 
@@ -447,7 +534,9 @@ src/server/index.mjs
 | 跨工具 context 傳遞 | ❌ 無 | ✅ 自動 | context layer |
 | 動態多輪推理 | ❌ 靜態模板 | ✅ state+branch | thinking --dynamic 完成度 |
 | **自動規劃 replan** | ❌ 步驟失敗就中斷 | ✅ 自動重新規劃 | **planner replan 引擎** |
-| 可復用 workflow 數量 | 0 | 5+ | workflow 目錄 |
+| **Workflow 策略** | YAML 靜態定義 | Plan-based dynamic | workflow_create/report/replan |
+| **Workflow 範本數** | 0 | 4+ (debug/refactor/security/research) | workflow_template_list |
+| **Workflow 步驟完成率** | — | >85% | workflow_summary 追蹤 |
 | 語言覆蓋 | 2 (Py/TS) | 4+ (Py/TS/RS/Go) | 語言助手工具數 |
 
 ---
@@ -480,3 +569,4 @@ src/server/index.mjs
 | `smart_tool_stats` | standard/tool_stats.mjs | tool-stats.mjs | 工具使用統計 |
 | `smart_toonify` | standard/toonify.mjs | toonify.mjs | TOON token 優化 (閾值 10%, 原 30%) |
 | `smart_ts_helper` | standard/ts_helper.mjs | ts-helper.mjs | TypeScript 分析 |
+| `smart_workflow` | standard/workflow.mjs | workflow.mjs | 多工具工作流編排 (create/report/replan/summary) |

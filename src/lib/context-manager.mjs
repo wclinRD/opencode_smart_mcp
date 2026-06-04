@@ -212,6 +212,16 @@ export class ContextManager {
     return { ...args, _context: summary };
   }
 
+  /**
+   * Get tool history for a specific workflowId.
+   * @param {string} workflowId
+   * @returns {Array} filtered tool history
+   */
+  getWorkflowHistory(workflowId) {
+    if (!this._context || !workflowId) return [];
+    return this._context.toolHistory.filter(e => e.workflowId === workflowId);
+  }
+
   // -----------------------------------------------------------------------
   // Result capture
   // -----------------------------------------------------------------------
@@ -222,8 +232,9 @@ export class ContextManager {
    * @param {object} args - original args (before context injection)
    * @param {object} result - { ok, output?, error? }
    * @param {number} durationMs
+   * @param {string} [workflowId] - optional workflow association
    */
-  capture(toolName, args, result, durationMs) {
+  capture(toolName, args, result, durationMs, workflowId) {
     if (!this._context) return;
 
     const entry = {
@@ -233,6 +244,8 @@ export class ContextManager {
       duration: durationMs,
       ok: result.ok === true,
     };
+
+    if (workflowId) entry.workflowId = workflowId;
 
     if (result.ok) {
       entry.result = truncate(result.output || '', this._maxResultLength);

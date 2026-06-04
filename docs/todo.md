@@ -243,56 +243,66 @@
 
 ---
 
-## 🟠 Phase 4: Workflow 引擎 (P1)
+## ✅ Phase 4: Workflow 引擎 — Plan-Based Orchestration (P1)
 
 **對應 plan.md 五-Phase 4**
-**目標**：定義可復用的多工具工作流，一鍵執行。
+**目標**：4 個新 MCP tool，實現動態計畫生成→執行回報→狀態管理→失敗 replan 的完整 workflow 循環。2026-06-04 完成。
 
-### 4.1 Workflow 定義
+### 4.1 Workflow Core（~500 行）
 
-- [ ] 定義 workflow YAML schema
-  ```yaml
-  name: debug-flow
-  steps:
-    - id: search
-      tool: smart_grep
-      args: { pattern: "${error_message}" }
-    - id: analyze
-      tool: smart_debug
-      args: { error: "${steps.search.result}" }
-      if: steps.search.count > 0
-    - id: fix
-      tool: smart_cross_file_edit
-      args: { file: "${steps.analyze.file}", pattern: "${steps.analyze.badPattern}", replacement: "${steps.analyze.goodPattern}" }
-      onFailure: report
-    - id: verify
-      tool: smart_test
-      args: {}
-  ```
-- [ ] 內建 3 個預設 workflow：
-  - [ ] `debug-flow.yaml` — grep → debug → fix → test
-  - [ ] `refactor-flow.yaml` — import-graph → naming → cross-file-edit → test
-  - [ ] `security-scan-flow.yaml` — security → report
+- [x] `src/cli/workflow.mjs` — 4 commands + list-templates：
+  - [x] `create` — 從 5 個 template 之一建立 workflow，解決 \$goal placeholder，回傳 parallel hints
+  - [x] `report` — 記錄步驟結果，尊重 onFailure 策略（abort→fail / skip→繼續 / warn→保持 active）
+  - [x] `replan` — 取消剩餘 pending 步驟，呼叫 planner.mjs 重新規劃，以 isReplan 標記追加新步驟
+  - [x] `summary` — 文字/JSON 格式完整報告（steps/parallel/findings/toolStats/progress）
+  - [x] 平行提示：`computeParallelHints()` 依 dependsOn 分群
 
-### 4.2 Workflow Runner
+### 4.2 MCP 整合
 
-- [ ] `src/plugins/standard/workflow-runner.mjs`
-  - [ ] 解析 YAML → 執行 DAG（支援並行步驟）
-  - [ ] 變數替換（`${...}` 語法）
-  - [ ] 條件執行（`if` / `onFailure`）
-  - [ ] 執行中斷與恢復
+- [x] `src/plugins/standard/workflow.mjs` — `smart_workflow` MCP 工具
+  - [x] Command dispatch: create / report / replan / summary / list-templates
+  - [x] 透過 `cli: 'workflow.mjs'` 經 smart_run router 自動註冊
+  - [x] mapArgs 正確轉換 MCP schema → CLI 引數
 
-### 4.3 MCP 整合
+### 4.3 ContextManager 強化
 
-- [ ] 註冊 `smart_workflow_run` 工具
-  - [ ] 參數：`workflow` (path 或 name) + `vars` (變數映射)
-  - [ ] 輸出：逐步結果 + 最終摘要
-- [ ] 註冊 `smart_workflow_list` 工具
-  - [ ] 列出所有可用 workflow + 說明
+- [x] `capture()` 新增第 5 參數 `workflowId` — optional workflow association
+- [x] 新增 `getWorkflowHistory(workflowId)` — 依 workflowId 過濾 tool history
+- [x] entry schema 擴充：`toolHistory[].workflowId`
+
+### 4.4 Planner 強化
+
+- [x] `computeParallelHints(steps)` — DAG-based 平行分群演算法
+- [x] `WORKFLOW_TEMPLATES` — 5 組 workflow 專用 template 常數
+- [x] Export 4 個 symbols: `generatePlan`, `computeParallelHints`, `WORKFLOW_TEMPLATES`, `analyzeToolSequence`
+- [x] `main()` 保護：僅在直接執行時執行，import 時跳過
+
+### 4.5 內建 Workflow Templates (5)
+
+- [x] `debug-flow` (6 steps) — memory_search → grep → error_diagnose → debug → cross_file_edit → test
+- [x] `refactor-flow` (5 steps) — import_graph → naming → rename_safety → cross_file_edit → test
+- [x] `security-flow` (5 steps) — security_scan(creds) → security_scan(injection) → grep → cross_file_edit → test
+- [x] `research-flow` (3 steps) — exa_search → thinking(synthesize) → report
+- [x] `default-flow` (2 steps) — planner → test
 
 ### 驗收標準
-- [ ] 執行 `smart_workflow_run debug-flow errorMessage="TypeError: ..."` → 自動完成除錯
-- [ ] 可自行撰寫 workflow YAML 並執行
+
+- [x] `workflow create "fix XSS" --template security-flow` → 回傳多步驟 JSON plan + parallel hints
+- [x] 每步完成後 `workflow report --step N --status ok` → 自動更新 context、前進 workflow
+- [x] 步驟失敗 + onFailure=skip → 自動跳過繼續
+- [x] 步驟失敗 + onFailure=abort → workflow 標記為 failed
+- [x] `workflow replan` → 自動產生新計畫（保留已完成結果）
+- [x] `workflow summary --json` → 完整報告含 findings/toolStats/steps
+- [x] 9 tests pass + 36 既有 tests 0 regression
+
+### 已具備的前置條件（不需重寫）
+
+- [x] planner.mjs — plan generation + condition + DAG + replan
+- [x] context-manager.mjs — 注入/捕獲/持久化
+- [x] invokeTool + captureAndReturn — 自動 context 記錄
+- [x] 9 任務模板 + 條件分支
+- [x] 26 CLI tools → 30 tools (6 core + 24 standard)
+- [x] memory-store — 跨 session 記憶
 
 ---
 
@@ -367,7 +377,7 @@
 
 ### MCP 伺服器基礎設施
 - [x] Plugin Loader + Router 架構 (core/ + standard/)
-- [x] 26 工具註冊 (6 core + 20 standard) — Phase 0 完成
+- [x] 30 工具註冊 (6 core + 24 standard) — Phase 4 完成 (2026-06-04)
 - [x] DEBUG env var logging
 - [x] Output guard (512KB / 200K chars)
 - [x] Tool timing tracking

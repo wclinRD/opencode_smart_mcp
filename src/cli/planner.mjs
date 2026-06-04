@@ -34,6 +34,7 @@
 //   -h, --help        Show help
 
 import { argv, exit } from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------------------
 // Available tools registry
@@ -489,6 +490,94 @@ function generatePlan(goal, options = {}) {
     summary: `No template matched. Generated ${genericSteps.length} step(s) from keywords.`,
   };
 }
+
+/**
+ * Compute parallel execution hints from plan steps.
+ * Groups steps into batches where all steps in a batch can run in parallel.
+ * Returns array of step-number arrays: [[1,2], [3], [4,5]]
+ */
+function computeParallelHints(steps) {
+  if (!steps || steps.length === 0) return [];
+  const stepGroups = {};
+  const ungrouped = new Set(steps.map(s => s.step));
+  let group = 0;
+
+  while (ungrouped.size > 0) {
+    const currentGroup = [];
+    for (const stepNum of ungrouped) {
+      const step = steps.find(s => s.step === stepNum);
+      if (!step) continue;
+      const deps = step.dependsOn || [];
+      const allDepsResolved = deps.length === 0 || deps.every(d => stepGroups[d] !== undefined && stepGroups[d] < group);
+      if (allDepsResolved) {
+        currentGroup.push(stepNum);
+      }
+    }
+    if (currentGroup.length === 0) break;
+    currentGroup.sort((a, b) => a - b);
+    for (const sn of currentGroup) {
+      stepGroups[sn] = group;
+      ungrouped.delete(sn);
+    }
+    group++;
+  }
+
+  const result = [];
+  for (let g = 0; g < group; g++) {
+    const grpSteps = Object.entries(stepGroups)
+      .filter(([, grp]) => grp === g)
+      .map(([step]) => parseInt(step, 10))
+      .sort((a, b) => a - b);
+    if (grpSteps.length > 0) result.push(grpSteps);
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Workflow templates — composite multi-tool workflows
+// ---------------------------------------------------------------------------
+
+const WORKFLOW_TEMPLATES = {
+  'debug-flow': {
+    description: 'Debug an error: search memory, grep code, diagnose, fix, then verify with tests',
+    steps: [
+      { tool: 'smart_memory_store',   args: { command: 'search', query: '$goal' }, description: 'Search memory for similar past errors', dependsOn: [], onFailure: 'skip' },
+      { tool: 'smart_grep',           args: { pattern: 'error|Error|ERROR|exception|throw|failed' }, description: 'Search code for error-related patterns', dependsOn: [], onFailure: 'abort' },
+      { tool: 'smart_error_diagnose', args: { error: '$goal' }, description: 'Diagnose error against KB + memory', dependsOn: [0, 1], onFailure: 'skip' },
+      { tool: 'smart_debug',          args: { error: '$goal' }, description: 'Deep debug analysis of root cause', dependsOn: [0, 1], onFailure: 'skip' },
+      { tool: 'smart_cross_file_edit', args: {}, description: 'Apply fix changes across files', dependsOn: [2, 3], onFailure: 'warn' },
+      { tool: 'smart_test',           args: {}, description: 'Run tests to verify the fix', dependsOn: [4], onFailure: 'warn' },
+    ],
+  },
+  'refactor-flow': {
+    description: 'Safely refactor code: analyze deps, check naming, safety check, apply changes, test',
+    steps: [
+      { tool: 'smart_import_graph',   args: { depth: 2 }, description: 'Analyze import dependencies', dependsOn: [], onFailure: 'warn' },
+      { tool: 'smart_naming',         args: {}, description: 'Check naming conventions in scope', dependsOn: [], onFailure: 'skip' },
+      { tool: 'smart_rename_safety',  args: {}, description: 'Check rename safety & detect conflicts', dependsOn: [0], onFailure: 'abort' },
+      { tool: 'smart_cross_file_edit', args: {}, description: 'Apply refactor changes across files', dependsOn: [2], onFailure: 'warn' },
+      { tool: 'smart_test',           args: {}, description: 'Run tests to verify refactor', dependsOn: [3], onFailure: 'warn' },
+    ],
+  },
+  'security-flow': {
+    description: 'Audit and fix security issues: scan creds, scan injections, grep high-risk patterns, fix, verify',
+    steps: [
+      { tool: 'smart_security',       args: { scan: 'credentials' }, description: 'Scan for leaked credentials & secrets', dependsOn: [], onFailure: 'warn' },
+      { tool: 'smart_security',       args: { scan: 'injection' }, description: 'Scan for injection flaws (XSS/SQL/command)', dependsOn: [], onFailure: 'warn' },
+      { tool: 'smart_grep',           args: { pattern: 'eval|exec|spawn|shell|child_process' }, description: 'Find high-risk API usage patterns', dependsOn: [0, 1], onFailure: 'skip' },
+      { tool: 'smart_cross_file_edit', args: {}, description: 'Fix identified security issues', dependsOn: [2], onFailure: 'warn' },
+      { tool: 'smart_test',           args: {}, description: 'Run tests to verify security fixes', dependsOn: [3], onFailure: 'warn' },
+    ],
+  },
+  'research-flow': {
+    description: 'Research a topic: search the web, synthesize findings with thinking, generate report',
+    steps: [
+      { tool: 'smart_exa_search',     args: { query: '$goal' }, description: 'Search the web for relevant information', dependsOn: [], onFailure: 'abort' },
+      { tool: 'smart_thinking',       args: { template: 'research', topic: '$goal' }, description: 'Synthesize research findings into insights', dependsOn: [0], onFailure: 'warn' },
+      { tool: 'smart_report',         args: { type: 'custom', title: '$goal' }, description: 'Generate structured research report', dependsOn: [1], onFailure: 'skip' },
+    ],
+  },
+};
 
 /**
  * Analyze a sequence of tool calls and return insight.
@@ -1384,4 +1473,15 @@ function main() {
   }
 }
 
-main();
+// Run only when executed directly (not on import)
+const __filename = fileURLToPath(import.meta.url);
+if (process.argv[1] === __filename) {
+  main();
+}
+
+export {
+  generatePlan,
+  computeParallelHints,
+  WORKFLOW_TEMPLATES,
+  analyzeToolSequence,
+};
