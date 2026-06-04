@@ -23,7 +23,7 @@ import { argv, exit } from 'node:process';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -82,6 +82,55 @@ const WORKFLOW_TEMPLATES = {
 };
 
 // ---------------------------------------------------------------------------
+// Tool → CLI script mapping (for dispatch command)
+// Maps MCP tool names to their CLI script filenames in src/cli/
+// Must be kept in sync with loader.mjs plugin definitions.
+// ---------------------------------------------------------------------------
+
+const TOOL_CLI_MAP = {
+  // Core tools (6)
+  smart_grep: 'contextual-grep.mjs',
+  smart_learn: 'learn-adapt.mjs',
+  smart_security: 'security-scan.mjs',
+  smart_test: 'test-runner.mjs',
+  smart_thinking: 'thinking.mjs',
+  // smart_think has no CLI — handler only
+
+  // Standard tools used in templates
+  smart_memory_store: 'memory-store.mjs',
+  smart_error_diagnose: 'error-diagnose.mjs',
+  smart_debug: 'debug-assist.mjs',
+  smart_cross_file_edit: 'cross-file-edit.mjs',
+  smart_import_graph: 'import-graph.mjs',
+  smart_naming: 'naming-convention.mjs',
+  smart_rename_safety: 'rename-safety.mjs',
+  smart_exa_search: 'exa-search.mjs',
+  smart_report: 'report.mjs',
+  smart_planner: 'planner.mjs',
+
+  // Additional standard tools (for custom workflows)
+  smart_coverage: 'coverage-check.mjs',
+  smart_diagram: 'diagram.mjs',
+  smart_git_context: 'git-context.mjs',
+  smart_github_search: 'github-search.mjs',
+  smart_test_suggest: 'test-suggest.mjs',
+  smart_integrate: 'tool-integrate.mjs',
+  smart_tool_stats: 'tool-stats.mjs',
+  smart_toonify: 'toonify.mjs',
+  smart_py_helper: 'py-helper.mjs',
+  smart_ts_helper: 'ts-helper.mjs',
+};
+
+const CLI_DIR = resolve(dirname(process.argv[1] || '.'));
+
+/** Resolve tool name to CLI path. Throws if unmappable. */
+function resolveToolCli(toolName) {
+  const cliFile = TOOL_CLI_MAP[toolName];
+  if (!cliFile) throw new Error(`No CLI mapping for tool: ${toolName} (cannot dispatch — may be handler-only)`);
+  return resolve(CLI_DIR, cliFile);
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -99,6 +148,7 @@ Usage:
   node workflow.mjs create <goal> [options]
   node workflow.mjs report --state <path> --step <N> --status <ok|fail|skip> [--result <json>] [--error <str>]
   node workflow.mjs replan --state <path> [--context <text>]
+  node workflow.mjs dispatch --state <path> [--step <N>] [--timeout <ms>] [--json]
   node workflow.mjs summary --state <path> [--json]
   node workflow.mjs list-templates
 
@@ -106,6 +156,8 @@ Options:
   --template <name>   Workflow template (debug-flow, refactor-flow, security-flow, research-flow, default-flow)
   --state <path>      Path to workflow state file (default: .workflows/<uuid>.json)
   --context <text>    Extra context (project info, constraints) for plan generation
+  --step <N>          Run a specific step (for dispatch/report)
+  --timeout <ms>      Per-tool timeout in ms (dispatch only, default: 30000)
   --json              Output in JSON format
   -h, --help          Show this help
 
@@ -504,6 +556,265 @@ function cmdListTemplates(opts) {
 }
 
 // ---------------------------------------------------------------------------
+// Tool execution (for dispatch command)
+// ---------------------------------------------------------------------------
+
+const DEFAULT_DISPATCH_TIMEOUT = 30000; // 30s per tool
+
+/**
+ * Convert step args object to CLI flags array.
+ * Uses per-tool mapArgs for tools with custom positional args,
+ * falls back to defaultMapArgs (--key value) for simple tools.
+ *
+ * The per-tool converters mirror the plugin definitions in src/plugins/.
+ */
+const TOOL_ARGS_CONVERTERS = {
+  // grep: positional pattern
+  smart_grep: (a) => { const c = []; if (a.pattern) c.push(String(a.pattern)); if (a.root) c.push('--root', String(a.root)); if (a.include) c.push('--include', String(a.include)); if (a.exclude) c.push('--exclude', String(a.exclude)); if (a.context) c.push('--context', String(a.context)); if (a.withScope) c.push('--with-scope'); if (a.withImports) c.push('--with-imports'); if (a.ignoreCase) c.push('--ignore-case'); if (a.filesOnly) c.push('--files-only'); if (a.maxMatches) c.push('--max-matches', String(a.maxMatches)); if (a.format) c.push('--format', String(a.format)); c.push('--no-color'); return c; },
+
+  // error_diagnose: positional error
+  smart_error_diagnose: (a) => { const c = []; if (a.error) c.push(String(a.error)); if (a.file) c.push('--file', String(a.file)); if (a.noMemory) c.push('--no-memory'); if (a.store) c.push('--store'); if (a.memoryResolution) c.push('--memory-resolution', String(a.memoryResolution)); if (a.memoryTools) c.push('--memory-tools', String(a.memoryTools)); if (a.memoryThreshold != null) c.push('--memory-threshold', String(a.memoryThreshold)); if (a.format) c.push('--format', String(a.format)); return c; },
+
+  // memory_store: positional command + query
+  smart_memory_store: (a) => { const c = []; if (a.command) c.push(String(a.command)); if (a.query) c.push(String(a.query)); if (a.id) c.push(String(a.id)); if (a.resolution) c.push('--resolution', String(a.resolution)); if (a.tools) c.push('--tools', String(a.tools)); if (a.files) c.push('--files', String(a.files)); if (a.category) c.push('--category', String(a.category)); if (a.success !== undefined) c.push('--success', String(a.success)); if (a.limit) c.push('--limit', String(a.limit)); if (a.threshold) c.push('--threshold', String(a.threshold)); if (a.format) c.push('--format', String(a.format)); return c; },
+
+  // exa_search: positional command + query
+  smart_exa_search: (a) => { const c = []; if (a.command) c.push(String(a.command)); if (a.command === 'crawl') { if (a.urls) { const urls = String(a.urls).split(',').map(u => u.trim()).filter(Boolean); c.push(...urls); } } else if (a.query) c.push(String(a.query)); if (a.numResults) c.push('--num-results', String(a.numResults)); if (a.maxChars) c.push('--max-chars', String(a.maxChars)); if (a.format) c.push('--format', String(a.format)); c.push('--no-color'); return c; },
+
+  // thinking: positional topic
+  smart_thinking: (a) => { const c = []; if (a.topic) c.push(String(a.topic)); if (a.template) c.push('--template', String(a.template)); if (a.steps) c.push('--steps', String(a.steps)); if (a.format) c.push('--format', String(a.format)); if (a.plan) c.push('--plan', String(a.plan)); if (a.planStep) c.push('--plan-step', String(a.planStep)); if (a.state) c.push('--state', String(a.state)); if (a.record) c.push('--record', String(a.record)); if (a.branch) c.push('--branch', String(a.branch)); if (a.restore) c.push('--restore', String(a.restore)); if (a.iterative) c.push('--iterative'); if (a.dynamic) c.push('--dynamic'); if (a.advance) c.push('--advance'); if (a.finish) c.push('--finish'); if (a.status) c.push('--status'); if (a.cancel) c.push('--cancel'); c.push('--no-color'); return c; },
+
+  // report: positional type
+  smart_report: (a) => { const c = []; if (a.type) c.push(String(a.type)); if (a.title) c.push('--title', String(a.title)); if (a.input) c.push('--input', String(a.input)); if (a.output) c.push('--output', String(a.output)); if (a.theme) c.push('--theme', String(a.theme)); if (a.root) c.push('--root', String(a.root)); c.push('--no-color'); return c; },
+
+  // planner: positional goal for plan/execute
+  smart_planner: (a) => { const c = []; if (a.command === 'list-tasks') { c.push('list-tasks'); return c; } if (a.command === 'analyze') { c.push('analyze'); if (a.tools) c.push(String(a.tools)); if (a.format) c.push('--format', String(a.format)); return c; } if (a.command) c.push(String(a.command)); if (a.goal) c.push(String(a.goal)); if (a.context) c.push('--context', String(a.context)); if (a.steps) c.push('--steps', String(a.steps)); if (a.strict) c.push('--strict'); if (a.state) c.push('--state', String(a.state)); if (a.step !== undefined) c.push('--step', String(a.step)); if (a.stepStatus) c.push('--status', String(a.stepStatus)); if (a.result) c.push('--result', String(a.result)); if (a.error) c.push('--error', String(a.error)); if (a.duration) c.push('--duration', String(a.duration)); if (a.format) c.push('--format', String(a.format)); return c; },
+
+  // cross_file_edit: positional file, pattern, replacement
+  smart_cross_file_edit: (a) => { const c = []; if (a.file) c.push(String(a.file)); if (a.pattern) c.push(String(a.pattern)); if (a.replacement) c.push(String(a.replacement)); if (a.root) c.push('--root', String(a.root)); if (a.include) c.push('--include', String(a.include)); if (a.exclude) c.push('--exclude', String(a.exclude)); if (a.signature) c.push('--signature', String(a.signature)); if (a.dryRun) c.push('--dry-run'); if (a.apply) c.push('--apply'); if (a.format) c.push('--format', String(a.format)); c.push('--no-color'); return c; },
+
+  // rename_safety: positional name, newName
+  smart_rename_safety: (a) => { const c = []; if (a.name) c.push(String(a.name)); if (a.newName) c.push(String(a.newName)); if (a.root) c.push('--root', String(a.root)); if (a.include) c.push('--include', String(a.include)); if (a.exclude) c.push('--exclude', String(a.exclude)); if (a.dryRun) c.push('--dry-run'); if (a.apply) c.push('--apply'); if (a.format) c.push('--format', String(a.format)); c.push('--no-color'); return c; },
+};
+
+/**
+ * Convert step args to CLI flags using per-tool converter or default.
+ */
+function argsToCLI(toolName, args) {
+  const converter = TOOL_ARGS_CONVERTERS[toolName];
+  if (converter) return converter(args);
+
+  // Default: convert all args to --key value
+  const cli = [];
+  for (const [k, v] of Object.entries(args || {})) {
+    if (k === '_timeout' || k === '_context') continue;
+    if (typeof v === 'boolean') { if (v) cli.push(`--${k}`); }
+    else if (v != null) cli.push(`--${k}`, String(v));
+  }
+  return cli;
+}
+
+/**
+ * Execute a single workflow step by spawning its CLI tool.
+ * @param {object} step - step definition { tool, args, ... }
+ * @param {number} timeoutMs - per-tool timeout
+ * @returns {{ ok: boolean, output: string, error: string|null, duration: number }}
+ */
+function executeTool(step, timeoutMs = DEFAULT_DISPATCH_TIMEOUT) {
+  const startMs = Date.now();
+  const cliPath = resolveToolCli(step.tool);
+  const cliArgs = argsToCLI(step.tool, step.args);
+
+  try {
+    const result = spawnSync('node', [cliPath, ...cliArgs], {
+      encoding: 'utf-8',
+      timeout: timeoutMs,
+      maxBuffer: 512 * 1024,
+    });
+    const duration = Date.now() - startMs;
+
+    if (result.error) {
+      let errMsg;
+      if (result.error.code === 'ETIMEDOUT') errMsg = `Timed out after ${timeoutMs}ms`;
+      else errMsg = `Spawn failed: ${result.error.message}`;
+      return { ok: false, output: '', error: errMsg, duration };
+    }
+
+    if (result.status !== 0 && result.status !== null) {
+      const stderr = (result.stderr || '').trim();
+      const errMsg = stderr || `Exit code ${result.status}`;
+      return { ok: false, output: result.stdout || '', error: errMsg, duration };
+    }
+
+    return { ok: true, output: result.stdout || '', error: null, duration };
+  } catch (err) {
+    return { ok: false, output: '', error: err.message, duration: Date.now() - startMs };
+  }
+}
+
+/**
+ * Auto-report step result into workflow state.
+ * Direct state manipulation (no intermediate stdout from cmdReport).
+ */
+function autoReport(statePath, stepNum, execResult) {
+  const state = loadState(statePath);
+  const step = state.steps[stepNum];
+  if (!step) return;
+
+  const status = execResult.ok ? 'ok' : 'fail';
+  step.status = status;
+  step.completedAt = nowISO();
+  step.duration = execResult.duration;
+  if (execResult.error) step.error = execResult.error;
+  if (execResult.output) {
+    const preview = execResult.output.length > 500
+      ? execResult.output.slice(0, 500) + '... [truncated]'
+      : execResult.output;
+    step.result = JSON.stringify({ output: preview });
+  }
+
+  // Track completed/failed — same logic as cmdReport
+  if (status === 'ok') {
+    state.completedSteps.push(stepNum);
+  } else {
+    if (step.onFailure === 'abort') {
+      state.failedSteps.push(stepNum);
+      state.status = 'failed';
+    } else if (step.onFailure === 'skip') {
+      step.status = 'skip';
+      state.skippedSteps.push(stepNum);
+    } else {
+      state.failedSteps.push(stepNum);
+    }
+  }
+
+  // Update tool stats
+  const toolName = step.tool;
+  if (!state.toolStats[toolName]) state.toolStats[toolName] = { calls: 0, ok: 0, fail: 0, totalDuration: 0 };
+  state.toolStats[toolName].calls++;
+  if (status === 'ok') state.toolStats[toolName].ok++;
+  else if (status === 'fail') state.toolStats[toolName].fail++;
+  if (execResult.duration) state.toolStats[toolName].totalDuration += execResult.duration;
+
+  // Advance step group
+  const currentGroup = state.parallel[state.currentStepGroup];
+  if (currentGroup) {
+    const allDone = currentGroup.every(sn => state.steps[sn] && state.steps[sn].status !== 'pending');
+    if (allDone) state.currentStepGroup++;
+  }
+
+  // Check if all done
+  const totalSteps = state.steps.length;
+  const doneSteps = state.completedSteps.length + state.failedSteps.length + state.skippedSteps.length;
+  if (doneSteps >= totalSteps) state.status = 'completed';
+
+  state.updatedAt = nowISO();
+  saveState(statePath, state);
+}
+
+// ---------------------------------------------------------------------------
+// Command: dispatch
+// ---------------------------------------------------------------------------
+
+/**
+ * Execute workflow steps by spawning their CLI tools directly.
+ * Sequential mode only for Phase 5.1 — parallel mode added in Phase 6.
+ *
+ * Usage:
+ *   node workflow.mjs dispatch --state <path>          # run current group
+ *   node workflow.mjs dispatch --state <path> --step N  # run specific step
+ *
+ * Options:
+ *   --state <path>   Workflow state file (required)
+ *   --step <N>       Run a specific step instead of the current group
+ *   --timeout <ms>   Per-tool timeout (default: 30000)
+ *   --json           Output in JSON format
+ */
+function cmdDispatch(opts) {
+  const statePath = opts.state;
+  if (!statePath) { console.error(`[${TOOL_NAME}] --state required for dispatch`); exit(1); }
+  const state = loadState(statePath);
+
+  if (state.status === 'completed') {
+    console.error(`[${TOOL_NAME}] Workflow already completed`);
+    exit(1);
+  }
+  if (state.status === 'failed') {
+    console.error(`[${TOOL_NAME}] Workflow is in failed state. Use replan first.`);
+    exit(1);
+  }
+
+  const timeout = opts.timeout || DEFAULT_DISPATCH_TIMEOUT;
+  const stepTargets = [];
+
+  if (opts.step !== undefined && opts.step !== null) {
+    // Run a specific step
+    const step = state.steps[opts.step];
+    if (!step) { console.error(`[${TOOL_NAME}] Step ${opts.step} not found`); exit(1); }
+    if (step.status !== 'pending') {
+      console.error(`[${TOOL_NAME}] Step ${opts.step} is not pending (status: ${step.status})`);
+      exit(1);
+    }
+    stepTargets.push(step);
+  } else {
+    // Run current step group (from parallel hints)
+    const group = state.parallel[state.currentStepGroup];
+    if (!group || group.length === 0) {
+      console.error(`[${TOOL_NAME}] No pending step group. Workflow may be complete.`);
+      exit(1);
+    }
+    for (const sn of group) {
+      const s = state.steps[sn];
+      if (s && s.status === 'pending') stepTargets.push(s);
+    }
+    if (stepTargets.length === 0) {
+      console.error(`[${TOOL_NAME}] All steps in current group [${group}] already done`);
+      exit(1);
+    }
+  }
+
+  // Sequential execution (default for Phase 5.1)
+  const results = [];
+  for (const step of stepTargets) {
+    console.error(`[${TOOL_NAME}] Dispatching step ${step.step}: ${step.tool}...`);
+    const execResult = executeTool(step, timeout);
+    autoReport(statePath, step.step, execResult);
+    results.push({ step: step.step, tool: step.tool, ...execResult });
+    console.error(`[${TOOL_NAME}] Step ${step.step} → ${execResult.ok ? 'ok' : 'fail'} (${execResult.duration}ms)`);
+  }
+
+  // Reload state for final output
+  const finalState = loadState(statePath);
+
+  if (opts.json) {
+    console.log(JSON.stringify({
+      workflowId: finalState.workflowId,
+      status: finalState.status,
+      currentStepGroup: finalState.currentStepGroup,
+      completedSteps: finalState.completedSteps,
+      failedSteps: finalState.failedSteps,
+      skippedSteps: finalState.skippedSteps,
+      results: results.map(r => ({
+        step: r.step, tool: r.tool, ok: r.ok, duration: r.duration,
+        error: r.error || undefined,
+      })),
+    }, null, 2));
+  } else {
+    const ok = results.filter(r => r.ok).length;
+    const fail = results.filter(r => !r.ok).length;
+    console.log(`[${TOOL_NAME}] Dispatch complete: ${ok} ok, ${fail} fail`);
+    console.log(`  Status:         ${finalState.status}`);
+    console.log(`  Completed:      ${finalState.completedSteps.length}/${finalState.steps.length}`);
+    if (finalState.status !== 'completed') {
+      const nextGroup = finalState.parallel[finalState.currentStepGroup];
+      if (nextGroup) {
+        console.log(`  Next group:     [${nextGroup.join(', ')}]`);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
@@ -530,6 +841,7 @@ function main() {
     else if (a === '--result') opts.result = args[++i];
     else if (a === '--error') opts.error = args[++i];
     else if (a === '--duration') opts.duration = parseInt(args[++i], 10);
+    else if (a === '--timeout') opts.timeout = parseInt(args[++i], 10);
     else if (a === '--json') opts.json = true;
     else if (a.startsWith('--')) { /* skip unknown */ }
     else positional.push(a);
@@ -551,6 +863,9 @@ function main() {
       break;
     case 'list-templates':
       cmdListTemplates(opts);
+      break;
+    case 'dispatch':
+      cmdDispatch(opts);
       break;
     default:
       console.error(`[${TOOL_NAME}] Unknown command: ${command}. Use --help for usage.`);

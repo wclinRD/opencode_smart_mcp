@@ -528,7 +528,7 @@ function respondError(id, code, message, data) {
 
 const CONTEXT_TOOL_DESCRIPTION =
   'Query or manage session context. Use this to see what tools have been called, what findings accumulated, or to reset/list sessions.\n' +
-  '  command: "get" (default) | "summary" | "history" | "findings" | "reset" | "sessions" | "delete" | "inject"\n' +
+  '  command: "get" (default) | "summary" | "history" | "findings" | "reset" | "sessions" | "delete" | "inject" | "workflow-stats"\n' +
   '  sessionId: optional, for resume/delete operations';
 
 /**
@@ -619,8 +619,17 @@ function handleSmartContext(id, args) {
         break;
       }
 
+      case 'workflow-stats': {
+        const wfId = args.workflowId || args.id;
+        if (!wfId) { result = 'workflowId required for workflow-stats.'; break; }
+        const cost = contextManager.getWorkflowCost(wfId);
+        if (!cost) { result = `No data found for workflow: ${wfId}. Ensure tools were called with this workflowId.`; break; }
+        result = JSON.stringify(cost, null, 2);
+        break;
+      }
+
       default:
-        result = `Unknown command: ${cmd}. Available: get, summary, history, findings, reset, sessions, delete, inject`;
+        result = `Unknown command: ${cmd}. Available: get, summary, history, findings, reset, sessions, delete, inject, workflow-stats`;
     }
 
     respond(id, { content: [{ type: 'text', text: result }] });
@@ -683,8 +692,9 @@ function handleRequest(req) {
         inputSchema: {
           type: 'object',
           properties: {
-            command: { type: 'string', description: 'Command: get (default), summary, history, findings, reset, sessions, delete, inject', enum: ['get', 'summary', 'history', 'findings', 'reset', 'sessions', 'delete', 'inject'] },
+            command: { type: 'string', description: 'Command: get (default), summary, history, findings, reset, sessions, delete, inject, workflow-stats', enum: ['get', 'summary', 'history', 'findings', 'reset', 'sessions', 'delete', 'inject', 'workflow-stats'] },
             sessionId: { type: 'string', description: 'Session ID (for resume/delete)' },
+            workflowId: { type: 'string', description: 'Workflow ID (for workflow-stats)' },
             projectRoot: { type: 'string', description: 'Project root path' },
           },
         },

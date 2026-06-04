@@ -306,9 +306,99 @@
 
 ---
 
-## 🟡 Phase 5: 程式碼生成輔助 (P2)
+## 🔴 Phase 5: Workflow 引擎強化 (P0 — 實際執行能力)
 
-**對應 plan.md 五-Phase 5**
+**對應 plan.md 五-Phase 5**  
+**目標**：讓 workflow 能真正執行工具，而非只管理 state。
+
+**動機**：目前 workflow.mjs 是 state tracker + report generator，實際工具執行靠 opencode agent 手動 dispatch。這不是真正的 workflow engine。
+
+### 5.1 Workflow Engine 加入 dispatch 層
+
+- [ ] `workflow.mjs` 新增 `dispatch` 指令：接收 workflowId → 自動 call invokeTool()
+- [ ] 支援 `parallel(group)` dispatch：同時 spawn 多個獨立工具
+- [ ] 先用 sequential 模式驗證，平行執行留待 Phase 6
+
+### 5.2 Workflow 產出可直接執行的 JSON
+
+- [ ] `create` 指令輸出格式強化：含完整 tool args + timeout + onFailure
+- [ ] opencode agent 可直接 iterate 執行，不需再 parse 描述文字
+
+### 5.3 Workflow context 聚合
+
+- [ ] ContextManager 新增 `getWorkflowCost(workflowId)`：回傳該 workflow 的總 token/時間/錯誤率
+- [ ] `smart_context` 新增 `workflow-stats` 指令
+
+### 驗收標準
+
+- [ ] `workflow dispatch --id <wfId>` 自動執行第一步工具
+- [ ] `workflow dispatch --id <wfId> --parallel` 同時執行獨立步驟
+- [ ] `smart_context workflow-stats --id <wfId>` 回傳成本數據
+
+---
+
+## 🟠 Phase 6: Compose 原語 + 平行執行基礎 (P1 — 工具組合)
+
+**對應 plan.md 五-Phase 6**  
+**目標**：提供 compose/pipe/parallel 三種工具組合原語。
+
+### 6.1 Compose 原語定義與實作
+
+- [ ] `src/plugins/standard/compose.mjs` — 新增 MCP tool `smart_compose`
+  - [ ] 輸入：`{ pipeline: [{ tool, args, mode: "seq"|"par"|"cond" }] }`
+  - [ ] 順序執行（pipe）：A 的輸出餵給 B
+  - [ ] 平行執行（parallel）：Promise.all + child_process.spawn async
+  - [ ] 條件執行（cond）：檢查前一步結果關鍵字決定分支
+- [ ] `src/lib/compose-engine.mjs` — compose 核心邏輯
+
+### 6.2 CLI spawn 非阻塞改造
+
+- [ ] 24 CLI tools 從 `spawnSync` → `spawn` + Promise wrapper
+- [ ] 保留 timeout 控制（AbortController）
+- [ ] 相容既有工具，不修改 signature
+
+### 驗收標準
+
+- [ ] `smart_compose({ pipeline: [...] })` 正確執行多工具流程
+- [ ] `mode: "par"` 平行執行比依序快（2 個 500ms 工具約 500ms 而非 1000ms）
+- [ ] `mode: "cond"` 根據條件正確分支
+
+---
+
+## 🟠 Phase 7: Memory 升級 (P1 — 語意記憶 + 模式歸納)
+
+**對應 plan.md 五-Phase 7**  
+**目標**：從 fuzzy string match 升級到語意搜尋 + 跨 session pattern 歸納。
+
+### 7.1 Vector search 層
+
+- [ ] 使用 sentence embedding（`@xenova/transformers` 或 local ONNX model）
+- [ ] 對每個 resolution 產生 embedding vector
+- [ ] 搜尋時比對語意相似度而非 Levenshtein distance
+- [ ] 降級策略：vector search 失敗 → fallback 到 fuzzy match
+
+### 7.2 Pattern abstraction
+
+- [ ] `tool-stats` `patterns` 指令增強：不只是 combo 分析
+- [ ] 自動歸納「失敗模式 cluster」：相同工具 + 相同 error type 多次失敗
+- [ ] 輸出 pattern report：「smart_grep 在 large 專案 timeout 率 40%，建議加 root 限制」
+
+### 7.3 Cross-session context 合併
+
+- [ ] ContextManager 新增 `mergeSessions(sessionIds[])`：合併多 session 的 findings
+- [ ] `smart_context` 新增 `merge` 指令
+
+### 驗收標準
+
+- [ ] 語意相似錯誤（"file not found" vs "cannot locate file"）可匹配
+- [ ] tool-stats patterns 輸出 pattern cluster 報告
+- [ ] cross-session merge 正確合併 findings
+
+---
+
+## 🟡 Phase 8: 程式碼生成輔助 (P2)
+
+**對應 plan.md 五-Phase 8**
 **目標**：分析問題後不僅報告，還能自動產出修復 patch。
 
 - [ ] `src/plugins/standard/patch-gen.mjs`
@@ -320,11 +410,11 @@
 
 ---
 
-## 🟡 Phase 6: Devtool 自身品質 (P2)
+## 🟡 Phase 9: Devtool 自身品質 (P2)
 
 **目標**：smart MCP 伺服器本身的穩定性與可測試性。
 
-### 6.1 自動測試
+### 9.1 自動測試
 
 - [ ] 為每個 tool 建立單元測試（`tests/` 目錄）
   - [ ] `tests/grep.test.mjs`
@@ -333,14 +423,14 @@
   - [ ] ...類推
 - [ ] CI 整合：`smart_test` 可執行自身測試
 
-### 6.2 效能監控
+### 9.2 效能監控
 
 - [ ] smart/stats 端點擴充
   - [ ] per-tool p50/p95/p99 延遲
   - [ ] 記憶體使用趨勢
   - [ ] 自動警報：某工具延遲突然飆升 2x
 
-### 6.3 Debug 模式增強
+### 9.3 Debug 模式增強
 
 - [ ] DEBUG=smart 輸出結構化
   - [ ] JSON lines format（可 pipe 到分析工具）
@@ -348,9 +438,9 @@
 
 ---
 
-## ⚪ Phase 7: 語言助手擴充 (P3)
+## ⚪ Phase 10: 語言助手擴充 (P3)
 
-**對應 plan.md 五-Phase 6**
+**對應 plan.md 五-Phase 9**
 
 - [ ] `src/plugins/standard/rs-helper.mjs` — Rust 分析
   - [ ] cargo check wrapper
@@ -365,9 +455,15 @@
 
 ---
 
-## ✅ 已完成 (v3.1)
+## ✅ 已完成 (v3.2)
 
-### 動態多輪推理強化
+### Phase 4: Workflow 引擎 (2026-06-04)
+- [x] `smart_workflow` — 5 commands (create/report/replan/summary/list-templates)
+- [x] 5 workflow templates (debug/refactor/security/research/default)
+- [x] ContextManager workflowId 維度支援
+- [x] Planner computeParallelHints() DAG-based 分群
+
+### 動態多輪推理強化 (Phase 2.3)
 - [x] thinking.mjs v3.1 — 動態多輪推理引擎
 - [x] State persistence (`--state <path>` JSON file)
 - [x] Step recording (`--record <idx> <result>`)
@@ -375,9 +471,9 @@
 - [x] Context accumulation (前序結果自動注入下一步 prompt)
 - [x] Session lifecycle: `--dynamic` → `--record` → `--advance` → `--branch` → `--finish`
 
-### MCP 伺服器基礎設施
+### MCP 伺服器基礎設施 (Phase 0)
 - [x] Plugin Loader + Router 架構 (core/ + standard/)
-- [x] 30 工具註冊 (6 core + 24 standard) — Phase 4 完成 (2026-06-04)
+- [x] 30 工具註冊 (6 core + 24 standard)
 - [x] DEBUG env var logging
 - [x] Output guard (512KB / 200K chars)
 - [x] Tool timing tracking
@@ -389,7 +485,7 @@
 - [x] Per-tool timeout override (args._timeout)
 - [x] 增強的錯誤回應 (含 tool list + suggestion)
 
-### 核心工具
+### 核心工具 (Phase 0)
 - [x] smart_grep — 語意感知程式碼搜尋 (含 scope/import context)
 - [x] smart_security — 安全漏洞掃描 (credential/injection/path/deps)
 - [x] smart_test — 測試執行器 (vitest/jest/mocha/ava/node:test)
@@ -397,7 +493,7 @@
 - [x] smart_thinking — 9 模板結構化推理 (v3.1: dynamic/state/branch/handler)
 - [x] smart_think — 快速對話推理 (handler-based, 取代 sequential-thinking)
 
-### Standard 工具
+### Standard 工具 (Phases 0-4)
 - [x] smart_coverage — 測試覆蓋率分析 (if/else/switch/loop/ternary)
 - [x] smart_cross_file_edit — 跨檔案編輯 (dry-run 預設安全)
 - [x] smart_debug — 錯誤分析與分類
@@ -416,6 +512,7 @@
 - [x] smart_tool_stats — 工具使用統計 (record/report/trends/recommendations)
 - [x] smart_toonify — TOON token 優化 (30-65% 節省)
 - [x] smart_ts_helper — TypeScript 分析 (config/exports/modules)
+- [x] smart_workflow — Plan-based orchestration (create/report/replan/summary)
 
 ### Bug Fixes
 - [x] toonify.mjs — 修復 `Cannot find module '../../package.json'`

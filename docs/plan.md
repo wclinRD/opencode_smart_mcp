@@ -7,11 +7,12 @@
 
 ## 一、現狀摘要
 
-Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 27 個開發工具。當前版本 3.2.0（Plugin Loader + Router 架構 + 動態多輪推理 + Context 管理）。
+Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 30 個開發工具。當前版本 3.2.0（Plugin Loader + Router 架構 + 動態多輪推理 + Context 管理 + Workflow 引擎）。
 
 ### 核心數據
-- **工具總數**：27（7 原生 + 20 經 router）
-- **架構**：Plugin Loader → src/plugins/core/（原生）/ src/plugins/standard/（router 分發）
+- **工具總數**：30（6 原生 + 24 經 router）
+- **架構**：Plugin Loader → src/plugins/core/（6 原生 handler）/ src/plugins/standard/（24 router CLI）
+- **Workflow 引擎**：Phase 4 完成 — 5 模板、平行提示、replan、summary
 - **語言**：JavaScript (ESM)
 - **輸出保護**：512KB buffer / 200K chars soft limit
 - **Health Endpoint**：`smart/health`（含 context 資訊）
@@ -35,7 +36,7 @@ src/
 │   ├── security.mjs          → smart_security
 │   ├── test.mjs              → smart_test
 │   └── thinking.mjs          → smart_thinking (深層分析, handler-based)
-│   │   ├── workflow.mjs          ✨新
+
 │
 ├── plugins/standard/    (24 standard tools, 經 smart_run router)
 │   ├── coverage.mjs          → smart_coverage
@@ -92,8 +93,9 @@ src/
 | **搜尋** | 3 | ✅ 成熟 | exa-search + github-search + grep |
 | **可視化** | 2 | ✅ 成熟 | diagram (Mermaid) + report (HTML) |
 | **後設** | 3 | 🟡 中等 | integrate + tool-stats + toonify |
-| **推理 (深層分析)** | 1 (smart_thinking) | ✅ 成熟 | 9 模板 + 動態多輪/state/branch，但 CLI spawn 不適合對話推理 |
-| **推理 (快速思考)** | 1 (smart_think - 新增) | 🆕 規劃中 | handler-based 輕量推理，目標取代 sequential-thinking |
+| **推理 (深層分析)** | 1 (smart_thinking) | ✅ 成熟 | 9 模板 + 動態多輪/state/branch/handler 化 |
+| **推理 (快速思考)** | 1 (smart_think) | ✅ 成熟 | handler-based 輕量推理，已取代 sequential-thinking |
+| **Workflow 編排** | 1 (smart_workflow) | ✅ 完成 | 5 模板 (debug/refactor/security/research/default) + create/report/replan/summary |
 
 ### 3.2 已驗證的強項
 
@@ -114,17 +116,17 @@ src/
 | 2026-06-04 | Phase 0 | 多項 Phase 0 完成 | 見下方 Phase 0 完成摘要 |
 | 2026-06-04 | Phase 1 | 記憶系統+error-diagnose 整合+tool-stats 升級 | memory-store: confirm 指令+auto-category+dedup+壓縮; error-diagnose: 記憶預設開啟(useMemory=true→noMemory); tool-stats: patterns 指令+session 分析+combo 發現; 10 整合測試通過 |
 
-### 3.4 關鍵缺口
+### 3.4 當前缺口 (Phase 1-4 完成後)
 
 | 缺口 | 嚴重性 | 說明 | 影響 |
 |------|--------|------|------|
-| **🟠 無狀態** | 高 | 每次工具呼叫獨立，不記得上次做了什麼、結果是什麼 | 無法做多步驟推理，複雜任務需外部 orchestration |
-| **🔴 無自我學習** | 高 | tool-stats 只計數（呼叫次數/成功率），沒有 pattern extraction、沒有 resolution caching | 同樣錯誤會重複犯，無法隨時間進步 |
-| **🔴 無動態規劃** | 高 | thinking 是靜態模板，不能根據中間結果調整策略、不能分支/回溯 | 複雜任務需手動迭代，無法自動化 |
-| **🟠 無記憶** | 高 | 沒有 past resolutions KB、沒有 failure pattern 累積機制 | 每輪從零開始，經驗無法 reuse |
-| **🟠 無程式生成** | 中 | 純分析工具，不能寫 code / 產生 patch | 找到問題無法自動修，需人工介入 |
-| **🟡 無 context 傳遞** | 中 | 工具間沒有標準化的 context 傳遞機制 | 無法自動化多工具流程 |
-| **🟡 無 workflow 引擎** | 中 | 沒有 pipeline / DAG 定義與執行能力 | 複雜工作流需在 agent 層硬編碼 |
+| **🔴 無工具組合原語** | 高 | 無 compose/pipe/parallel 原語，24 standard tools 只能依序呼叫 | workflow 無法平行執行，複雜編排需 opencode 硬編碼 |
+| **🔴 CLI spawn 阻塞 event loop** | 高 | 24 standard tools 用 spawnSync，Node.js 單執行緒卡住 | 無法平行執行多工具，延遲疊加 |
+| **🟠 Workflow 無實際執行能力** | 高 | workflow 只管理 state，工具執行要靠 opencode agent 手動 dispatch | 非真正 workflow engine，僅 state tracker |
+| **🟠 Context 無 workflow 維度聚合** | 中 | 不能問「這個 workflow 花了多少 token / 時間」 | 成本與效能不可視 |
+| **🟠 Memory 僅 resolution** | 中 | 無 vector search / pattern abstraction / 跨 session context 合併 | 經驗累積有限，相同模式重複犯 |
+| **🟡 無程式生成** | 中 | 純分析工具，不能寫 code / 產生 patch | 找到問題無法自動修，需人工介入 |
+| **🟡 Planner 無 LLM-based 分解** | 中 | 模板僅關鍵字比對，複雜目標（如「修復 memory leak」）match 不到 | 退回 generic plan，品質不穩 |
 | **🟢 語言覆蓋不足** | 低 | 只有 Python/TS 助手，缺 Rust/Go/Java | 多語言專案支援不完整 |
 
 ---
@@ -152,29 +154,66 @@ src/
 - 工具間沒有共享記憶 → 每次都要重新描述上下文
 - 無法累積經驗 → 同樣情境每次從零推理
 
-### 4.2 修復優先級
+### 4.2 修復優先級 (當前 v3.2)
 
 | 優先級 | 要解決的問題 | 預期效益 |
 |--------|------------|---------|
-| **P0** | 無自我學習 + 無記憶 | 減少重複錯誤 60%+ |
-| **P0** | 無動態規劃 | 複雜任務成功率提升 40%+ |
-| **P1** | 無狀態 + 無 context 傳遞 | 減少 token 消耗 30%+ |
-| **P1** | 無 workflow 引擎 | 多工具協作速度提升 50%+ |
+| **P0** | 無工具組合原語 + CLI spawn 阻塞 | Workflow 平行執行加速 2-3x |
+| **P0** | Workflow 無實際執行能力 | 真正自動化多工具流程 |
+| **P1** | Workflow context 維度聚合 | 成本與效能可視化 |
+| **P1** | Memory 升級 (vector + pattern) | 減少重複錯誤 60%+ |
 | **P2** | 無程式生成 | 減少人工介入 70%+ |
+| **P3** | Planner LLM-based 分解 | 複雜目標匹配率提升 |
 | **P3** | 語言覆蓋不足 | 多語言專案支援 |
+
+### 4.3 Workflow 引擎深度評估 (2026-06-04 Phase 4 完成後)
+
+6 層面評估結果：
+
+| 層面 | 評分 | 關鍵發現 |
+|------|------|---------|
+| **Plugin Loader** | ✅ 成熟 | 30 tools 自動載入，新增工具=新增 .mjs 檔案，零設定 |
+| **Context Manager** | ✅ 成熟 | 自動注入/捕獲/持久化，workflowId 維度，findings 提取 |
+| **Planner** | ✅ 成熟 | 9 模板 + DAG + 條件分支 + replan 引擎 |
+| **Memory Store** | 🟡 夠用 | fuzzy match 堪用，但無 vector search / pattern abstraction |
+| **Workflow Engine** | 🟡 夠用但有限 | 5 模板 + create/report/replan/summary，但**無實際執行能力** |
+| **Error Handling** | ✅ 優秀 | per-tool ERROR_FIXES + keyword scanning + Fix/Try 提示 |
+
+### 4.4 Workflow 引擎：能做到 vs 不能做到
+
+| 能做到 ✅ | 不能做到 ❌ |
+|-----------|------------|
+| 建立 workflow (5 templates) | **實際執行工具** — 只管理 state，opencode 手動 dispatch |
+| 回報步驟結果、追蹤進度 | **平行執行** — CLI spawnSync 阻塞 event loop |
+| 步驟失敗時 replan | **工具組合原語** — 無 compose/pipe/parallel |
+| 輸出 summary 報告 (findings/toolStats) | **跨 workflow 記憶** — 每次從模板開始 |
+| `computeParallelHints()` DAG 分群 | **LLM-based 目標分解** — 僅關鍵字比對 |
+
+### 4.5 關鍵架構決策
+
+```
+決策 1: 疊加 Workflow Layer 而非改寫核心 ✅
+  → workflow.mjs 獨立，不修改 invokeTool/loader/context-manager
+
+決策 2: Plan-based orchestration 而非 agent spawning ✅
+  → MCP server 不 spawn subagent，opencode host 負責執行
+
+決策 3: handler 為新工具首選，24 standard 工具仍 spawnSync
+  → smart_think / smart_thinking 已 handler 化，其餘待遷移
+```
 
 ---
 
 ## 五、強化路線圖
 
 ### Phase 0: thinking.mjs 改造 + smart_think 新增（P0 — 推理引擎革新）
-│   │   ├── workflow.mjs          ✨新
+
 
 **目標**：將 thinking.mjs 從「批次分析 CLI」改造為「推理引擎」，新增 handler-based 快速思考工具 `smart_think`，最終取代 opencode 的 sequential-thinking。
-│   │   ├── workflow.mjs          ✨新
+
 
 **動機**：目前 smart_thinking 透過 `cli: 'thinking.mjs'` 每次 spawn Node.js process，延遲 ~100ms+，且輸出模板骨架而非推理內容。這使其無法取代 sequential-thinking（in-process, sub-ms, 對話原生）。
-│   │   ├── workflow.mjs          ✨新
+
 
 ```
 現狀：
@@ -187,14 +226,14 @@ src/
 ```
 
 #### 0.1 thinking.mjs 重構（共享推理引擎）
-│   │   ├── workflow.mjs          ✨新
+
 
 將 `thinking.mjs` 從純 CLI 改造為可程式化呼叫的模組：
-│   │   ├── workflow.mjs          ✨新
+
 
 ```
 thinking.mjs
-│   │   ├── workflow.mjs          ✨新
+
 ├── export quickThink(args)    → 供 smart_think 呼叫
 │     ├── 4 參數: thought/nextThoughtNeeded/thoughtNumber/totalThoughts
 │     ├── 回傳格式化推理文字（相容 sequential-thinking 輸出）
@@ -225,7 +264,7 @@ thinking.mjs
 #### 0.3 現有 smart_thinking 改造（handler 化）
 
 將 `src/plugins/core/thinking.mjs` 的 `cli` 改為 `handler`，消除 process spawn overhead，同時保留所有既有功能（9 模板、state persistence、branching、context accumulation）。
-│   │   ├── workflow.mjs          ✨新
+
 
 ### Phase 4 完成摘要 (2026-06-04)
 
@@ -265,7 +304,7 @@ thinking.mjs
 | 項目 | 狀態 | 備註 |
 |------|------|------|
 | 0.1 thinking.mjs 重構 | ✅ | `quickThought` / `quickThink` / `deepAnalyze` / `main` 全部匯出 |
-│   │   ├── workflow.mjs          ✨新
+
 | 0.2 quick-think.mjs 新增 | ✅ | handler-based, 2 required params, 支援 hypothesis/verification/branching |
 | 0.3 smart_thinking handler 化 | ✅ | 9 模板 + dynamic/state/branch, iterative 模式 fallback 到 CLI |
 | 0.4 輸出改造 | ✅ | 無 emoji/分隔線, topic 內嵌, header 簡潔, summary 推理鏈 |
@@ -353,7 +392,7 @@ thinking.mjs
    - onFailure='warn' → 自動觸發 replan：重新產生 plan 取代剩餘步驟
    - 累積已完成的 context 作為新 plan 的輸入
 4. `thinking.mjs` 升級（v3.1 ✅）— 從靜態模板 → 動態多輪推理
-│   │   ├── workflow.mjs          ✨新
+
    - **State persistence**: JSON 狀態檔案 (`--state <path>`)
    - **Step-by-step dynamic mode**: `--dynamic` 一次只顯示當前步驟
    - **Result recording**: `--record <idx> <result>`
@@ -456,7 +495,95 @@ thinking.mjs
 - ✅ 9 任務模板 + 條件分支
 - ✅ 26 CLI tools
 
-### Phase 5: 程式碼生成輔助（P2）
+### Phase 5: Workflow 引擎強化（P0 — 實際執行能力）
+
+**對應分析**：plan.md 四-4.3/4.4（Workflow 能做到 vs 不能做到）
+**目標**：讓 workflow 能真正執行工具，而非只管理 state。
+
+**動機**：目前 workflow.mjs 是 state tracker + report generator，實際工具執行靠 opencode agent 手動 dispatch。這不是真正的 workflow engine。
+
+**具體實作**：
+
+1. **Workflow Engine 加入 dispatch 層**
+   - `workflow.mjs` 新增 `dispatch` 指令：接收 workflowId → 自動 call invokeTool()
+   - 支援 `parallel(group)` dispatch：同時 spawn 多個獨立工具
+   - 解決 `spawnSync` 阻塞問題：先用 sequential 模式驗證，平行執行留待 Phase 5.2
+
+2. **Workflow 產出可直接執行的 JSON**
+   - `create` 指令輸出格式強化：含完整 tool args + timeout + onFailure
+   - opencode agent 可直接 iterate 執行，不需再 parse 描述文字
+
+3. **Workflow context 聚合**
+   - ContextManager 新增 `getWorkflowCost(workflowId)`：回傳該 workflow 的總 token/時間/錯誤率
+   - `smart_context` 新增 `workflow-stats` 指令
+
+**驗收標準**：
+- [ ] `workflow dispatch --id <wfId>` 自動執行第一步工具
+- [ ] `workflow dispatch --id <wfId> --parallel` 同時執行獨立步驟
+- [ ] `smart_context workflow-stats --id <wfId>` 回傳成本數據
+
+### Phase 6: Compose 原語 + 平行執行基礎（P1 — 工具組合）
+
+**對應分析**：plan.md 三-3.4（無工具組合原語、CLI spawn 阻塞）
+**目標**：提供 compose/pipe/parallel 三種工具組合原語。
+
+**具體實作**：
+
+1. **Compose 原語定義**
+   ```
+   // 順序執行（pipe）：A 的輸出餵給 B
+   pipe(smart_grep({pattern: "error"}), smart_error_diagnose())
+   
+   // 平行執行：A 和 B 同時跑
+   parallel(smart_security({scan: "creds"}), smart_security({scan: "injection"}))
+   
+   // 條件執行：根據結果決定走哪條路
+   cond(condition, thenTool, elseTool)
+   ```
+
+2. **`smart_compose` MCP tool**（or 強化 smart_run）
+   - 輸入：`{ pipeline: [{ tool, args, mode: "seq"|"par"|"cond" }] }`
+   - `mode: "par"` 時，使用 Promise.all + 非阻塞 spawn（child_process.spawn async）
+   - `mode: "cond"` 時，檢查前一步結果的關鍵字決定分支
+
+3. **CLI spawn 非阻塞改造**
+   - 從 `spawnSync` 改為 `spawn` + Promise wrapper
+   - 保留 timeout 控制（AbortController）
+   - 相容既有工具，不修改 signature
+
+**驗收標準**：
+- [ ] `smart_compose({ pipeline: [...] })` 正確執行多工具流程
+- [ ] `mode: "par"` 平行執行比依序快（2 個 500ms 工具約 500ms 而非 1000ms）
+- [ ] `mode: "cond"` 根據條件正確分支
+
+### Phase 7: Memory 升級（P1 — 語意記憶 + 模式歸納）
+
+**對應分析**：plan.md 三-3.4（Memory 僅 resolution）
+**目標**：從 fuzzy string match 升級到語意搜尋 + 跨 session pattern 歸納。
+
+**具體實作**：
+
+1. **Vector search 層**
+   - 使用 sentence embedding（`@xenova/transformers` 或 local ONNX model）
+   - 對每個 resolution 產生 embedding vector
+   - 搜尋時比對語意相似度而非 Levenshtein distance
+   - 降級策略：vector search 失敗 → fallback 到 fuzzy match
+
+2. **Pattern abstraction**
+   - `tool-stats` `patterns` 指令增強：不只是 combo 分析
+   - 自動歸納「失敗模式 cluster」：相同工具 + 相同 error type 多次失敗
+   - 輸出 pattern report：「smart_grep 在 large 專案 timeout 率 40%，建議加 root 限制」
+
+3. **Cross-session context 合併**
+   - ContextManager 新增 `mergeSessions(sessionIds[])`：合併多 session 的 findings
+   - `smart_context` 新增 `merge` 指令
+
+**驗收標準**：
+- [ ] 語意相似錯誤（"file not found" vs "cannot locate file"）可匹配
+- [ ] tool-stats patterns 輸出 pattern cluster 報告
+- [ ] cross-session merge 正確合併 findings
+
+### Phase 8: 程式碼生成輔助（P2）
 
 **目標**：分析問題後不僅報告，還能自動產出修復 patch。
 
@@ -465,7 +592,7 @@ thinking.mjs
 2. 整合 error-diagnose → patch-gen → cross-file-edit 流程
 3. 安全閘門：重大修改需人批准（patch preview）
 
-### Phase 6: 語言助手擴充（P3）
+### Phase 9: 語言助手擴充（P3）
 
 **目標**：支援更多程式語言的專屬分析。
 
@@ -478,18 +605,7 @@ thinking.mjs
 
 ## 六、架構演進
 
-### 當前 v3.0
-
-```
-src/server/index.mjs
-  ├── plugins/core/ (6 原生 — 全部 handler-based)
-  │   ├── thinking.mjs   → smart_thinking (深層模板分析，handler 化)
-│   │   ├── workflow.mjs          ✨新
-  │   └── quick-think.mjs → smart_think (快速推理，取代 sequential-thinking)
-  └── plugins/standard/ (20 router)
-```
-
-### 目標 v4.0
+### 當前 v3.2（Phase 0-4 完成）
 
 ```
 src/server/index.mjs
@@ -500,43 +616,72 @@ src/server/index.mjs
   │   ├── security.mjs     → smart_security
   │   ├── test.mjs         → smart_test
   │   └── thinking.mjs     → smart_thinking
-│   │   ├── workflow.mjs          ✨新
-  ├── plugins/standard/ (21 router)
-  │   ├── ... (既有 20 工具)
-  │   └── workflow.mjs     → smart_workflow_*     ← Phase 4 新增
+  │
+  ├── plugins/standard/ (24 router)
+  │   ├── ... (20 既有工具)
+  │   ├── workflow.mjs     → smart_workflow       ← Phase 4
+  │   └── planner.mjs      → smart_planner        ← Phase 2 強化
+  │
+  ├── cli/                 (26 CLI 實作)
   └── lib/
       ├── utils.mjs
-      └── context-manager.mjs
+      └── context-manager.mjs                    ← Phase 3
 ```
 
-#### v3.0 → v4.0 關鍵轉變
+### 目標 v4.0
 
-| 面向 | v3.0 | v4.0 |
+```
+src/server/index.mjs
+  ├── plugins/core/ (6 原生 — 全部 handler-based)
+  │   ├── ... (smart_grep, smart_learn, smart_think, smart_security, smart_test, smart_thinking)
+  │
+  ├── plugins/standard/ (28+ router)
+  │   ├── workflow.mjs     → smart_workflow       ← Phase 5 強化 (dispatch)
+  │   ├── compose.mjs      → smart_compose        ← Phase 6 新增
+  │   ├── memory_store.mjs → smart_memory_store   ← Phase 7 升級 (vector)
+  │   ├── patch-gen.mjs    → smart_patch_gen       ← Phase 8 新增
+  │   ├── rs-helper.mjs    → smart_rs_helper       ← Phase 9 新增
+  │   ├── go-helper.mjs    → smart_go_helper       ← Phase 9 新增
+  │   └── ... (既有 24 工具)
+  │
+  ├── cli/                 (全部 handler 化，無 spawnSync)
+  └── lib/
+      ├── utils.mjs
+      ├── context-manager.mjs
+      └── compose-engine.mjs                    ← Phase 6 新增
+```
+
+#### v3.2 → v4.0 關鍵轉變
+
+| 面向 | v3.2 | v4.0 |
 |------|------|------|
-| 推理工具架構 | CLI spawn (process per call) | handler (in-process) |
-| 輸出內容 | 模板骨架 | 真實推理 |
-| 對話支援 | ❌ 批次導向 | ✅ 對話原生 |
-| 工具數量 | 26 (6 core + 20 standard) | 30 (6 core + 24 standard) |
-| Workflow 策略 | YAML 靜態定義 | Plan-based dynamic orchestration |
-| Context 傳遞 | ❌ 無 | ✅ ContextManager 自動 |
+| 推理工具架構 | 6 handler + 24 CLI spawn | 全部 handler (in-process) |
+| 輸出內容 | 真實推理 | 真實推理 + action 指令 |
+| Workflow 策略 | State tracker only | 實際執行引擎 |
+| 工具組合原語 | ❌ 無 | ✅ compose/pipe/parallel |
+| 工具數量 | 30 (6 core + 24 standard) | 34+ (6 core + 28+ standard) |
+| Memory 搜尋 | Fuzzy string match | Vector semantic search |
+| Context 傳遞 | ✅ ContextManager 自動 | ✅+ workflow 維度聚合 |
 
 ---
 
 ## 七、成功指標
 
-| 指標 | 當前 | 目標 (2026 Q3) | 衡量方式 |
-|------|------|---------------|---------|
-| 推理工具延遲 | ~100ms (CLI spawn) | <1ms (handler) | smart_think 呼叫時間 |
-| 可取代 sequential-thinking | ❌ | ✅ | agent 預設使用 smart_think |
+| 指標 | 當前 v3.2 | 目標 v4.0 (2026 Q3) | 衡量方式 |
+|------|-----------|---------------------|---------|
+| 推理工具延遲 | <1ms (handler) ✅ | <1ms | smart_think 呼叫時間 |
+| 可取代 sequential-thinking | ✅ 已取代 | ✅ | agent 預設使用 smart_think |
 | 工具一次呼叫成功率 | ~85% | >95% | tool-stats report |
-| 相同錯誤重複發生率 | ~40% | <10% | memory 命中率 |
-| 複雜任務(5+工具)完成率 | ~60% | >85% | planner 追蹤 |
-| 跨工具 context 傳遞 | ❌ 無 | ✅ 自動 | context layer |
-| 動態多輪推理 | ❌ 靜態模板 | ✅ state+branch | thinking --dynamic 完成度 |
-| **自動規劃 replan** | ❌ 步驟失敗就中斷 | ✅ 自動重新規劃 | **planner replan 引擎** |
-| **Workflow 策略** | YAML 靜態定義 | Plan-based dynamic | workflow_create/report/replan |
-| **Workflow 範本數** | 0 | 4+ (debug/refactor/security/research) | workflow_template_list |
-| **Workflow 步驟完成率** | — | >85% | workflow_summary 追蹤 |
+| 相同錯誤重複發生率 | ~20% (fuzzy match) | <10% (vector search) | memory 命中率 |
+| 複雜任務(5+工具)完成率 | ~60% | >85% | workflow_summary 追蹤 |
+| 跨工具 context 傳遞 | ✅ 自動 | ✅+ workflow 聚合 | context layer |
+| 動態多輪推理 | ✅ state+branch | ✅ | thinking --dynamic 完成度 |
+| **自動規劃 replan** | ✅ 已完成 | ✅ | planner replan 引擎 |
+| **Workflow 實際執行** | ❌ state tracker only | ✅ dispatch 引擎 | workflow dispatch 命令 |
+| **工具組合原語** | ❌ 無 | ✅ compose/pipe/parallel | smart_compose 工具 |
+| **CLI 非阻塞** | ❌ 24 tools spawnSync | ✅ 全部 handler/async | 無 spawnSync 殘留 |
+| **Memory 搜尋** | fuzzy string match | vector semantic search | 語意匹配成功率 |
+| **Workflow 範本數** | 5 | 8+ (含 compose/parallel) | workflow_template_list |
 | 語言覆蓋 | 2 (Py/TS) | 4+ (Py/TS/RS/Go) | 語言助手工具數 |
 
 ---

@@ -222,6 +222,55 @@ export class ContextManager {
     return this._context.toolHistory.filter(e => e.workflowId === workflowId);
   }
 
+  /**
+   * Get cost/performance summary for a workflow.
+   * Computes total tokens (from output length), total time, error rate,
+   * and per-tool breakdown from captured tool history.
+   * @param {string} workflowId
+   * @returns {object|null} { workflowId, totalCalls, totalDurationMs, errorCount, errorRate,
+   *   totalOutputChars, toolBreakdown: { name, calls, errors, avgMs, outputChars }[] }
+   */
+  getWorkflowCost(workflowId) {
+    const history = this.getWorkflowHistory(workflowId);
+    if (history.length === 0) return null;
+
+    let totalDuration = 0;
+    let errorCount = 0;
+    let totalOutputChars = 0;
+    const byTool = {};
+
+    for (const entry of history) {
+      totalDuration += entry.duration || 0;
+      if (!entry.ok) errorCount++;
+      totalOutputChars += (entry.result || entry.error || '').length;
+
+      const tool = entry.tool;
+      if (!byTool[tool]) byTool[tool] = { calls: 0, errors: 0, totalDurationMs: 0, outputChars: 0 };
+      byTool[tool].calls++;
+      if (!entry.ok) byTool[tool].errors++;
+      byTool[tool].totalDurationMs += entry.duration || 0;
+      byTool[tool].outputChars += (entry.result || entry.error || '').length;
+    }
+
+    const totalCalls = history.length;
+    return {
+      workflowId,
+      totalCalls,
+      totalDurationMs: totalDuration,
+      avgDurationMs: totalCalls > 0 ? Math.round(totalDuration / totalCalls) : 0,
+      errorCount,
+      errorRate: totalCalls > 0 ? Number((errorCount / totalCalls * 100).toFixed(1)) : 0,
+      totalOutputChars,
+      toolBreakdown: Object.entries(byTool).map(([name, s]) => ({
+        name,
+        calls: s.calls,
+        errors: s.errors,
+        avgMs: s.calls > 0 ? Math.round(s.totalDurationMs / s.calls) : 0,
+        outputChars: s.outputChars,
+      })),
+    };
+  }
+
   // -----------------------------------------------------------------------
   // Result capture
   // -----------------------------------------------------------------------

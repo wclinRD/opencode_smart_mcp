@@ -354,6 +354,95 @@ describe('Phase 4: Workflow Engine', () => {
   });
 
   // -----------------------------------------------------------------------
+  // 10. Dispatch: run a specific step
+  // -----------------------------------------------------------------------
+  it('10. dispatch step: runs a specific step and updates state', () => {
+    const statePath = wfStatePath('test10-dispatch-step');
+    runWF(['create', 'list files in current directory',
+      '--template', 'default-flow', '--state', statePath,
+    ]);
+
+    // Dispatch step 0 (smart_planner) directly
+    const res = runWF(['dispatch', '--state', statePath, '--step', '0', '--json']);
+    assert.equal(res.status, 0, `dispatch step failed: ${res.stderr}`);
+    const data = parseJSON(res);
+    assert.ok(data, 'should return valid JSON');
+    assert.equal(data.results.length, 1, 'should have 1 result');
+    assert.equal(data.results[0].step, 0, 'should be step 0');
+    assert.equal(data.results[0].ok, true, 'step 0 should succeed');
+
+    // State should be updated
+    const state = loadState(statePath);
+    assert.equal(state.steps[0].status, 'ok', 'step 0 should be ok');
+    assert.equal(state.completedSteps.length, 1, '1 step completed');
+  });
+
+  // -----------------------------------------------------------------------
+  // 11. Dispatch: run current group
+  // -----------------------------------------------------------------------
+  it('11. dispatch group: runs all pending steps in current group', () => {
+    const statePath = wfStatePath('test11-dispatch-group');
+    runWF(['create', 'check JavaScript syntax in src',
+      '--template', 'default-flow', '--state', statePath,
+    ]);
+
+    // First dispatch step 0
+    runWF(['dispatch', '--state', statePath, '--step', '0']);
+    let state = loadState(statePath);
+    assert.equal(state.steps[0].status, 'ok', 'step 0 should be ok');
+
+    // Now dispatch the current group (should be step 1)
+    const res = runWF(['dispatch', '--state', statePath, '--json']);
+    assert.equal(res.status, 0, `dispatch group failed: ${res.stderr}`);
+    const data = parseJSON(res);
+    assert.ok(data, 'should return valid JSON');
+    assert.equal(data.results.length, 1, 'should have 1 result');
+    assert.equal(data.results[0].step, 1, 'should be step 1');
+
+    state = loadState(statePath);
+    assert.equal(state.steps[1].status, 'ok', 'step 1 should be ok');
+    // Workflow should be completed now (both steps done)
+    assert.equal(state.status, 'completed', 'workflow should be completed');
+  });
+
+  // -----------------------------------------------------------------------
+  // 12. Dispatch: error on completed workflow
+  // -----------------------------------------------------------------------
+  it('12. dispatch completed: errors on already-completed workflow', () => {
+    const statePath = wfStatePath('test12-dispatch-completed');
+    runWF(['create', 'dummy goal',
+      '--template', 'default-flow', '--state', statePath,
+    ]);
+
+    // Complete both steps via dispatch
+    runWF(['dispatch', '--state', statePath, '--step', '0']);
+    runWF(['dispatch', '--state', statePath]);
+
+    // Try to dispatch again
+    const res = runWF(['dispatch', '--state', statePath]);
+    assert.notEqual(res.status, 0, 'should fail on completed workflow');
+    assert.ok(res.stderr.includes('already completed'), 'should mention already completed');
+  });
+
+  // -----------------------------------------------------------------------
+  // 13. Dispatch: error on non-pending step
+  // -----------------------------------------------------------------------
+  it('13. dispatch non-pending: errors when step already run', () => {
+    const statePath = wfStatePath('test13-dispatch-nonpending');
+    runWF(['create', 'test process',
+      '--template', 'default-flow', '--state', statePath,
+    ]);
+
+    // Dispatch step 0
+    runWF(['dispatch', '--state', statePath, '--step', '0']);
+
+    // Try to dispatch step 0 again
+    const res = runWF(['dispatch', '--state', statePath, '--step', '0']);
+    assert.notEqual(res.status, 0, 'should fail on non-pending step');
+    assert.ok(res.stderr.includes('not pending'), 'should mention not pending');
+  });
+
+  // -----------------------------------------------------------------------
   // 9. Full lifecycle: create → report → report → done
   // -----------------------------------------------------------------------
   it('9. full lifecycle: research-flow create → report 0 → report 1 → completed', () => {
