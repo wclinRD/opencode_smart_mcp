@@ -219,6 +219,9 @@ const ERROR_FIXES = {
   integrate: {
     missing:   'command is required (list/suggest-commit/generate-pr/diagnose/mcp). Usage: smart_run(tool:"integrate", args:{command:"list"})',
   },
+  compose: {
+    missing:   'pipeline is required (JSON array). Usage: smart_run(tool:"compose", args:{pipeline:"[{tool:\"smart_grep\", args:{pattern:\"error\"}, mode:\"seq\"}]"})',
+  },
 };
 
 /**
