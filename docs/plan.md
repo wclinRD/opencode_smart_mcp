@@ -10,7 +10,7 @@
 Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 36 個開發工具 + 專屬 agent personality。當前版本 3.3.1（Plugin Loader + Router 架構 + 動態多輪推理 + Context 管理 + Workflow 引擎 + Compose 引擎 + Agent 人格定義 + 小模型兜底工具 + 全面非阻塞 CLI）。
 
 ### 核心數據
-- **工具總數**：36（6 原生 + 27 經 router + 3 agent 輔助工具）
+- **工具總數**：38（6 原生 + 32 經 router — 含 4 Phase 10 程式碼語義工具 + 3 Phase D agent 輔助工具）
 - **架構**：Plugin Loader → src/plugins/core/（6 原生 handler）/ src/plugins/standard/（24 router CLI — 全部非阻塞 async spawn）
 - **Workflow 引擎**：Phase 4-6 完成 — dispatch 實際執行 + 5 模板 + compose/pipe/parallel 三種原語 + replan + summary
 - **語言**：JavaScript (ESM) — 6 核心 handler + 24 CLI 全數非阻塞化 (Phase 6)
@@ -132,6 +132,7 @@ src/
 | 2026-06-04 | `toonify` | default `minSavingsThreshold: 30` 太高，中小型資料 (<100 tokens) 無法優化 | 降為 10% + 增加 `minTokensThreshold: 20` |
 | 2026-06-04 | Phase 0 | 多項 Phase 0 完成 | 見下方 Phase 0 完成摘要 |
 | 2026-06-04 | Phase 1 | 記憶系統+error-diagnose 整合+tool-stats 升級 | memory-store: confirm 指令+auto-category+dedup+壓縮; error-diagnose: 記憶預設開啟(useMemory=true→noMemory); tool-stats: patterns 指令+session 分析+combo 發現; 10 整合測試通過 |
+| 2026-06-04 | `invokeTool` | `handler` 不支援 async — 4 個 Phase 10 LSP 工具回傳 `[object Promise]` | handler 傳回 Promise 時回傳 `__async` sentinel，caller 路徑 resolve Promise 後 respond |
 
 ### 3.4 當前缺口 (Phase 1-6 完成後，2026-06-04)
 

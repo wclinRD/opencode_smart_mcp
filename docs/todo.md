@@ -547,6 +547,7 @@
   - [x] 每個工具對應 inputSchema（參數校驗）
   - [x] handler-based（不經過 CLI spawn）
   - [x] 38 工具總數中顯示
+  - [x] ⚠️ Bug: `invokeTool()` 不支援 async handler → 回傳 `[object Promise]`（已修復，2026-06-04）
 
 ### 驗收標準 ✅
 
@@ -789,6 +790,10 @@
 - [x] 兩層架構：強模型用 system prompt 推理，弱模型用 JS 引擎兜底
 
 ### Bug Fixes
+- [x] invokeTool() — 修復 async handler 回傳 `[object Promise]`
+  - 原因：4 個 Phase 10 LSP 工具（code-ast/code-call-graph/code-type-infer/code-impact）使用 `async handler`，但 `invokeTool()` 未 await Promise
+  - 修復：handler 回傳 Promise 時回傳 `__async` sentinel，caller 路徑（tools/call native + smart_run）resolve 後再 respond
+  - 2026-06-04 驗證通過：`smart_code_ast({file: "src/server/loader.mjs"})` 回傳 22 symbols
 - [x] toonify.mjs — 修復 `Cannot find module '../../package.json'`
   - 原因：`createRequire(TOONIFY_PATH)` base 為 `/Users/wclin/toonify-mcp`，`../../package.json` 解析到 `/Users/package.json` 不存在
   - 修復：移除 dead code（`require('../../package.json')` 的 destructured `optimize` 完全未使用），同時移除 `createRequire` import

@@ -429,6 +429,18 @@ function invokeTool(def, args, timeoutOverride, signal) {
     debugLog('Handler:', def.name, 'args:', JSON.stringify(contextArgs));
     try {
       const handlerOutput = def.handler(contextArgs);
+      // Async handler support (handler returns Promise)
+      if (handlerOutput instanceof Promise) {
+        debugLog('Handler is async for:', def.name);
+        return {
+          __async: true,
+          promise: handlerOutput,
+          toolName: def.name,
+          origArgs: args,
+          contextArgs,
+          startTime,
+        };
+      }
       // Handler returns null to signal "fall back to CLI" (e.g. interactive mode)
       if (handlerOutput === null) {
         debugLog('Handler returned null, falling back to CLI for:', def.name);
@@ -724,7 +736,33 @@ function handleRequest(req) {
         if (id != null) pendingCalls.set(String(id), controller);
         try {
           const result = handleDevtoolRun(id, p, controller.signal, args);
-          if (result.ok) {
+
+          // Async handler — resolve Promise and respond
+          if (result && result.__async) {
+            const { promise, toolName: tName, origArgs, startTime: st } = result;
+            promise
+              .then(resolvedOutput => {
+                const elapsedMs = Number(process.hrtime.bigint() - st) / 1_000_000;
+                if (controller.signal.aborted) {
+                  captureAndReturn(tName, origArgs, { ok: false, error: `Tool ${tName} was cancelled` }, elapsedMs);
+                  respond(id, { content: [{ type: 'text', text: '' }] });
+                  return;
+                }
+                const output = String(resolvedOutput ?? '');
+                const cr = captureAndReturn(tName, origArgs, { ok: true, output }, elapsedMs);
+                respond(id, { content: [{ type: 'text', text: cr.output }] });
+              })
+              .catch(err => {
+                const elapsedMs = Number(process.hrtime.bigint() - st) / 1_000_000;
+                const fix = getErrorFix(tName.replace('smart_', ''), 'generic', err.message);
+                const cr = captureAndReturn(tName, origArgs, { ok: false, error: `Handler error in ${tName}: ${err.message}\nFix: ${fix}` }, elapsedMs);
+                respondError(id, -32603, `smart_run error: ${cr.error}`, {
+                  tool: 'smart_run', args: JSON.stringify(origArgs), error: cr.error,
+                  type: 'execution',
+                  suggestion: fix,
+                });
+              });
+          } else if (result.ok) {
             respond(id, { content: [{ type: 'text', text: result.output }] });
           } else {
             // Extract fix from result.error (already has Fix: appended by handleDevtoolRun)
@@ -757,6 +795,34 @@ function handleRequest(req) {
       if (id != null) pendingCalls.set(String(id), controller);
       try {
         const result = invokeTool(def, args, null, controller.signal);
+
+        // Async handler — resolve Promise and respond
+        if (result && result.__async) {
+          const { promise, toolName: tName, origArgs, startTime: st } = result;
+          promise
+            .then(resolvedOutput => {
+              const elapsedMs = Number(process.hrtime.bigint() - st) / 1_000_000;
+              if (controller.signal.aborted) {
+                captureAndReturn(tName, origArgs, { ok: false, error: `Tool ${tName} was cancelled` }, elapsedMs);
+                respond(id, { content: [{ type: 'text', text: '' }] });
+                return;
+              }
+              const output = String(resolvedOutput ?? '');
+              const cr = captureAndReturn(tName, origArgs, { ok: true, output }, elapsedMs);
+              respond(id, { content: [{ type: 'text', text: cr.output }] });
+            })
+            .catch(err => {
+              const elapsedMs = Number(process.hrtime.bigint() - st) / 1_000_000;
+              const fix = getErrorFix(tName.replace('smart_', ''), 'generic', err.message);
+              const cr = captureAndReturn(tName, origArgs, { ok: false, error: `Handler error in ${tName}: ${err.message}\nFix: ${fix}` }, elapsedMs);
+              respondError(id, -32603, `Tool execution failed: ${tName}`, {
+                tool: tName, args: JSON.stringify(origArgs), error: cr.error,
+                type: 'execution', suggestion: fix,
+              });
+            });
+          return;
+        }
+
         if (result.ok) {
           respond(id, { content: [{ type: 'text', text: result.output }] });
         } else {
