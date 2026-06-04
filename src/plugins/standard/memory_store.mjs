@@ -1,7 +1,7 @@
 export default {
   name: 'smart_memory_store',
   category: 'plan',
-  description: 'Use when: need to store or retrieve past error resolutions, patterns, and learnings across sessions. Supports fuzzy matching — works even with partial error text. Use search first, add if not found.',
+  description: 'Use when: need to store or retrieve past error resolutions, patterns, and learnings across sessions. Supports fuzzy matching + vector search (TF-IDF hybrid) — use vector=true for semantic matching across similar error messages. Use search first, add if not found.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -15,6 +15,8 @@ export default {
       id: { type: 'string', description: 'Entry ID (for get/delete)' },
       limit: { type: 'number', description: 'Max results (default: 10 for search, 50 for list)' },
       threshold: { type: 'number', description: 'Fuzzy match threshold 0-1 (default: 0.4)' },
+      vector: { type: 'boolean', description: 'Enable hybrid vector search (TF-IDF + fuzzy) for better semantic matching' },
+      vectorThreshold: { type: 'number', description: 'Vector match threshold 0-1 (default: 0.1)' },
       format: { type: 'string', enum: ['text', 'json'], description: 'Output format (default: text)' },
     },
     required: ['command'],
@@ -32,6 +34,8 @@ export default {
     if (a.success !== undefined) cli.push('--success', String(a.success));
     if (a.limit) cli.push('--limit', String(a.limit));
     if (a.threshold) cli.push('--threshold', String(a.threshold));
+    if (a.vector) cli.push('--vector');
+    if (a.vectorThreshold) cli.push('--vector-threshold', String(a.vectorThreshold));
     if (a.format) cli.push('--format', String(a.format));
     return cli;
   },

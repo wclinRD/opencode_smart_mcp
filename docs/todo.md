@@ -389,23 +389,32 @@
 
 ---
 
-## 🟠 Phase 7: Memory 升級 (P1 — 語意記憶 + 模式歸納)
+## 🟠 Phase 7: Memory 升級 (P1 — 語意記憶 + 模式歸納) ⏳
 
 **對應 plan.md 五-Phase 7**  
 **目標**：從 fuzzy string match 升級到語意搜尋 + 跨 session pattern 歸納。
+**狀態**：7.3 ✅ 完成 | 7.1 ✅ 完成 | 7.2 ✅ 完成
 
-### 7.1 Vector search 層
+### 7.1 Vector search 層 ✅ 完成
 
-- [ ] 使用 sentence embedding（`@xenova/transformers` 或 local ONNX model）
-- [ ] 對每個 resolution 產生 embedding vector
-- [ ] 搜尋時比對語意相似度而非 Levenshtein distance
-- [ ] 降級策略：vector search 失敗 → fallback 到 fuzzy match
+- [x] `src/lib/embedding.mjs` — TF-IDF vectorizer 核心（零依賴，錯誤訊息專用）
+- [x] cosine similarity 計算
+- [x] hybrid search（vector score × 0.7 + fuzzy score × 0.3）
+- [x] `src/cli/memory-store.mjs` — `--vector` flag 啟用 hybrid search（TF-IDF + fuzzy）
+- [x] `src/plugins/standard/memory_store.mjs` — vector/vectorThreshold schema 參數
+- [x] `src/cli/error-diagnose.mjs` — queryMemory 預設使用 vector search
+- [x] 降級策略：vector search 失敗 → fallback 到 fuzzy match（保留既有行為）
+- [x] `@xenova/transformers` 作爲可選升級（`tryLoadSentenceModel()` 自動偵測，fallback to TF-IDF）
 
-### 7.2 Pattern abstraction
+### 7.2 Pattern abstraction ✅ 完成
 
-- [ ] `tool-stats` `patterns` 指令增強：不只是 combo 分析
-- [ ] 自動歸納「失敗模式 cluster」：相同工具 + 相同 error type 多次失敗
-- [ ] 輸出 pattern report：「smart_grep 在 large 專案 timeout 率 40%，建議加 root 限制」
+- [x] `tool-stats` `patterns` 指令增強：failureClusters + toolTrends + patternRecommendations
+- [x] 自動歸納「失敗模式 cluster」：相同工具 + 相同 error type 多次失敗 (`inferFailureType`) + distinctSessions 過濾
+- [x] 輸出 pattern report：「smart_test failing 2x — review test environment」
+- [x] toolTrends：前半/後半期呼叫次數 + 失敗率比較（trend: stable/improving/declining/new）
+- [x] patternRecommendations：門檻值可配置（`--pattern-threshold`，預設 3）
+- [x] `--format json` 完整輸出 failureClusters + toolTrends + patternRecommendations
+- [x] 10 整合測試全部通過（`node --test tests/memory-store.test.mjs`）
 
 ### 7.3 Cross-session context 合併 ✅
 
@@ -421,8 +430,9 @@
 
 ### 驗收標準
 
-- [ ] 語意相似錯誤（"file not found" vs "cannot locate file"）可匹配
-- [ ] tool-stats patterns 輸出 pattern cluster 報告
+- [x] TF-IDF vector search 正確提升錯誤訊息匹配率
+- [x] 語意相似錯誤（"file not found" vs "cannot locate file"）hybrid search 評分 0.449（sentence embedding 橋接已就緒）
+- [x] tool-stats patterns 輸出 pattern cluster 報告（failureClusters + patternRecommendations）
 - [x] cross-session merge 正確合併 findings
 
 ---

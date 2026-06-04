@@ -29,6 +29,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { createVectorizer, hybridSearch } from '../lib/embedding.mjs';
 
 const HOME = process.env.HOME || process.env.USERPROFILE || '/tmp';
 
@@ -258,7 +259,21 @@ function cmdSearch(dataDir, query, options) {
     return { found: true, count: 1, entries: [{ ...exact, similarity: 1.0, matchType: 'exact' }], matchType: 'exact' };
   }
   
-  // 2. Fuzzy search
+  // 2. Vector search (if enabled) — hybrid TF-IDF + fuzzy
+  if (options.vector) {
+    const vectorResults = hybridSearch(query, memory.entries, {
+      textKey: 'errorMessage',
+      vectorWeight: 0.7,
+      topK: limit,
+      minScore: options.vectorThreshold != null ? options.vectorThreshold : 0.1,
+    });
+    if (vectorResults.length > 0) {
+      return { found: true, count: vectorResults.length, entries: vectorResults, matchType: 'vector' };
+    }
+    // Vector returned nothing — fall through to fuzzy
+  }
+  
+  // 3. Fuzzy search (default fallback)
   const results = fuzzySearch(memory, query, threshold, limit);
   if (results.length > 0) {
     return { found: true, count: results.length, entries: results.map(r => ({ ...r, matchType: 'fuzzy' })), matchType: 'fuzzy' };
@@ -392,7 +407,10 @@ function formatText(command, result) {
       for (const e of result.entries) {
         const sim = e.similarity ? ` [${(e.similarity * 100).toFixed(0)}% match]` : '';
         const status = e.success ? '✅' : '❌';
-        out.push(`  ${status} ${e.id}${sim}`);
+        const vecInfo = (e._vectorScore != null && e._fuzzyScore != null)
+          ? ` (vector:${(e._vectorScore * 100).toFixed(0)}% fuzzy:${(e._fuzzyScore * 100).toFixed(0)}%)`
+          : '';
+        out.push(`  ${status} ${e.id}${sim}${vecInfo}`);
         out.push(`     Error: ${(e.errorMessage || '').slice(0, 120)}`);
         if (e.resolution) out.push(`     Fix:   ${e.resolution.slice(0, 200)}`);
         if (e.toolsUsed && e.toolsUsed.length > 0) out.push(`     Tools: ${e.toolsUsed.join(', ')}`);
@@ -505,6 +523,8 @@ Options:
   --data-dir <path>         Override data directory
   --limit <N>               Max results (default: 10 for search, 50 for list)
   --threshold <N>           Fuzzy match threshold 0-1 (default: 0.4)
+  --vector                  Use hybrid vector search (TF-IDF + fuzzy, better for semantic matching)
+  --vector-threshold <N>    Vector match threshold 0-1 (default: 0.1)
   -h, --help                Show this help
 
 Examples:
@@ -534,6 +554,8 @@ function parseArgs() {
     success: undefined,
     limit: null,
     threshold: null,
+    vector: false,
+    vectorThreshold: null,
   };
   
   if (!opts.command) {
@@ -572,6 +594,8 @@ function parseArgs() {
       case '--success': opts.success = args[++i] === 'true'; break;
       case '--limit': opts.limit = parseInt(args[++i], 10); break;
       case '--threshold': opts.threshold = parseFloat(args[++i]); break;
+      case '--vector': opts.vector = true; break;
+      case '--vector-threshold': opts.vectorThreshold = parseFloat(args[++i]); break;
     }
     i++;
   }

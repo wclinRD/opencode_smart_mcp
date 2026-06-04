@@ -591,6 +591,97 @@ function cmdPatterns(root, opts) {
     .sort((a, b) => b.rate - a.rate)
     .slice(0, top);
 
+  // ── Phase 7.2: Failure Clustering ──
+
+  // 6. Cluster failures by tool + error type
+  const failures = recent.filter(e => e.success === false);
+  const failureClusters = {};
+
+  for (const f of failures) {
+    const tool = f.tool || 'unknown';
+    // Extract error type from args or tool name context
+    const errorType = inferFailureType(f);
+    const clusterKey = `${tool}:${errorType}`;
+
+    if (!failureClusters[clusterKey]) {
+      failureClusters[clusterKey] = {
+        tool,
+        errorType,
+        count: 0,
+        firstSeen: f.timestamp,
+        lastSeen: f.timestamp,
+        sessions: new Set(),
+        sampleArgs: [],
+      };
+    }
+    failureClusters[clusterKey].count++;
+    failureClusters[clusterKey].lastSeen = f.timestamp;
+    if (f.session) failureClusters[clusterKey].sessions.add(f.session);
+    if (f.args && failureClusters[clusterKey].sampleArgs.length < 3) {
+      failureClusters[clusterKey].sampleArgs.push(f.args);
+    }
+  }
+
+  // 7. Trend analysis per tool
+  const toolTrends = {};
+  const halfPoint = new Date(cutoff.getTime() + (Date.now() - cutoff.getTime()) / 2);
+
+  for (const e of recent) {
+    const tool = e.tool || 'unknown';
+    if (!toolTrends[tool]) toolTrends[tool] = { firstHalf: { calls: 0, fails: 0 }, secondHalf: { calls: 0, fails: 0 } };
+    const half = new Date(e.timestamp) >= halfPoint ? 'secondHalf' : 'firstHalf';
+    toolTrends[tool][half].calls++;
+    if (e.success === false) toolTrends[tool][half].fails++;
+  }
+
+  const trendReport = Object.entries(toolTrends)
+    .map(([tool, h]) => {
+      const fRate1 = h.firstHalf.calls > 0 ? h.firstHalf.fails / h.firstHalf.calls : 0;
+      const fRate2 = h.secondHalf.calls > 0 ? h.secondHalf.fails / h.secondHalf.calls : 0;
+      const change = fRate1 > 0 ? ((fRate2 - fRate1) / fRate1) * 100 : 0;
+      return {
+        tool,
+        firstHalf: { calls: h.firstHalf.calls, failRate: Math.round(fRate1 * 100) },
+        secondHalf: { calls: h.secondHalf.calls, failRate: Math.round(fRate2 * 100) },
+        trend: change > 20 ? 'worsening' : change < -20 ? 'improving' : 'stable',
+        changePct: Math.round(change),
+      };
+    })
+    .filter(t => t.firstHalf.calls >= 2 || t.secondHalf.calls >= 2)
+    .sort((a, b) => b.changePct - a.changePct);
+
+  // 8. Pattern-based recommendations
+  const patternRecommendations = [];
+  const warnThreshold = opts.patternThreshold != null ? opts.patternThreshold : 3;
+
+  for (const [key, cluster] of Object.entries(failureClusters)) {
+    if (cluster.count >= warnThreshold) {
+      patternRecommendations.push({
+        type: 'frequent-failure',
+        tool: cluster.tool,
+        errorType: cluster.errorType,
+        occurrences: cluster.count,
+        distinctSessions: cluster.sessions.size,
+        recommendation: generateFailureRecommendation(cluster),
+        severity: cluster.count >= 10 ? 'high' : cluster.count >= 5 ? 'medium' : 'low',
+      });
+    }
+  }
+
+  // Worsening trend warnings
+  for (const t of trendReport) {
+    if (t.trend === 'worsening' && t.secondHalf.failRate >= 40) {
+      patternRecommendations.push({
+        type: 'worsening-trend',
+        tool: t.tool,
+        before: `${t.firstHalf.failRate}% fail rate (${t.firstHalf.calls} calls)`,
+        after: `${t.secondHalf.failRate}% fail rate (${t.secondHalf.calls} calls)`,
+        recommendation: `${t.tool} failure rate increased ${t.changePct}% — review recent changes or config`,
+        severity: t.secondHalf.failRate >= 60 ? 'high' : 'medium',
+      });
+    }
+  }
+
   return {
     period: `${days} days`,
     totalEntries: recent.length,
@@ -612,7 +703,66 @@ function cmdPatterns(root, opts) {
       best: bestTools.map(t => ({ name: t.name, rate: Math.round(t.rate * 100), calls: t.calls })),
       worst: worstTools.map(t => ({ name: t.name, rate: Math.round(t.rate * 100), calls: t.calls })),
     },
+    failureClusters: Object.entries(failureClusters)
+      .map(([key, c]) => ({
+        tool: c.tool,
+        errorType: c.errorType,
+        occurrences: c.count,
+        distinctSessions: c.sessions.size,
+        period: `${c.firstSeen?.slice(0, 10) || '?'} — ${c.lastSeen?.slice(0, 10) || '?'}`,
+      }))
+      .sort((a, b) => b.occurrences - a.occurrences)
+      .slice(0, top),
+    toolTrends: trendReport.slice(0, top),
+    patternRecommendations: patternRecommendations.slice(0, top),
   };
+}
+
+// ── Phase 7.2 Helpers ──
+
+/**
+ * Infer failure type from a tool stats entry.
+ */
+function inferFailureType(entry) {
+  // Check args for error-like patterns
+  const args = entry.args;
+  if (args) {
+    if (args.includes('timeout') || args.includes('TIMEOUT')) return 'timeout';
+    if (args.includes('ENOENT') || args.includes('not found')) return 'not-found';
+    if (args.includes('EACCES') || args.includes('permission')) return 'permission';
+    if (args.includes('syntax') || args.includes('Syntax')) return 'syntax';
+    if (args.includes('type') || args.includes('Type')) return 'type-error';
+    if (args.includes('module') || args.includes('Module')) return 'module';
+    if (args.includes('network') || args.includes('ECONN')) return 'network';
+  }
+  // Fallback: use tool name heuristics
+  const tool = entry.tool || '';
+  if (tool.includes('test')) return 'test-failure';
+  if (tool.includes('security')) return 'security-issue';
+  if (tool.includes('grep') || tool.includes('search')) return 'search-timeout';
+  if (tool.includes('edit') || tool.includes('rename')) return 'edit-conflict';
+  return 'unknown';
+}
+
+/**
+ * Generate human-readable recommendation for a failure cluster.
+ */
+function generateFailureRecommendation(cluster) {
+  const { tool, errorType, count } = cluster;
+  const map = {
+    timeout: `${tool} timed out ${count}x — check timeout config or reduce scope`,
+    'not-found': `${tool} cannot find resource ${count}x — verify paths and existence`,
+    permission: `${tool} permission denied ${count}x — check file permissions`,
+    syntax: `${tool} syntax errors ${count}x — review input format`,
+    'type-error': `${tool} type errors ${count}x — verify argument types`,
+    module: `${tool} module errors ${count}x — check dependency installation`,
+    network: `${tool} network errors ${count}x — verify connectivity`,
+    'test-failure': `${tool} failing ${count}x — review test environment`,
+    'security-issue': `${tool} flagged ${count}x — investigate findings`,
+    'search-timeout': `${tool} slow search ${count}x — add root filter or limit scope`,
+    'edit-conflict': `${tool} edit conflicts ${count}x — use dry-run first`,
+  };
+  return map[errorType] || `${tool} failing (${errorType}) ${count}x — investigate pattern`;
 }
 
 // ---------------------------------------------------------------------------
@@ -642,6 +792,7 @@ Options:
   --format <fmt>        Output: text, json, markdown (default: text)
   --days <N>            Analyze last N days (default: 30)
   --top <N>             Show top N tools (default: 10)
+  --pattern-threshold <N>  Min failures to trigger cluster warning (default: 3)
   --no-color            Disable color output
   -h, --help            Show this help
 
@@ -672,6 +823,7 @@ function parseArgs() {
     session: null,
     days: 30,
     top: 10,
+    patternThreshold: null,
     color: undefined,
   };
 
@@ -702,6 +854,7 @@ function parseArgs() {
       case '--session': opts.session = args[++i]; break;
       case '--days': opts.days = parseInt(args[++i], 10); break;
       case '--top': opts.top = parseInt(args[++i], 10); break;
+      case '--pattern-threshold': opts.patternThreshold = parseInt(args[++i], 10); break;
       case '--no-color': opts.color = false; break;
       case '--color': opts.color = true; break;
     }

@@ -225,14 +225,19 @@ function listPatterns() {
  * Spawns memory-store.mjs search as a child process.
  * Returns null if memory store unavailable or no matches.
  */
-function queryMemory(errorMessage, threshold) {
+function queryMemory(errorMessage, threshold, useVector) {
   try {
     if (!existsSync(MEMORY_CLI)) return null;
-    const result = spawnSync('node', [
+    const args = [
       MEMORY_CLI, 'search', errorMessage,
       '--threshold', String(threshold != null ? threshold : 0.6),
       '--format', 'json',
-    ], { encoding: 'utf-8', timeout: 5000, maxBuffer: 1024 * 50 });
+    ];
+    // Enable vector search by default for better semantic matching
+    if (useVector !== false) {
+      args.push('--vector', '--vector-threshold', '0.15');
+    }
+    const result = spawnSync('node', args, { encoding: 'utf-8', timeout: 5000, maxBuffer: 1024 * 50 });
 
     if (result.status !== 0 || !result.stdout) return null;
     const parsed = JSON.parse(result.stdout);
