@@ -367,6 +367,28 @@
 
 ---
 
+## ✅ Phase D: Agent Personality + 小模型兜底 (Phase D) ✅
+
+**對應 plan.md**：smart-mcp.md agent 人格定義
+**目標**：提供專屬 agent personality 定義 + 3 個小模型/兜底工具。
+**狀態**：✅ 已完成
+
+### D.1 Agent Personality
+
+- [x] `~/.config/opencode/agents/smart-mcp.md` — 220 行 agent 人格定義
+  - [x] primary agent 模式（不使用 subagent）
+  - [x] 30+ 工具策略性運用提示
+  - [x] 繁體中文溝通
+  - [x] 強制循環演算法（todo → execute → verify）
+
+### D.2 小模型兜底工具
+
+- [x] `smart_agent_execute` — 小模型執行工具
+- [x] `smart_agent_plan` — 小模型規劃工具
+- [x] `smart_agent_recommend` — 小模型推薦工具
+
+---
+
 ## 🟠 Phase 7: Memory 升級 (P1 — 語意記憶 + 模式歸納)
 
 **對應 plan.md 五-Phase 7**  
@@ -457,7 +479,219 @@
 
 ---
 
-## ✅ 已完成 (v3.3)
+## 🔴 Phase 10: 程式碼語義推理基礎工具鏈 (P0 — 第一週衝刺)
+
+**對應 plan.md 五-Phase 10**
+**目標**：建立多層混合智能的第一層 — 4 個確定性程式碼分析工具 + LSP bridge
+**策略**：先用 LSP 快速實現（Day 1-3），再換 Tree-sitter（第二週）。TypeScript 優先。
+
+### 10.1 LSP bridge 核心 ✅
+
+- [x] `src/lib/lsp-bridge.mjs` — LSP 統一接入層 (492 行)
+  - [x] spawn TypeScript LSP process（typescript-language-server via stdio）
+  - [x] 生命週期管理：lazy-init（首次呼叫才啟動）+ closeAllLspBridges()
+  - [x] auto-reconnect（LSP crash 自動重啟，1s delay）
+  - [x] 封裝 JSON-RPC 2.0 通訊（Content-Length header 解析）
+  - [x] 支援 methods: initialize / open / close / documentSymbol / references / hover / definition
+  - [x] LRU cache 快取響應（TTL 30 秒，max 200 entries）
+  - [x] `getSymbols(file)` → `[{name, kind, range, signature}]`
+  - [x] `getReferences(file, pos)` → `[{file, range}]`
+  - [x] `getHover(file, pos)` → `{contents, range}`
+  - [x] `getDefinition(file, pos)` → `{file, line, col}`
+  - [x] Singleton 管理：getLspBridge(rootDir) 共享同一 process
+  - [x] Bug fix: _findTsserver() ESM require → execSync import
+
+### 10.2 smart_code_ast — AST 結構查詢 ✅
+
+- [x] `src/plugins/standard/code-ast.mjs` → `smart_code_ast`
+  - [x] 參數：`{ file, symbol?, kind?, recursive?, format?, root? }`
+  - [x] LSP `documentSymbol` 實作（快速上線）
+  - [x] 輸出：`{ file, symbols: [{name, kind, line, col, signature, children}] }`（JSON 或 text）
+  - [x] 支援：function / class / interface / type / variable / method / property / enum
+  - [x] 降級策略：不可用時回傳 error（不 fallback 到 LLM）
+  - [x] 實測：loader.mjs → 22 symbols in 0.6s，含 function/constant/variable/property
+
+### 10.3 smart_code_call_graph — 呼叫鏈追蹤 ✅
+
+- [x] `src/plugins/standard/code-call-graph.mjs` → `smart_code_call_graph`
+  - [x] 參數：`{ file, symbol, direction: "callers"|"callees", depth: 1|2|3, format?, root? }`
+  - [x] LSP `textDocument/references` 為基礎
+  - [x] 支援跨檔案呼叫鏈（遞迴 buildGraph 追蹤）
+  - [x] 深度控制：depth=1 只直接，depth=2-3 遞迴
+  - [x] 輸出：`{ root, direction, depth, [direction]: [...] }`
+  - [x] 迴圈偵測：visited Set 避免無限迴圈
+
+### 10.4 smart_code_type_infer — 型別推導 ✅
+
+- [x] `src/plugins/standard/code-type-infer.mjs` → `smart_code_type_infer`
+  - [x] 參數：`{ file, line, col?, format?, root? }`
+  - [x] LSP `textDocument/hover` 取得型別 + 文件
+  - [x] 輸出：`{ type: "Array<string>", range: {start, end} }`
+  - [x] 實測：loader.mjs L90 → `function defaultMapArgs(args: any): string[]` ✅
+
+### 10.5 smart_code_impact — 影響半徑分析 ✅
+
+- [x] `src/plugins/standard/code-impact.mjs` → `smart_code_impact`
+  - [x] 參數：`{ diff?, files?, symbols?, depth: 1|2|3, format?, root? }`
+  - [x] 支援 git diff 輸入（parseDiff）或直接指定檔案
+  - [x] 解析 diff → 找出修改符號（hunk matching）
+  - [x] 查詢 LSP references → 找出受影響下游
+  - [x] 深度控制：depth=2 遞迴追蹤 transitive impacts
+  - [x] 輸出：`{ direct, transitive, totalFiles, totalSymbols, confidence }`
+  - [x] 保守策略：動態語言 over-approximation
+
+### 10.6 工具註冊 ✅
+
+- [x] 4 工具自動註冊為 MCP tools（smart_code_ast, smart_code_call_graph, smart_code_type_infer, smart_code_impact）
+  - [x] `loader.mjs` 自動載入 plugins/standard/code-*.mjs
+  - [x] 每個工具對應 inputSchema（參數校驗）
+  - [x] handler-based（不經過 CLI spawn）
+  - [x] 38 工具總數中顯示
+
+### 驗收標準 ✅
+
+- [x] `smart_code_ast({file: "src/server/loader.mjs"})` 回傳 22 symbols（constants + functions + variables）
+- [x] `smart_code_call_graph({file, symbol, depth:2})` 回傳呼叫鏈結構
+- [x] `smart_code_type_infer({file: "src/server/loader.mjs", line: 90, col: 0})` 回 `function defaultMapArgs(args: any): string[]`
+- [x] `smart_code_impact({files: ["src/lib/lsp-bridge.mjs"]})` 回直接/間接影響檔案列表
+- [x] 4 工具全部在 MCP 工具清單中顯示（38 tools total）
+- [x] LSP bridge 正確管理生命週期（lazy-init + auto-reconnect）
+
+---
+
+## 🔴 Phase 11: Code Knowledge Graph (P0 — 殺手級)
+
+**對應 plan.md 五-Phase 11**
+**目標**：持久化專案級程式碼知識圖譜，Claude Code 架構上永遠做不到
+**前置**：Phase 10 工具鏈完成
+
+### 11.1 CKG 儲存層
+
+- [ ] `src/lib/ckg-engine.mjs` — CKG 核心
+  - [ ] SQLite schema：nodes(id, name, kind, file, range) + edges(from, to, kind) + facts(node_id, key, value, version)
+  - [ ] 節點類型：file / function / class / interface / type / variable
+  - [ ] 邊類型：calls / imports / extends / implements / defines / parameterOf / returnTypeOf
+  - [ ] JSON hot-cache：最近 1000 查詢結果（LRU）
+  - [ ] `build(root)` — 全量掃描建立 CKG
+  - [ ] `incrementalUpdate(file)` — 單檔增量更新
+  - [ ] `query({query, symbol, file, depth, kind})` — 查詢介面
+
+### 11.2 增量更新機制
+
+- [ ] `chokidar` watch mode：監聽專案檔案變更
+  - [ ] add / change / unlink + debounce 500ms
+  - [ ] 變更 → `smart_code_ast` re-analysis → CKG update
+- [ ] git hook：`post-commit` / `post-checkout` 觸發重建
+- [ ] 失效機制：signature 變更 → caller edges 標記「需驗證」
+
+### 11.3 smart_code_query
+
+- [ ] `src/plugins/standard/code-query.mjs` → `smart_code_query`
+  - [ ] 查詢類型：callers / callees / dependencies / metrics / unused-exports
+  - [ ] `query: "callers"` — 誰呼叫了某函式
+  - [ ] `query: "dependencies"` — 模組依賴結構
+  - [ ] `query: "unused-exports"` — 未使用的導出
+  - [ ] 跨 session 保留：CKG SQLite 檔案持久化
+
+### 驗收標準
+
+- [ ] 1000 檔案專案 CKG 建立 < 30 秒
+- [ ] 增量更新單檔 < 100ms
+- [ ] `smart_code_query({query: "callers", symbol: "foo"})` 回傳正確呼叫者
+- [ ] 檔案修改後 1 秒內 CKG 自動更新
+- [ ] 跨 session 查詢同一資訊不需重掃
+
+---
+
+## 🔴 Phase 12: Hybrid Reasoning Engine (P0 — 分層效率)
+
+**對應 plan.md 五-Phase 12**
+**目標**：Task Classifier 自動路由問題到最適合的處理層
+**前置**：Phase 10 + Phase 11 完成
+
+### 12.1 Task Classifier
+
+- [ ] `src/lib/hybrid-engine.mjs` — Hybrid Router 核心
+  - [ ] Rule-based classifier：關鍵字比對問題類型
+  - [ ] 分類類別：structure / semantic / change-impact / optimization / unknown
+  - [ ] confidence score + threshold 機制
+  - [ ] 低於 threshold → 走混合路徑（同時跑兩條路）
+- [ ] `src/plugins/standard/hybrid-router.mjs` → `smart_hybrid_router`
+  - [ ] 輸入：`{ question, context?, files?, diff? }`
+  - [ ] 輸出：結構化答案 + 來源追溯
+
+### 12.2 輸出合併引擎
+
+- [ ] 確定性 + LLM 結果結構化合併
+- [ ] 衝突偵測：確定性結果 vs LLM 推測不一致時標記
+- [ ] 信心顯示：`{ answer, sources: [{type, tool, confidence}], confidence, metadata }`
+
+### 驗收標準
+
+- [ ] Task Classifier 準確率 > 90%（100 題測試集）
+- [ ] 確定性路徑延遲 < 50ms
+- [ ] 不確定時雙路徑合併無衝突
+- [ ] 輸出格式結構化，可追溯來源
+
+---
+
+## 🟠 Phase 13: Change-Impact Pipeline (P1)
+
+**對應 plan.md 五-Phase 13**
+**目標**：git diff → AST diff → 影響傳播 → 測試預測
+**前置**：Phase 10 + Phase 11 + Phase 12 完成
+
+### 13.1 影響傳播
+
+- [ ] `src/lib/impact-engine.mjs` — 影響分析核心
+  - [ ] git diff parsing → 修改符號列表
+  - [ ] CKG 查詢 → 影響傳播（depth 控制）
+  - [ ] over-approximation（動態語言）vs 精確分析（靜態語言）
+- [ ] `src/plugins/standard/impact-flow.mjs` → `smart_impact_flow`
+  - [ ] 輸入：`{ diff?, files?, depth?, checkTests? }`
+  - [ ] 輸出：受影響檔案 + 函式 + 測試案例
+
+### 13.2 Workflow 整合
+
+- [ ] workflow 模板新增：`refactor-safe-flow`
+  - [ ] step 1: `smart_code_impact` → impact list
+  - [ ] step 2: `smart_code_call_graph` → 確認影響範圍
+  - [ ] step 3: LLM review impact summary
+  - [ ] step 4: safe-edit（with safety constraints）
+  - [ ] step 5: verify（test run）
+
+### 驗收標準
+
+- [ ] AST diff 正確識別變更符號 > 95%
+- [ ] Impact 傳播在 1000 檔案專案 < 200ms
+- [ ] 重構 workflow 能主動警示「此修改影響 X 個下游模組」
+
+---
+
+## 🟡 Phase 14: Multi-Model Orchestration (P2)
+
+**對應 plan.md 五-Phase 14**
+**目標**：動態選擇處理模型/工具，最佳化成本與延遲
+**前置**：Phase 10-13 完成
+
+### 14.1 模型路由器
+
+- [ ] `src/lib/model-router.mjs` — 模型路由核心
+  - [ ] Tier 分類：結構(T1) / 簡單語義(T2) / 複雜語義(T3) / 重構生成(T4)
+  - [ ] Plugin 式模型提供者（API / 本地 / 確定性）
+  - [ ] 成本追蹤 + 延遲監控
+  - [ ] 自動降級策略
+- [ ] `src/plugins/standard/model-router.mjs` → `smart_model_router`
+
+### 驗收標準
+
+- [ ] 整體 API 成本降低 60%+
+- [ ] 平均延遲改善 70%+
+- [ ] 降級路徑正確觸發
+
+---
+
+## ✅ 已完成 (v3.3.1)
 
 ### Phase 5: Workflow 引擎強化 — dispatch 層 (2026-06-04)
 - [x] `workflow.mjs` — `dispatch` 指令：自動呼叫 CLI 工具 + auto-report
@@ -540,7 +774,7 @@
 - [x] smart_ts_helper — TypeScript 分析 (config/exports/modules)
 - [x] smart_workflow — Plan-based orchestration (create/report/replan/summary/dispatch)
 
-### Agent Personality + 小模型兜底工具 (2026-06-04)
+### Phase D: Agent Personality + 小模型兜底工具 (2026-06-04)
 - [x] `config/agents/smart-mcp.md` — 220 行完整 agent 人格定義，含：
   - 33+ 工具策略表（任務類型→首選工具對照）
   - 常見任務工具鏈（除錯/重構/安全/探索/Git/研究）
