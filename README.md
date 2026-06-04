@@ -1,34 +1,53 @@
 # Smart MCP — 開發工具集
 
-MCP server 提供 26 個開發工具，可在 opencode 中直接呼叫。
+MCP server 提供 **33 個開發工具**，可在 opencode 中直接呼叫。
+另有 **smart-agent**（即將發布 npm）提供 agent 大腦配置，自動學習專案慣例、記憶錯誤經驗、推薦 tool 組合。
 
 ---
 
 ## 給 LLM / AI Agent 的安裝指引
 
-如果你是 LLM 並被要求安裝這個 MCP server，請依以下步驟操作：
+### 方式一：快速安裝（推薦）
 
-### 步驟 1：clone 專案
+```bash
+npm install smart-agent
+```
+
+這會自動：
+1. 安裝 `smart-mcp`（peer dependency）
+2. 設定 opencode MCP 設定
+3. 初始化記憶系統目錄
+4. 學習專案慣例（可選）
+
+> 注意：`smart-agent` npm package 仍在準備中，敬請期待。
+
+---
+
+### 方式二：手動安裝 smart-mcp
+
+如果你是 LLM 並被要求手動安裝這個 MCP server，請依以下步驟操作：
+
+#### 步驟 1：clone 專案
 
 ```bash
 git clone https://github.com/wclinRD/opencode_smart_mcp.git
 cd opencode_smart_mcp
 ```
 
-### 步驟 2：安裝相依套件
+#### 步驟 2：安裝相依套件
 
 ```bash
 cd .opencode && npm install && cd ..
 ```
 
-### 步驟 3：確認 server 入口檔存在
+#### 步驟 3：確認 server 入口檔存在
 
 ```bash
 ls src/server/index.mjs
 # 應回傳：src/server/index.mjs
 ```
 
-### 步驟 4：將 MCP 設定加入 opencode.json
+#### 步驟 4：將 MCP 設定加入 opencode.json
 
 在專案根目錄或 `~/.config/opencode/opencode.json` 中，加入以下內容：
 
@@ -47,7 +66,7 @@ ls src/server/index.mjs
 
 > 注意：`command` 必須使用**絕對路徑**指向 clone 下來的 `src/server/index.mjs`。不可使用相對路徑，否則 opencode 會無法啟動 MCP server。
 
-### 步驟 5：啟用後驗證
+#### 步驟 5：啟用後驗證
 
 啟動 opencode 後檢查 MCP server 是否成功連接：
 
@@ -76,22 +95,27 @@ smart/
 │   │   └── loader.mjs     # 自動掃描 & 載入 plugins/ 的 plugin
 │   ├── plugins/
 │   │   ├── core/          # 6 個 native MCP tool（tools/list 直接顯示）
-│   │   └── standard/      # 20 個 tool，透過 smart_run router 呼叫
+│   │   └── standard/      # 27 個 tool，透過 smart_run router 呼叫
 │   ├── cli/               # 各 tool 的 CLI 實作（也可獨立執行）
 │   │   ├── contextual-grep.mjs
 │   │   ├── thinking.mjs
 │   │   └── ...
 │   └── lib/
-│       └── utils.mjs      # 共用工具函式
+│       ├── utils.mjs      # 共用工具函式
+│       └── compose-engine.mjs  # 工具組合引擎（Phase 6）
 ├── config/
 │   ├── opencode.json      # opencode 整合設定檔
 │   └── .opencode-conventions.json
 ├── docs/
 │   ├── README.md
-│   ├── plan.md
-│   └── todo.md
+│   ├── plan.md            # Smart MCP 發展藍圖
+│   ├── todo.md            # Smart MCP 待辦事項
+│   ├── smart-agent-plan.md # Smart Agent 發展藍圖
+│   └── smart-agent-todo.md # Smart Agent 待辦事項
 └── reports/               # 自動產生的報告（coverage, security）
 ```
+
+---
 
 ## 安裝方式
 
@@ -124,6 +148,8 @@ smart/
 
 或是用 `opencode mcp list` 確認 smart 顯示為 connected。
 
+---
+
 ## Native Tools（6 個，直接呼叫）
 
 | Tool name | 功能 |
@@ -135,12 +161,16 @@ smart/
 | `smart_test` | 自動偵測並執行測試（vitest/jest/mocha/ava/node:test） |
 | `smart_thinking` | 結構化推理，9 種 template + 動態多輪推理 |
 
-## 標準 Tools（20 個，透過 smart_run router 呼叫）
+---
+
+## 標準 Tools（27 個，透過 smart_run router 呼叫）
 
 使用方式：
 ```
 smart_run(tool: "tool_name", args: {...})
 ```
+
+### 分析工具
 
 | Tool name | 功能 |
 |-----------|------|
@@ -149,19 +179,80 @@ smart_run(tool: "tool_name", args: {...})
 | `debug` | 分析 error message / stack trace，分類錯誤類型，建議修復 |
 | `error_diagnose` | 對照 failure pattern KB 診斷錯誤，回傳 root cause & 修復 |
 | `test_suggest` | 從程式碼分析建議測試案例 |
-| `git_context` | 分析 staged/unstaged changes、commit diff、import graph impact |
 | `import_graph` | 分析跨檔案 import dependencies，pre-refactor impact check |
-| `integrate` | 整合工具：list tools、suggest-commit、generate-pr、diagnose errors |
-| `cross_file_edit` | 安全跨檔案編輯：用 import graph 找相關檔案，apply pattern changes |
-| `rename_safety` | 多檔案 rename safety check，detect naming conflicts / shadowing |
-| `diagram` | 產生 Mermaid.js diagram（flowchart/sequence/class/ER） |
-| `report` | 產生自包含 HTML report（test/security/coverage/custom） |
 | `py_helper` | 分析 Python 專案：venv detect、dep check、mypy、modernization |
 | `ts_helper` | 分析 TypeScript 專案：tsconfig strict recs、unused exports、ESM/CJS |
-| `tool_stats` | 追蹤 tool 使用統計：calls、duration、success rate、trends |
+
+### Git 工具
+
+| Tool name | 功能 |
+|-----------|------|
+| `git_context` | 分析 staged/unstaged changes、commit diff、import graph impact |
+| `git_commit` | 自動生成 conventional commit messages，分析 staged diff |
+| `git_pr` | 建立 PR，包含自動生成描述（commit table + file list + diff stat） |
+| `git_review` | heuristic 程式碼審查，4 個焦點領域（security/performance/correctness/style） |
+
+### 重構工具
+
+| Tool name | 功能 |
+|-----------|------|
+| `cross_file_edit` | 安全跨檔案編輯：用 import graph 找相關檔案，apply pattern changes |
+| `rename_safety` | 多檔案 rename safety check，detect naming conflicts / shadowing |
+
+### 搜尋工具
+
+| Tool name | 功能 |
+|-----------|------|
 | `exa_search` | Exa AI search：搜尋網頁、crawl URL、找 code/documentation |
 | `github_search` | 搜尋 public GitHub code，filter by repo/path/language |
+
+### 視覺化工具
+
+| Tool name | 功能 |
+|-----------|------|
+| `diagram` | 產生 Mermaid.js diagram（flowchart/sequence/class/ER） |
+| `report` | 產生自包含 HTML report（test/security/coverage/custom） |
+
+### Workflow 工具
+
+| Tool name | 功能 |
+|-----------|------|
+| `workflow` | 多工具工作流編排：create/report/replan/summary |
+| `planner` | 目標分解：9 種任務模板 + DAG + 條件分支 + replan |
+| `compose` | 工具組合：seq（順序）/par（平行）/cond（條件）執行 |
+
+### 整合工具
+
+| Tool name | 功能 |
+|-----------|------|
+| `integrate` | 整合工具：list tools、suggest-commit、generate-pr、diagnose errors |
+| `tool_stats` | 追蹤 tool 使用統計：calls、duration、success rate、trends |
 | `toonify` | 用 TOON format 壓縮 JSON/CSV/YAML，token 減少 30-65% |
+
+---
+
+## Smart Agent（Agent 大腦配置）
+
+**即將發布 npm package！**
+
+`smart-agent` 讓 opencode agent 從「有很多工具」升級到「知道怎麼用對的工具」：
+
+- **Tool 策略引擎** — 根據任務描述自動推薦合適的 tool 或 tool 組合
+- **Workflow 自動化** — 一鍵執行複雜多步驟任務（create → execute → replan → summary）
+- **Memory 自動整合** — 錯誤發生時自動寫入記憶，相似錯誤自動取出建議
+- **Planner 整合** — 複雜任務自動使用 planner 分解目標
+
+### 安裝方式（即將支援）
+
+```bash
+npm install smart-agent
+```
+
+詳細規劃請見：
+- [docs/smart-agent-plan.md](./docs/smart-agent-plan.md)
+- [docs/smart-agent-todo.md](./docs/smart-agent-todo.md)
+
+---
 
 ## 如何新增 Tool
 
@@ -192,6 +283,8 @@ export default {
 3. CLI 實作放在 `src/cli/xxx-cli.mjs`
 4. 重新啟動 opencode，tool 會自動被 `loader.mjs` 載入
 
+---
+
 ## 特殊工具呼叫
 
 列出所有 router tool：
@@ -218,3 +311,22 @@ smart/health
 ```
 smart/stats
 ```
+
+---
+
+## 開發階段
+
+| Phase | 內容 | 狀態 |
+|-------|------|------|
+| Phase 0 | thinking.mjs 改造 + smart_think 新增 | ✅ 完成 |
+| Phase 1 | 自我學習 + 記憶系統 | ✅ 完成 |
+| Phase 2 | 動態規劃引擎 | ✅ 完成 |
+| Phase 3 | 狀態管理 + Context 傳遞 | ✅ 完成 |
+| Phase 4 | Workflow 引擎（plan-based orchestration） | ✅ 完成 |
+| Phase 5 | Workflow 引擎強化（實際執行能力） | ✅ 完成 |
+| Phase 6 | Compose 原語 + 平行執行 | ✅ 完成 |
+| Phase 7 | Memory 升級（語意記憶 + 模式歸納） | 🔄 進行中 |
+| Phase 8 | 程式碼生成輔助 | 📋 規劃中 |
+| Phase 9 | 語言助手擴充 | 📋 規劃中 |
+
+詳細規劃請見 [docs/plan.md](./docs/plan.md)。
