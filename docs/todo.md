@@ -142,24 +142,26 @@
 **對應 plan.md 五-Phase 2**
 **目標**：讓 smart 能自動規劃多工具執行序列，並根據結果動態調整。
 
-### 2.1 Planner 核心
+### 2.1 Planner 核心 ✅
 
-- [ ] `src/plugins/standard/planner.mjs` — 輕量級規劃器
-  - [ ] 輸入：目標描述 + 可用工具清單 + 當前 context
-  - [ ] 分解：將目標拆為 sub-goals
-  - [ ] 映射：sub-goal → 最佳工具組合（參照 plan.md 任務-工具映射表）
-  - [ ] DAG 生成：標記依賴關係，產出有序執行序列
-  - [ ] 輸出格式：JSON array of { tool, args, dependsOn, onFailure }
+- [x] `src/plugins/standard/planner.mjs` — 輕量級規劃器（含執行狀態管理）
+  - [x] 輸入：目標描述 + 可用工具清單 + 當前 context
+  - [x] 分解：9 任務模板 + 通用關鍵字 fallback
+  - [x] 映射：sub-goal → 最佳工具組合
+  - [x] DAG 生成：dependsOn 依賴 + conditions 條件分支
+  - [x] 輸出格式：JSON array of { tool, args, dependsOn, onFailure }
+  - [x] **Plan execution state** — `execute` 命令建立 JSON state file
+  - [x] **State lifecycle** — `next` / `report` / `replan` 完整命令
 
-### 2.2 條件分支與動態調整
+### 2.2 條件分支與動態調整 ✅
 
-- [ ] Planner 支援條件邏輯
-  - [ ] `if result.X > threshold → use tool Y`
-  - [ ] `if result.X contains "error" → use tool Z`
-  - [ ] 工具失敗 → 自動切換到 onFailure 分支（非簡單重試）
-- [ ] 回饋循環
-  - [ ] 每步執行結果更新 planner state
-  - [ ] state 變化觸發 replanning（必要時）
+- [x] Planner 支援條件邏輯
+  - [x] 模板內嵌 `conditions[]` + `branchOn` metadata（如 debug-error 的 `foundErrors`）
+  - [x] onFailure 三種策略：`abort`（停掉）、`skip`（跳過）、`warn`（自動 replan）
+  - [x] 工具失敗 onFailure=warn → 自動觸發 replan（非簡單重試）
+- [x] 回饋循環
+  - [x] `report` 命令記錄步驟結果並更新 accumulatedContext
+  - [x] state 變化（步驟失敗）自動觸發 replanRemainingSteps()
 
 ### 2.3 thinking.mjs 升級
 
@@ -178,9 +180,11 @@
 - [x] `decision`: `quick-decision`（跳至建議）/ `needs-tradeoff`（插入加權評分）
 
 ### 驗收標準
-- [ ] 輸入「除錯這個 error」→ 自動產出 [grep → debug → read → fix → test] 計畫
-- [ ] 中間某步失敗 → 自動調整後續步驟，不崩潰
-- [x] `--dynamic` 模式可正確建立 state file、record、advance、branch、finish
+- [x] 輸入「除錯這個 error」→ 自動產出 [memory_store → grep → diagnose → debug → test] 計畫（debug-error 模板）
+- [x] 中間某步失敗 → onFailure=warn 自動 replan，onFailure=abort 停掉，onFailure=skip 跳過
+- [x] `execute` 命令產生 plan + state file，`next` 取得下一步，`report` 回報結果
+- [x] `replan` 命令可強制重新規劃剩餘步驟，保留已完成的結果
+- [x] 7 整合測試全部通過（`node --test tests/planner.test.mjs`）
 
 ---
 

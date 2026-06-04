@@ -276,7 +276,7 @@ thinking.mjs
    - `patterns` 指令：session 偵測 + combo 分析 + 任務分類績效
    - 成功率趨勢分析（前半/後半比較）+ 衰落工具警告 + 替代建議
 
-### Phase 2: 動態規劃引擎（P0）
+### Phase 2: 動態規劃引擎（P0） ✅
 
 **目標**：讓 smart 能根據目標自動生成執行計畫，並根據中間結果調整。
 
@@ -293,20 +293,27 @@ thinking.mjs
 ```
 
 **具體實作**：
-1. `src/plugins/standard/planner.mjs` — 輕量級規劃器
-   - 輸入：自然語言目標（由 agent 或 thinking tool 產生）
-   - 輸出：有序的工具呼叫序列 + 依賴 DAG
-   - 支援條件分支（if result.X → use tool Y else tool Z）
-2. `thinking.mjs` 升級（v3.1 ✅ 已完成） — 從靜態模板 → 動態多輪推理
-   - **State persistence**: JSON 狀態檔案 (`--state <path>`)，支援 resume/cancel/finish
+1. **Plan generation** ✅ — 9 任務模板 + 關鍵字 fallback + 條件分支 + DAG 依賴
+   - 模板比對（debug-error/refactor-rename/search-code/...）
+   - 變數替換（`$goal`, `$contextFile`, `$symbol`）
+   - 條件分支 metadata（`conditions[]` + `branchOn`）
+2. **Plan execution state** ✅（新增）— JSON state file runtime 追蹤
+   - `execute <goal>` — 產生 plan + 建立 state file + 回傳第一步
+   - `next --state <path>` — 回傳下一步（尊重 dependencies）
+   - `report --state <path> --step N --status ok|fail` — 回報結果，觸發動態調整
+   - `replan --state <path> [--context]` — 強制重新規劃剩餘步驟
+3. **Replan engine** ✅（新增）— 步驟失敗時動態調整
+   - onFailure='abort' → 停掉整個 plan
+   - onFailure='skip' → 跳過，標記依賴步驟為 skipped
+   - onFailure='warn' → 自動觸發 replan：重新產生 plan 取代剩餘步驟
+   - 累積已完成的 context 作為新 plan 的輸入
+4. `thinking.mjs` 升級（v3.1 ✅）— 從靜態模板 → 動態多輪推理
+   - **State persistence**: JSON 狀態檔案 (`--state <path>`)
    - **Step-by-step dynamic mode**: `--dynamic` 一次只顯示當前步驟
-   - **Result recording**: `--record <idx> <result>` 注入前一步結果到下一步 context
-   - **Branching**: 模板支援條件分支（`branches` schema），`--branch <name>` 選擇路徑
-   - **Context accumulation**: 前序步驟結果自動累積注入後續步驟 prompt
-   - Backward compatible: 保留所有靜態模板與 `--iterative` 模式
-3. 回饋循環
-   - 工具執行成功 → 繼續原計畫
-   - 工具執行失敗 → planner 重新規劃（非簡單重試）
+   - **Result recording**: `--record <idx> <result>`
+   - **Branching**: 模板支援條件分支
+   - **Context accumulation**: 前序結果自動注入後續 prompt
+   - **plan_execute 模板**: 與 planner 輸出整合
 
 ### Phase 3: 狀態管理 + Context 傳遞（P1）
 
@@ -431,6 +438,7 @@ src/server/index.mjs
 | 複雜任務(5+工具)完成率 | ~60% | >85% | planner 追蹤 |
 | 跨工具 context 傳遞 | ❌ 無 | ✅ 自動 | context layer |
 | 動態多輪推理 | ❌ 靜態模板 | ✅ state+branch | thinking --dynamic 完成度 |
+| **自動規劃 replan** | ❌ 步驟失敗就中斷 | ✅ 自動重新規劃 | **planner replan 引擎** |
 | 可復用 workflow 數量 | 0 | 5+ | workflow 目錄 |
 | 語言覆蓋 | 2 (Py/TS) | 4+ (Py/TS/RS/Go) | 語言助手工具數 |
 

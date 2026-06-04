@@ -642,6 +642,384 @@ function formatToolList() {
 }
 
 // ---------------------------------------------------------------------------
+// Plan Execution State — runtime tracking & dynamic replanning
+// ---------------------------------------------------------------------------
+//
+// State file format (~/.smart/plans/<id>.json):
+//   {
+//     planId, goal, matchedTemplate, createdAt, updatedAt,
+//     status: 'in_progress'|'completed'|'failed'|'cancelled',
+//     steps: [{ step, tool, args, description, dependsOn, onFailure,
+//               status: 'pending'|'completed'|'failed'|'skipped',
+//               result, error, duration, completedAt }],
+//     completedSteps, failedSteps, skippedSteps,
+//     accumulatedContext
+//   }
+//
+// Commands:
+//   execute <goal>         Generate plan + start execution session
+//   next --state <path>    Get next runnable step
+//   report --state <path> --step <N> --status <ok|fail> [--result <json>] [--error <text>]
+//                          Report step result, auto-replan on failure
+//   replan --state <path>  Force re-plan remaining steps
+// ---------------------------------------------------------------------------
+
+import { resolve, dirname } from 'node:path';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+
+const PLAN_STATE_DIR = resolve(process.env.HOME || '/tmp', '.smart', 'plans');
+
+function ensurePlanDir() {
+  if (!existsSync(PLAN_STATE_DIR)) {
+    try { mkdirSync(PLAN_STATE_DIR, { recursive: true }); } catch { /* ignore */ }
+  }
+  return PLAN_STATE_DIR;
+}
+
+function generatePlanId() {
+  return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+}
+
+/**
+ * Create a plan execution state file from a generated plan.
+ */
+function createPlanState(goal, plan, statePath) {
+  const stepsWithStatus = plan.steps.map(s => ({
+    step: s.step,
+    tool: s.tool,
+    args: s.args || {},
+    description: s.description || '',
+    dependsOn: s.dependsOn || [],
+    onFailure: s.onFailure || 'warn',
+    conditions: s.conditions || undefined,
+    branchOn: s.branchOn || null,
+    // Runtime state
+    status: 'pending',
+    result: null,
+    error: null,
+    duration: null,
+    completedAt: null,
+  }));
+
+  const state = {
+    planId: generatePlanId(),
+    goal,
+    matchedTemplate: plan.matchedTemplate,
+    templateDescription: plan.templateDescription,
+    totalSteps: plan.totalSteps,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    status: 'in_progress',
+    steps: stepsWithStatus,
+    conditions: plan.conditions || [],
+    branches: plan.branches || null,
+    warnings: plan.warnings || [],
+    completedSteps: [],
+    failedSteps: [],
+    skippedSteps: [],
+    accumulatedContext: '',
+  };
+
+  writePlanState(statePath, state);
+  return state;
+}
+
+function readPlanState(statePath) {
+  try {
+    const raw = readFileSync(statePath, 'utf8');
+    return JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`Cannot read plan state: ${statePath} — ${e.message}`);
+  }
+}
+
+function writePlanState(statePath, state) {
+  state.updatedAt = new Date().toISOString();
+  const dir = dirname(statePath);
+  if (!existsSync(dir)) {
+    try { mkdirSync(dir, { recursive: true }); } catch { /* ignore */ }
+  }
+  writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8');
+}
+
+function updatePlanContext(state) {
+  const parts = [];
+  for (const step of state.steps) {
+    if (step.status === 'completed') {
+      parts.push(`Step ${step.step} (${step.tool}): completed — ${JSON.stringify(step.result)}`);
+    } else if (step.status === 'failed') {
+      parts.push(`Step ${step.step} (${step.tool}): FAILED — ${step.error}`);
+    } else if (step.status === 'skipped') {
+      parts.push(`Step ${step.step} (${step.tool}): skipped`);
+    }
+  }
+  state.accumulatedContext = parts.join('\n');
+}
+
+/**
+ * Find next runnable step respecting dependency order.
+ * Returns the step object or null if none available.
+ */
+function getNextRunnableStep(state) {
+  for (const step of state.steps) {
+    if (step.status !== 'pending') continue;
+
+    const deps = step.dependsOn || [];
+    if (deps.length === 0) return step;
+
+    const allReady = deps.every(d => {
+      const ds = state.steps.find(s => s.step === d);
+      return ds && (ds.status === 'completed' || ds.status === 'skipped');
+    });
+
+    const depFailed = deps.some(d => {
+      const ds = state.steps.find(s => s.step === d);
+      return ds && ds.status === 'failed';
+    });
+
+    if (allReady && !depFailed) return step;
+  }
+  return null;
+}
+
+/**
+ * Check if all steps are done (no pending steps).
+ */
+function isPlanComplete(state) {
+  return state.steps.every(s => s.status !== 'pending');
+}
+
+/**
+ * Format a single step for display.
+ */
+function formatStepOutput(step, state) {
+  const lines = [];
+  const deps = (step.dependsOn || []).length > 0
+    ? ` (after step ${step.dependsOn.join(', ')})` : '';
+  const failIcon = step.onFailure === 'abort' ? '!' : step.onFailure === 'warn' ? '?' : '-';
+
+  lines.push(`Step ${step.step}/${state.totalSteps}: ${step.tool}${deps}`);
+  lines.push(`  ${step.description}`);
+  if (step.conditions && step.conditions.length > 0) {
+    lines.push(`  [branch: ${step.conditions.map(c => c.description || c.expression).join('; ')}]`);
+  }
+  const argStr = Object.entries(step.args || {})
+    .filter(([k]) => !['format', 'root'].includes(k))
+    .map(([k, v]) => ` ${k}=${JSON.stringify(v)}`)
+    .join('');
+  if (argStr) lines.push(`  args:${argStr}`);
+  lines.push(`  onFail: ${failIcon} ${step.onFailure}`);
+  return lines.join('\n');
+}
+
+/**
+ * Format execution summary.
+ */
+function formatExecutionSummary(state) {
+  const lines = [];
+  const total = state.steps.length;
+  const completed = state.completedSteps.length;
+  const failed = state.failedSteps.length;
+  const skipped = state.skippedSteps.length;
+
+  lines.push(`Plan: ${state.goal}`);
+  if (state.matchedTemplate) lines.push(`  Template: ${state.matchedTemplate}`);
+  lines.push(`  Status: ${state.status}`);
+  lines.push(`  Progress: ${completed}/${total} steps`);
+
+  if (failed > 0) {
+    lines.push('  Failed steps:');
+    for (const fn of state.failedSteps) {
+      const s = state.steps.find(st => st.step === fn);
+      if (s) lines.push(`    ${fn}: ${s.tool} — ${s.error || 'unknown error'}`);
+    }
+  }
+  if (skipped > 0) {
+    lines.push(`  Skipped: ${skipped} steps`);
+  }
+
+  if (state.accumulatedContext) {
+    lines.push('');
+    lines.push('Context:');
+    lines.push(state.accumulatedContext);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Record step result and determine next action.
+ * Returns: { nextStep, done, status, replanned, summary, error }
+ */
+function recordStepResult(state, statePath, stepNumber, opts) {
+  const { status, result, error, duration } = opts;
+  const step = state.steps.find(s => s.step === stepNumber);
+  if (!step) return { error: `Step ${stepNumber} not found` };
+
+  // Record result
+  step.status = status;
+  step.result = result || null;
+  step.error = error || null;
+  step.duration = duration || null;
+  step.completedAt = new Date().toISOString();
+
+  if (status === 'completed') state.completedSteps.push(stepNumber);
+  else if (status === 'failed') state.failedSteps.push(stepNumber);
+  else if (status === 'skipped') state.skippedSteps.push(stepNumber);
+
+  updatePlanContext(state);
+
+  // Check if all done
+  if (isPlanComplete(state)) {
+    state.status = state.failedSteps.length > 0 ? 'failed' : 'completed';
+    writePlanState(statePath, state);
+    return { done: true, status: state.status, summary: formatExecutionSummary(state) };
+  }
+
+  // Handle failure — onFailure strategies
+  if (status === 'failed') {
+    switch (step.onFailure) {
+      case 'abort':
+        state.status = 'failed';
+        writePlanState(statePath, state);
+        return { done: true, status: 'failed',
+          reason: `Step ${stepNumber} failed with onFailure=abort`,
+          summary: formatExecutionSummary(state) };
+      case 'skip':
+        // Mark dependent pending steps as blocked too
+        for (const s of state.steps) {
+          if (s.status !== 'pending') continue;
+          if ((s.dependsOn || []).includes(stepNumber)) {
+            s.status = 'skipped';
+            s.result = '[Dependency failed]';
+            s.completedAt = new Date().toISOString();
+            state.skippedSteps.push(s.step);
+          }
+        }
+        updatePlanContext(state);
+        break;
+      case 'warn':
+      default:
+        // Continue but warn — try replan
+        break;
+    }
+
+    // Try replan for non-abort failures
+    if (step.onFailure !== 'abort') {
+      const replanResult = replanRemainingSteps(state);
+      if (replanResult.replanned) {
+        writePlanState(statePath, state);
+        const next = getNextRunnableStep(state);
+        return {
+          replanned: true,
+          newPlanSteps: replanResult.changes,
+          nextStep: next || null,
+          summary: formatExecutionSummary(state),
+        };
+      }
+    }
+  }
+
+  // Normal: advance to next step
+  writePlanState(statePath, state);
+  const next = getNextRunnableStep(state);
+
+  if (!next) {
+    // All remaining pending steps have unmet dependencies or nothing left
+    if (isPlanComplete(state)) {
+      state.status = state.failedSteps.length > 0 ? 'failed' : 'completed';
+      writePlanState(statePath, state);
+      return { done: true, status: state.status, summary: formatExecutionSummary(state) };
+    }
+    // Steps are blocked
+    return { done: true, status: 'blocked', summary: formatExecutionSummary(state) };
+  }
+
+  return { nextStep: next.step, summary: formatStepOutput(next, state) };
+}
+
+/**
+ * Replan remaining steps by generating a fresh plan with failure context.
+ * Replaces all pending/failed steps with new plan steps.
+ */
+function replanRemainingSteps(state, additionalContext) {
+  const completedIds = new Set(state.completedSteps);
+  const completedSteps = state.steps.filter(s => completedIds.has(s.step));
+
+  // Build enriched context from what's happened so far
+  const contextParts = [];
+  if (state.accumulatedContext) contextParts.push(state.accumulatedContext);
+  if (additionalContext) contextParts.push(additionalContext);
+  contextParts.push(`Original goal: ${state.goal}`);
+
+  // Count remaining capacity
+  const remainingSlots = Math.max(1, state.totalSteps - completedSteps.length);
+
+  // Generate a fresh plan for the remaining work
+  const freshPlan = generatePlan(state.goal, {
+    context: contextParts.join('\n'),
+    steps: remainingSlots + 2, // allow some flexibility
+  });
+
+  if (!freshPlan.steps || freshPlan.steps.length === 0) {
+    return { replanned: false, reason: 'Fresh plan generation produced no steps' };
+  }
+
+  // Find the first completed step index to know where to splice
+  const lastCompleted = completedSteps.length > 0
+    ? Math.max(...completedSteps.map(s => s.step))
+    : 0;
+
+  // Identify steps to replace: those not completed (pending, failed, skipped)
+  const stepsToRemove = state.steps.filter(s => s.status !== 'completed').map(s => s.step);
+
+  // Build new steps from fresh plan, preserving step numbering
+  let newStepNum = lastCompleted + 1;
+  const newSteps = freshPlan.steps.slice(0, remainingSlots + 2).map((fs, i) => ({
+    step: newStepNum + i,
+    tool: fs.tool,
+    args: fs.args || {},
+    description: fs.description || '',
+    dependsOn: (fs.dependsOn || []).map(d => d + lastCompleted), // remap
+    onFailure: fs.onFailure || 'warn',
+    conditions: fs.conditions || undefined,
+    branchOn: fs.branchOn || null,
+    status: 'pending',
+    result: null,
+    error: null,
+    duration: null,
+    completedAt: null,
+  }));
+
+  // Filter out removed steps, keep completed, add new steps
+  const keptSteps = state.steps.filter(s => s.status === 'completed');
+  state.steps = [...keptSteps, ...newSteps];
+
+  // Re-number everything sequentially
+  state.steps.forEach((s, i) => { s.step = i + 1; });
+  state.totalSteps = state.steps.length;
+
+  // Clear runtime tracking (will re-populate as execution continues)
+  state.failedSteps = [];
+  state.skippedSteps = [];
+  state.status = 'in_progress';
+  updatePlanContext(state);
+
+  // Count changes
+  const changes = {
+    removed: stepsToRemove.length,
+    added: newSteps.length,
+    totalNow: state.steps.length,
+  };
+
+  return {
+    replanned: true,
+    changes,
+    summary: `Replanned: removed ${stepsToRemove.length} stale steps, added ${newSteps.length} fresh steps. Total: ${state.steps.length}.`,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
@@ -650,34 +1028,58 @@ function printHelp() {
 Usage: node planner.mjs <goal> [options]
        node planner.mjs analyze <tool1,tool2,...>
        node planner.mjs list-tasks
+       node planner.mjs execute <goal> [options]
+       node planner.mjs next --state <path>
+       node planner.mjs report --state <path> --step <N> --status <ok|fail> [options]
+       node planner.mjs replan --state <path> [--context <text>]
 
-Generate execution plans for smart tools with condition branch support.
+Generate execution plans with runtime state tracking & dynamic replanning.
 
 Commands:
-  <goal>                  Natural language description of what to do
-  analyze <tools>        Analyze a tool sequence and suggest improvements
-  list-tasks             List all available task templates
+  <goal>                  Generate a plan for a goal (default)
+  analyze <tools>        Analyze a tool sequence
+  list-tasks             List all task templates
+  execute <goal>         Generate plan + create execution state file
+  next --state <path>    Get next runnable step from execution state
+  report ...             Report step result, auto-replan on failure
+  replan --state <path>  Force re-plan remaining steps
 
-Features:
-  - 9 task templates with automatic goal matching
-  - Condition branches: steps can define conditional execution paths
-    (see debug-error template for an example with grep → diagnose/todo)
-  - Generic keyword-based fallback when no template matches
-  - Tool sequence analysis and optimization suggestions
-
-Options:
+Plan Generation Options:
   --format <fmt>          Output: text, json (default: text)
   --context <text>        Additional context (e.g., "file=src/index.js")
   --steps <N>             Max steps in plan (default: 10)
   --strict                Only use tools that exist in registry
-  -h, --help              Show this help
+
+Execution State Options:
+  --state <path>          Plan state file path
+  --step <N>              Step number being reported
+  --status <ok|fail|skip> Step execution status
+  --result <json>         Step result (JSON string)
+  --error <text>          Error message if failed
+  --duration <ms>         Step execution duration
 
 Examples:
-  node planner.mjs "debug the TypeError in login.js"       # Template with condition branch
-  node planner.mjs "refactor the utils module" --context "file=src/utils.js"
-  node planner.mjs analyze "smart_grep,smart_debug,smart_test"
-  node planner.mjs list-tasks
+  node planner.mjs "debug the TypeError in login.js"
+  node planner.mjs execute "refactor utils module" --context "file=src/utils.js"
+  node planner.mjs next --state ~/.smart/plans/abc123.json
+  node planner.mjs report --state ~/.smart/plans/abc123.json --step 1 --status ok --result '"Found 3 errors"'
+  node planner.mjs report --state ~/.smart/plans/abc123.json --step 2 --status fail --error "Tool timed out"
+  node planner.mjs replan --state ~/.smart/plans/abc123.json --context "Try different approach"
 `);
+}
+
+function parseStatePath(args) {
+  const idx = args.indexOf('--state');
+  return idx >= 0 && idx + 1 < args.length ? args[idx + 1] : null;
+}
+
+function getArg(args, name, defaultVal) {
+  const idx = args.indexOf(name);
+  return idx >= 0 && idx + 1 < args.length ? args[idx + 1] : defaultVal;
+}
+
+function hasFlag(args, name) {
+  return args.includes(name);
 }
 
 function main() {
@@ -687,19 +1089,23 @@ function main() {
     exit(0);
   }
 
-  if (args[0] === 'list-tasks') {
+  const cmd = args[0];
+
+  // ---- list-tasks ----
+  if (cmd === 'list-tasks') {
     console.log(formatToolList());
     exit(0);
   }
 
-  if (args[0] === 'analyze') {
+  // ---- analyze ----
+  if (cmd === 'analyze') {
     const tools = args[1];
     if (!tools) {
       console.error('Usage: planner.mjs analyze <tool1,tool2,...>');
       exit(1);
     }
     const analysis = analyzeToolSequence(tools);
-    if (args.includes('--format') && args[args.indexOf('--format') + 1] === 'json') {
+    if (hasFlag(args, '--format') && getArg(args, '--format') === 'json') {
       console.log(JSON.stringify(analysis, null, 2));
     } else {
       console.log(formatAnalysis(analysis));
@@ -707,7 +1113,247 @@ function main() {
     exit(0);
   }
 
-  // Parse options
+  // ---- execute: generate plan + create state file ----
+  if (cmd === 'execute') {
+    const goalParts = [];
+    let context = '';
+    let maxSteps = 10;
+    let strict = false;
+    let statePath = null;
+    let format = 'text';
+
+    for (let i = 1; i < args.length; i++) {
+      if (args[i] === '--context') { context = args[++i] || ''; }
+      else if (args[i] === '--steps') { maxSteps = parseInt(args[++i], 10) || 10; }
+      else if (args[i] === '--strict') { strict = true; }
+      else if (args[i] === '--state') { statePath = args[++i]; }
+      else if (args[i] === '--format') { format = args[++i] || 'text'; }
+      else if (!args[i].startsWith('--')) { goalParts.push(args[i]); }
+    }
+
+    const goal = goalParts.join(' ');
+    if (!goal) {
+      console.error('Error: execute requires a goal description.');
+      exit(1);
+    }
+
+    // Generate plan
+    const plan = generatePlan(goal, { context, steps: maxSteps, strict });
+
+    // Create state file
+    if (!statePath) {
+      ensurePlanDir();
+      statePath = resolve(PLAN_STATE_DIR, generatePlanId() + '.json');
+    }
+    const state = createPlanState(goal, plan, statePath);
+
+    // Get first step
+    const firstStep = getNextRunnableStep(state);
+    const output = {
+      status: 'execution_started',
+      statePath,
+      planId: state.planId,
+      totalSteps: plan.totalSteps,
+      matchedTemplate: plan.matchedTemplate,
+      summary: plan.summary,
+      firstStep: firstStep ? {
+        step: firstStep.step,
+        tool: firstStep.tool,
+        description: firstStep.description,
+        dependsOn: firstStep.dependsOn,
+        onFailure: firstStep.onFailure,
+        args: firstStep.args,
+      } : null,
+      steps: format === 'json' ? undefined : plan.steps.map(s => formatStepOutput(s, state)).join('\n\n'),
+    };
+
+    if (format === 'json') {
+      console.log(JSON.stringify(output, null, 2));
+    } else {
+      console.log(`Plan execution started: ${statePath}`);
+      console.log(`Plan ID: ${state.planId}`);
+      console.log(`Goal: ${goal}`);
+      console.log(`Total steps: ${plan.totalSteps}`);
+      if (plan.matchedTemplate) console.log(`Template: ${plan.matchedTemplate}`);
+      console.log('');
+      if (firstStep) {
+        console.log('First step to execute:');
+        console.log(formatStepOutput(firstStep, state));
+      }
+      if (plan.warnings && plan.warnings.length > 0) {
+        console.log('\nWarnings:');
+        for (const w of plan.warnings) console.log(`  - ${w}`);
+      }
+      console.log(`\nUse: planner.mjs next --state ${statePath}`);
+      console.log(`     planner.mjs report --state ${statePath} --step <N> --status <ok|fail> [--result <json>]`);
+    }
+    exit(0);
+  }
+
+  // ---- next: get next runnable step ----
+  if (cmd === 'next') {
+    const statePath = parseStatePath(args);
+    if (!statePath) {
+      console.error('Error: --state <path> is required for next command.');
+      exit(1);
+    }
+    if (!existsSync(statePath)) {
+      console.error(`Error: State file not found: ${statePath}`);
+      exit(1);
+    }
+
+    const state = readPlanState(statePath);
+
+    if (state.status === 'completed' || state.status === 'failed') {
+      console.log(`Plan already ${state.status}.`);
+      console.log(formatExecutionSummary(state));
+      exit(0);
+    }
+
+    const next = getNextRunnableStep(state);
+    if (!next) {
+      if (isPlanComplete(state)) {
+        state.status = state.failedSteps.length > 0 ? 'failed' : 'completed';
+        writePlanState(statePath, state);
+        console.log(`Plan ${state.status}.`);
+        console.log(formatExecutionSummary(state));
+      } else {
+        console.log('No runnable step: all remaining steps are blocked by failed dependencies.');
+        console.log('Use replan to re-plan remaining steps.');
+      }
+      exit(0);
+    }
+
+    // Mark step as running
+    next.status = 'running';
+    writePlanState(statePath, state);
+
+    console.log(formatStepOutput(next, state));
+    exit(0);
+  }
+
+  // ---- report: record step result ----
+  if (cmd === 'report') {
+    const statePath = parseStatePath(args);
+    if (!statePath) {
+      console.error('Error: --state <path> is required for report command.');
+      exit(1);
+    }
+    if (!existsSync(statePath)) {
+      console.error(`Error: State file not found: ${statePath}`);
+      exit(1);
+    }
+
+    const state = readPlanState(statePath);
+    const stepNumber = parseInt(getArg(args, '--step'), 10);
+    if (!stepNumber || stepNumber < 1) {
+      console.error('Error: --step <N> is required (positive integer).');
+      exit(1);
+    }
+
+    const statusStr = getArg(args, '--status', 'ok');
+    const resultStr = getArg(args, '--result', null);
+    const errorStr = getArg(args, '--error', null);
+    const durationStr = getArg(args, '--duration', null);
+
+    const status = statusStr === 'fail' ? 'failed' : statusStr === 'skip' ? 'skipped' : 'completed';
+
+    // Parse result JSON if provided
+    let result = resultStr;
+    if (resultStr && resultStr.startsWith('"') || resultStr === 'true' || resultStr === 'false' || resultStr === 'null') {
+      try { result = JSON.parse(resultStr); } catch { /* keep as string */ }
+    }
+
+    const duration = durationStr ? parseInt(durationStr, 10) || null : null;
+
+    const outcome = recordStepResult(state, statePath, stepNumber, {
+      status,
+      result,
+      error: errorStr,
+      duration,
+    });
+
+    if (outcome.error) {
+      console.error(`Error: ${outcome.error}`);
+      exit(1);
+    }
+
+    const fmt = getArg(args, '--format', 'text');
+
+    if (fmt === 'json') {
+      console.log(JSON.stringify(outcome, null, 2));
+    } else {
+      console.log(`Step ${stepNumber}: ${status}`);
+      if (outcome.replanned) {
+        console.log(`↻ Replanned: ${outcome.summary}`);
+        if (outcome.nextStep) {
+          console.log('');
+          console.log('Next step:');
+          const ns = state.steps.find(s => s.step === outcome.nextStep);
+          if (ns) console.log(formatStepOutput(ns, state));
+        }
+      } else if (outcome.done) {
+        console.log('');
+        console.log(outcome.summary);
+      } else if (outcome.nextStep) {
+        console.log('');
+        console.log('Next step:');
+        const ns = state.steps.find(s => s.step === outcome.nextStep);
+        if (ns) console.log(formatStepOutput(ns, state));
+      }
+    }
+    exit(0);
+  }
+
+  // ---- replan: force re-plan remaining steps ----
+  if (cmd === 'replan') {
+    const statePath = parseStatePath(args);
+    if (!statePath) {
+      console.error('Error: --state <path> is required for replan command.');
+      exit(1);
+    }
+    if (!existsSync(statePath)) {
+      console.error(`Error: State file not found: ${statePath}`);
+      exit(1);
+    }
+
+    const state = readPlanState(statePath);
+    const additionalContext = getArg(args, '--context', '');
+    const fmt = getArg(args, '--format', 'text');
+
+    const result = replanRemainingSteps(state, additionalContext);
+
+    if (!result.replanned) {
+      console.error(`Replan failed: ${result.reason || 'unknown'}`);
+      exit(1);
+    }
+
+    writePlanState(statePath, state);
+
+    if (fmt === 'json') {
+      console.log(JSON.stringify({ replanned: true, ...result, statePath }, null, 2));
+    } else {
+      console.log(`↻ Replanned (${statePath})`);
+      console.log(`  Removed ${result.changes.removed} stale steps`);
+      console.log(`  Added ${result.changes.added} new steps`);
+      console.log(`  Total: ${result.changes.totalNow} steps`);
+      console.log('');
+      console.log('Updated plan:');
+      for (const s of state.steps) {
+        if (s.status === 'completed') {
+          console.log(`  ✓ Step ${s.step}: ${s.tool} [done]`);
+        } else {
+          console.log('');
+          console.log(formatStepOutput(s, state));
+        }
+      }
+      console.log(`\nUse: planner.mjs next --state ${statePath}`);
+      console.log(`     planner.mjs report --state ${statePath} --step <N> --status <ok|fail>`);
+    }
+    exit(0);
+  }
+
+  // ---- Default: generate plan only (no state) ----
   const goalParts = [];
   let format = 'text';
   let context = '';
