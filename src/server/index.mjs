@@ -530,7 +530,54 @@ function invokeTool(def, args, timeoutOverride, signal) {
 const PROTOCOL_VERSION = '2024-11-05';
 
 function writeMsg(msg) { stdout.write(JSON.stringify(msg) + '\n'); }
-function respond(id, result) { writeMsg({ jsonrpc: '2.0', id, result }); }
+
+// --- Toonify auto-optimization ---
+const TOONIFY_ENABLED = env.SMART_TOONIFY !== '0' && env.SMART_TOONIFY !== 'false';
+const TOONIFY_PATH = env.TOONIFY_PATH || resolve(env.HOME || '/Users/wclin', 'toonify-mcp');
+let _optimizer = null;
+let _respondChain = Promise.resolve();
+
+async function getOptimizer() {
+  if (_optimizer) return _optimizer;
+  if (!TOONIFY_ENABLED) return null;
+  try {
+    const { TokenOptimizer } = await import(resolve(TOONIFY_PATH, 'dist/optimizer/token-optimizer.js'));
+    _optimizer = new TokenOptimizer({
+      minTokensThreshold: 50, minSavingsThreshold: 10, maxProcessingTime: 20,
+    });
+    return _optimizer;
+  } catch (err) {
+    debugLog('Toonify unavailable:', err.message);
+    return null;
+  }
+}
+
+async function tryOptimizeOutput(text) {
+  if (!text || text.length < 500) return text;
+  const t = text.trim();
+  if (t[0] !== '{' && t[0] !== '[' && t[0] !== '"') return text;
+  const opt = await getOptimizer();
+  if (!opt) return text;
+  try {
+    const r = await opt.optimize(text, { toolName: 'auto' });
+    if (r.optimized) {
+      debugLog('Toonify:', r.savings?.tokens || 0, 'tokens saved');
+      return r.optimizedContent;
+    }
+  } catch { /* best-effort */ }
+  return text;
+}
+
+function respond(id, result) {
+  _respondChain = _respondChain
+    .then(async () => {
+      if (result?.content?.[0]?.type === 'text' && typeof result.content[0].text === 'string') {
+        result.content[0].text = await tryOptimizeOutput(result.content[0].text);
+      }
+      writeMsg({ jsonrpc: '2.0', id, result });
+    })
+    .catch(() => { writeMsg({ jsonrpc: '2.0', id, result }); });
+}
 function respondError(id, code, message, data) {
   const err = { code, message };
   if (data !== undefined) err.data = data;
