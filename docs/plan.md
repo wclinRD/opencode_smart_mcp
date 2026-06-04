@@ -108,6 +108,7 @@ src/
 | 2026-06-04 | `toonify` | `require('../../package.json')` dead code 導致 `Cannot find module` | 移除未使用的 `createRequire` + `require` 呼叫 |
 | 2026-06-04 | `toonify` | default `minSavingsThreshold: 30` 太高，中小型資料 (<100 tokens) 無法優化 | 降為 10% + 增加 `minTokensThreshold: 20` |
 | 2026-06-04 | Phase 0 | 多項 Phase 0 完成 | 見下方 Phase 0 完成摘要 |
+| 2026-06-04 | Phase 1 | 記憶系統+error-diagnose 整合+tool-stats 升級 | memory-store: confirm 指令+auto-category+dedup+壓縮; error-diagnose: 記憶預設開啟(useMemory=true→noMemory); tool-stats: patterns 指令+session 分析+combo 發現; 10 整合測試通過 |
 
 ### 3.4 關鍵缺口
 
@@ -244,7 +245,7 @@ thinking.mjs
 
 ---
 
-### Phase 1: 自我學習 + 記憶系統（P0）
+### Phase 1: 自我學習 + 記憶系統（P0）✅
 
 **目標**：讓 smart 能從過往經驗中學習，避免重複犯錯。
 
@@ -261,16 +262,19 @@ thinking.mjs
 ```
 
 **具體實作**：
-1. `src/plugins/standard/memory-store.mjs` — 輕量級 JSON-based 記憶儲存
-   - key: 錯誤訊息的 embedding / hash
-   - value: { resolution, toolsUsed, timestamp, success }
-   - 支援模糊搜尋（Levenshtein / 關鍵字匹配）
-2. `error-diagnose.mjs` 增強 — 診斷前先搜尋記憶庫
-   - 找到匹配 → 直接回傳已知修復方案
-   - 未找到 → 正常診斷，完成後存入記憶庫
-3. `tool-stats.mjs` 升級 — 不只是計數，加入 pattern 分析
-   - 自動歸納「哪類任務用哪組工具最成功」
-   - 自動偵測「某工具成功率持續下降 → 建議替代」
+1. `src/plugins/standard/memory-store.mjs` — 輕量級 JSON-based 記憶儲存 ✅
+   - key: 錯誤訊息的 hash
+   - value: { resolution, toolsUsed, timestamp, success, hitCount, confirmedAt[] }
+   - 支援模糊搜尋（Levenshtein / word overlap / keyword boost）
+   - 自動分類（9 categories）+ dedup + auto-compression（5000 筆上限）
+   - `confirm` 指令：回饋機制，boost hitCount +2
+2. `error-diagnose.mjs` 增強 — 診斷前先搜尋記憶庫 ✅
+   - 記憶搜尋預設**開啟**（`--no-memory` 可關閉）
+   - 找到匹配 → 直接回傳已知修復方案（≥0.8 信心）
+   - 未找到 → 正常診斷，完成後 `--store` 存入記憶庫
+3. `tool-stats.mjs` 升級 — 不只是計數，加入 pattern 分析 ✅
+   - `patterns` 指令：session 偵測 + combo 分析 + 任務分類績效
+   - 成功率趨勢分析（前半/後半比較）+ 衰落工具警告 + 替代建議
 
 ### Phase 2: 動態規劃引擎（P0）
 

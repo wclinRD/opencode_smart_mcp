@@ -4,16 +4,17 @@
       "file": {
         "kebabCase": 21,
         "camelCase": 21,
-        "snake_case": 12
+        "snake_case": 12,
+        "other": 1
       },
       "variable": {
-        "UPPER_CASE": 40,
-        "camelCase": 1444,
+        "UPPER_CASE": 41,
+        "camelCase": 1492,
         "other": 6,
         "PascalCase": 5
       },
       "function": {
-        "camelCase": 349
+        "camelCase": 351
       },
       "class": {
         "camelCase": 4,
@@ -21,18 +22,18 @@
       }
     },
     "imports": {
-      "commonjs": 5,
-      "esm": 32,
+      "commonjs": 4,
+      "esm": 33,
       "mixed": true
     },
     "testing": {
       "hasTests": true,
-      "framework": null,
+      "framework": "node",
       "pattern": null
     },
     "structure": {
       "src": true,
-      "test": false,
+      "test": true,
       "lib": true,
       "app": false
     },
@@ -41,9 +42,9 @@
     ],
     "exports": {
       "default": 28,
-      "named": 15
+      "named": 16
     }
   },
   "preferences": {},
-  "lastAnalyzed": "2026-06-04T02:31:12.382Z"
+  "lastAnalyzed": "2026-06-04T02:46:00.816Z"
 }

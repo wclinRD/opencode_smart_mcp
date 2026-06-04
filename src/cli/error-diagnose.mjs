@@ -35,7 +35,7 @@ Options:
   --file <path>         Read error from file
   --format <fmt>        Output: text, json, markdown (default: text)
   --list                List all known error patterns
-  --use-memory          Search memory store for past resolutions before KB match
+  --no-memory           Skip memory store search (memory search is ON by default)
   --store               After diagnosis, store result to memory store
   --memory-resolution <text>  Resolution text (for --store, defaults to fix suggestion)
   --memory-tools <list>       Comma-separated tools used (for --store)
@@ -290,7 +290,9 @@ function main() {
     exit(0);
   }
 
-  const useMemory = args.includes('--use-memory');
+  // Memory search is ON by default (Phase 1: auto-search before KB)
+  // Pass --no-memory to disable
+  const useMemory = !args.includes('--no-memory');
   const doStore = args.includes('--store');
   let memoryThreshold = 0.6;
   const threshIdx = args.indexOf('--memory-threshold');
@@ -312,7 +314,7 @@ function main() {
     query = readFileSync(args[fileIdx + 1], 'utf-8');
   } else {
     // Collect positional args, skipping known flags and their values
-    const SKIP_FLAGS = new Set(['--file', '--format', '--list', '--use-memory', '--store',
+    const SKIP_FLAGS = new Set(['--file', '--format', '--list', '--no-memory', '--store',
       '--memory-resolution', '--memory-tools', '--memory-threshold']);
     const TAKES_VALUE = new Set(['--file', '--format', '--memory-resolution', '--memory-tools', '--memory-threshold']);
     const parts = [];

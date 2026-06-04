@@ -93,37 +93,47 @@
 
 ---
 
-## 🔴 Phase 1: 自我學習 + 記憶系統 (P0)
+## 🔴 Phase 1: 自我學習 + 記憶系統 (P0) ✅
 
 **對應 plan.md 五-Phase 1**
 **目標**：讓 smart 能記住過往修復經驗，避免重複犯錯。
 
-### 1.1 記憶儲存層
+### 1.1 記憶儲存層 ✅
 
-- [ ] `src/plugins/standard/memory-store.mjs` — 建立輕量級 JSON 記憶庫
-  - [ ] 定義記憶 schema：{ hash, errorType, resolution, toolsUsed, timestamp, success }
-  - [ ] 模糊搜尋：Levenshtein distance / keyword match 比對錯誤訊息
-  - [ ] 支援 CRUD：store / search / update / delete
-  - [ ] 儲存位置：~/.smart/memory/resolutions.json
-  - [ ] 自動壓縮：超過 N 筆時壓縮舊記錄
+- [x] `src/plugins/standard/memory-store.mjs` — 輕量級 JSON 記憶庫
+  - [x] 定義記憶 schema：{ hash, errorType, resolution, toolsUsed, timestamp, success, hitCount }
+  - [x] 模糊搜尋：Levenshtein distance + word overlap + keyword boost
+  - [x] 支援 CRUD：store / search / list / get / confirm / delete / stats / export
+  - [x] 儲存位置：~/.smart/memory/resolutions.json (可通過 --data-dir 覆蓋)
+  - [x] 自動壓縮：超過 5000 筆時移除 hitCount 最低的 20%
+  - [x] 自動分類：9 種錯誤類別（build/runtime/test/permission/path/network/lint/git/unknown）
+  - [x] Dedup：相同 hash 自動更新 hitCount 而非重複儲存
+  - [x] `confirm` 指令：使用者確認修復有效 → hitCount +2 + 記錄 confirmedAt
+  - [x] 最新修復：3 項 enhancements（模糊搜尋門檻、feedback 機制、CLI/plugin 一致性）
 
-### 1.2 error-diagnose 整合記憶
+### 1.2 error-diagnose 整合記憶 ✅
 
-- [ ] 修改 `src/plugins/standard/error-diagnose.mjs`
-  - [ ] 診斷前先 `memory.search(currentError)` → 命中直接回傳已知修復
-  - [ ] 未命中 → 正常診斷 → 診斷完成後 `memory.store(case)`
-  - [ ] 回饋機制：使用者確認修復有效 → 提高該 case 權重
+- [x] `src/plugins/standard/error-diagnose.mjs` — 整合 memory-store
+  - [x] **記憶搜尋預設開啟**：`useMemory` 已改為 `true`（傳 `--no-memory` 可關閉）
+  - [x] 診斷前自動 `memory.search(currentError)` → 高信心命中直接回傳已知修復
+  - [x] 信心混合輸出：≥0.8 → 記憶為主 KB 為輔；0.5-0.8 → 並列顯示；<0.5 → 僅 KB
+  - [x] `--store` 自動儲存診斷結果到記憶庫（含 resolution + tools + category）
+  - [x] 回饋機制：`confirm` 指令可提高 case 權重（hitCount +2）
 
-### 1.3 tool-stats 升級
+### 1.3 tool-stats 升級 ✅
 
-- [ ] 升級 `src/plugins/standard/tool-stats.mjs`
-  - [ ] 不只是計數：加入 pattern 歸納（哪類任務配哪組工具最成功）
-  - [ ] 成功率趨勢分析：自動偵測某工具連續失敗
-  - [ ] 建議引擎增強：不只報表，直接產出 actionable 建議
+- [x] `src/plugins/standard/tool-stats.mjs` — 完整模式分析
+  - [x] `patterns` 指令：session 偵測 + 工具組合分析 + 任務分類績效
+  - [x] 成功率趨勢分析：前半/後半期比較，下降 >20% 自動警告
+  - [x] 建議引擎：低成功率、高延遲波動、衰落工具、替代建議、任務型別警告
+  - [x] `inferTaskType()`：工具名稱 → 任務分類（search/debug/refactor/test...）
+  - [x] 最佳工具組合：同 session 內共現頻率最高的工具對
+  - [x] 插件描述已強化，引導 agent 使用 `patterns` 指令
 
 ### 驗收標準
-- [ ] 兩次相同錯誤 → 第二次秒回修復方案（不重複診斷）
-- [ ] tool-stats 能回答「哪些工具組合對除錯任務最有效」
+- [x] 兩次相同錯誤 → 第二次秒回修復方案（不重複診斷）
+- [x] tool-stats 能回答「哪些工具組合對除錯任務最有效」
+- [x] 10 整合測試全部通過（`node --test tests/memory-store.test.mjs`）
 
 ---
 

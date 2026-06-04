@@ -304,6 +304,33 @@ function cmdDelete(dataDir, id) {
   return { deleted: true, id: removed.id, errorMessage: removed.errorMessage };
 }
 
+function cmdConfirm(dataDir, id, options) {
+  const memory = loadMemory(dataDir);
+  const entry = memory.entries.find(e => e.id === id);
+  if (!entry) return { confirmed: false, error: `No entry with id '${id}'` };
+
+  // Boost hitCount more than a regular search (+2 instead of +1)
+  entry.hitCount = (entry.hitCount || 1) + 2;
+  entry.lastSeen = new Date().toISOString();
+  entry.confirmedAt = entry.confirmedAt || [];
+  entry.confirmedAt.push(new Date().toISOString());
+  // Track what tools validated this confirmation
+  if (options.tools) {
+    const newTools = options.tools.split(',').map(s => s.trim()).filter(Boolean);
+    for (const t of newTools) {
+      if (!entry.toolsUsed.includes(t)) entry.toolsUsed.push(t);
+    }
+  }
+  // Update resolution if provided
+  if (options.resolution) entry.resolution = options.resolution;
+
+  saveMemory(dataDir, memory);
+  return {
+    confirmed: true, id: entry.id, hitCount: entry.hitCount,
+    confirmCount: entry.confirmedAt.length, errorMessage: entry.errorMessage,
+  };
+}
+
 function cmdStats(dataDir) {
   const memory = loadMemory(dataDir);
   const entries = memory.entries;
@@ -404,6 +431,16 @@ function formatText(command, result) {
       out.push(`  Hit Count:   ${e.hitCount || 1}`);
       break;
     }
+    case 'confirm': {
+      if (result.confirmed) {
+        out.push(`Confirmed entry: ${result.id} (total hits: ${result.hitCount}, confirmations: ${result.confirmCount})`);
+        out.push(`  Error: ${result.errorMessage.slice(0, 100)}`);
+        out.push(`  Weight boosted — future searches will rank this higher.`);
+      } else {
+        out.push(`Error: ${result.error}`);
+      }
+      break;
+    }
     case 'delete': {
       if (result.deleted) {
         out.push(`Deleted entry: ${result.id}`);
@@ -453,6 +490,7 @@ Commands:
   search <error-message>  Find similar past resolutions
   list                    List stored entries
   get <id>                Get entry details by ID
+  confirm <id>            Confirm a resolution was effective (boosts weight)
   delete <id>             Delete an entry
   stats                   Show memory statistics
   export                  Export all entries as JSON
@@ -483,7 +521,7 @@ function parseArgs() {
     process.exit(0);
   }
   
-  const knownCommands = ['store', 'search', 'list', 'get', 'delete', 'stats', 'export'];
+  const knownCommands = ['store', 'search', 'list', 'get', 'confirm', 'delete', 'stats', 'export'];
   const opts = {
     command: knownCommands.includes(args[0]) ? args[0] : null,
     commandArgs: [],
@@ -514,7 +552,7 @@ function parseArgs() {
       i++;
     }
     opts.commandArgs = positional;
-  } else if (['get', 'delete'].includes(opts.command)) {
+  } else if (['get', 'confirm', 'delete'].includes(opts.command)) {
     if (args.length < 2) {
       console.error(`Usage: memory-store.mjs ${opts.command} <id>`);
       process.exit(1);
@@ -574,6 +612,9 @@ function main() {
       break;
     case 'get':
       result = cmdGet(dataDir, opts.commandArgs[0]);
+      break;
+    case 'confirm':
+      result = cmdConfirm(dataDir, opts.commandArgs[0], opts);
       break;
     case 'delete':
       result = cmdDelete(dataDir, opts.commandArgs[0]);

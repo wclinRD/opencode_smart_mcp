@@ -5,7 +5,7 @@ export default {
   inputSchema: {
     type: 'object',
     properties: {
-      command: { type: 'string', enum: ['store', 'search', 'list', 'get', 'delete', 'stats', 'export'], description: 'store/search/list/get/delete/stats/export' },
+      command: { type: 'string', enum: ['store', 'search', 'list', 'get', 'confirm', 'delete', 'stats', 'export'], description: 'store/search/list/get/confirm/delete/stats/export' },
       query: { type: 'string', description: 'Error message to search or store (positional for store/search)' },
       resolution: { type: 'string', description: 'How the error was fixed (for store)' },
       tools: { type: 'string', description: 'Comma-separated tool names used (for store)' },
