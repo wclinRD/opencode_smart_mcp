@@ -718,7 +718,17 @@
 
 ---
 
-## ✅ 已完成 (v3.5.0)
+## ✅ 已完成 (v3.6.0)
+
+### Auto-Toonify 回應攔截器 (2026-06-05)
+- [x] `src/server/index.mjs` — `respond()` 新增 auto-toonify 攔截器
+  - [x] `tryOptimizeOutput()` — 對 ≥500 chars 的 JSON-like 輸出自動執行 TOON 優化
+  - [x] lazy-init `TokenOptimizer`（首次大 JSON 回應才載入 toonify-mcp）
+  - [x] `_respondChain` Promise-chain 保證輸出順序
+  - [x] best-effort catch — 優化失敗不中斷正常回應
+  - [x] 配置：`SMART_TOONIFY=0` 關閉，`TOONIFY_PATH` 自訂路徑
+  - [x] 參數：`minTokensThreshold: 50, minSavingsThreshold: 10, maxProcessingTime: 20`
+- [x] agent 零感知節省 token：不須手動呼叫 smart_toonify
 
 ### Phase 12: Hybrid Reasoning Engine (2026-06-05)
 - [x] `src/lib/hybrid-engine.mjs` — Hybrid Reasoning 核心 (1050 行)

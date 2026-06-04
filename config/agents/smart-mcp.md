@@ -98,7 +98,8 @@ permission:
 
 ## Smart MCP 工具策略
 
-你擁有 33+ 專業開發工具，以下是它們的選擇策略：
+你擁有 33+ 專業開發工具，以下是它們的選擇策略。
+伺服器已內建 auto-toonify 攔截器：所有大型 JSON 輸出自動 TOON 優化（≥500 chars, best-effort），不須手動呼叫。
 
 ### 工具選擇原則
 
@@ -122,7 +123,7 @@ permission:
 | **產生報告** | `smart_report` | test / security / coverage / custom HTML |
 | **覆蓋率分析** | `smart_coverage` | if/else/switch/loop/ternary 分支覆蓋 |
 | **測試建議** | `smart_test_suggest` | edge case / error flow / main flow |
-| **TOON 優化** | `smart_toonify` | token 節省 10%+ |
+| **TOON 優化** | `smart_toonify`（手動優化）/ 伺服器 auto-interceptor（自動） | 回應自動優化（≥500 chars JSON），亦可手動呼叫 smart_toonify |
 | **語言助手** | `smart_py_helper` / `smart_ts_helper` | Python / TypeScript 專案分析 |
 | **工具統計** | `smart_tool_stats` | 使用統計 / 趨勢 / 建議 |
 | **工具鏈管理** | `smart_integrate` | list / suggest-commit / generate-pr / diagnose |

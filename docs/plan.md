@@ -7,7 +7,7 @@
 
 ## 一、現狀摘要
 
-Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 40 個開發工具 + 專屬 agent personality。當前版本 3.5.0（Plugin Loader + Router 架構 + 動態多輪推理 + Context 管理 + Workflow 引擎 + Compose 引擎 + LSP 程式碼語義分析 + CKG 程式碼知識圖譜 + Hybrid Reasoning Engine + Agent 人格定義 + 全面非阻塞 CLI）。
+Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 40 個開發工具 + 專屬 agent personality。當前版本 3.6.0（Plugin Loader + Router 架構 + 動態多輪推理 + Context 管理 + Workflow 引擎 + Compose 引擎 + LSP 程式碼語義分析 + CKG 程式碼知識圖譜 + Hybrid Reasoning Engine + Agent 人格定義 + 全面非阻塞 CLI + auto-toonify 輸出攔截器）。
 
 ### 核心數據
 - **工具總數**：40（6 原生 + 34 經 router — 含 4 Phase 10 程式碼語義工具 + 1 Phase 11 CKG 查詢工具 + 1 Phase 12 Hybrid Router + 3 Phase D agent 輔助工具）
@@ -15,6 +15,7 @@ Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode
 - **Workflow 引擎**：Phase 4-6 完成 — dispatch 實際執行 + 5 模板 + compose/pipe/parallel 三種原語 + replan + summary
 - **語言**：JavaScript (ESM) — 6 核心 handler + 24 CLI 全數非阻塞化 (Phase 6)
 - **輸出保護**：512KB buffer / 200K chars soft limit
+- **Auto-Toonify 攔截器**：`respond()` 自動對 ≥500 chars 的 JSON-like 輸出執行 TOON 優化（lazy-init TokenOptimizer, best-effort, Promise-chain 保證順序）
 - **Health Endpoint**：`smart/health`（含 context 資訊）
 - **Context 管理**：`smart_context` MCP tool + `smart/context` 端點 + 自動注入/捕獲/持久化
 - **動態推理**：thinking v3.1 — state persistence, branching, multi-round, context accumulation
@@ -26,7 +27,8 @@ Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode
 ```
 src/
 ├── server/              (MCP Server Entry)
-│   ├── index.mjs        → JSON-RPC 2.0 over stdio
+│   ├── index.mjs        → JSON-RPC 2.0 over stdio + auto-toonify interceptor
+│   │                      (所有 JSON 回覆 ≥500 chars 自動 TOON 優化)
 │   └── loader.mjs       → Plugin auto-loader
 │
 ├── plugins/core/        (6 native tools, 直接註冊為 MCP tools)
@@ -122,7 +124,7 @@ src/
 | **語言助手** | 2 | 🟡 中等 | py-helper + ts-helper (僅 Python/TS) |
 | **搜尋** | 3 | ✅ 成熟 | exa-search + github-search + grep |
 | **可視化** | 2 | ✅ 成熟 | diagram (Mermaid) + report (HTML) |
-| **後設** | 3 | 🟡 中等 | integrate + tool-stats + toonify |
+| **後設** | 3 | ✅ 成熟 | integrate + tool-stats + toonify（含 auto-interceptor 自動優化輸出） |
 | **推理 (深層分析)** | 1 (smart_thinking) | ✅ 成熟 | 9 模板 + 動態多輪/state/branch/handler 化 |
 | **推理 (快速思考)** | 1 (smart_think) | ✅ 成熟 | handler-based 輕量推理，已取代 sequential-thinking |
 | **Workflow 編排** | 1 (smart_workflow) | ✅ 完成 | 5 模板 (debug/refactor/security/research/default) + create/report/replan/summary |
@@ -137,6 +139,7 @@ src/
 5. **輸出保護** — 512KB / 200K chars 截斷，避免撐爆 LLM context
 6. **健康檢查** — smart/health 端點可監控伺服器狀態
 7. **優雅關閉** — SIGINT/SIGTERM 正確清理 pending calls
+8. **Auto-Toonify 輸出攔截器** — 所有 JSON 回應自動優化（lazy-init, best-effort, Promise-chain 保證順序），agent 零感知省 token
 
 ### 3.3 近期修復記錄
 
@@ -147,6 +150,7 @@ src/
 | 2026-06-04 | Phase 0 | 多項 Phase 0 完成 | 見下方 Phase 0 完成摘要 |
 | 2026-06-04 | Phase 1 | 記憶系統+error-diagnose 整合+tool-stats 升級 | memory-store: confirm 指令+auto-category+dedup+壓縮; error-diagnose: 記憶預設開啟(useMemory=true→noMemory); tool-stats: patterns 指令+session 分析+combo 發現; 10 整合測試通過 |
 | 2026-06-04 | `invokeTool` | `handler` 不支援 async — 4 個 Phase 10 LSP 工具回傳 `[object Promise]` | handler 傳回 Promise 時回傳 `__async` sentinel，caller 路徑 resolve Promise 後 respond |
+| 2026-06-05 | `toonify` (server) | 無自動優化機制，每次手動呼叫 smart_toonify 才能省 token | `respond()` 新增 auto-toonify 攔截器：Promise-chain interceptor 自動對 ≥500 chars 的 JSON-like 輸出執行 TOON 優化，lazy-init TokenOptimizer，best-effort catch |
 
 ### 3.4 當前缺口（Phase 10-11 完成後，2026-06-05）
 
@@ -1138,7 +1142,7 @@ src/server/index.mjs
 
 ## 六、架構演進
 
-### 當前 v3.5.0（Phase 0-12 + Agent Phase D + Compose Engine + CKG + Hybrid Engine 完成）
+### 當前 v3.6.0（Phase 0-12 + Agent Phase D + Compose Engine + CKG + Hybrid Engine + Auto-Toonify 完成）
 
 ```
 src/server/index.mjs
@@ -1212,9 +1216,9 @@ src/server/index.mjs
       ├── lsp-bridge.mjs                        ← Phase 10 ✅
       └── ckg-engine.mjs                        ← Phase 11 ✅
 
-#### v3.5.0 → v4.0 關鍵轉變
+#### v3.6.0 → v4.0 關鍵轉變
 
-| 面向 | v3.5.0 (當前) | v4.0 (目標) |
+| 面向 | v3.6.0 (當前) | v4.0 (目標) |
 |------|--------------|-------------|
 | 推理工具架構 | 6 handler + 30 CLI 非阻塞 | 全部 handler (in-process) |
 | 輸出內容 | 真實推理 + 工具鏈計畫 | 真實推理 + action 指令 |
@@ -1233,7 +1237,7 @@ src/server/index.mjs
 
 ## 七、成功指標
 
-| 指標 | 當前 v3.5.0 | 目標 v4.0 (2026 Q3) | 衡量方式 |
+| 指標 | 當前 v3.6.0 | 目標 v4.0 (2026 Q3) | 衡量方式 |
 |------|------------|---------------------|---------|
 | 推理工具延遲 | <1ms (handler) ✅ | <1ms | smart_think 呼叫時間 |
 | 可取代 sequential-thinking | ✅ 已取代 | ✅ | agent 預設使用 smart_think |
@@ -1285,7 +1289,7 @@ src/server/index.mjs
 | `smart_test_suggest` | standard/test_suggest.mjs | test-suggest.mjs | 測試案例建議 |
 | `smart_integrate` | standard/integrate.mjs | tool-integrate.mjs | 工具鏈管理 |
 | `smart_tool_stats` | standard/tool_stats.mjs | tool-stats.mjs | 工具使用統計 |
-| `smart_toonify` | standard/toonify.mjs | toonify.mjs | TOON token 優化 (閾值 10%, 原 30%) |
+| `smart_toonify` | standard/toonify.mjs | toonify.mjs | TOON token 優化 (閾值 10%, 原 30%) — 另有 server 端 auto-interceptor 自動優化所有 JSON 輸出 |
 | `smart_ts_helper` | standard/ts_helper.mjs | ts-helper.mjs | TypeScript 分析 |
 | `smart_compose` | standard/compose.mjs | compose.mjs | 工具組合原語 (seq/par/cond pipeline) — Phase 6 |
 | `smart_git_commit` | standard/git_commit.mjs | git-commit.mjs | Git commit 輔助 (message/dry-run/template) |
