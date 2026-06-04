@@ -281,9 +281,48 @@ function reviewFileDiff(fileDiff, focus = 'all') {
           /(password|secret|token|api[_-]?key|private[_-]?key)/i.test(content)) {
         comments.push({ file: path, line, severity: 'critical', category: 'security', message: 'Possible hardcoded secret: use environment variables or a secrets manager.' });
       }
-      // eval
+      // eval / Function() constructor
       if (/\b(eval|Function\s*\(|setTimeout\s*\(\s*['"])/.test(content)) {
         comments.push({ file: path, line, severity: 'high', category: 'security', message: 'eval-like expression detected: this can lead to code injection attacks.' });
+      }
+      // XSS: innerHTML / dangerouslySetInnerHTML
+      if (/\binnerHTML\s*=/.test(content) && !/(?:textContent|escape|sanitize|DOMPurify)/i.test(content)) {
+        comments.push({ file: path, line, severity: 'high', category: 'security', message: 'Direct innerHTML assignment detected: use textContent or sanitize input to prevent XSS.' });
+      }
+      // XSS: document.write
+      if (/\bdocument\.write\s*\(/.test(content)) {
+        comments.push({ file: path, line, severity: 'high', category: 'security', message: 'document.write can introduce XSS: consider safer DOM manipulation methods.' });
+      }
+      // Prototype pollution via merge/assign with user input
+      if (/Object\.(assign|merge)\s*\(/.test(content) &&
+          /(req\.|body|params|query|input|userInput|payload)/i.test(content)) {
+        comments.push({ file: path, line, severity: 'medium', category: 'security', message: 'Object merge with user-controlled input: risk of prototype pollution — use a safe merge utility or Object.hasOwn check.' });
+      }
+      // Path traversal: user input in fs operations
+      if (/('|")(\.\.\/|\.\\|[\\/]etc[\\/]|[\\/]tmp[\\/])('|")/.test(content) &&
+          /(readFile|writeFile|readFileSync|writeFileSync|createReadStream|existsSync|unlink|rm)/i.test(content)) {
+        comments.push({ file: path, line, severity: 'high', category: 'security', message: 'Hardcoded path with traversal pattern: use path.join and validate against allowed base paths.' });
+      }
+      // postMessage without origin check
+      if (/\bpostMessage\s*\(/.test(content) &&
+          !/\*(origin|targetOrigin)/i.test(content) &&
+          !/location\.origin/.test(content)) {
+        comments.push({ file: path, line, severity: 'high', category: 'security', message: 'postMessage should specify targetOrigin instead of "*" to prevent data leaks.' });
+      }
+      // Math.random for security-sensitive contexts
+      if (/\bMath\.random\b/.test(content) &&
+          /(password|token|secret|key|jwt|session|csrf)/i.test(content)) {
+        comments.push({ file: path, line, severity: 'medium', category: 'security', message: 'Math.random is not cryptographically secure: use crypto.randomBytes or Web Crypto API instead.' });
+      }
+      // Insecure crypto: MD5/SHA1 for security
+      if (/\b(md5|sha1)\b/i.test(content) &&
+          /(password|hash|encrypt|sign|hmac)/i.test(content)) {
+        comments.push({ file: path, line, severity: 'medium', category: 'security', message: 'MD5/SHA1 are not cryptographically secure: use SHA-256 or bcrypt for security-sensitive hashing.' });
+      }
+      // Open redirect
+      if (/\bwindow\.location\s*=/.test(content) &&
+          /(params|query|redirect|next|url|href|search)/i.test(content)) {
+        comments.push({ file: path, line, severity: 'high', category: 'security', message: 'Open redirect via window.location: validate the target URL against an allowlist to prevent phishing.' });
       }
     }
   }
@@ -303,6 +342,21 @@ function reviewFileDiff(fileDiff, focus = 'all') {
       // console.log in production
       if (/\bconsole\.(log|debug|info|warn)\b/.test(content) && !content.trim().startsWith('//') && !content.trim().startsWith('#')) {
         comments.push({ file: path, line, severity: 'low', category: 'performance', message: 'Debug logging left in code: consider removing or using a proper logger with log levels.' });
+      }
+      // JSON parse/stringify in loops
+      if (/\b(JSON\.parse|JSON\.stringify)\b/.test(content) &&
+          /(for|while|forEach|map|filter|reduce)\b/.test(content)) {
+        comments.push({ file: path, line, severity: 'medium', category: 'performance', message: 'JSON serialization/parsing inside a loop: hoist outside the loop to avoid repeated overhead.' });
+      }
+      // Regex in hot path (`.match()` or `RegExp` inside loops)
+      if (/\.(match|exec|test)\s*\(/.test(content) &&
+          /(for|while|forEach|map|filter|reduce)\b/.test(content)) {
+        comments.push({ file: path, line, severity: 'low', category: 'performance', message: 'Regex operation inside a loop: compile the RegExp once outside the loop for better performance.' });
+      }
+      // Synchronous filesystem in potentially async code
+      if (/\b(readFileSync|writeFileSync|existsSync|readdirSync)\b/.test(content) &&
+          /(await|async|Promise|\.then\s*\()/.test(content)) {
+        comments.push({ file: path, line, severity: 'low', category: 'performance', message: 'Synchronous fs call in async context: use the async variant to avoid blocking the event loop.' });
       }
     }
   }
@@ -331,6 +385,30 @@ function reviewFileDiff(fileDiff, focus = 'all') {
           comments.push({ file: path, line, severity: 'medium', category: 'correctness', message: 'Deep property access without optional chaining: could throw if intermediate value is null/undefined.' });
         }
       }
+      // parseInt without radix
+      if (/\bparseInt\s*\(/.test(content) && !/,\s*\d+\s*\)/.test(content)) {
+        comments.push({ file: path, line, severity: 'medium', category: 'correctness', message: 'parseInt without radix (second argument): always specify the base, e.g., parseInt(str, 10).' });
+      }
+      // Assignment in condition (likely typo)
+      if (/if\s*\(\s*[^=!<>]+\s*=\s*[^\s=]/.test(content) && !/===|!==|==/.test(content)) {
+        comments.push({ file: path, line, severity: 'high', category: 'correctness', message: 'Assignment in condition: use == or === for comparison, or add double parentheses if intentional (if ((x = fn()))).' });
+      }
+      // await in forEach callback
+      if (/\b(forEach|map|filter|reduce)\s*\(\s*async\b/.test(content)) {
+        comments.push({ file: path, line, severity: 'medium', category: 'correctness', message: 'async callback inside forEach/map/filter: these don\'t await promises properly — use a for...of loop instead.' });
+      }
+      // Floating point comparison
+      if (/===?\s*[\d.]+\s*[\+\-]\s*[\d.]+/.test(content) ||
+          /[\d.]+\s*[\+\-]\s*[\d.]+/.test(content) && /===/.test(content)) {
+        // Too many false positives, check more carefully
+        if (/\b\d+\.\d+\b/.test(content) && /===?\s*/.test(content) && /[\+\-*/%]/.test(content)) {
+          comments.push({ file: path, line, severity: 'low', category: 'correctness', message: 'Floating point arithmetic compared with ===: precision errors can cause unexpected results — use an epsilon comparison.' });
+        }
+      }
+      // new Array(n).map won't work
+      if (/new\s+Array\s*\([^)]+\)\s*\.\s*map\s*\(/.test(content)) {
+        comments.push({ file: path, line, severity: 'medium', category: 'correctness', message: 'new Array(n).map() does not iterate over empty slots — use Array.from({ length: n }, mapFn) instead.' });
+      }
     }
   }
 
@@ -343,6 +421,32 @@ function reviewFileDiff(fileDiff, focus = 'all') {
       // Magic numbers
       if (/\b\d{4,}\b/.test(content) && !/(?:const|let|var)\s/.test(content) && !/(?:version|port|count|index|limit|timeout|size|max|min)/i.test(content)) {
         comments.push({ file: path, line, severity: 'info', category: 'style', message: 'Magic number: consider naming this as a constant.' });
+      }
+      // var usage
+      if (/\bvar\s+\w+/.test(content) && !/(?:polyfill|\/\*|\*\/)/.test(content)) {
+        comments.push({ file: path, line, severity: 'info', category: 'style', message: 'Using var instead of const/let: prefer block-scoped declarations.' });
+      }
+      // Function with too many parameters (>3)
+      if (/(?:function\s+\w+\s*\(|const\s+\w+\s*=\s*(?:\(|function))/i.test(content) &&
+          !/\.(on|addEventListener|subscribe|map|filter|reduce|forEach|then|catch)/.test(content)) {
+        const params = content.match(/\(([^)]*)\)/);
+        if (params) {
+          const paramCount = params[1].split(',').filter(p => p.trim().length > 0 && !p.includes('{')).length;
+          if (paramCount > 3) {
+            comments.push({ file: path, line, severity: 'info', category: 'style', message: `Function has ${paramCount} parameters: consider using a single options object instead.` });
+          }
+        }
+      }
+      // Bare boolean literals as function arguments
+      if (/,\s*(true|false)\s*\)/.test(content) && /\.\w+\s*\(/.test(content)) {
+        comments.push({ file: path, line, severity: 'info', category: 'style', message: 'Boolean literal as argument: consider using a named options object or a constant for clarity.' });
+      }
+      // Long regex literal
+      if (/\/[^/]+\/[gimsu]*/.test(content) && content.length > 80) {
+        const regexMatch = content.match(/\/([^/]+)\//);
+        if (regexMatch && regexMatch[1].length > 30) {
+          comments.push({ file: path, line, severity: 'info', category: 'style', message: `Long regex pattern (${regexMatch[1].length} chars): consider breaking into named parts or adding a comment explaining the pattern.` });
+        }
       }
     }
   }

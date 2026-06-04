@@ -139,135 +139,311 @@ const CONVENTIONAL_TYPES = [
   { type: 'feat', description: 'API or integration', indicators: ['api', 'endpoint', 'route', 'graphql', 'rest', 'grpc'] },
 ];
 
+// ---------------------------------------------------------------------------
+// Diff content analysis helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract the "meat" of the diff — added/removed code lines (not context).
+ */
+function extractCodeChanges(diffContent) {
+  const added = [];
+  const removed = [];
+  for (const line of diffContent.split('\n')) {
+    if (line.startsWith('+') && !line.startsWith('+++ ')) added.push(line.slice(1));
+    else if (line.startsWith('-') && !line.startsWith('--- ')) removed.push(line.slice(1));
+  }
+  return { added, removed };
+}
+
+/**
+ * Parse diff to extract per-file changes: what functions/classes are touched.
+ */
+function parseDiffStructure(diffContent) {
+  const files = [];
+  let current = null;
+
+  for (const line of diffContent.split('\n')) {
+    const fileMatch = line.match(/^diff --git a\/(.+) b\/(.+)$/);
+    if (fileMatch) {
+      if (current) files.push(current);
+      current = { oldPath: fileMatch[1], newPath: fileMatch[2], hunks: [], addedLines: [], removedLines: [] };
+      continue;
+    }
+    const hunkMatch = line.match(/^@@ -\d+,\d+ \+(\d+),\d+ @@\s*(.*)/);
+    if (hunkMatch && current) {
+      current.hunks.push({ start: parseInt(hunkMatch[1], 10), section: hunkMatch[2].trim() });
+      continue;
+    }
+    if (current) {
+      if (line.startsWith('+') && !line.startsWith('+++ ')) current.addedLines.push(line.slice(1));
+      else if (line.startsWith('-') && !line.startsWith('--- ')) current.removedLines.push(line.slice(1));
+    }
+  }
+  if (current) files.push(current);
+  return files;
+}
+
+/**
+ * Extract meaningful identifiers from added code lines.
+ */
+function extractIdentifiers(lines) {
+  const ids = new Set();
+  const patterns = [
+    /(?:export\s+)?(?:async\s+)?function\s+(\w+)/g,
+    /(?:export\s+)?(?:const|let|var)\s+(\w+)/g,
+    /(?:export\s+)?class\s+(\w+)/g,
+    /(?:export\s+)?interface\s+(\w+)/g,
+    /(?:export\s+)?type\s+(\w+)/g,
+    /(?:export\s+)?enum\s+(\w+)/g,
+    /(?:import\s+)(?:(\w+)|{[\s\S]*?})\s+from/g,
+    /module\.exports\s*=\s*(\w+)/g,
+    /def\s+(\w+)\s*\(/g,
+    /class\s+(\w+)/g,
+    /(\w+)\s*=\s*(?:class|function)\s*\(/g,
+    /\.(\w+)\s*=\s*(?:function|\(|async)/g,
+    /(?:it|test|describe)\s*\(\s*['"]([^'"]+)['"]/g,
+  ];
+  for (const line of lines) {
+    for (const re of patterns) {
+      re.lastIndex = 0;
+      let m;
+      while ((m = re.exec(line)) !== null) {
+        if (m[1] && m[1].length > 1) ids.add(m[1]);
+      }
+    }
+  }
+  return [...ids];
+}
+
 /**
  * Detect conventional commit type from changed files + diff content.
  */
 function detectType(changedFiles, diffContent) {
   const extensions = new Set(changedFiles.map(f => extname(f.path).toLowerCase()));
   const paths = changedFiles.map(f => f.path.toLowerCase());
-  const combined = [...paths, diffContent.toLowerCase()].join(' ');
+  const { added, removed } = extractCodeChanges(diffContent);
+  const combinedCode = [...added, ...removed].join(' ');
+  const combinedPaths = paths.join(' ');
 
-  // Check for test files
-  if (paths.some(p => p.includes('test') || p.includes('spec') || p.endsWith('.test.') || p.endsWith('.spec.'))) {
-    // If only test files changed
-    if (changedFiles.every(f => f.path.toLowerCase().includes('test') || f.path.toLowerCase().includes('spec'))) {
-      return 'test';
-    }
+  // Special-case detection (high precision)
+
+  // 1. Only test files changed → test
+  if (changedFiles.every(f =>
+    /test|spec|__tests__|__mocks__|fixture/.test(f.path.toLowerCase()) ||
+    /\.(test|spec)\./.test(f.path.toLowerCase())
+  )) return 'test';
+
+  // 2. Only docs files changed → docs
+  if (changedFiles.every(f => {
+    const ext = extname(f.path).toLowerCase();
+    return ['.md', '.txt', '.rst', '.adoc', '.mdx'].includes(ext);
+  })) return 'docs';
+
+  // 3. Only config/CI files → chore
+  if (changedFiles.every(f =>
+    /(config|\.json|\.yaml|\.yml|\.toml|dockerfile|ci|\.gitignore)/i.test(f.path) &&
+    !/src|lib|app/.test(f.path)
+  )) return 'chore';
+
+  // 4. Only style files → style
+  if (changedFiles.every(f =>
+    /\.(css|scss|less|styl)/i.test(extname(f.path))
+  )) return 'style';
+
+  // Heuristic scoring — primarily based on ADDED code
+  const codeLower = combinedCode.toLowerCase();
+  const addedCodeLower = added.join(' ').toLowerCase();
+  const scores = { feat: 0, fix: 0, refactor: 0, chore: 0 };
+
+  // Count changed lines
+  const totalChangeLines = added.length + removed.length;
+  if (totalChangeLines === 0) return 'chore';
+
+  // Added lines with new identifiers → feat (weighted by proportion)
+  const identifiers = extractIdentifiers(added);
+  const newFunctionRatio = identifiers.length / Math.max(added.length, 1);
+
+  if (newFunctionRatio > 0.15) scores.feat += 3;
+  else if (newFunctionRatio > 0.05) scores.feat += 1;
+
+  // Significant removal proportion → refactor
+  if (removed.length > added.length * 0.5) scores.refactor += 2;
+  else if (removed.length > added.length * 0.2) scores.refactor += 1;
+
+  // Keywords in ADDED code only (not removed!)
+  if (/fix|bug|issue|error|exception|null|undefined|crash|fail/.test(addedCodeLower)) scores.fix += 2;
+  if (/add|implement|create|new|support|feature/.test(addedCodeLower)) scores.feat += 2;
+  if (/refactor|restructur|clean|simplif|extract|reorgan/.test(addedCodeLower)) scores.refactor += 2;
+  if (/deprecat|remov|drop|delete/.test(addedCodeLower)) {
+    scores.chore += 1;
   }
 
-  // Check for docs
-  if (extensions.has('.md') || extensions.has('.txt') || paths.some(p => p.includes('doc') || p.includes('readme'))) {
-    if (changedFiles.every(f => {
-      const ext = extname(f.path).toLowerCase();
-      return ['.md', '.txt', '.rst', '.adoc'].includes(ext) || f.path.toLowerCase().includes('doc');
-    })) {
-      return 'docs';
-    }
+  // Perf keywords — only score, don't short-circuit (avoid false positives from code that
+  // mentions 'perf' as a type string or regex pattern)
+  if (added.some(l => /optimize|performance|slow|latency|throughput|bottleneck/i.test(l))) scores.perf = 2;
+
+  // File addition ratio
+  const addedFiles = changedFiles.filter(f => f.status === 'A').length;
+  const totalFiles = changedFiles.length;
+  if (addedFiles / totalFiles > 0.5) scores.feat += 1;
+
+  // Config-only changes → chore
+  if (combinedPaths.includes('config') || combinedPaths.includes('.json') || combinedPaths.includes('.yaml')) {
+    if (identifiers.length === 0) scores.chore += 1;
   }
 
-  // Score each type
-  const scores = {};
-  for (const { type, indicators } of CONVENTIONAL_TYPES) {
-    const score = indicators.filter(ind => combined.includes(ind)).length;
-    if (!scores[type]) scores[type] = 0;
-    scores[type] += score;
-  }
-
-  // Default ordering for tie-breaking
-  const typeOrder = ['feat', 'fix', 'refactor', 'test', 'docs', 'chore', 'style', 'perf'];
+  const typeOrder = ['feat', 'fix', 'refactor', 'perf', 'chore'];
   let bestType = 'chore';
-  let bestScore = 0;
-  for (const type of typeOrder) {
-    if ((scores[type] || 0) > bestScore) {
-      bestScore = scores[type];
-      bestType = type;
+  let bestScore = -1;
+  for (const t of typeOrder) {
+    if ((scores[t] || 0) > bestScore) {
+      bestScore = scores[t];
+      bestType = t;
     }
   }
+
+  // Tie-break: when scores are equal, prefer more meaningful type
+  if (bestScore === 0) return 'chore';
 
   return bestType;
 }
 
 /**
- * Detect scope from file paths.
+ * Detect scope from file paths — finds the deepest common ancestor directory.
  */
 function detectScope(changedFiles) {
-  // Look for common top-level directories
-  const dirs = changedFiles
-    .map(f => f.path.split(/[/\\]/)[0])
-    .filter(Boolean);
+  if (changedFiles.length === 0) return '';
 
-  if (dirs.length === 0) return '';
+  const paths = changedFiles.map(f => f.path.split(/[/\\]/).filter(Boolean));
 
-  // Find most common directory
-  const counts = {};
-  for (const d of dirs) { counts[d] = (counts[d] || 0) + 1; }
-  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-
-  // Only use scope if >50% of files are in the same directory
-  if (sorted[0][1] > changedFiles.length * 0.5) {
-    return sorted[0][0];
+  // Single file: use second-to-last segment (parent dir), or empty for root files
+  if (paths.length === 1) {
+    const parts = paths[0];
+    return parts.length > 1 ? parts.slice(0, -1).join('/') : '';
   }
 
-  return '';
+  // Multiple files: find common ancestor path
+  const minLen = Math.min(...paths.map(p => p.length));
+  let commonLen = 0;
+  for (let i = 0; i < minLen; i++) {
+    const first = paths[0][i];
+    if (paths.every(p => p[i] === first)) {
+      commonLen = i + 1;
+    } else break;
+  }
+
+  if (commonLen <= 1) {
+    // No deep common ancestor — use most frequent top-level directory
+    const tops = paths.map(p => p[0]).filter(Boolean);
+    const counts = {};
+    let maxCount = 0;
+    let topDir = '';
+    for (const d of tops) {
+      counts[d] = (counts[d] || 0) + 1;
+      if (counts[d] > maxCount) { maxCount = counts[d]; topDir = d; }
+    }
+    return maxCount > changedFiles.length * 0.4 ? topDir : '';
+  }
+
+  // Use common ancestor, but strip too-generic top levels
+  const ancestor = paths[0].slice(0, commonLen);
+  const ancestorStr = ancestor.join('/');
+
+  // Avoid overly broad scopes like just "src"
+  if (commonLen === 1 && (ancestorStr === 'src' || ancestorStr === 'lib' || ancestorStr === 'app')) {
+    return '';
+  }
+
+  return ancestorStr;
 }
 
 /**
- * Generate a short summary line from diff content.
+ * Generate a concise, meaningful summary from diff content.
  */
 function generateSummary(changedFiles, diffContent) {
   const paths = changedFiles.map(f => f.path);
-  const lowercaseDiff = diffContent.toLowerCase();
+  const diffFiles = parseDiffStructure(diffContent);
+  const { added } = extractCodeChanges(diffContent);
 
-  // Try to find meaningful keywords
-  const keywords = [
-    { word: 'implement', template: 'implement' },
-    { word: 'add', template: 'add' },
-    { word: 'support', template: 'add support for' },
-    { word: 'handle', template: 'handle' },
-    { word: 'update', template: 'update' },
-    { word: 'remove', template: 'remove' },
-    { word: 'fix', template: 'fix' },
-    { word: 'improve', template: 'improve' },
-    { word: 'refactor', template: 'refactor' },
-    { word: 'simplify', template: 'simplify' },
-  ];
+  // Extract identifiers from added code
+  const identifiers = extractIdentifiers(added);
 
-  // Pick the most descriptive keyword present
-  let verb = 'update';
-  let verbIdx = -1;
-  for (const { word, template } of keywords) {
-    const idx = lowercaseDiff.indexOf(word);
-    if (idx >= 0 && (verbIdx < 0 || idx < verbIdx)) {
-      verb = template;
-      verbIdx = idx;
-    }
+  // Determine verb based on change patterns
+  const addedFiles = changedFiles.filter(f => f.status === 'A').length;
+  const deletedFiles = changedFiles.filter(f => f.status === 'D').length;
+  const modifiedFiles = changedFiles.filter(f => f.status === 'M' || (f.status !== 'A' && f.status !== 'D')).length;
+
+  let verb;
+  if (addedFiles > 0 && modifiedFiles === 0 && deletedFiles === 0 && changedFiles.length === addedFiles) {
+    verb = 'add';
+  } else if (deletedFiles > 0 && addedFiles === 0 && modifiedFiles === 0) {
+    verb = 'remove';
+  } else if (identifiers.some(id => /implement|creat|init/i.test(id))) {
+    verb = 'implement';
+  } else if (addedFiles >= modifiedFiles) {
+    verb = 'add';
+  } else if (modifiedFiles > addedFiles && identifiers.some(id => /(?:refactor|simplif|clean|extract|restruct)/i.test(id))) {
+    verb = 'refactor';
+  } else {
+    verb = 'update';
   }
 
-  // Extract the main subject from file names
-  const fileSubjects = paths
-    .map(p => {
+
+
+  // Convert all filenames to readable subjects (used as fallback)
+  const uniqueFileSubjects = [...new Set(
+    paths.map(p => {
       const base = p.split(/[/\\]/).pop().replace(/\.[^.]+$/, '');
-      // Convert camelCase/snake_case to readable words
       return base
         .replace(/([A-Z])/g, ' $1')
         .replace(/[-_]/g, ' ')
         .toLowerCase()
         .trim();
     })
-    .filter(Boolean);
+  )].filter(Boolean);
 
-  // Use the most generic file as subject, or combine a few
-  const uniqueSubjects = [...new Set(fileSubjects)];
-  let subject;
-  if (uniqueSubjects.length <= 3) {
-    subject = uniqueSubjects.join(', ');
-  } else {
-    // Pick the most meaningful ones
-    const meaningful = uniqueSubjects.filter(s => s.length > 2 && !['index', 'main', 'app', 'util', 'helper', 'common'].includes(s));
-    subject = meaningful.length > 0 ? meaningful.slice(0, 3).join(', ') : uniqueSubjects[0];
+  // === Determine subject ===
+  // Strategy 1: single file → use its readable name
+  if (changedFiles.length === 1) {
+    return `${verb} ${uniqueFileSubjects[0]}`;
   }
 
-  return `${verb} ${subject}`;
+  // Strategy 2: new files dominate → use new filenames
+  const newFileSubjects = changedFiles
+    .filter(f => f.status === 'A')
+    .map(f => {
+      const base = f.path.split(/[/\\]/).pop().replace(/\.[^.]+$/, '');
+      return base.replace(/([A-Z])/g, ' $1').replace(/[-_]/g, ' ').toLowerCase().trim();
+    })
+    .filter(Boolean);
+  if (newFileSubjects.length > 0 && newFileSubjects.length >= changedFiles.length * 0.5) {
+    const subject = [...new Set(newFileSubjects)].slice(0, 3).join(' & ');
+    return `${verb} ${subject.replace(/^./, c => c.toUpperCase())}`;
+  }
+
+  // Strategy 3: look for high-level identifiers (classes, interfaces, exports)
+  // Filter out low-level implementation functions
+  const highLevelIds = identifiers.filter(id =>
+    id.length > 3 &&
+    /^[A-Z]/.test(id) && // PascalCase = class/interface/type
+    !id.endsWith('Error') && !id.endsWith('Exception')
+  );
+  if (highLevelIds.length > 0) {
+    const subjects = [...new Set(highLevelIds.map(id =>
+      id.replace(/([A-Z])/g, ' $1').replace(/[-_]/g, ' ').toLowerCase().trim()
+    ))];
+    return `${verb} ${subjects.slice(0, 2).join(' & ').replace(/^./, c => c.toUpperCase())}`;
+  }
+
+  // Strategy 4: use filenames (grouped by concept)
+  const filteredSubjects = uniqueFileSubjects.filter(s =>
+    s.length > 2 && !['index', 'main', 'app', 'util', 'helper', 'common',
+                       'utils', 'types', 'config', 'setup', 'styles'].includes(s)
+  );
+  const finalSubjects = filteredSubjects.length > 0 ? filteredSubjects : uniqueFileSubjects;
+  const subject = finalSubjects.slice(0, 3).join(' & ');
+  return `${verb} ${subject.replace(/^./, c => c.toUpperCase())}`;
 }
 
 /**

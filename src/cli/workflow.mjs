@@ -79,6 +79,16 @@ const WORKFLOW_TEMPLATES = {
       { tool: 'smart_test',    args: {}, description: 'Run tests to establish baseline', dependsOn: [0], onFailure: 'skip' },
     ],
   },
+  'git-flow': {
+    description: 'Git workflow: analyze context, commit with auto-message, optionally create PR or review. Goal is the commit intent (e.g., "add login feature" or "review staged changes").',
+    steps: [
+      { tool: 'smart_git_context', args: { all: true, statOnly: true }, description: 'Analyze git state — staged/unstaged changes', dependsOn: [], onFailure: 'abort' },
+      { tool: 'smart_git_commit',  args: { all: true, dryRun: true, message: '$goal' }, description: 'Preview commit with auto-generated message', dependsOn: [0], onFailure: 'warn' },
+      { tool: 'smart_git_commit',  args: { all: true, message: '$goal' }, description: 'Execute the commit', dependsOn: [1], onFailure: 'abort' },
+      { tool: 'smart_git_pr',      args: { noPublish: true }, description: 'Generate PR description from committed changes', dependsOn: [2], onFailure: 'skip' },
+      { tool: 'smart_git_review',  args: { all: true, focus: 'all' }, description: 'Review all changes for issues', dependsOn: [0], onFailure: 'skip' },
+    ],
+  },
 };
 
 // ---------------------------------------------------------------------------
