@@ -2,6 +2,70 @@
 
 MCP server 提供 26 個開發工具，可在 opencode 中直接呼叫。
 
+---
+
+## 給 LLM / AI Agent 的安裝指引
+
+如果你是 LLM 並被要求安裝這個 MCP server，請依以下步驟操作：
+
+### 步驟 1：clone 專案
+
+```bash
+git clone https://github.com/wclinRD/opencode_smart_mcp.git
+cd opencode_smart_mcp
+```
+
+### 步驟 2：安裝相依套件
+
+```bash
+cd .opencode && npm install && cd ..
+```
+
+### 步驟 3：確認 server 入口檔存在
+
+```bash
+ls src/server/index.mjs
+# 應回傳：src/server/index.mjs
+```
+
+### 步驟 4：將 MCP 設定加入 opencode.json
+
+在專案根目錄或 `~/.config/opencode/opencode.json` 中，加入以下內容：
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "smart": {
+      "type": "local",
+      "command": ["node", "/絕對路徑/src/server/index.mjs"],
+      "enabled": true
+    }
+  }
+}
+```
+
+> 注意：`command` 必須使用**絕對路徑**指向 clone 下來的 `src/server/index.mjs`。不可使用相對路徑，否則 opencode 會無法啟動 MCP server。
+
+### 步驟 5：啟用後驗證
+
+啟動 opencode 後檢查 MCP server 是否成功連接：
+
+```bash
+opencode mcp list
+# smart 應顯示 connected
+```
+
+### 錯誤排除
+
+| 錯誤訊息 | 原因 | 修復 |
+|----------|------|------|
+| `4/5 startup requests failed` | opencode.json 頂層含有非標準欄位 | 移除 `name`、`version`、`description` 等 |
+| `ECONNREFUSED` | command 路徑錯誤或 node 找不到 | 檢查 `command[1]` 是否為正確絕對路徑 |
+| tool 不存在 | plugin 未正確載入 | 確認 `.opencode/node_modules/` 已安裝 |
+
+---
+
 ## 架構
 
 ```
