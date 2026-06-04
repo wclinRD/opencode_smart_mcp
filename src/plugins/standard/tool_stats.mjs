@@ -1,0 +1,8 @@
+export default {
+  name: 'smart_tool_stats',
+  category: 'plan',
+  description: 'Use when: need to review smart usage patterns — which tools are used most, error rates, trends. Also provides recommendations for stale tools. Run periodically to identify overused or underused tools.',
+  inputSchema: { type: 'object', properties: { command: { type: 'string', enum: ['record', 'report', 'trends', 'recommendations', 'patterns'], description: 'record/report/trends/recommendations/patterns' }, name: { type: 'string', description: 'Tool name (for record)' }, duration: { type: 'number', description: 'Duration ms (for record)' }, success: { type: 'boolean', description: 'Call succeeded?' }, days: { type: 'number', description: 'Last N days (default: 30)' }, top: { type: 'number', description: 'Top N (default: 10)' }, root: { type: 'string', description: 'Root dir (default: .)' }, format: { type: 'string', enum: ['text', 'json', 'markdown'], description: 'Output format (default: text)' } }, required: ['command'] },
+  cli: 'tool-stats.mjs',
+  mapArgs(a) { const cli = []; if (a.command) cli.push(String(a.command)); if (a.name) cli.push(String(a.name)); if (a.duration) cli.push('--duration', String(a.duration)); if (a.success !== undefined) cli.push('--success', String(a.success)); if (a.days) cli.push('--days', String(a.days)); if (a.top) cli.push('--top', String(a.top)); if (a.root) cli.push('--root', String(a.root)); if (a.format) cli.push('--format', String(a.format)); cli.push('--no-color'); return cli; },
+};

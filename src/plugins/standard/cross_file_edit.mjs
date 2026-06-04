@@ -1,0 +1,8 @@
+export default {
+  name: 'smart_cross_file_edit',
+  category: 'edit',
+  description: 'Use when: need to apply the same pattern change across multiple related files. Uses import graph to find all affected files. Dry-run by default. Avoid when: editing a single file (use standard edit tool instead).',
+  inputSchema: { type: 'object', properties: { file: { type: 'string', description: 'Source file path (positional)' }, pattern: { type: 'string', description: 'Old text to find' }, replacement: { type: 'string', description: 'New text to apply' }, root: { type: 'string', description: 'Root dir (default: .)' }, include: { type: 'string', description: 'Glob include' }, exclude: { type: 'string', description: 'Glob exclude' }, signature: { type: 'string', enum: ['rename', 'signature', 'auto'], description: 'Change type (default: auto)' }, dryRun: { type: 'boolean', description: 'Preview only (default: true)' }, apply: { type: 'boolean', description: 'Actually apply (default: false)' }, format: { type: 'string', enum: ['text', 'json', 'diff'], description: 'Output format (default: text)' } }, required: ['file'] },
+  cli: 'cross-file-edit.mjs',
+  mapArgs(a) { const cli = []; if (a.file) cli.push(String(a.file)); if (a.pattern) cli.push(String(a.pattern)); if (a.replacement) cli.push(String(a.replacement)); if (a.root) cli.push('--root', String(a.root)); if (a.include) cli.push('--include', String(a.include)); if (a.exclude) cli.push('--exclude', String(a.exclude)); if (a.signature) cli.push('--signature', String(a.signature)); if (a.dryRun) cli.push('--dry-run'); if (a.apply) cli.push('--apply'); if (a.format) cli.push('--format', String(a.format)); cli.push('--no-color'); return cli; },
+};

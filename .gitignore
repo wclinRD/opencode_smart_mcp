@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+.opencode/node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Auto-generated reports (can regenerate)
+reports/*.html
+
+# Logs
+*.log
+
+# Runtime opencode data (machine-specific, not for sharing)
+.opencode/memory-core/
+.opencode/memory-working/
+.opencode/stats/
