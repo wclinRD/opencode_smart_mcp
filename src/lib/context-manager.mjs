@@ -385,6 +385,76 @@ export class ContextManager {
     } catch { return false; }
   }
 
+  /**
+   * Merge findings and history from multiple sessions into current context.
+   * Duplicate findings (same text) are skipped. Tool history is appended
+   * chronologically up to MAX_HISTORY. Metadata counts are aggregated.
+   * @param {string[]} sessionIds - Array of session IDs to merge
+   * @returns {object} merge result { mergedFindings, mergedCalls, totalToolCount, totalErrorCount }
+   */
+  mergeSessions(sessionIds) {
+    if (!this._context || !sessionIds || sessionIds.length === 0) {
+      return { mergedFindings: 0, mergedCalls: 0, totalToolCount: 0, totalErrorCount: 0 };
+    }
+
+    let mergedFindings = 0;
+    let mergedCalls = 0;
+    let totalToolCount = this._context.metadata.toolCount;
+    let totalErrorCount = this._context.metadata.errorCount;
+    const existingFindings = new Set(
+      this._context.accumulatedFindings.map(f => f.finding)
+    );
+
+    for (const sid of sessionIds) {
+      const loaded = this._loadFromDisk(sid);
+      if (!loaded) continue;
+
+      // Merge findings (skip duplicates)
+      for (const f of loaded.accumulatedFindings || []) {
+        if (!existingFindings.has(f.finding)) {
+          this._context.accumulatedFindings.push({
+            ...f,
+            source: `${f.source}@${sid.slice(0, 8)}`,
+          });
+          existingFindings.add(f.finding);
+          mergedFindings++;
+          if (this._context.accumulatedFindings.length > this._maxFindings) {
+            this._context.accumulatedFindings.shift();
+          }
+        }
+      }
+
+      // Merge tool history (chronologically, deduplicate by timestamp)
+      const history = loaded.toolHistory || [];
+      for (const entry of history) {
+        entry.sessionSource = sid.slice(0, 8);
+        this._context.toolHistory.push(entry);
+        mergedCalls++;
+        if (entry.ok === false) totalErrorCount++;
+        totalToolCount++;
+      }
+
+      // Aggregate metadata
+      if (loaded.metadata) {
+        totalToolCount += loaded.metadata.toolCount || 0;
+        totalErrorCount += loaded.metadata.errorCount || 0;
+      }
+    }
+
+    // Trim history to max
+    if (this._context.toolHistory.length > this._maxHistory) {
+      this._context.toolHistory = this._context.toolHistory.slice(-this._maxHistory);
+    }
+
+    this._context.metadata.toolCount = totalToolCount;
+    this._context.metadata.errorCount = totalErrorCount;
+    this._context.metadata.updatedAt = nowISO();
+
+    if (this._autoSave) this._save();
+
+    return { mergedFindings, mergedCalls, totalToolCount, totalErrorCount };
+  }
+
   /** List all persisted contexts with metadata (no full history). */
   listSessionsSummary() {
     const sessions = this.listSessions();

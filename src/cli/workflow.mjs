@@ -54,6 +54,16 @@ const WORKFLOW_TEMPLATES = {
       { tool: 'smart_test',           args: {}, description: 'Run tests to verify refactor', dependsOn: [3], onFailure: 'warn' },
     ],
   },
+  'refactor-safe-flow': {
+    description: 'Refactor with change-impact awareness: analyze impact, trace call graph, think, apply safely, verify',
+    steps: [
+      { tool: 'smart_impact_flow',    args: {}, description: 'Analyze change impact via CKG call graph', dependsOn: [], onFailure: 'warn' },
+      { tool: 'smart_code_call_graph', args: { depth: 2 }, description: 'Confirm impact scope with call graph', dependsOn: [0], onFailure: 'skip' },
+      { tool: 'smart_thinking',       args: { template: 'refactor', topic: '$goal' }, description: 'Think about impact results & plan safe changes', dependsOn: [0, 1], onFailure: 'skip' },
+      { tool: 'smart_cross_file_edit', args: {}, description: 'Apply refactor changes across files', dependsOn: [2], onFailure: 'warn' },
+      { tool: 'smart_test',           args: {}, description: 'Run tests to verify refactor', dependsOn: [3], onFailure: 'warn' },
+    ],
+  },
   'security-flow': {
     description: 'Audit and fix security issues: scan creds, scan injections, grep high-risk patterns, fix, verify',
     steps: [
@@ -171,7 +181,7 @@ Usage:
   node workflow.mjs list-templates
 
 Options:
-  --template <name>   Workflow template (debug-flow, refactor-flow, security-flow, research-flow, default-flow)
+  --template <name>   Workflow template (debug-flow, refactor-flow, refactor-safe-flow, security-flow, research-flow, default-flow, git-flow)
   --state <path>      Path to workflow state file (default: .workflows/<uuid>.json)
   --context <text>    Extra context (project info, constraints) for plan generation
   --step <N>          Run a specific step (for dispatch/report)

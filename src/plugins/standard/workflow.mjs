@@ -8,7 +8,7 @@ export default {
       command: { type: 'string', enum: ['create', 'report', 'dispatch', 'replan', 'summary', 'list-templates'],
         description: 'create (start new workflow from template) | report (record step result) | dispatch (execute steps by spawning CLI tools) | replan (re-plan after failure) | summary (show workflow state) | list-templates (show available templates)' },
       goal: { type: 'string', description: 'Goal description (for create)' },
-      template: { type: 'string', description: 'Workflow template name: debug-flow, refactor-flow, security-flow, research-flow, default-flow (for create)' },
+      template: { type: 'string', description: 'Workflow template name: debug-flow, refactor-flow, refactor-safe-flow, security-flow, research-flow, default-flow, git-flow (for create)' },
       state: { type: 'string', description: 'Path to workflow state file (for dispatch/report/replan/summary)' },
       step: { type: 'number', description: 'Step number to dispatch or report (for dispatch/report)' },
       stepStatus: { type: 'string', enum: ['ok', 'fail', 'skip'], description: 'Step execution status (for report, default: ok)' },

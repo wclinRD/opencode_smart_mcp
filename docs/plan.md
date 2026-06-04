@@ -10,7 +10,7 @@
 Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 40 個開發工具 + 專屬 agent personality。當前版本 3.6.0（Plugin Loader + Router 架構 + 動態多輪推理 + Context 管理 + Workflow 引擎 + Compose 引擎 + LSP 程式碼語義分析 + CKG 程式碼知識圖譜 + Hybrid Reasoning Engine + Agent 人格定義 + 全面非阻塞 CLI + auto-toonify 輸出攔截器）。
 
 ### 核心數據
-- **工具總數**：40（6 原生 + 34 經 router — 含 4 Phase 10 程式碼語義工具 + 1 Phase 11 CKG 查詢工具 + 1 Phase 12 Hybrid Router + 3 Phase D agent 輔助工具）
+- **工具總數**：41（6 原生 + 35 經 router — 含 4 Phase 10 程式碼語義工具 + 1 Phase 11 CKG 查詢工具 + 1 Phase 12 Hybrid Router + 1 Phase 13 Impact Flow + 3 Phase D agent 輔助工具）
 - **架構**：Plugin Loader → src/plugins/core/（6 原生 handler）/ src/plugins/standard/（24 router CLI — 全部非阻塞 async spawn）
 - **Workflow 引擎**：Phase 4-6 完成 — dispatch 實際執行 + 5 模板 + compose/pipe/parallel 三種原語 + replan + summary
 - **語言**：JavaScript (ESM) — 6 核心 handler + 24 CLI 全數非阻塞化 (Phase 6)
@@ -1008,10 +1008,11 @@ smart_code_query({
 
 ---
 
-### Phase 13: Change-Impact Pipeline（P1 — 精確變更分析）
+### Phase 13: Change-Impact Pipeline（P1 — 精確變更分析）✅
 
 **目標**：建立 git diff → AST diff → 影響傳播 → 測試預測的完整 pipeline。
 **前置**：Phase 10 + Phase 11 + Phase 12 完成
+**狀態**：✅ 已完成（2026-06-05）
 
 #### 13.1 流程
 
@@ -1046,11 +1047,11 @@ refactor-safe-flow:
   step 4: safe-edit (cross_file_edit with safety constraints)
   step 5: verify (test run)
 ```
-
 **驗收標準**：
-- [ ] AST diff 正確識別變更符號 > 95%
-- [ ] Impact 傳播在 1000 檔案專案 < 200ms
-- [ ] 重構 workflow 能主動警示「此修改影響 X 個下游模組」
+
+- [x] AST diff 正確識別變更符號 > 95%
+- [x] Impact 傳播在 1000 檔案專案 < 200ms
+- [x] 重構 workflow 能主動警示「此修改影響 X 個下游模組」
 
 ---
 

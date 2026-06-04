@@ -407,16 +407,23 @@
 - [ ] 自動歸納「失敗模式 cluster」：相同工具 + 相同 error type 多次失敗
 - [ ] 輸出 pattern report：「smart_grep 在 large 專案 timeout 率 40%，建議加 root 限制」
 
-### 7.3 Cross-session context 合併
+### 7.3 Cross-session context 合併 ✅
 
-- [ ] ContextManager 新增 `mergeSessions(sessionIds[])`：合併多 session 的 findings
-- [ ] `smart_context` 新增 `merge` 指令
+- [x] ContextManager 新增 `mergeSessions(sessionIds[])`：合併多 session 的 findings + history + metadata
+  - [x] 去重 findings（by 文字內容）
+  - [x] 時序合併 tool history
+  - [x] 聚合 metadata（toolCount + errorCount）
+  - [x] 自動 trim 到 MAX_HISTORY
+  - [x] sessionSource 標記（`${tool}@${sid.slice(0,8)}`）
+- [x] `smart_context` 新增 `merge` 指令
+  - [x] 輸入：`{ command: "merge", sessionIds: [...] }`
+  - [x] 輸出：`{ mergedFindings, mergedCalls, totalToolCount, totalErrorCount }`
 
 ### 驗收標準
 
 - [ ] 語意相似錯誤（"file not found" vs "cannot locate file"）可匹配
 - [ ] tool-stats patterns 輸出 pattern cluster 報告
-- [ ] cross-session merge 正確合併 findings
+- [x] cross-session merge 正確合併 findings
 
 ---
 
@@ -662,30 +669,36 @@
 
 ---
 
-## 🟠 Phase 13: Change-Impact Pipeline (P1)
+## 🟠 Phase 13: Change-Impact Pipeline (P1) ✅
 
 **對應 plan.md 五-Phase 13**
 **目標**：git diff → AST diff → 影響傳播 → 測試預測
 **前置**：Phase 10 + Phase 11 + Phase 12 完成
+**狀態**：✅ 已完成（2026-06-05）
 
-### 13.1 影響傳播
+**實作摘要**：`src/lib/impact-engine.mjs` (710 行) — ImpactEngine class 包含 parseDiff / getChangedSymbols / propagateImpact (CKG+LSP) / predictTests / analyzeImpact 完整 pipeline。`src/plugins/standard/impact-flow.mjs` — `smart_impact_flow` MCP tool（handler-based, 支援 text/json 格式）。`src/cli/workflow.mjs` — `refactor-safe-flow` 模板（5 步驟：impact_flow → call_graph → thinking → cross_file_edit → test）。
 
-- [ ] `src/lib/impact-engine.mjs` — 影響分析核心
-  - [ ] git diff parsing → 修改符號列表
-  - [ ] CKG 查詢 → 影響傳播（depth 控制）
-  - [ ] over-approximation（動態語言）vs 精確分析（靜態語言）
-- [ ] `src/plugins/standard/impact-flow.mjs` → `smart_impact_flow`
-  - [ ] 輸入：`{ diff?, files?, depth?, checkTests? }`
-  - [ ] 輸出：受影響檔案 + 函式 + 測試案例
+### 13.1 影響傳播 ✅
 
-### 13.2 Workflow 整合
+- [x] `src/lib/impact-engine.mjs` — 影響分析核心 (710 行)
+  - [x] git diff parsing → 修改符號列表（parseDiff + getChangedSymbols）
+  - [x] CKG queryCallers → 影響傳播（propagateImpact, depth 控制）
+  - [x] LSP references fallback（當 CKG 資料不可用時）
+  - [x] Test prediction（3 種啟發式：import 關係 / 同目錄 / 命名匹配）
+  - [x] over-approximation（動態語言）vs CKG 精確分析（靜態語言）
+- [x] `src/plugins/standard/impact-flow.mjs` → `smart_impact_flow` MCP tool
+  - [x] 輸入：`{ diff?, files?, symbols?, depth?, predictTests?, format?, root? }`
+  - [x] 輸出：`{ changes, symbols, impact: { direct, transitive, stats }, testPrediction, summary }`
+  - [x] 支援 text/json 輸出格式
 
-- [ ] workflow 模板新增：`refactor-safe-flow`
-  - [ ] step 1: `smart_code_impact` → impact list
-  - [ ] step 2: `smart_code_call_graph` → 確認影響範圍
-  - [ ] step 3: LLM review impact summary
-  - [ ] step 4: safe-edit（with safety constraints）
-  - [ ] step 5: verify（test run）
+### 13.2 Workflow 整合 ✅
+
+- [x] workflow 模板新增：`refactor-safe-flow`
+  - [x] step 1: `smart_impact_flow` → impact list
+  - [x] step 2: `smart_code_call_graph` → 確認影響範圍
+  - [x] step 3: `smart_thinking` → review impact summary
+  - [x] step 4: `smart_cross_file_edit` → 安全編輯
+  - [x] step 5: `smart_test` → 驗證
 
 ### 驗收標準
 
@@ -718,7 +731,18 @@
 
 ---
 
-## ✅ 已完成 (v3.6.0)
+## ✅ 已完成 (v3.7.0)
+
+### Phase 13: Change-Impact Pipeline (2026-06-05)
+- [x] `src/lib/impact-engine.mjs` — ImpactEngine class (710 行)
+  - parseDiff / getChangedSymbols / propagateImpact (CKG+LSP) / predictTests / analyzeImpact
+- [x] `src/plugins/standard/impact-flow.mjs` → `smart_impact_flow` MCP tool (handler-based)
+- [x] Workflow 模板新增 `refactor-safe-flow` (5 步驟)
+- [x] Phase 7.3: ContextManager mergeSessions() + smart_context merge 指令
+
+### Phase 7.3: Cross-session context 合併 (2026-06-05)
+- [x] `ContextManager.mergeSessions(sessionIds[])` — 去重合併 findings + history + metadata
+- [x] `smart_context merge` — MCP 指令（支援 sessionIds 陣列參數）
 
 ### Auto-Toonify 回應攔截器 (2026-06-05)
 - [x] `src/server/index.mjs` — `respond()` 新增 auto-toonify 攔截器

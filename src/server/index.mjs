@@ -590,7 +590,7 @@ function respondError(id, code, message, data) {
 
 const CONTEXT_TOOL_DESCRIPTION =
   'Query or manage session context. Use this to see what tools have been called, what findings accumulated, or to reset/list sessions.\n' +
-  '  command: "get" (default) | "summary" | "history" | "findings" | "reset" | "sessions" | "delete" | "inject" | "workflow-stats"\n' +
+  '  command: "get" (default) | "summary" | "history" | "findings" | "reset" | "sessions" | "delete" | "inject" | "workflow-stats" | "merge"\n' +
   '  sessionId: optional, for resume/delete operations';
 
 /**
@@ -681,6 +681,14 @@ function handleSmartContext(id, args) {
         break;
       }
 
+      case 'merge': {
+        const sessionIds = args.sessionIds || (args.sessionId ? [args.sessionId] : []);
+        if (sessionIds.length === 0) { result = 'sessionIds (array) or sessionId required for merge.'; break; }
+        const mergeResult = contextManager.mergeSessions(sessionIds);
+        result = JSON.stringify(mergeResult, null, 2);
+        break;
+      }
+
       case 'workflow-stats': {
         const wfId = args.workflowId || args.id;
         if (!wfId) { result = 'workflowId required for workflow-stats.'; break; }
@@ -691,7 +699,7 @@ function handleSmartContext(id, args) {
       }
 
       default:
-        result = `Unknown command: ${cmd}. Available: get, summary, history, findings, reset, sessions, delete, inject, workflow-stats`;
+        result = `Unknown command: ${cmd}. Available: get, summary, history, findings, reset, sessions, delete, inject, workflow-stats, merge`;
     }
 
     respond(id, { content: [{ type: 'text', text: result }] });
@@ -754,8 +762,9 @@ function handleRequest(req) {
         inputSchema: {
           type: 'object',
           properties: {
-            command: { type: 'string', description: 'Command: get (default), summary, history, findings, reset, sessions, delete, inject, workflow-stats', enum: ['get', 'summary', 'history', 'findings', 'reset', 'sessions', 'delete', 'inject', 'workflow-stats'] },
-            sessionId: { type: 'string', description: 'Session ID (for resume/delete)' },
+            command: { type: 'string', description: 'Command: get (default), summary, history, findings, reset, sessions, delete, inject, workflow-stats, merge', enum: ['get', 'summary', 'history', 'findings', 'reset', 'sessions', 'delete', 'inject', 'workflow-stats', 'merge'] },
+            sessionId: { type: 'string', description: 'Session ID (for resume/delete/merge)' },
+            sessionIds: { type: 'array', items: { type: 'string' }, description: 'Session IDs array (for merge)' },
             workflowId: { type: 'string', description: 'Workflow ID (for workflow-stats)' },
             projectRoot: { type: 'string', description: 'Project root path' },
           },
