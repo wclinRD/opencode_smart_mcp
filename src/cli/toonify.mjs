@@ -20,7 +20,6 @@
 //   --no-color          Disable color output
 //   -h, --help          Show this help
 
-import { createRequire } from 'module';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
@@ -29,7 +28,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Path to the installed toonify-mcp package
 const TOONIFY_PATH = resolve('/Users/wclin/toonify-mcp');
-const require = createRequire(TOONIFY_PATH);
 
 // ---------------------------------------------------------------------------
 // Dynamically import toonify-mcp modules
@@ -55,7 +53,10 @@ async function loadToonify() {
 
 async function cmdOptimize(content, opts) {
   await loadToonify();
-  const optimizer = new TokenOptimizer();
+  const optimizer = new TokenOptimizer({
+    minSavingsThreshold: 10,
+    minTokensThreshold: 20,
+  });
   try {
     const result = await optimizer.optimize(content, {
       toolName: opts.toolName || 'smart',
@@ -67,7 +68,6 @@ async function cmdOptimize(content, opts) {
     }
 
     const lines = [];
-    const { optimize } = require('../../package.json');
     lines.push('📦 TOON Token Optimization');
     lines.push('='.repeat(50));
 
@@ -92,7 +92,10 @@ async function cmdOptimize(content, opts) {
       lines.push(`  ⚠ Not optimized`);
       lines.push(`  Reason: ${result.reason || 'Unknown'}`);
       if (result.originalTokens) {
-        lines.push(`  Tokens: ${result.originalTokens.toLocaleString()}`);
+        lines.push(`  Original tokens: ${result.originalTokens.toLocaleString()}`);
+      }
+      if (result.optimizedTokens) {
+        lines.push(`  Optimized tokens: ${result.optimizedTokens.toLocaleString()}`);
       }
     }
     return lines.join('\n');

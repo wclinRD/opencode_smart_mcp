@@ -1,4 +1,4 @@
-import { quickThought } from '../../cli/thinking.mjs';
+import { quickThink } from '../../cli/thinking.mjs';
 
 export default {
   name: 'smart_think',
@@ -86,7 +86,7 @@ Key features:
   },
   /** Direct handler — no process spawn overhead */
   handler(args) {
-    const result = quickThought({
+    const result = quickThink({
       thought: String(args.thought ?? ''),
       nextThoughtNeeded: Boolean(args.nextThoughtNeeded),
       thoughtNumber: Number(args.thoughtNumber ?? 1),

@@ -653,15 +653,11 @@ function formatDynamicHeader(state, step) {
   const progress = state.steps.filter(s => s.completed).length;
   const total = state.totalSteps;
 
-  lines.push(`🧠 ${tmpl.name} — Dynamic Mode`);
-  lines.push(`   ${tmpl.description}`);
-  lines.push('');
-  lines.push(`Topic: ${state.topic}`);
-  lines.push(`Progress: ${progress}/${total} steps completed`);
+  lines.push(`[${tmpl.name}] ${state.topic}`);
+  lines.push(`Progress: ${progress}/${total} | ${state.template}`);
   if (state.branchActive) {
-    lines.push(`[Branch active: ${state.branchHistory.join(' → ')}]`);
+    lines.push(`Branch: ${state.branchHistory.join(' → ')}`);
   }
-  lines.push('='.repeat(60));
   lines.push('');
   return lines.join('\n');
 }
@@ -680,20 +676,12 @@ function formatDynamicStep(step, state) {
   if (tmpl.branches && step.index === state.currentStepIndex) {
     const branchKeys = Object.keys(tmpl.branches);
     if (branchKeys.length > 0) {
-      lines.push('Available branches (select via --branch <name> after completing this step):');
+      lines.push('Branches:');
       for (const [key, branch] of Object.entries(tmpl.branches)) {
-        lines.push(`  ${key}: ${branch.label} — ${branch.description}`);
+        lines.push(`  ${key} → ${branch.label}: ${branch.description}`);
       }
       lines.push('');
     }
-  }
-
-  // Show state file path for resume
-  if (_statePath) {
-    lines.push(`[State: ${_statePath}]`);
-    lines.push(`[Record result: thinking.mjs --state ${_statePath} --record ${step.index} "your result"]`);
-    lines.push(`[Advance:     thinking.mjs --state ${_statePath} --advance]`);
-    lines.push('');
   }
 
   return lines.join('\n');
@@ -703,18 +691,21 @@ function formatDynamicSummary(state) {
   const lines = [];
   const tmpl = TEMPLATES[state.template];
 
-  lines.push(`🧠 ${tmpl.name} — Complete`);
-  lines.push('='.repeat(60));
+  lines.push(`[${tmpl.name} Complete] ${state.topic}`);
   lines.push('');
 
   for (const step of state.steps) {
-    const status = step.result ? '✅' : '⬜';
-    lines.push(`${status} Step ${step.index + 1}: ${step.name}`);
+    const mark = step.result ? '✓' : '○';
+    lines.push(`${mark} Step ${step.index + 1}: ${step.name}`);
     if (step.result) {
-      lines.push(`   ${step.result}`);
+      // Indent multi-line results
+      const resultLines = step.result.split('\n');
+      for (const rl of resultLines) {
+        lines.push(`    ${rl}`);
+      }
     }
     if (step.branchTaken) {
-      lines.push(`   → Branch: ${step.branchTaken}`);
+      lines.push(`    → Branch: ${step.branchTaken}`);
     }
     lines.push('');
   }
@@ -724,8 +715,11 @@ function formatDynamicSummary(state) {
     lines.push('');
   }
 
-  lines.push(`Total steps: ${state.steps.length}`);
-  lines.push(`Completed: ${state.steps.filter(s => s.completed).length}/${state.steps.length}`);
+  const completed = state.steps.filter(s => s.completed).length;
+  lines.push(`Summary: ${completed}/${state.steps.length} steps completed`);
+  if (state.cancelled) {
+    lines.push('Session was cancelled.');
+  }
   lines.push('');
 
   return lines.join('\n');
@@ -828,23 +822,25 @@ function applyBranch(state, branchName) {
 function formatText(template, topic, steps, opts) {
   const lines = [];
 
-  lines.push(`🧠 ${template.name}`);
-  lines.push(`   ${template.description}`);
-  lines.push('');
-  lines.push(`Topic: ${topic}`);
-  lines.push('='.repeat(60));
+  lines.push(`[${template.name}] ${topic}`);
+  lines.push(template.description);
   lines.push('');
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
-    lines.push(`Step ${i + 1}: ${step.icon || '•'} ${step.name}`);
-    lines.push('─'.repeat(40));
+    lines.push(`Step ${i + 1}/${steps.length}: ${step.name}`);
+    lines.push(`  ${topic ? `Context: ${topic}` : ''}`);
     lines.push(`  ${step.prompt}`);
     if (step.notes) {
-      lines.push(`  → ${step.notes}`);
+      lines.push(`  Note: ${step.notes}`);
+    }
+    if (step.planStep) {
+      lines.push(`  Plan: ${JSON.stringify(step.planStep)}`);
     }
     lines.push('');
   }
+
+  lines.push(`End of ${template.name}. Use smart_think to continue reasoning.`);
 
   return lines.join('\n');
 }
@@ -852,18 +848,13 @@ function formatText(template, topic, steps, opts) {
 function formatMarkdown(template, topic, steps, opts) {
   const lines = [];
 
-  lines.push(`# ${template.name}`);
-  lines.push('');
+  lines.push(`# ${template.name}: ${topic}`);
   lines.push(`> ${template.description}`);
-  lines.push('');
-  lines.push(`**Topic:** ${topic}`);
-  lines.push('');
-  lines.push('---');
   lines.push('');
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
-    lines.push(`## Step ${i + 1}: ${step.name}`);
+    lines.push(`## Step ${i + 1}/${steps.length}: ${step.name}`);
     lines.push('');
     lines.push(`${step.prompt}`);
     if (step.notes) {
@@ -872,6 +863,9 @@ function formatMarkdown(template, topic, steps, opts) {
     }
     lines.push('');
   }
+
+  lines.push('---');
+  lines.push(`_End of ${template.name}. Continue with smart_think for deeper reasoning._`);
 
   return lines.join('\n');
 }
@@ -1368,6 +1362,9 @@ async function main() {
 }
 
 // Only run CLI when executed directly (not when imported)
+// Alias for plan compatibility
+export const quickThink = quickThought;
+
 const isMainModule = process.argv[1] && (
   process.argv[1] === resolve(process.cwd(), 'thinking.mjs') ||
   process.argv[1].endsWith('/thinking.mjs')

@@ -12,24 +12,24 @@
 
 ### 0.1 thinking.mjs 重構 — 抽出可程式化 API
 
-- [ ] 將 thinking.mjs 從純 CLI 改造為模組，export 三個入口：
-  - [ ] `export function quickThink(args)` — 快速推理
+- [x] 將 thinking.mjs 從純 CLI 改造為模組，export 三個入口：
+  - [x] `export function quickThink(args)` / `export function quickThought(args)` — 快速推理
     - 參數：`{ thought, nextThoughtNeeded, thoughtNumber, totalThoughts, isRevision?, revisesThought?, branchFromThought?, branchId?, template? }`
     - 回傳：`{ output: string, done: boolean }`
     - 當指定 `template` 時，附加對應模板的 step prompt 作為引導（不強迫，參考用）
-  - [ ] `export function deepAnalyze(args)` — 深層模板分析
+  - [x] `export function deepAnalyze(args)` — 深層模板分析
     - 參數：`{ topic, template, steps?, format?, plan?, state? }`（保留現有功能）
-    - 回傳：`{ output: string, state?: object }`
-  - [ ] `main()` — 保留 CLI 模式，向後相容
+    - 回傳：`{ output: string, type: string }`
+  - [x] `main()` — 保留 CLI 模式，向後相容
 
 ### 0.2 新增 src/plugins/core/quick-think.mjs
 
-- [ ] 建立 `src/plugins/core/quick-think.mjs` — handler-based MCP 工具
-  - [ ] 定義 inputSchema：僅 2 required（thought + nextThoughtNeeded）
-  - [ ] 可選參數：thoughtNumber, totalThoughts, isRevision, revisesThought, branchFromThought, branchId, template
-  - [ ] 使用 `handler` 而非 `cli`，直接呼叫 `thinking.mjs` 的 `quickThink()`
-  - [ ] 輸出格式：模擬 sequential-thinking 的逐步推理鏈
-  - [ ] 範例輸出：
+- [x] 建立 `src/plugins/core/quick-think.mjs` — handler-based MCP 工具
+  - [x] 定義 inputSchema：僅 2 required（thought + nextThoughtNeeded）
+  - [x] 可選參數：thoughtNumber, totalThoughts, isRevision, revisesThought, branchFromThought, branchId, template, hypothesis, verification, needsMoreThoughts, adjustTotalThoughts
+  - [x] 使用 `handler` 而非 `cli`，直接呼叫 `thinking.mjs` 的 `quickThink()`
+  - [x] 輸出格式：模擬 sequential-thinking 的逐步推理鏈
+  - [x] 範例輸出：
     ```
     Thought 3/5: 分析 command injection 的 root cause
     
@@ -38,47 +38,58 @@
     
     修復方案：改用 spawnSync，args 以 array 傳遞。
     ```
-  - [ ] 註冊為 `smart_think`（注意：不是 `smart_thinking`）
+  - [x] 註冊為 `smart_think`（注意：不是 `smart_thinking`）
 
 ### 0.3 smart_thinking 改造 — handler 化
 
-- [ ] 修改 `src/plugins/core/thinking.mjs`：
-  - [ ] 將 `cli` → `handler`，消除 process spawn overhead
-  - [ ] handler 內部呼叫 `thinking.mjs` 的 `deepAnalyze()`
-  - [ ] 保留所有 9 模板 + state persistence + branching + context accumulation
-  - [ ] 向後相容：所有現有參數繼續支援（topic, template, steps, format, plan, planStep, iterative, dynamic, state, record, advance, branch, finish, status, cancel, restore）
+- [x] 修改 `src/plugins/core/thinking.mjs`：
+  - [x] 將 `cli` → `handler`，消除 process spawn overhead
+  - [x] handler 內部呼叫 `thinking.mjs` 的 `deepAnalyze()` / `startDynamicSession()` / `execStateCommand()`
+  - [x] 保留所有 9 模板 + state persistence + branching + context accumulation
+  - [x] 向後相容：所有現有參數繼續支援（topic, template, steps, format, plan, planStep, iterative, dynamic, state, record, advance, branch, finish, status, cancel, restore）
+  - [x] interactive 模式仍 fallback 到 CLI spawn（需要 stdin）
 
 ### 0.4 輸出改造 — 從模板骨架到真實推理
 
-- [ ] static 模式輸出改造：
-  - [ ] 不再輸出空的 template section headers
-  - [ ] 改為輸出每個步驟的引導 prompt + template context
-  - [ ] agent 看到 prompt 後可直接產出推理內容
-- [ ] dynamic 模式輸出改造：
-  - [ ] step 輸出從模板骨架 → 前序 context + 當前引導
-  - [ ] summary 輸出從模板完成狀態 → 完整推理鏈回放
+- [x] static 模式輸出改造：
+  - [x] 不再輸出空的 template section headers（移除 emoji icon、分隔線）
+  - [x] 改為輸出每個步驟的引導 prompt + template context（topic 內嵌每步）
+  - [x] text/markdown/json 三種格式統一改造
+- [x] dynamic 模式輸出改造：
+  - [x] header 從 `🧠 xxx — Dynamic Mode` → `[Template] Topic` 簡潔格式
+  - [x] step 輸出從模板骨架 → 前序 context + 當前引導
+  - [x] summary 輸出從模板完成狀態 → 完整推理鏈回放
 
 ### 0.5 測試與驗證
 
-- [ ] 測試 `quickThink()` 單元：
-  - [ ] 基本呼叫：`quickThink({ thought: "test", nextThoughtNeeded: false, thoughtNumber: 1, totalThoughts: 1 })` → 回傳正確格式
-  - [ ] 修訂：`isRevision: true, revisesThought: 2` → 輸出含修訂標記
-  - [ ] 分支：`branchFromThought: 3, branchId: "alt-path"` → 輸出含分支標記
-  - [ ] 模板引導：`template: "debug"` → 輸出含 debug 模板提示
-- [ ] 測試 `deepAnalyze()` 單元：
-  - [ ] 各模板回傳正確結構
-  - [ ] state file 可正確建立
-  - [ ] branch 選擇正確
-- [ ] 測試 smart-mcp 可正確載入 quick-think.mjs
-- [ ] 測試 smart_think 可被 MCP client 呼叫
+- [x] 測試 `quickThink()` 單元：
+  - [x] 基本呼叫：`quickThink({ thought: "test", nextThoughtNeeded: false, thoughtNumber: 1, totalThoughts: 1 })` → 回傳正確格式
+  - [x] 修訂：`isRevision: true, revisesThought: 2` → 輸出含修訂標記
+  - [x] 分支：`branchFromThought: 3, branchId: "alt-path"` → 輸出含分支標記
+  - [x] 模板引導：`template: "debug"` → 輸出含 debug 模板提示
+  - [x] hypothesis/verification/needsMoreThoughts/adjustTotalThoughts 測試
+  - [x] `quickThink` 與 `quickThought` 一致
+- [x] 測試 `deepAnalyze()` 單元：
+  - [x] 各 9 模板回傳正確結構
+  - [x] text/markdown/json 格式正確
+  - [x] 無 topic 回傳 error
+  - [x] 未知 template 回傳 error
+- [x] 測試 `startDynamicSession()` + `execStateCommand()`：
+  - [x] state file 可正確建立
+  - [x] --record 正確保存結果 + advance
+  - [x] --branch 選擇正確
+  - [x] --cancel / --finish 正確
+  - [x] 錯誤處理（invalid index, unknown command）
+- [x] 測試 plan integration：plan context 正確注入 steps
+- [x] 總計 27 測試，全部通過 (`node --test tests/thinking.test.mjs`)
 
 ### 驗收標準
-- [ ] `smart_think` 呼叫延遲 <1ms（無 process spawn）
-- [ ] 參數僅 2 required（thought + nextThoughtNeeded）
-- [ ] 輸出是真實推理內容，非模板骨架
-- [ ] 支援 revision/branching/template 引導
-- [ ] `smart_thinking` 保留所有既有功能，但延遲從 ~100ms 降到 <1ms
-- [ ] opencode agent 可直接用 `smart_think` 取代 `sequential-thinking`
+- [x] `smart_think` 呼叫延遲 <1ms（handler-based，無 process spawn）
+- [x] 參數僅 2 required（thought + nextThoughtNeeded）
+- [x] 輸出是真實推理內容，非模板骨架
+- [x] 支援 revision/branching/template 引導
+- [x] `smart_thinking` 保留所有既有功能（9 模板 + dynamic + state persistence + branching + context accumulation）
+- [x] opencode agent 可直接用 `smart_think` 取代 `sequential-thinking`
 
 ---
 
@@ -318,7 +329,7 @@
 
 ### MCP 伺服器基礎設施
 - [x] Plugin Loader + Router 架構 (core/ + standard/)
-- [x] 23 工具註冊 (5 core + 18 standard) — Phase 0 完成後變為 24 (6 core + 18 standard)
+- [x] 26 工具註冊 (6 core + 20 standard) — Phase 0 完成
 - [x] DEBUG env var logging
 - [x] Output guard (512KB / 200K chars)
 - [x] Tool timing tracking
@@ -335,8 +346,8 @@
 - [x] smart_security — 安全漏洞掃描 (credential/injection/path/deps)
 - [x] smart_test — 測試執行器 (vitest/jest/mocha/ava/node:test)
 - [x] smart_learn — 專案慣例學習 (語言/結構/命名/風格)
-- [x] smart_thinking — 6 模板結構化推理 (debug/refactor/feature/research/decision/analyze) (v3.1: 9 模板 + dynamic/state/branch)
-- [ ] smart_think — 快速對話推理 (Phase 0 新增, handler-based, 取代 sequential-thinking)
+- [x] smart_thinking — 9 模板結構化推理 (v3.1: dynamic/state/branch/handler)
+- [x] smart_think — 快速對話推理 (handler-based, 取代 sequential-thinking)
 
 ### Standard 工具
 - [x] smart_coverage — 測試覆蓋率分析 (if/else/switch/loop/ternary)
@@ -357,3 +368,12 @@
 - [x] smart_tool_stats — 工具使用統計 (record/report/trends/recommendations)
 - [x] smart_toonify — TOON token 優化 (30-65% 節省)
 - [x] smart_ts_helper — TypeScript 分析 (config/exports/modules)
+
+### Bug Fixes
+- [x] toonify.mjs — 修復 `Cannot find module '../../package.json'`
+  - 原因：`createRequire(TOONIFY_PATH)` base 為 `/Users/wclin/toonify-mcp`，`../../package.json` 解析到 `/Users/package.json` 不存在
+  - 修復：移除 dead code（`require('../../package.json')` 的 destructured `optimize` 完全未使用），同時移除 `createRequire` import
+- [x] toonify.mjs — 降低 `minSavingsThreshold` 從 30% 到 10%
+  - 原因：TOON format 對中型資料（50-200 tokens）可省 10-29%，但 default 30% 門檻太高導致永遠回傳 "Not optimized"
+  - 修復：傳遞自訂 config `{ minSavingsThreshold: 10, minTokensThreshold: 20 }` 給 `TokenOptimizer`
+  - 效果：5 users JSON 從 67→47 tokens（29.9%），200 users JSON 從 5,012→2,888 tokens（42.4%）

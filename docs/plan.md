@@ -101,7 +101,15 @@ src/
 6. **健康檢查** — smart/health 端點可監控伺服器狀態
 7. **優雅關閉** — SIGINT/SIGTERM 正確清理 pending calls
 
-### 3.3 關鍵缺口
+### 3.3 近期修復記錄
+
+| 日期 | 工具 | 問題 | 修復 |
+|------|------|------|------|
+| 2026-06-04 | `toonify` | `require('../../package.json')` dead code 導致 `Cannot find module` | 移除未使用的 `createRequire` + `require` 呼叫 |
+| 2026-06-04 | `toonify` | default `minSavingsThreshold: 30` 太高，中小型資料 (<100 tokens) 無法優化 | 降為 10% + 增加 `minTokensThreshold: 20` |
+| 2026-06-04 | Phase 0 | 多項 Phase 0 完成 | 見下方 Phase 0 完成摘要 |
+
+### 3.4 關鍵缺口
 
 | 缺口 | 嚴重性 | 說明 | 影響 |
 |------|--------|------|------|
@@ -206,6 +214,18 @@ thinking.mjs
 #### 0.3 現有 smart_thinking 改造（handler 化）
 
 將 `src/plugins/core/thinking.mjs` 的 `cli` 改為 `handler`，消除 process spawn overhead，同時保留所有既有功能（9 模板、state persistence、branching、context accumulation）。
+
+#### Phase 0 完成摘要 (2026-06-04)
+
+| 項目 | 狀態 | 備註 |
+|------|------|------|
+| 0.1 thinking.mjs 重構 | ✅ | `quickThought` / `quickThink` / `deepAnalyze` / `main` 全部匯出 |
+| 0.2 quick-think.mjs 新增 | ✅ | handler-based, 2 required params, 支援 hypothesis/verification/branching |
+| 0.3 smart_thinking handler 化 | ✅ | 9 模板 + dynamic/state/branch, iterative 模式 fallback 到 CLI |
+| 0.4 輸出改造 | ✅ | 無 emoji/分隔線, topic 內嵌, header 簡潔, summary 推理鏈 |
+| 0.5 測試 | ✅ | 27 測試 (quickThought/deepAnalyze/startDynamicSession/execStateCommand/plan) |
+| 命名對齊 | ✅ | `quickThink` 別名已加入, import 使用 `quickThink` |
+| **工具數** | **6 core + 20 standard = 26** | smart_think 加入 core, 總數 26 |
 
 #### 0.4 輸出改造
 
@@ -361,9 +381,10 @@ thinking.mjs
 
 ```
 src/server/index.mjs
-  ├── plugins/core/ (5 原生)
-  │   └── thinking.mjs → smart_thinking (CLI spawn, 批次分析)
-  └── plugins/standard/ (18 router)
+  ├── plugins/core/ (6 原生 — 全部 handler-based)
+  │   ├── thinking.mjs   → smart_thinking (深層模板分析，handler 化)
+  │   └── quick-think.mjs → smart_think (快速推理，取代 sequential-thinking)
+  └── plugins/standard/ (20 router)
 ```
 
 ### 目標 v4.0
@@ -437,5 +458,5 @@ src/server/index.mjs
 | `smart_test_suggest` | standard/test_suggest.mjs | test-suggest.mjs | 測試案例建議 |
 | `smart_integrate` | standard/integrate.mjs | tool-integrate.mjs | 工具鏈管理 |
 | `smart_tool_stats` | standard/tool_stats.mjs | tool-stats.mjs | 工具使用統計 |
-| `smart_toonify` | standard/toonify.mjs | toonify.mjs | TOON token 優化 |
+| `smart_toonify` | standard/toonify.mjs | toonify.mjs | TOON token 優化 (閾值 10%, 原 30%) |
 | `smart_ts_helper` | standard/ts_helper.mjs | ts-helper.mjs | TypeScript 分析 |

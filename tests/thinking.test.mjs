@@ -1,0 +1,403 @@
+// thinking.test.mjs — Phase 0 tests for thinking.mjs
+//
+// Tests the 4 exported functions:
+//   quickThought / quickThink  — conversational reasoning
+//   deepAnalyze                — structured template analysis
+//   startDynamicSession        — multi-step stateful sessions
+//   execStateCommand           — state management (record/advance/branch/finish)
+//
+// Run: node --test tests/thinking.test.mjs
+
+import { describe, it, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { existsSync, unlinkSync, mkdirSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+
+// Import the module under test
+import {
+  quickThought,
+  quickThink,
+  deepAnalyze,
+  startDynamicSession,
+  execStateCommand,
+} from '../src/cli/thinking.mjs';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const TEST_STATE_DIR = resolve(tmpdir(), 'smart-test-' + Date.now());
+
+function testStatePath(name = 'test-state.json') {
+  if (!existsSync(TEST_STATE_DIR)) {
+    mkdirSync(TEST_STATE_DIR, { recursive: true });
+  }
+  return resolve(TEST_STATE_DIR, name);
+}
+
+function cleanupState(path) {
+  try { unlinkSync(path); } catch { /* ignore */ }
+}
+
+// ---------------------------------------------------------------------------
+// Tests: quickThought / quickThink
+// ---------------------------------------------------------------------------
+
+describe('quickThought / quickThink', () => {
+
+  it('returns done when nextThoughtNeeded=false', () => {
+    const result = quickThought({
+      thought: 'This is my reasoning step.',
+      nextThoughtNeeded: false,
+      thoughtNumber: 1,
+      totalThoughts: 1,
+    });
+    assert.ok(result.done);
+    assert.equal(typeof result.output, 'string');
+    assert.ok(result.output.includes('This is my reasoning step.'));
+    assert.ok(result.output.includes('1/1'));
+  });
+
+  it('returns not done when nextThoughtNeeded=true', () => {
+    const result = quickThought({
+      thought: 'Still analyzing...',
+      nextThoughtNeeded: true,
+      thoughtNumber: 1,
+      totalThoughts: 3,
+    });
+    assert.equal(result.done, false);
+    assert.ok(result.output.includes('Still analyzing...'));
+  });
+
+  it('includes revision marker when isRevision=true', () => {
+    const result = quickThought({
+      thought: 'Revised analysis',
+      nextThoughtNeeded: false,
+      thoughtNumber: 2,
+      totalThoughts: 3,
+      isRevision: true,
+      revisesThought: 1,
+    });
+    assert.ok(result.output.includes('Revising'));
+    assert.ok(result.output.includes('Revision of thought 1'));
+  });
+
+  it('includes branch marker when branchFromThought set', () => {
+    const result = quickThought({
+      thought: 'Branch exploration',
+      nextThoughtNeeded: true,
+      thoughtNumber: 3,
+      totalThoughts: 5,
+      branchFromThought: 2,
+      branchId: 'alt-approach',
+    });
+    assert.ok(result.output.includes('Branch from thought 2'));
+    assert.ok(result.output.includes('alt-approach'));
+  });
+
+  it('includes hypothesis section when hypothesis provided', () => {
+    const result = quickThought({
+      thought: 'Testing hypothesis',
+      nextThoughtNeeded: false,
+      thoughtNumber: 1,
+      totalThoughts: 1,
+      hypothesis: 'The bug is in the parser',
+    });
+    assert.ok(result.output.includes('Hypothesis'));
+    assert.ok(result.output.includes('The bug is in the parser'));
+  });
+
+  it('includes verification section with auto-verdict', () => {
+    const result = quickThought({
+      thought: 'Verifying',
+      nextThoughtNeeded: false,
+      thoughtNumber: 2,
+      totalThoughts: 3,
+      verification: 'Confirmed: root cause is null pointer',
+    });
+    assert.ok(result.output.includes('Verification'));
+  });
+
+  it('includes template guidance when template provided', () => {
+    const result = quickThought({
+      thought: 'Debug step',
+      nextThoughtNeeded: true,
+      thoughtNumber: 1,
+      totalThoughts: 5,
+      template: 'debug',
+    });
+    assert.ok(result.output.includes('Debug Analysis guidance'));
+    assert.ok(result.output.includes('Step 1: Error Classification'));
+  });
+
+  it('supports adjustTotalThoughts', () => {
+    const result = quickThought({
+      thought: 'Need more steps',
+      nextThoughtNeeded: true,
+      thoughtNumber: 3,
+      totalThoughts: 3,
+      adjustTotalThoughts: 6,
+    });
+    assert.ok(result.output.includes('was 3, now 6'));
+    assert.equal(result.totalThoughts, 6);
+  });
+
+  it('supports needsMoreThoughts', () => {
+    const result = quickThought({
+      thought: 'Not enough info',
+      nextThoughtNeeded: false,
+      thoughtNumber: 3,
+      totalThoughts: 3,
+      needsMoreThoughts: true,
+    });
+    assert.ok(result.output.includes('More reasoning needed'));
+  });
+
+  it('quickThink is alias for quickThought', () => {
+    const a = quickThought({ thought: 'test', nextThoughtNeeded: false });
+    const b = quickThink({ thought: 'test', nextThoughtNeeded: false });
+    assert.equal(a.output, b.output);
+    assert.equal(a.done, b.done);
+  });
+
+  it('handles empty thought gracefully', () => {
+    const result = quickThought({
+      thought: '',
+      nextThoughtNeeded: false,
+    });
+    assert.ok(result.done);
+    assert.equal(typeof result.output, 'string');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: deepAnalyze
+// ---------------------------------------------------------------------------
+
+describe('deepAnalyze', () => {
+
+  it('returns error when no topic and no plan', () => {
+    const result = deepAnalyze({ template: 'analyze', steps: 3 });
+    assert.equal(result.type, 'error');
+  });
+
+  it('returns text format by default', () => {
+    const result = deepAnalyze({
+      topic: 'Why is the API slow?',
+      template: 'debug',
+      steps: 3,
+    });
+    assert.equal(result.type, 'static');
+    assert.ok(result.output.includes('Debug Analysis'));
+    assert.ok(result.output.includes('Why is the API slow?'));
+    assert.ok(result.output.includes('Step 1/3'));
+  });
+
+  it('returns markdown format', () => {
+    const result = deepAnalyze({
+      topic: 'Test topic',
+      template: 'analyze',
+      steps: 2,
+      format: 'markdown',
+    });
+    assert.ok(result.output.includes('# General Analysis'));
+    assert.ok(result.output.includes('## Step'));
+  });
+
+  it('returns JSON format', () => {
+    const result = deepAnalyze({
+      topic: 'JSON test',
+      template: 'decision',
+      steps: 2,
+      format: 'json',
+    });
+    const parsed = JSON.parse(result.output);
+    assert.equal(parsed.template, 'Decision Analysis');
+    assert.equal(parsed.topic, 'JSON test');
+    assert.ok(Array.isArray(parsed.steps));
+  });
+
+  it('supports all 9 templates', () => {
+    const templates = ['debug', 'refactor', 'feature', 'research', 'decision',
+      'analyze', 'plan_execute', 'retrospect', 'architecture'];
+    for (const t of templates) {
+      const result = deepAnalyze({ topic: `Testing ${t}`, template: t, steps: 2 });
+      assert.equal(result.type, 'static', `Template ${t} should produce static output`);
+      assert.ok(result.output.length > 0, `Template ${t} should produce non-empty output`);
+    }
+  });
+
+  it('returns error for unknown template', () => {
+    const result = deepAnalyze({
+      topic: 'test',
+      template: 'nonexistent',
+    });
+    assert.equal(result.type, 'error');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: startDynamicSession + execStateCommand
+// ---------------------------------------------------------------------------
+
+describe('startDynamicSession and execStateCommand', () => {
+  const statePaths = [];
+
+  after(() => {
+    for (const p of statePaths) cleanupState(p);
+  });
+
+  it('starts a dynamic session with default state path', () => {
+    const sp = testStatePath('session-1.json');
+    statePaths.push(sp);
+    const result = startDynamicSession({
+      topic: 'Should we use SQL or NoSQL?',
+      template: 'decision',
+      state: sp,
+    });
+    assert.ok(result.output);
+    assert.ok(result.state);
+    assert.equal(result.state.topic, 'Should we use SQL or NoSQL?');
+    assert.equal(result.state.template, 'decision');
+    assert.equal(result.state.currentStepIndex, 0);
+    assert.ok(result.state.steps.length > 0);
+    assert.ok(existsSync(sp));
+  });
+
+  it('--status returns current state info', () => {
+    const sp = testStatePath('session-status.json');
+    statePaths.push(sp);
+    startDynamicSession({ topic: 'test', template: 'analyze', state: sp });
+
+    const result = execStateCommand(sp, { type: 'status' });
+    assert.ok(result.output);
+    assert.ok(result.state);
+    assert.equal(result.state.template, 'analyze');
+  });
+
+  it('--record stores result and advances', () => {
+    const sp = testStatePath('session-record.json');
+    statePaths.push(sp);
+    const session = startDynamicSession({ topic: 'test', template: 'analyze', state: sp });
+
+    const step0 = session.state.steps[0];
+    const recordResult = execStateCommand(sp, {
+      type: 'record',
+      index: 0,
+      result: 'The context is about performance optimization',
+      advance: true,
+    });
+    assert.ok(recordResult.output);
+    assert.ok(!recordResult.error);
+
+    // Verify state file updated
+    const statusResult = execStateCommand(sp, { type: 'status' });
+    assert.ok(statusResult.state.steps[0].completed);
+    assert.equal(statusResult.state.steps[0].result, 'The context is about performance optimization');
+  });
+
+  it('--branch selects a branch path', () => {
+    const sp = testStatePath('session-branch.json');
+    statePaths.push(sp);
+    startDynamicSession({ topic: 'test', template: 'analyze', state: sp });
+
+    const branchResult = execStateCommand(sp, {
+      type: 'branch',
+      branchName: 'hypothesis-confirmed',
+    });
+    assert.ok(branchResult.output);
+    assert.ok(!branchResult.error);
+  });
+
+  it('--cancel cancels session', () => {
+    const sp = testStatePath('session-cancel.json');
+    statePaths.push(sp);
+    startDynamicSession({ topic: 'test', template: 'analyze', state: sp });
+
+    const cancelResult = execStateCommand(sp, { type: 'cancel' });
+    assert.ok(cancelResult.output.includes('cancelled'));
+    assert.ok(cancelResult.state.cancelled);
+  });
+
+  it('--finish marks session complete with summary', () => {
+    const sp = testStatePath('session-finish.json');
+    statePaths.push(sp);
+    startDynamicSession({ topic: 'test', template: 'analyze', state: sp });
+
+    // Record all steps first
+    const stateData = JSON.parse(readFileSync(sp, 'utf8'));
+    for (let i = 0; i < stateData.steps.length; i++) {
+      execStateCommand(sp, { type: 'record', index: i, result: `Result ${i + 1}`, advance: true });
+    }
+
+    const finishResult = execStateCommand(sp, { type: 'finish' });
+    assert.ok(finishResult.output);
+    assert.ok(finishResult.state.completed);
+    assert.ok(finishResult.output.includes('Complete'));
+  });
+
+  it('returns error for invalid step index in record', () => {
+    const sp = testStatePath('session-invalid.json');
+    statePaths.push(sp);
+    startDynamicSession({ topic: 'test', template: 'analyze', state: sp });
+
+    const result = execStateCommand(sp, { type: 'record', index: 999, result: 'x' });
+    assert.ok(result.error);
+  });
+
+  it('returns error for unknown command type', () => {
+    const sp = testStatePath('session-unknown-cmd.json');
+    statePaths.push(sp);
+    startDynamicSession({ topic: 'test', template: 'analyze', state: sp });
+
+    const result = execStateCommand(sp, { type: 'nonexistent' });
+    assert.ok(result.error);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: deepAnalyze with plan integration
+// ---------------------------------------------------------------------------
+
+describe('deepAnalyze with plan', () => {
+
+  it('integrates plan context into steps', () => {
+    const plan = {
+      goal: 'Fix login bug',
+      steps: [
+        { id: 1, description: 'Reproduce the bug', tool: 'smart_test' },
+        { id: 2, description: 'Find root cause', tool: 'smart_debug' },
+        { id: 3, description: 'Apply fix', tool: 'cross_file_edit' },
+      ],
+    };
+    const result = deepAnalyze({
+      plan,
+      template: 'plan_execute',
+      steps: 3,
+    });
+    assert.ok(result.output);
+    assert.ok(result.output.includes('Plan Context'));
+    assert.ok(result.output.includes('Reproduce the bug'));
+  });
+
+  it('focuses on specific plan step when planStep provided', () => {
+    const plan = {
+      goal: 'Refactor parser',
+      steps: [
+        { id: 1, description: 'Analyze current code', tool: 'smart_grep' },
+        { id: 2, description: 'Design new structure', tool: 'smart_think' },
+      ],
+    };
+    const result = deepAnalyze({
+      plan,
+      template: 'refactor',
+      steps: 3,
+      planStep: 2,
+    });
+    assert.ok(result.output);
+    assert.ok(result.output.includes('Plan Context'));
+    // Should reference step 2
+    assert.ok(result.output.includes('Design new structure'));
+  });
+});
