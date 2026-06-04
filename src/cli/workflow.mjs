@@ -108,10 +108,15 @@ const TOOL_CLI_MAP = {
   smart_report: 'report.mjs',
   smart_planner: 'planner.mjs',
 
+  // Git workflow tools
+  smart_git_context: 'git-context.mjs',
+  smart_git_commit: 'git-commit.mjs',
+  smart_git_pr: 'git-pr.mjs',
+  smart_git_review: 'git-review.mjs',
+
   // Additional standard tools (for custom workflows)
   smart_coverage: 'coverage-check.mjs',
   smart_diagram: 'diagram.mjs',
-  smart_git_context: 'git-context.mjs',
   smart_github_search: 'github-search.mjs',
   smart_test_suggest: 'test-suggest.mjs',
   smart_integrate: 'tool-integrate.mjs',
@@ -595,6 +600,15 @@ const TOOL_ARGS_CONVERTERS = {
 
   // rename_safety: positional name, newName
   smart_rename_safety: (a) => { const c = []; if (a.name) c.push(String(a.name)); if (a.newName) c.push(String(a.newName)); if (a.root) c.push('--root', String(a.root)); if (a.include) c.push('--include', String(a.include)); if (a.exclude) c.push('--exclude', String(a.exclude)); if (a.dryRun) c.push('--dry-run'); if (a.apply) c.push('--apply'); if (a.format) c.push('--format', String(a.format)); c.push('--no-color'); return c; },
+
+  // git_commit
+  smart_git_commit: (a) => { const c = []; if (a.root) c.push('--root', String(a.root)); if (a.message) c.push('--message', String(a.message)); if (a.type) c.push('--type', String(a.type)); if (a.scope !== undefined) c.push('--scope', String(a.scope)); if (a.all) c.push('--all'); if (a.amend) c.push('--amend'); if (a.dryRun) c.push('--dry-run'); if (a.format) c.push('--format', String(a.format)); c.push('--no-color'); return c; },
+
+  // git_pr
+  smart_git_pr: (a) => { const c = []; if (a.root) c.push('--root', String(a.root)); if (a.base) c.push('--base', String(a.base)); if (a.head) c.push('--head', String(a.head)); if (a.title) c.push('--title', String(a.title)); if (a.body) c.push('--body', String(a.body)); if (a.draft) c.push('--draft'); if (a.noPublish) c.push('--no-publish'); if (a.format) c.push('--format', String(a.format)); c.push('--no-color'); return c; },
+
+  // git_review
+  smart_git_review: (a) => { const c = []; if (a.root) c.push('--root', String(a.root)); if (a.commit) c.push('--commit', String(a.commit)); if (a.range) c.push('--range', String(a.range)); if (a.pr) c.push('--pr', String(a.pr)); if (a.staged) c.push('--staged'); if (a.all) c.push('--all'); if (a.focus) c.push('--focus', String(a.focus)); if (a.format) c.push('--format', String(a.format)); if (a.output) c.push('--output', String(a.output)); if (a.maxComments) c.push('--max-comments', String(a.maxComments)); c.push('--no-color'); return c; },
 };
 
 /**
