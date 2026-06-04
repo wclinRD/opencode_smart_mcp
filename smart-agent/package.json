@@ -10,10 +10,13 @@
     "./tool-strategy": "./src/agent/tool-strategy.mjs",
     "./workflow-strategy": "./src/agent/workflow-strategy.mjs",
     "./memory-integration": "./src/agent/memory-integration.mjs",
-    "./planner-integration": "./src/agent/planner-integration.mjs"
+    "./planner-integration": "./src/agent/planner-integration.mjs",
+    "./install/install-agent": "./src/install/install-agent.mjs"
   },
   "scripts": {
     "postinstall": "node src/install/postinstall.mjs",
+    "setup": "node src/install/postinstall.mjs --setup-agent",
+    "install-agent": "node src/install/install-agent.mjs",
     "test": "node --test tests/"
   },
   "peerDependencies": {

@@ -22,7 +22,7 @@ const CONFIG_PATH_JSONC = resolve(CONFIG_DIR, 'opencode.jsonc');
 
 const DEFAULT_CONFIG_TEMPLATE = {
   $schema: 'https://opencode.ai/config.json',
-  default_agent: 'smart',
+  default_agent: 'smart-mcp',
   mcp: {
     smart: {
       type: 'local',

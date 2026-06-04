@@ -1,33 +1,16 @@
 # Smart MCP — 開發工具集
 
-MCP server 提供 **33 個開發工具**，可在 opencode 中直接呼叫。
-另有 **smart-agent**（即將發布 npm）提供 agent 大腦配置，自動學習專案慣例、記憶錯誤經驗、推薦 tool 組合。
+MCP server 提供 **33 個開發工具** + **專屬 agent personality**，可在 opencode 中直接呼叫。
 
 ---
 
 ## 給 LLM / AI Agent 的安裝指引
 
-### 方式一：快速安裝（推薦）
+你是一個 LLM 或 AI Coding Agent，以下是如何安裝並設定 Smart MCP 的完整步驟。
 
-```bash
-npm install smart-agent
-```
+### 🚀 快速安裝（完整流程）
 
-這會自動：
-1. 安裝 `smart-mcp`（peer dependency）
-2. 設定 opencode MCP 設定
-3. 初始化記憶系統目錄
-4. 學習專案慣例（可選）
-
-> 注意：`smart-agent` npm package 仍在準備中，敬請期待。
-
----
-
-### 方式二：手動安裝 smart-mcp
-
-如果你是 LLM 並被要求手動安裝這個 MCP server，請依以下步驟操作：
-
-#### 步驟 1：clone 專案
+#### 步驟 1：Clone 專案
 
 ```bash
 git clone https://github.com/wclinRD/opencode_smart_mcp.git
@@ -40,117 +23,223 @@ cd opencode_smart_mcp
 cd .opencode && npm install && cd ..
 ```
 
-#### 步驟 3：確認 server 入口檔存在
+#### 步驟 3：設定 MCP Server（opencode.jsonc）
 
-```bash
-ls src/server/index.mjs
-# 應回傳：src/server/index.mjs
-```
+編輯 `~/.config/opencode/opencode.jsonc`，加入：
 
-#### 步驟 4：將 MCP 設定加入 opencode.json
-
-在專案根目錄或 `~/.config/opencode/opencode.json` 中，加入以下內容：
-
-```json
+```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
+  "default_agent": "smart-mcp",
   "mcp": {
     "smart": {
       "type": "local",
-      "command": ["node", "/絕對路徑/src/server/index.mjs"],
+      "command": ["node", "/絕對路徑/opencode_smart_mcp/src/server/index.mjs"],
       "enabled": true
     }
   }
 }
 ```
 
-> 注意：`command` 必須使用**絕對路徑**指向 clone 下來的 `src/server/index.mjs`。不可使用相對路徑，否則 opencode 會無法啟動 MCP server。
+> ⚠️ `command[1]` 必須使用**絕對路徑**指向 clone 下來的 `src/server/index.mjs`。不可使用相對路徑！
 
-#### 步驟 5：啟用後驗證
+#### 步驟 4：安裝 Agent Personality（讓 agent 懂得用 33 個工具）
 
-啟動 opencode 後檢查 MCP server 是否成功連接：
+```bash
+node smart-agent/src/install/install-agent.mjs
+```
+
+這會自動：
+1. 複製 `config/agents/smart-mcp.md` → `~/.config/opencode/agents/smart-mcp.md`
+2. 設定 `default_agent = "smart-mcp"`
+3. 建立記憶目錄 `~/.smart/memory/`
+
+#### 步驟 5：重啟 opencode 並驗證
 
 ```bash
 opencode mcp list
 # smart 應顯示 connected
 ```
 
-### 錯誤排除
+---
+
+### 📦 透過 npm 安裝（smart-agent 套件）
+
+```bash
+npm install smart-agent
+npm run install-agent   # 安裝 agent personality
+```
+
+---
+
+### 🔧 自動安裝腳本（一鍵完成）
+
+```bash
+node smart-agent/src/install/install-agent.mjs
+```
+
+預設行為：
+- 複製 agent 定義檔 → `~/.config/opencode/agents/smart-mcp.md`
+- 更新 opencode 設定 → `~/.config/opencode/opencode.jsonc`
+- 建立記憶目錄 → `~/.smart/memory/`
+
+使用 `--dry-run` 預覽：
+
+```bash
+node smart-agent/src/install/install-agent.mjs --dry-run
+```
+
+---
+
+### ✅ 安裝後驗證清單
+
+| 檢查項目 | 指令 | 預期結果 |
+|---------|------|---------|
+| MCP server 連線 | `opencode mcp list` | smart → connected |
+| Agent 定義存在 | `ls ~/.config/opencode/agents/smart-mcp.md` | 檔案存在 |
+| 預設 agent | `cat ~/.config/opencode/opencode.jsonc \| grep default_agent` | `"smart-mcp"` |
+| 工具可用 | 在 opencode 中呼叫 `smart_grep`、`smart_think` 等 | 正常回應 |
+
+---
+
+### ❌ 錯誤排除
 
 | 錯誤訊息 | 原因 | 修復 |
-|----------|------|------|
+|---------|------|------|
 | `4/5 startup requests failed` | opencode.json 頂層含有非標準欄位 | 移除 `name`、`version`、`description` 等 |
-| `ECONNREFUSED` | command 路徑錯誤或 node 找不到 | 檢查 `command[1]` 是否為正確絕對路徑 |
-| tool 不存在 | plugin 未正確載入 | 確認 `.opencode/node_modules/` 已安裝 |
+| `ECONNREFUSED` / tool 沒回應 | command 路徑錯誤或 node 找不到 | 檢查 `command[1]` 是否為正確絕對路徑 |
+| tool 不存在 / unknown tool | plugin 未正確載入 | 確認 `.opencode/node_modules/` 已安裝 |
+| `default_agent not found` | agent 定義檔不在 `~/.config/opencode/agents/` | 執行 `node smart-agent/src/install/install-agent.mjs` |
 
 ---
 
-## 架構
+## 🔧 給人類開發者的安裝方式
 
-```
-smart/
-├── src/
-│   ├── server/            # MCP server 核心
-│   │   ├── index.mjs      # Entry point (JSON-RPC 2.0 over stdio)
-│   │   └── loader.mjs     # 自動掃描 & 載入 plugins/ 的 plugin
-│   ├── plugins/
-│   │   ├── core/          # 6 個 native MCP tool（tools/list 直接顯示）
-│   │   └── standard/      # 27 個 tool，透過 smart_run router 呼叫
-│   ├── cli/               # 各 tool 的 CLI 實作（也可獨立執行）
-│   │   ├── contextual-grep.mjs
-│   │   ├── thinking.mjs
-│   │   └── ...
-│   └── lib/
-│       ├── utils.mjs      # 共用工具函式
-│       └── compose-engine.mjs  # 工具組合引擎（Phase 6）
-├── config/
-│   ├── opencode.json      # opencode 整合設定檔
-│   └── .opencode-conventions.json
-├── docs/
-│   ├── README.md
-│   ├── plan.md            # Smart MCP 發展藍圖
-│   ├── todo.md            # Smart MCP 待辦事項
-│   ├── smart-agent-plan.md # Smart Agent 發展藍圖
-│   └── smart-agent-todo.md # Smart Agent 待辦事項
-└── reports/               # 自動產生的報告（coverage, security）
-```
+### 方式一：在 opencode 中啟用（手動）
 
----
+編輯 `~/.config/opencode/opencode.jsonc`：
 
-## 安裝方式
-
-### 1. 在 opencode 中啟用
-
-編輯 `config/opencode.json`（或放到專案根目錄）：
-
-```json
+```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
+  "default_agent": "smart-mcp",          // 使用 smart-mcp agent 人格
   "mcp": {
     "smart": {
       "type": "local",
-      "command": ["node", "/絕對路徑/src/server/index.mjs"],
+      "command": ["node", "/絕對路徑/opencode_smart_mcp/src/server/index.mjs"],
       "enabled": true
     }
   }
 }
 ```
 
-### 2. 重要注意事項
+### 方式二：透過 smart-agent npm 套件
 
-- `opencode.json` 頂層**不能有** `name`、`version`、`description` 等非標準欄位 — 會導致 opencode 啟動失敗（`4/5 startup requests failed`）
-- MCP server name 由 `mcp.smart` 這個 key 決定，無須額外 name 欄位
-- `command` 中的路徑必須是**絕對路徑**
+```bash
+npm install smart-agent
+npm run setup          # postinstall + agent install
+```
 
-### 3. 測試安裝是否成功
+### 方式三：一鍵腳本
 
-啟動 opencode 後，狀態列（status bar）會顯示 `⊙ 1 MCP` 變為 `⊙ 2 MCP`（加上既有的 global MCP servers）。
-
-或是用 `opencode mcp list` 確認 smart 顯示為 connected。
+```bash
+git clone https://github.com/wclinRD/opencode_smart_mcp.git
+cd opencode_smart_mcp
+node smart-agent/src/install/install-agent.mjs
+```
 
 ---
 
-## Native Tools（6 個，直接呼叫）
+## 🧠 Smart MCP Agent Personality
+
+安裝後，opencode 預設使用 **smart-mcp agent**，它擁有以下能力：
+
+### 工具選擇原則
+
+你（agent）會根據任務類型自動選用最佳工具：
+
+| 任務類型 | 首選工具 |
+|---------|---------|
+| 搜尋程式碼 | `smart_grep`（附 scope/import context） |
+| 理解新專案 | `smart_learn`（語言、結構、慣例） |
+| 快速推理 | `smart_think`（hypothesis→verify，取代 sequential-thinking） |
+| 深層分析 | `smart_thinking`（9 模板） |
+| 安全掃描 | `smart_security`（credentials/injection/path-traversal/dependencies） |
+| 執行測試 | `smart_test`（自動偵測框架） |
+| 診斷錯誤 | `smart_error_diagnose`（pattern KB + 記憶庫） |
+| 跨檔案編輯 | `smart_cross_file_edit`（dry-run 安全） |
+| Git 流程 | `smart_git_context` + `smart_git_commit` + `smart_git_pr` + `smart_git_review` |
+| 網路研究 | `smart_exa_search` |
+| GitHub 探索 | `smart_github_search` |
+| 產生圖表 | `smart_diagram` |
+| 產生報告 | `smart_report` |
+
+### Workflow 自動化
+
+5+ 步驟的複雜任務自動使用 workflow 引擎：
+
+```bash
+smart_workflow create "<目標>" --template <flow> --state wf.json
+```
+
+可用模板：`debug-flow`、`refactor-flow`、`security-flow`、`research-flow`、`git-flow`
+
+### Pipeline 組合
+
+自訂工具鏈，支援 seq/par/cond 三種模式：
+
+```bash
+smart_compose({ pipeline: [
+  { tool: "smart_grep", args: {...}, mode: "seq" },
+  { tool: "smart_debug", args: {...}, mode: "seq" },
+  { tool: "smart_security", args: {...}, mode: "par" },
+]})
+```
+
+---
+
+## 🏗 架構
+
+```
+opencode_smart_mcp/
+├── src/
+│   ├── server/                # MCP server 核心
+│   │   ├── index.mjs          # Entry point (JSON-RPC 2.0 over stdio)
+│   │   └── loader.mjs         # 自動掃描 & 載入 plugins/ 的 plugin
+│   ├── plugins/
+│   │   ├── core/              # 6 個 native MCP tool（tools/list 直接顯示）
+│   │   └── standard/          # 27 個 tool，透過 smart_run router 呼叫
+│   ├── cli/                   # 各 tool 的 CLI 實作
+│   └── lib/
+│       ├── utils.mjs          # 共用工具函式
+│       └── compose-engine.mjs # 工具組合引擎
+├── config/
+│   ├── agents/
+│   │   └── smart-mcp.md       # 🤖 Agent personality 定義檔（給 LLM 用）
+│   ├── opencode.json          # opencode 整合設定範例
+│   └── .opencode-conventions.json
+├── smart-agent/               # 📦 npm publish 套件
+│   ├── src/
+│   │   ├── agent/             # 策略引擎、memory、planner
+│   │   ├── install/           # 安裝腳本
+│   │   │   ├── postinstall.mjs
+│   │   │   ├── install-agent.mjs     # 🆕 Agent 定義安裝器
+│   │   │   ├── detect-project.mjs
+│   │   │   └── generate-config.mjs   # 🆕 預設使用 smart-mcp agent
+│   │   └── index.mjs
+│   └── package.json
+├── docs/
+│   ├── README.md              # 簡化版安裝說明
+│   ├── plan.md                # Smart MCP 發展藍圖
+│   ├── todo.md                # Smart MCP 待辦事項
+│   ├── smart-agent-plan.md    # Smart Agent 發展藍圖
+│   └── smart-agent-todo.md    # Smart Agent 待辦事項
+└── reports/                   # 自動產生的報告
+```
+
+---
+
+## 🛠 Native Tools（6 個，直接呼叫）
 
 | Tool name | 功能 |
 |-----------|------|
@@ -161,9 +250,7 @@ smart/
 | `smart_test` | 自動偵測並執行測試（vitest/jest/mocha/ava/node:test） |
 | `smart_thinking` | 結構化推理，9 種 template + 動態多輪推理 |
 
----
-
-## 標準 Tools（27 個，透過 smart_run router 呼叫）
+## 🛠 Standard Tools（27 個，透過 smart_run router 呼叫）
 
 使用方式：
 ```
@@ -229,32 +316,26 @@ smart_run(tool: "tool_name", args: {...})
 | `tool_stats` | 追蹤 tool 使用統計：calls、duration、success rate、trends |
 | `toonify` | 用 TOON format 壓縮 JSON/CSV/YAML，token 減少 30-65% |
 
----
+### 開發擴充工具
 
-## Smart Agent（Agent 大腦配置）
-
-**即將發布 npm package！**
-
-`smart-agent` 讓 opencode agent 從「有很多工具」升級到「知道怎麼用對的工具」：
-
-- **Tool 策略引擎** — 根據任務描述自動推薦合適的 tool 或 tool 組合
-- **Workflow 自動化** — 一鍵執行複雜多步驟任務（create → execute → replan → summary）
-- **Memory 自動整合** — 錯誤發生時自動寫入記憶，相似錯誤自動取出建議
-- **Planner 整合** — 複雜任務自動使用 planner 分解目標
-
-### 安裝方式（即將支援）
-
-```bash
-npm install smart-agent
-```
-
-詳細規劃請見：
-- [docs/smart-agent-plan.md](./docs/smart-agent-plan.md)
-- [docs/smart-agent-todo.md](./docs/smart-agent-todo.md)
+| Tool name | 功能 |
+|-----------|------|
+| `context` | Session 狀態管理（summary / findings / history / reset / inject） |
+| `memory_store` | 記憶存取（search / store / list / confirm） |
 
 ---
 
-## 如何新增 Tool
+## 🤖 如何將 smart-mcp agent 用在自己的專案
+
+如果你想在自己的 opencode 專案中使用 smart-mcp agent personality，不需要整個 clone：
+
+1. 複製 `config/agents/smart-mcp.md` 到 `~/.config/opencode/agents/`
+2. 在 opencode.jsonc 中設定 `"default_agent": "smart-mcp"`
+3. 確認 MCP server 設定指向你的 smart-mcp 安裝路徑
+
+---
+
+## 📦 如何新增 Tool
 
 1. 在 `src/plugins/core/`（native）或 `src/plugins/standard/`（router）下建立 `.mjs` 檔案
 2. 遵循 plugin contract：
@@ -285,7 +366,7 @@ export default {
 
 ---
 
-## 特殊工具呼叫
+## 🎯 特殊工具呼叫
 
 列出所有 router tool：
 ```
@@ -314,7 +395,7 @@ smart/stats
 
 ---
 
-## 開發階段
+## 📋 開發階段
 
 | Phase | 內容 | 狀態 |
 |-------|------|------|
@@ -330,3 +411,13 @@ smart/stats
 | Phase 9 | 語言助手擴充 | 📋 規劃中 |
 
 詳細規劃請見 [docs/plan.md](./docs/plan.md)。
+
+---
+
+## 📄 相關文件
+
+- [docs/plan.md](./docs/plan.md) — Smart MCP 發展藍圖
+- [docs/todo.md](./docs/todo.md) — Smart MCP 待辦事項
+- [docs/smart-agent-plan.md](./docs/smart-agent-plan.md) — Smart Agent 發展藍圖
+- [docs/smart-agent-todo.md](./docs/smart-agent-todo.md) — Smart Agent 待辦事項
+- [config/agents/smart-mcp.md](./config/agents/smart-mcp.md) — Agent personality 定義檔（原始檔）
