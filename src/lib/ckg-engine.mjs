@@ -1,0 +1,1108 @@
+// ckg-engine.mjs — Code Knowledge Graph Engine
+//
+// Persistent SQLite-based project code understanding graph.
+// Builds nodes (symbols: functions, classes, files, variables, etc.)
+// and edges (calls, imports, extends, implements, contains, defines).
+//
+// Uses Node.js built-in node:sqlite (DatabaseSync) — zero dependencies.
+// Builds on LSP bridge from Phase 10 for symbol/reference analysis.
+//
+// Schema:
+//   projects      — project roots + metadata
+//   nodes         — code symbols (function/class/file/...)
+//   edges         — relationships (calls/imports/extends/...)
+//   facts         — additional node properties
+//   file_versions — file content tracking for incremental updates
+//
+// API:
+//   class CkgEngine
+//     constructor(root, { dbDir, lspBridge } = {})
+//     async build()                   — Full project scan
+//     async incrementalUpdate(file)   — Single file re-scan
+//     async watch(root, {debounceMs, onUpdate})
+//     queryCallers(symbol, file, opts)
+//     queryCallees(symbol, file, opts)
+//     queryDependencies(file)
+//     queryUnusedExports()
+//     querySymbol(name, file, kind)
+//   getCkgEngine(root) — Singleton management
+
+import { DatabaseSync } from 'node:sqlite';
+import { existsSync, readFileSync, statSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { resolve, relative, dirname, basename, extname, sep } from 'node:path';
+import { createHash } from 'node:crypto';
+import { watch } from 'node:fs';
+import { homedir } from 'node:os';
+import { getLspBridge } from './lsp-bridge.mjs';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+const CKG_DIR = resolve(homedir(), '.smart', 'ckg');
+const NODE_KINDS = new Set([
+  'file', 'module', 'namespace', 'package', 'class', 'method', 'property',
+  'field', 'constructor', 'enum', 'interface', 'function', 'variable',
+  'constant', 'struct', 'type-parameter',
+]);
+const EDGE_KINDS = new Set([
+  'calls', 'imports', 'extends', 'implements', 'defines', 'parameterOf',
+  'returnTypeOf', 'contains',
+]);
+const SUPPORTED_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
+const STALE_DAYS = 30; // keep stale nodes for 30 days before hard deletion
+const DEFAULT_DEPTH = 2;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Compute MD5 hash of file content */
+function hashContent(content) {
+  return createHash('md5').update(content, 'utf8').digest('hex');
+}
+
+/** Get a stable project ID from root path */
+function projectHash(root) {
+  return createHash('sha256').update(resolve(root)).digest('hex').slice(0, 16);
+}
+
+/** Check if file extension is supported */
+function isSupportedFile(file) {
+  const ext = extname(file).toLowerCase();
+  return SUPPORTED_EXTS.has(ext);
+}
+
+/** Check if path should be skipped (node_modules, .git, dist, etc.) */
+function shouldSkipDir(name) {
+  return ['node_modules', '.git', 'dist', 'build', '.next', 'coverage',
+    '.smart', '.opencode', '.agents', '__pycache__', '.cache'].includes(name);
+}
+
+/** Parse import statements from file content (JS/TS) */
+function parseImports(content, filePath) {
+  const imports = [];
+
+  // ES module imports: import ... from '...'
+  const esmRe = /import\s+(?:\s*\{[^}]*\}\s*|\s*\*\s*as\s+\w+\s*|\s*\w+\s*(?:,\s*\{[^}]*\})?\s*)?from\s+['"]([^'"]+)['"]/g;
+  let m;
+  while ((m = esmRe.exec(content)) !== null) {
+    imports.push({ source: m[1].trim(), type: 'esm', raw: m[0].trim() });
+  }
+
+  // Dynamic import()
+  const dynamicRe = /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+  while ((m = dynamicRe.exec(content)) !== null) {
+    imports.push({ source: m[1].trim(), type: 'dynamic', raw: m[0].trim() });
+  }
+
+  // require()
+  const requireRe = /(?:const|let|var|import)\s+(?:\{[^}]*\}|\w+)\s*=\s*require\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+  while ((m = requireRe.exec(content)) !== null) {
+    imports.push({ source: m[1].trim(), type: 'require', raw: m[0].trim() });
+  }
+
+  // export ... from '...'
+  const exportRe = /export\s+(?:\{[^}]*\}|\*\s+from)\s+from\s+['"]([^'"]+)['"]/g;
+  while ((m = exportRe.exec(content)) !== null) {
+    imports.push({ source: m[1].trim(), type: 'reexport', raw: m[0].trim() });
+  }
+
+  return imports;
+}
+
+/** Resolve import source to an actual file path */
+function resolveImportSource(source, importerFile, projectRoot) {
+  if (!source.startsWith('.') && !source.startsWith('/')) {
+    return null; // bare specifier (npm package) — skip
+  }
+  const dir = dirname(resolve(projectRoot, importerFile));
+  // Try exact, then with extensions, then index files
+  const candidates = [
+    resolve(dir, source),
+    resolve(dir, source + '.ts'),
+    resolve(dir, source + '.tsx'),
+    resolve(dir, source + '.js'),
+    resolve(dir, source + '.mjs'),
+    resolve(dir, source + '.cjs'),
+    resolve(dir, source, 'index.ts'),
+    resolve(dir, source, 'index.tsx'),
+    resolve(dir, source, 'index.js'),
+    resolve(dir, source, 'index.mjs'),
+  ];
+  for (const c of candidates) {
+    if (existsSync(c) && isSupportedFile(c)) {
+      return relative(projectRoot, c);
+    }
+  }
+  return null; // couldn't resolve
+}
+
+// ---------------------------------------------------------------------------
+// LRU Cache (same pattern as LSP bridge)
+// ---------------------------------------------------------------------------
+class QueryCache {
+  constructor(maxSize = 500, ttlMs = 60_000) {
+    this.maxSize = maxSize;
+    this.ttlMs = ttlMs;
+    this._map = new Map();
+  }
+  get(key) {
+    const entry = this._map.get(key);
+    if (!entry) return undefined;
+    if (Date.now() - entry.ts > this.ttlMs) {
+      this._map.delete(key);
+      return undefined;
+    }
+    this._map.delete(key);
+    this._map.set(key, entry);
+    return entry.value;
+  }
+  set(key, value) {
+    if (this._map.size >= this.maxSize) {
+      const oldest = this._map.keys().next().value;
+      this._map.delete(oldest);
+    }
+    this._map.set(key, { value, ts: Date.now() });
+  }
+  invalidate(key) { this._map.delete(key); }
+  clear() { this._map.clear(); }
+}
+
+// ---------------------------------------------------------------------------
+// CkgEngine
+// ---------------------------------------------------------------------------
+export class CkgEngine {
+  /**
+   * @param {string} projectRoot - Absolute path to project root
+   * @param {object} [opts]
+   * @param {string} [opts.dbDir] - Directory for SQLite DB (default: ~/.smart/ckg/)
+   * @param {object} [opts.lspBridge] - Shared LspBridge instance
+   */
+  constructor(projectRoot, opts = {}) {
+    this.projectRoot = resolve(projectRoot || '.');
+    this._dbDir = opts.dbDir || CKG_DIR;
+    this._bridge = opts.lspBridge || null; // lazy-init
+    this._cache = new QueryCache(500, 60_000);
+    this._db = null;
+    this._projectId = null;
+    this._buildInProgress = false;
+    this._watchers = [];
+  }
+
+  // -----------------------------------------------------------------------
+  // Database lifecycle
+  // -----------------------------------------------------------------------
+
+  /** Get database instance (open if needed) */
+  _getDb() {
+    if (this._db) return this._db;
+    mkdirSync(this._dbDir, { recursive: true });
+    const dbPath = resolve(this._dbDir, `${projectHash(this.projectRoot)}.db`);
+    this._db = new DatabaseSync(dbPath);
+    this._db.exec('PRAGMA journal_mode=WAL');
+    this._db.exec('PRAGMA synchronous=NORMAL');
+    this._db.exec('PRAGMA foreign_keys=ON');
+    this._ensureSchema();
+    this._ensureProject();
+    return this._db;
+  }
+
+  /** Create tables if they don't exist */
+  _ensureSchema() {
+    const db = this._db;
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS projects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        root TEXT NOT NULL UNIQUE,
+        name TEXT,
+        language TEXT DEFAULT 'typescript',
+        file_count INTEGER DEFAULT 0,
+        node_count INTEGER DEFAULT 0,
+        edge_count INTEGER DEFAULT 0,
+        built_at TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS nodes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        file TEXT NOT NULL,
+        range_start_line INTEGER,
+        range_start_col INTEGER,
+        range_end_line INTEGER,
+        range_end_col INTEGER,
+        signature TEXT,
+        exported INTEGER DEFAULT 0,
+        stale INTEGER DEFAULT 0,
+        stale_reason TEXT,
+        content_hash TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (project_id) REFERENCES projects(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS edges (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id INTEGER NOT NULL,
+        from_node_id INTEGER NOT NULL,
+        to_node_id INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        metadata TEXT,
+        stale INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (project_id) REFERENCES projects(id),
+        FOREIGN KEY (from_node_id) REFERENCES nodes(id),
+        FOREIGN KEY (to_node_id) REFERENCES nodes(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS facts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        node_id INTEGER NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT NOT NULL,
+        version INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (node_id) REFERENCES nodes(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS file_versions (
+        file TEXT NOT NULL,
+        project_id INTEGER NOT NULL,
+        content_hash TEXT NOT NULL,
+        node_count INTEGER DEFAULT 0,
+        scanned_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (file, project_id),
+        FOREIGN KEY (project_id) REFERENCES projects(id)
+      );
+
+      -- Indices
+      CREATE INDEX IF NOT EXISTS idx_nodes_name ON nodes(name);
+      CREATE INDEX IF NOT EXISTS idx_nodes_kind ON nodes(kind);
+      CREATE INDEX IF NOT EXISTS idx_nodes_file ON nodes(file);
+      CREATE INDEX IF NOT EXISTS idx_nodes_project ON nodes(project_id);
+      CREATE INDEX IF NOT EXISTS idx_nodes_stale ON nodes(stale);
+      CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(from_node_id);
+      CREATE INDEX IF NOT EXISTS idx_edges_to ON edges(to_node_id);
+      CREATE INDEX IF NOT EXISTS idx_edges_kind ON edges(kind);
+      CREATE INDEX IF NOT EXISTS idx_edges_project ON edges(project_id);
+      CREATE INDEX IF NOT EXISTS idx_facts_node ON facts(node_id);
+
+      -- Full-text search
+      CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
+        name, signature, file,
+        content='nodes', content_rowid='id',
+        tokenize='unicode61'
+      );
+    `);
+  }
+
+  /** Ensure project record exists */
+  _ensureProject() {
+    const db = this._db;
+    const root = this.projectRoot;
+    const name = basename(root);
+    let row = db.prepare('SELECT id FROM projects WHERE root = ?').get(root);
+    if (!row) {
+      db.prepare('INSERT INTO projects (root, name) VALUES (?, ?)').run(root, name);
+      row = db.prepare('SELECT id FROM projects WHERE root = ?').get(root);
+    }
+    this._projectId = row.id;
+  }
+
+  // -----------------------------------------------------------------------
+  // LSP bridge access
+  // -----------------------------------------------------------------------
+
+  _getBridge() {
+    if (!this._bridge) {
+      this._bridge = getLspBridge(this.projectRoot);
+    }
+    return this._bridge;
+  }
+
+  // -----------------------------------------------------------------------
+  // Build — Full project scan
+  // -----------------------------------------------------------------------
+
+  /**
+   * Full project build: find all supported files, analyze symbols and edges.
+   * Skips files whose content hash hasn't changed.
+   * @param {object} [opts]
+   * @param {boolean} [opts.force=false] - Force rebuild all files
+   * @param {function} [opts.onProgress] - Progress callback (file, index, total)
+   * @returns {Promise<{files: number, nodes: number, edges: number, duration: string}>}
+   */
+  async build(opts = {}) {
+    const startTime = Date.now();
+    this._buildInProgress = true;
+    const db = this._getDb();
+    const bridge = this._getBridge();
+    const force = opts.force === true;
+    const buildReferences = opts.buildReferences === true;
+    const onProgress = opts.onProgress || (() => {});
+
+    // Find all supported files (or use provided list)
+    const allFiles = opts.files || this._findProjectFiles();
+    const totalFiles = allFiles.length;
+    let totalNodes = 0;
+    let totalEdges = 0;
+    let scannedCount = 0;
+
+    // Pre-mark all nodes as stale (will unmark as we scan)
+    // This handles deleted files automatically
+    if (force) {
+      db.prepare('UPDATE nodes SET stale = 1 WHERE project_id = ?').run(this._projectId);
+      db.prepare('UPDATE edges SET stale = 1 WHERE project_id = ?').run(this._projectId);
+    }
+
+    // Process each file
+    for (let i = 0; i < allFiles.length; i++) {
+      const file = allFiles[i];
+      const absPath = resolve(this.projectRoot, file);
+
+      onProgress(file, i + 1, totalFiles);
+
+      // Read file and compute hash
+      let content;
+      try {
+        content = readFileSync(absPath, 'utf-8');
+      } catch {
+        continue; // file might have been deleted
+      }
+      const hash = hashContent(content);
+
+      // Check if unchanged (skip if same hash, unless force)
+      if (!force) {
+        const existing = db.prepare(
+          'SELECT content_hash FROM file_versions WHERE file = ? AND project_id = ?'
+        ).get(file, this._projectId);
+        if (existing && existing.content_hash === hash) {
+          // File unchanged — unmark nodes as stale
+          db.prepare('UPDATE nodes SET stale = 0 WHERE project_id = ? AND file = ?').run(this._projectId, file);
+          scannedCount++;
+          continue;
+        }
+      }
+
+      // Analyze file with LSP
+      let symbols = [];
+      try {
+        const symResult = await bridge.getSymbols(file);
+        symbols = symResult.symbols || [];
+      } catch (err) {
+        // LSP might fail for some files — skip gracefully
+        continue;
+      }
+
+      // Remove old nodes for this file (edges first to avoid FK constraints)
+      db.prepare('DELETE FROM edges WHERE from_node_id IN (SELECT id FROM nodes WHERE project_id = ? AND file = ?)').run(this._projectId, file);
+      db.prepare('DELETE FROM edges WHERE to_node_id IN (SELECT id FROM nodes WHERE project_id = ? AND file = ?)').run(this._projectId, file);
+      db.prepare('DELETE FROM facts WHERE node_id IN (SELECT id FROM nodes WHERE project_id = ? AND file = ?)').run(this._projectId, file);
+      db.prepare('DELETE FROM nodes WHERE project_id = ? AND file = ?').run(this._projectId, file);
+      db.prepare('DELETE FROM file_versions WHERE file = ? AND project_id = ?').run(file, this._projectId);
+
+      // Create nodes for this file
+      const nodeIds = this._createFileNodes(file, symbols, hash);
+      totalNodes += nodeIds.length;
+
+      // Parse imports and create import edges
+      const imports = parseImports(content, file);
+      for (const imp of imports) {
+        const targetFile = resolveImportSource(imp.source, file, this.projectRoot);
+        if (targetFile && targetFile !== file) {
+          // Find or create a file node for the target
+          let targetNode = db.prepare(
+            'SELECT id FROM nodes WHERE project_id = ? AND file = ? AND kind = ? LIMIT 1'
+          ).get(this._projectId, targetFile, 'file');
+          if (!targetNode) {
+            // Create file node for target
+            const r = db.prepare(
+              'INSERT INTO nodes (project_id, name, kind, file, exported, stale, content_hash) VALUES (?, ?, ?, ?, ?, 0, ?)'
+            ).run(this._projectId, basename(targetFile), 'file', targetFile, 1, '');
+            targetNode = { id: Number(r.lastInsertRowid) };
+          }
+
+          // Create import edge
+          if (targetNode && nodeIds.fileNodeId) {
+            db.prepare(
+              'INSERT INTO edges (project_id, from_node_id, to_node_id, kind, metadata) VALUES (?, ?, ?, ?, ?)'
+            ).run(this._projectId, nodeIds.fileNodeId, targetNode.id, 'imports',
+              JSON.stringify({ source: imp.source, type: imp.type }));
+            totalEdges++;
+          }
+        }
+      }
+
+      // Find references for function/class symbols → create call edges
+      // (opt-in, expensive — uses LSP textDocument/references per symbol)
+      if (buildReferences) {
+        const functionNodes = symbols.filter(s =>
+          s.kind === 'function' || s.kind === 'method' || s.kind === 'class'
+        );
+        for (const sym of functionNodes) {
+          const fromNode = db.prepare(
+            'SELECT id FROM nodes WHERE project_id = ? AND file = ? AND name = ? AND kind = ? AND stale = 0 LIMIT 1'
+          ).get(this._projectId, file, sym.name, sym.kind);
+          if (!fromNode) continue;
+
+          let refs;
+          try {
+            const refResult = await bridge.getReferences(file, sym.line, sym.col || 0);
+            refs = refResult.references || [];
+          } catch {
+            continue;
+          }
+
+          for (const ref of refs) {
+            const refRel = relative(this.projectRoot, ref.file);
+            if (refRel === file) continue;
+
+            // Find or create file node for reference target
+            let toNode = db.prepare(
+              'SELECT id FROM nodes WHERE project_id = ? AND file = ? AND kind = ? LIMIT 1'
+            ).get(this._projectId, refRel, 'file');
+            if (!toNode) {
+              const r = db.prepare(
+                'INSERT INTO nodes (project_id, name, kind, file, exported, stale, content_hash) VALUES (?, ?, ?, ?, ?, 0, ?)'
+              ).run(this._projectId, basename(refRel), 'file', refRel, 1, '');
+              toNode = { id: Number(r.lastInsertRowid) };
+            }
+
+            if (toNode) {
+              db.prepare(
+                'INSERT INTO edges (project_id, from_node_id, to_node_id, kind, metadata) VALUES (?, ?, ?, ?, ?)'
+              ).run(this._projectId, fromNode.id, toNode.id, 'calls',
+                JSON.stringify({ file: refRel, line: ref.line, col: ref.col }));
+              totalEdges++;
+            }
+          }
+        }
+      }
+
+      // Update file version
+      db.prepare(
+        'INSERT OR REPLACE INTO file_versions (file, project_id, content_hash, node_count) VALUES (?, ?, ?, ?)'
+      ).run(file, this._projectId, hash, nodeIds.length);
+      scannedCount++;
+    }
+
+    // Clean up stale nodes older than STALE_DAYS
+    const staleCutoff = new Date(Date.now() - STALE_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    db.prepare(
+      'DELETE FROM nodes WHERE project_id = ? AND stale = 1 AND updated_at < ?'
+    ).run(this._projectId, staleCutoff);
+    db.prepare(
+      'DELETE FROM edges WHERE id IN (SELECT e.id FROM edges e JOIN nodes n ON e.from_node_id = n.id WHERE n.project_id = ? AND n.stale = 1)'
+    ).run(this._projectId);
+
+    // Update project stats
+    const nodeCount = db.prepare('SELECT COUNT(*) as c FROM nodes WHERE project_id = ? AND stale = 0').get(this._projectId).c;
+    const edgeCount = db.prepare('SELECT COUNT(*) as c FROM edges e JOIN nodes n ON e.from_node_id = n.id WHERE n.project_id = ? AND n.stale = 0').get(this._projectId).c;
+    db.prepare(
+      'UPDATE projects SET file_count = ?, node_count = ?, edge_count = ?, built_at = datetime(\'now\'), updated_at = datetime(\'now\') WHERE id = ?'
+    ).run(totalFiles, nodeCount, edgeCount, this._projectId);
+
+    this._buildInProgress = false;
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    return {
+      files: totalFiles,
+      scanned: scannedCount,
+      nodes: nodeCount,
+      edges: edgeCount,
+      duration: `${duration}s`,
+    };
+  }
+
+  /** Find all supported project files */
+  _findProjectFiles() {
+    const results = [];
+    const walkDir = (dir) => {
+      let entries;
+      try {
+        entries = readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        if (entry.name.startsWith('.')) continue;
+        if (shouldSkipDir(entry.name)) continue;
+        const fullPath = resolve(dir, entry.name);
+        if (entry.isDirectory()) {
+          walkDir(fullPath);
+        } else if (entry.isFile()) {
+          const relPath = relative(this.projectRoot, fullPath);
+          if (isSupportedFile(fullPath)) {
+            results.push(relPath);
+          }
+        }
+      }
+    };
+    walkDir(this.projectRoot);
+    return results;
+  }
+
+  /** Create nodes for all symbols in a file, return created node IDs */
+  _createFileNodes(file, symbols, contentHash) {
+    const db = this._getDb();
+    const projectId = this._projectId;
+    const now = new Date().toISOString();
+    const nodeIds = [];
+    let fileNodeId = null;
+
+    // Create file node first
+    const fileStmt = db.prepare(
+      'INSERT INTO nodes (project_id, name, kind, file, exported, stale, content_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)'
+    );
+    const fileResult = fileStmt.run(projectId, basename(file), 'file', file, 1, contentHash, now, now);
+    fileNodeId = Number(fileResult.lastInsertRowid);
+    nodeIds.fileNodeId = fileNodeId;
+
+    // Create symbol nodes
+    const symStmt = db.prepare(
+      `INSERT INTO nodes (project_id, name, kind, file, range_start_line, range_start_col,
+        range_end_line, range_end_col, signature, exported, stale, content_hash, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`
+    );
+
+    const walkSymbols = (symbols, parentId = null) => {
+      for (const sym of symbols) {
+        const symResult = symStmt.run(
+          projectId, sym.name, sym.kind, file,
+          sym.line || null, sym.col || null,
+          null, null,  // end line/col not always available
+          sym.signature || sym.name,
+          sym.kind === 'function' || sym.kind === 'class' ? 1 : 0,
+          contentHash, now, now
+        );
+        const nodeId = Number(symResult.lastInsertRowid);
+
+        nodeIds.push(nodeId);
+
+        // Create "contains" edge from file to this symbol
+        if (fileNodeId) {
+          db.prepare(
+            'INSERT INTO edges (project_id, from_node_id, to_node_id, kind, metadata) VALUES (?, ?, ?, ?, ?)'
+          ).run(projectId, fileNodeId, nodeId, 'contains',
+            JSON.stringify({ line: sym.line, kind: sym.kind }));
+        }
+
+        // If this symbol has a parent, create contains edge
+        if (parentId) {
+          db.prepare(
+            'INSERT INTO edges (project_id, from_node_id, to_node_id, kind, metadata) VALUES (?, ?, ?, ?, ?)'
+          ).run(projectId, parentId, nodeId, 'contains',
+            JSON.stringify({ line: sym.line }));
+        }
+
+        if (sym.children) {
+          walkSymbols(sym.children, nodeId);
+        }
+      }
+    };
+    walkSymbols(symbols);
+
+    return nodeIds;
+  }
+
+  // -----------------------------------------------------------------------
+  // Incremental update — single file re-analysis
+  // -----------------------------------------------------------------------
+
+  /**
+   * Re-analyze a single file. Removes old nodes/edges for this file,
+   * re-scans with LSP, recreates nodes and edges.
+   * @param {string} file - File path (relative to project root)
+   * @returns {Promise<{updated: boolean, nodes: number, edges: number}>}
+   */
+  async incrementalUpdate(file) {
+    const db = this._getDb();
+    const bridge = this._getBridge();
+    const absPath = resolve(this.projectRoot, file);
+
+    if (!existsSync(absPath)) {
+      // File was deleted — mark nodes as stale
+      db.prepare('UPDATE nodes SET stale = 1, stale_reason = ? WHERE project_id = ? AND file = ?')
+        .run('file deleted', this._projectId, file);
+      db.prepare('DELETE FROM file_versions WHERE file = ? AND project_id = ?').run(file, this._projectId);
+      return { updated: true, nodes: 0, edges: 0 };
+    }
+
+    if (!isSupportedFile(file)) {
+      return { updated: false, nodes: 0, edges: 0 };
+    }
+
+    // Read file
+    let content;
+    try {
+      content = readFileSync(absPath, 'utf-8');
+    } catch {
+      return { updated: false, nodes: 0, edges: 0 };
+    }
+    const hash = hashContent(content);
+
+    // Check if actually changed
+    const existing = db.prepare(
+      'SELECT content_hash FROM file_versions WHERE file = ? AND project_id = ?'
+    ).get(file, this._projectId);
+    if (existing && existing.content_hash === hash) {
+      return { updated: false, nodes: 0, edges: 0 };
+    }
+
+    // Remove old data for this file (edges first to avoid FK constraints)
+    db.prepare('DELETE FROM edges WHERE from_node_id IN (SELECT id FROM nodes WHERE project_id = ? AND file = ?)').run(this._projectId, file);
+    db.prepare('DELETE FROM edges WHERE to_node_id IN (SELECT id FROM nodes WHERE project_id = ? AND file = ?)').run(this._projectId, file);
+    db.prepare('DELETE FROM facts WHERE node_id IN (SELECT id FROM nodes WHERE project_id = ? AND file = ?)').run(this._projectId, file);
+    db.prepare('DELETE FROM nodes WHERE project_id = ? AND file = ?').run(this._projectId, file);
+    db.prepare('DELETE FROM file_versions WHERE file = ? AND project_id = ?').run(file, this._projectId);
+
+    // Get symbols from LSP
+    let symbols = [];
+    try {
+      const symResult = await bridge.getSymbols(file);
+      symbols = symResult.symbols || [];
+    } catch {
+      return { updated: true, nodes: 0, edges: 0 };
+    }
+
+    // Create nodes
+    const nodeIds = this._createFileNodes(file, symbols, hash);
+
+    // Parse imports and create edges
+    const imports = parseImports(content, file);
+    let edgeCount = 0;
+    for (const imp of imports) {
+      const targetFile = resolveImportSource(imp.source, file, this.projectRoot);
+      if (targetFile && targetFile !== file && nodeIds.fileNodeId) {
+        let targetNode = db.prepare(
+          'SELECT id FROM nodes WHERE project_id = ? AND file = ? AND kind = ? LIMIT 1'
+        ).get(this._projectId, targetFile, 'file');
+        if (!targetNode) {
+          const r = db.prepare(
+            'INSERT INTO nodes (project_id, name, kind, file, exported, stale, content_hash) VALUES (?, ?, ?, ?, ?, 0, ?)'
+          ).run(this._projectId, basename(targetFile), 'file', targetFile, 1, '');
+          targetNode = { id: Number(r.lastInsertRowid) };
+        }
+        if (targetNode) {
+          db.prepare(
+            'INSERT INTO edges (project_id, from_node_id, to_node_id, kind, metadata) VALUES (?, ?, ?, ?, ?)'
+          ).run(this._projectId, nodeIds.fileNodeId, targetNode.id, 'imports',
+            JSON.stringify({ source: imp.source, type: imp.type }));
+          edgeCount++;
+        }
+      }
+    }
+
+    // Update file version
+    db.prepare(
+      'INSERT OR REPLACE INTO file_versions (file, project_id, content_hash, node_count) VALUES (?, ?, ?, ?)'
+    ).run(file, this._projectId, hash, nodeIds.length);
+
+    // Update project stats
+    const nodeCount = db.prepare('SELECT COUNT(*) as c FROM nodes WHERE project_id = ? AND stale = 0').get(this._projectId).c;
+    const totalEdgeCount = db.prepare(
+      'SELECT COUNT(*) as c FROM edges e JOIN nodes n ON e.from_node_id = n.id WHERE n.project_id = ? AND n.stale = 0'
+    ).get(this._projectId).c;
+    db.prepare(
+      'UPDATE projects SET node_count = ?, edge_count = ?, updated_at = datetime(\'now\') WHERE id = ?'
+    ).run(nodeCount, totalEdgeCount, this._projectId);
+
+    // Invalidate relevant cache entries
+    this._cache.clear();
+
+    return { updated: true, nodes: nodeIds.length, edges: edgeCount };
+  }
+
+  // -----------------------------------------------------------------------
+  // File watching
+  // -----------------------------------------------------------------------
+
+  /**
+   * Watch project files for changes and auto-update CKG.
+   * @param {string} root - Project root to watch
+   * @param {object} [opts]
+   * @param {number} [opts.debounceMs=500] - Debounce delay
+   * @param {function} [opts.onUpdate] - Callback on update (result)
+   * @returns {() => void} - Unwatch function
+   */
+  watch(root, opts = {}) {
+    const debounceMs = opts.debounceMs || 500;
+    const onUpdate = opts.onUpdate || (() => {});
+    const pending = new Map();
+
+    const doUpdate = async (filePath) => {
+      const relPath = relative(this.projectRoot, filePath);
+      if (!isSupportedFile(relPath) || shouldSkipDir(basename(dirname(relPath)))) return;
+      try {
+        const result = await this.incrementalUpdate(relPath);
+        if (result.updated) {
+          onUpdate(result);
+        }
+      } catch (err) {
+        // silent — LSP might not be ready
+      }
+    };
+
+    const watcher = watch(root, { recursive: true }, (eventType, filename) => {
+      if (!filename) return;
+      // Debounce
+      if (pending.has(filename)) clearTimeout(pending.get(filename));
+      pending.set(filename, setTimeout(() => {
+        pending.delete(filename);
+        doUpdate(filename);
+      }, debounceMs));
+    });
+
+    this._watchers.push(watcher);
+    return () => {
+      watcher.close();
+      const idx = this._watchers.indexOf(watcher);
+      if (idx >= 0) this._watchers.splice(idx, 1);
+    };
+  }
+
+  // -----------------------------------------------------------------------
+  // Queries
+  // -----------------------------------------------------------------------
+
+  /**
+   * Query callers of a symbol.
+   * @param {string} symbol - Symbol name (function/class/variable)
+   * @param {string} file - File containing the symbol
+   * @param {object} [opts]
+   * @param {number} [opts.depth=2] - Recursion depth
+   * @param {boolean} [opts.includeStale=false]
+   * @returns {object} Call chain
+   */
+  queryCallers(symbol, file, opts = {}) {
+    const db = this._getDb();
+    const depth = opts.depth || DEFAULT_DEPTH;
+    const staleFilter = opts.includeStale ? '' : 'AND n.stale = 0';
+
+    const cacheKey = `callers:${file}:${symbol}:${depth}`;
+    const cached = this._cache.get(cacheKey);
+    if (cached) return cached;
+
+    // Find node by name + file
+    const node = db.prepare(
+      `SELECT id, name, kind, file, range_start_line as line, signature FROM nodes n
+       WHERE n.project_id = ? AND n.name = ? AND n.file = ? ${staleFilter}
+       LIMIT 1`
+    ).get(this._projectId, symbol, file);
+
+    if (!node) {
+      const result = { root: { symbol, file }, callers: [], depth, totalCallers: 0 };
+      this._cache.set(cacheKey, result);
+      return result;
+    }
+
+    // Get direct callers (edges where this node is the target)
+    const callers = db.prepare(
+      `SELECT DISTINCT n.id, n.name, n.kind, n.file, n.range_start_line as line, n.signature
+       FROM edges e
+       JOIN nodes n ON e.from_node_id = n.id
+       WHERE e.to_node_id = ? AND e.kind = 'calls' ${staleFilter}
+       ORDER BY n.file, n.name`
+    ).all(node.id);
+
+    // Recursive caller tracking for depth > 1
+    const getCallerChain = (nodeId, currentDepth) => {
+      if (currentDepth >= depth) return [];
+      const deeper = db.prepare(
+        `SELECT DISTINCT n.id, n.name, n.kind, n.file, n.range_start_line as line, n.signature
+         FROM edges e
+         JOIN nodes n ON e.from_node_id = n.id
+         WHERE e.to_node_id = ? AND e.kind = 'calls' ${staleFilter}
+         ORDER BY n.file, n.name`
+      ).all(nodeId);
+      return deeper.map(c => ({
+        ...c,
+        callers: getCallerChain(c.id, currentDepth + 1),
+      }));
+    };
+
+    const enriched = callers.map(c => ({
+      ...c,
+      callers: getCallerChain(c.id, 1),
+    }));
+
+    const result = {
+      root: { symbol, file, line: node.line, signature: node.signature },
+      callers: enriched,
+      depth,
+      totalCallers: callers.length,
+    };
+
+    this._cache.set(cacheKey, result);
+    return result;
+  }
+
+  /**
+   * Query callees of a symbol (what does this function call).
+   * @param {string} symbol - Symbol name
+   * @param {string} file - File containing the symbol
+   * @param {object} [opts]
+   * @param {number} [opts.depth=2]
+   * @param {boolean} [opts.includeStale=false]
+   * @returns {object} Callee chain
+   */
+  queryCallees(symbol, file, opts = {}) {
+    const db = this._getDb();
+    const depth = opts.depth || DEFAULT_DEPTH;
+    const staleFilter = opts.includeStale ? '' : 'AND n.stale = 0';
+
+    const cacheKey = `callees:${file}:${symbol}:${depth}`;
+    const cached = this._cache.get(cacheKey);
+    if (cached) return cached;
+
+    const node = db.prepare(
+      `SELECT id, name, kind, file, range_start_line as line, signature FROM nodes n
+       WHERE n.project_id = ? AND n.name = ? AND n.file = ? ${staleFilter}
+       LIMIT 1`
+    ).get(this._projectId, symbol, file);
+
+    if (!node) {
+      const result = { root: { symbol, file }, callees: [], depth, totalCallees: 0 };
+      this._cache.set(cacheKey, result);
+      return result;
+    }
+
+    const callees = db.prepare(
+      `SELECT DISTINCT n.id, n.name, n.kind, n.file, n.range_start_line as line, n.signature
+       FROM edges e
+       JOIN nodes n ON e.to_node_id = n.id
+       WHERE e.from_node_id = ? AND e.kind = 'calls' ${staleFilter}
+       ORDER BY n.file, n.name`
+    ).all(node.id);
+
+    const getCalleeChain = (nodeId, currentDepth) => {
+      if (currentDepth >= depth) return [];
+      const deeper = db.prepare(
+        `SELECT DISTINCT n.id, n.name, n.kind, n.file, n.range_start_line as line, n.signature
+         FROM edges e
+         JOIN nodes n ON e.to_node_id = n.id
+         WHERE e.from_node_id = ? AND e.kind = 'calls' ${staleFilter}
+         ORDER BY n.file, n.name`
+      ).all(nodeId);
+      return deeper.map(c => ({
+        ...c,
+        callees: getCalleeChain(c.id, currentDepth + 1),
+      }));
+    };
+
+    const enriched = callees.map(c => ({
+      ...c,
+      callees: getCalleeChain(c.id, 1),
+    }));
+
+    const result = {
+      root: { symbol, file, line: node.line, signature: node.signature },
+      callees: enriched,
+      depth,
+      totalCallees: callees.length,
+    };
+
+    this._cache.set(cacheKey, result);
+    return result;
+  }
+
+  /**
+   * Query dependency structure of a file.
+   * @param {string} file - File path
+   * @returns {object} Dependencies (imports from, imported by)
+   */
+  queryDependencies(file) {
+    const db = this._getDb();
+    const staleFilter = 'AND n.stale = 0';
+
+    const cacheKey = `deps:${file}`;
+    const cached = this._cache.get(cacheKey);
+    if (cached) return cached;
+
+    // Find file node
+    const fileNode = db.prepare(
+      `SELECT id, name FROM nodes n WHERE n.project_id = ? AND n.file = ? AND n.kind = 'file' ${staleFilter} LIMIT 1`
+    ).get(this._projectId, file);
+
+    if (!fileNode) {
+      const result = { file, imports: [], importedBy: [], totalImports: 0, totalImporters: 0 };
+      this._cache.set(cacheKey, result);
+      return result;
+    }
+
+    // What this file imports (outgoing edges with kind='imports')
+    const imports = db.prepare(
+      `SELECT DISTINCT n.file as target, n.name as target_name, e.metadata
+       FROM edges e
+       JOIN nodes n ON e.to_node_id = n.id
+       WHERE e.from_node_id = ? AND e.kind = 'imports' ${staleFilter}
+       ORDER BY n.file`
+    ).all(fileNode.id).map(r => ({
+      file: r.target,
+      name: r.target_name,
+      specifier: r.metadata ? JSON.parse(r.metadata).source : null,
+    }));
+
+    // What imports this file (incoming edges)
+    const importedBy = db.prepare(
+      `SELECT DISTINCT n.file as source, n.name as source_name
+       FROM edges e
+       JOIN nodes n ON e.from_node_id = n.id
+       JOIN nodes tn ON e.to_node_id = tn.id
+       WHERE tn.file = ? AND tn.kind = 'file' AND e.kind = 'imports' ${staleFilter}
+       ORDER BY n.file`
+    ).all(file);
+
+    const result = {
+      file,
+      imports,
+      importedBy,
+      totalImports: imports.length,
+      totalImporters: importedBy.length,
+    };
+
+    this._cache.set(cacheKey, result);
+    return result;
+  }
+
+  /**
+   * Find unused exports in the project.
+   * @returns {Array} Unused exported symbols
+   */
+  queryUnusedExports() {
+    const db = this._getDb();
+    const staleFilter = 'AND n.stale = 0';
+
+    const cacheKey = 'unused-exports';
+    const cached = this._cache.get(cacheKey);
+    if (cached) return cached;
+
+    // Find exported symbols that have no incoming call/import edges
+    const unused = db.prepare(
+      `SELECT n.id, n.name, n.kind, n.file, n.range_start_line as line, n.signature
+       FROM nodes n
+       WHERE n.project_id = ? AND n.exported = 1 AND n.stale = 0
+         AND n.kind IN ('function', 'class', 'interface', 'type', 'constant', 'variable')
+         AND n.id NOT IN (
+           SELECT DISTINCT e.to_node_id FROM edges e
+           WHERE e.kind IN ('calls', 'imports') AND e.stale = 0
+         )
+       ORDER BY n.file, n.name
+       LIMIT 200`
+    ).all(this._projectId);
+
+    // Also exclude symbols that are only referenced within their own file
+    // (We'll use a simpler heuristic: exported symbols only referenced by their file)
+    // Actually the edge table tracks cross-file references, so any symbol
+    // referenced within the same file won't appear as an edge. And symbols
+    // referenced by other files will have incoming edges. So this is correct.
+
+    this._cache.set(cacheKey, unused);
+    return unused;
+  }
+
+  /**
+   * Query a symbol by name.
+   * @param {string} name - Symbol name
+   * @param {object} [opts]
+   * @param {string} [opts.file] - Filter by file
+   * @param {string} [opts.kind] - Filter by kind (function, class, etc.)
+   * @param {boolean} [opts.includeStale=false]
+   * @returns {Array} Matching symbols
+   */
+  querySymbol(name, opts = {}) {
+    const db = this._getDb();
+    let sql = 'SELECT id, name, kind, file, range_start_line as line, signature, exported FROM nodes WHERE project_id = ? AND name = ?';
+    const params = [this._projectId, name];
+    const conditions = [];
+
+    if (opts.file) { conditions.push('file = ?'); params.push(opts.file); }
+    if (opts.kind) { conditions.push('kind = ?'); params.push(opts.kind); }
+    if (!opts.includeStale) { conditions.push('stale = 0'); }
+    if (conditions.length) sql += ' AND ' + conditions.join(' AND ');
+    sql += ' ORDER BY file, kind';
+
+    return db.prepare(sql).all(...params);
+  }
+
+  /**
+   * Get project stats.
+   * @returns {object} Project statistics
+   */
+  getStats() {
+    const db = this._getDb();
+    const proj = db.prepare('SELECT * FROM projects WHERE id = ?').get(this._projectId);
+    if (!proj) return { status: 'not_built' };
+
+    const activeNodes = db.prepare('SELECT COUNT(*) as c FROM nodes WHERE project_id = ? AND stale = 0').get(this._projectId).c;
+    const staleNodes = db.prepare('SELECT COUNT(*) as c FROM nodes WHERE project_id = ? AND stale = 1').get(this._projectId).c;
+    const edgeCount = db.prepare(
+      'SELECT COUNT(*) as c FROM edges e JOIN nodes n ON e.from_node_id = n.id WHERE n.project_id = ? AND n.stale = 0'
+    ).get(this._projectId).c;
+    const kindBreakdown = db.prepare(
+      'SELECT kind, COUNT(*) as count FROM nodes WHERE project_id = ? AND stale = 0 GROUP BY kind ORDER BY count DESC'
+    ).all(this._projectId);
+
+    return {
+      project: proj.name,
+      root: proj.root,
+      files: proj.file_count,
+      nodes: activeNodes,
+      stale: staleNodes,
+      edges: edgeCount,
+      builtAt: proj.built_at,
+      kindBreakdown: kindBreakdown.reduce((acc, r) => { acc[r.kind] = r.count; return acc; }, {}),
+    };
+  }
+
+  // -----------------------------------------------------------------------
+  // Close / Cleanup
+  // -----------------------------------------------------------------------
+
+  /** Close database and stop watchers */
+  async close() {
+    // Stop all watchers
+    for (const w of this._watchers) {
+      try { w.close(); } catch { /* ignore */ }
+    }
+    this._watchers = [];
+
+    // Close database
+    if (this._db) {
+      try { this._db.close(); } catch { /* ignore */ }
+      this._db = null;
+    }
+    this._cache.clear();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Singleton management
+// ---------------------------------------------------------------------------
+const _instances = new Map();
+
+/**
+ * Get or create a CkgEngine for a project root.
+ * @param {string} rootDir - Project root directory
+ * @returns {CkgEngine}
+ */
+export function getCkgEngine(rootDir) {
+  const key = rootDir || process.cwd();
+  if (!_instances.has(key)) {
+    _instances.set(key, new CkgEngine(key));
+  }
+  return _instances.get(key);
+}
+
+/**
+ * Close all CKG engine instances (call on shutdown).
+ */
+export async function closeAllCkgEngines() {
+  for (const [key, engine] of _instances) {
+    try { await engine.close(); } catch { /* ignore */ }
+    _instances.delete(key);
+  }
+}
