@@ -423,11 +423,13 @@ function generateSummary(changedFiles, diffContent) {
   }
 
   // Strategy 3: look for high-level identifiers (classes, interfaces, exports)
-  // Filter out low-level implementation functions
+  // Filter out low-level implementation functions and ALL_CAPS constants
   const highLevelIds = identifiers.filter(id =>
     id.length > 3 &&
-    /^[A-Z]/.test(id) && // PascalCase = class/interface/type
-    !id.endsWith('Error') && !id.endsWith('Exception')
+    /^[A-Z][a-z]/.test(id) && // PascalCase (NOT ALL_CAPS or lowercase)
+    !id.endsWith('Error') && !id.endsWith('Exception') &&
+    !/^[A-Z]{2,}$/.test(id) && // Not pure uppercase (constants)
+    !/^[A-Z]+_/.test(id) // Not SCREAMING_SNAKE_CASE
   );
   if (highLevelIds.length > 0) {
     const subjects = [...new Set(highLevelIds.map(id =>
