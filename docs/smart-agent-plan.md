@@ -35,7 +35,7 @@ agent 立即具備：
 
 | 資產 | 數量 | 可複用性 |
 |------|------|---------|
-| MCP tools | 36 個（6 core + 27 standard + 3 agent） | ✅ 直接使用 |
+| MCP tools | 39 個（6 core + 33 standard） | ✅ 直接使用 |
 | ContextManager | 1 個 | ✅ session/工具追蹤 |
 | Memory Store | 1 個 | ✅ fuzzy match 經驗 |
 | Workflow Engine | Phase 5 完成 | ✅ 已啟用 dispatch |
@@ -84,7 +84,7 @@ agent 立即具備：
 │                         ▼                                         │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │               Smart MCP Server                             │  │
-│  │  ├── 36 tools（6 core + 27 standard + 3 agent）           │  │
+│  │  ├── 39 tools（6 core + 33 standard + 3 agent）           │  │
 │  │  ├── ContextManager（session 追蹤）                       │  │
 │  │  ├── Memory Store（經驗庫）                               │  │
 │  │  └── Workflow Engine（dispatch 引擎）                     │  │

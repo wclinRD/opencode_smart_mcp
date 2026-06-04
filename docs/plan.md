@@ -7,10 +7,10 @@
 
 ## 一、現狀摘要
 
-Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 36 個開發工具 + 專屬 agent personality。當前版本 3.3.1（Plugin Loader + Router 架構 + 動態多輪推理 + Context 管理 + Workflow 引擎 + Compose 引擎 + Agent 人格定義 + 小模型兜底工具 + 全面非阻塞 CLI）。
+Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 39 個開發工具 + 專屬 agent personality。當前版本 3.4.0（Plugin Loader + Router 架構 + 動態多輪推理 + Context 管理 + Workflow 引擎 + Compose 引擎 + LSP 程式碼語義分析 + CKG 程式碼知識圖譜 + Agent 人格定義 + 小模型兜底工具 + 全面非阻塞 CLI）。
 
 ### 核心數據
-- **工具總數**：38（6 原生 + 32 經 router — 含 4 Phase 10 程式碼語義工具 + 3 Phase D agent 輔助工具）
+- **工具總數**：39（6 原生 + 33 經 router — 含 4 Phase 10 程式碼語義工具 + 1 Phase 11 CKG 查詢工具 + 3 Phase D agent 輔助工具）
 - **架構**：Plugin Loader → src/plugins/core/（6 原生 handler）/ src/plugins/standard/（24 router CLI — 全部非阻塞 async spawn）
 - **Workflow 引擎**：Phase 4-6 完成 — dispatch 實際執行 + 5 模板 + compose/pipe/parallel 三種原語 + replan + summary
 - **語言**：JavaScript (ESM) — 6 核心 handler + 24 CLI 全數非阻塞化 (Phase 6)
@@ -38,17 +38,26 @@ src/
 │   └── thinking.mjs          → smart_thinking (深層分析, handler-based)
 
 │
-├── plugins/standard/    (30 standard tools, 經 smart_run router)
-│   ├── agent-execute.mjs      → smart_agent_execute (小模型用)
-│   ├── agent-plan.mjs         → smart_agent_plan (小模型用)
-│   ├── agent-recommend.mjs    → smart_agent_recommend (小模型用)
+├── plugins/standard/    (33 standard tools, 經 smart_run router)
+│   ├── agent-execute.mjs      → smart_agent_execute     ← Phase D
+│   ├── agent-plan.mjs         → smart_agent_plan        ← Phase D
+│   ├── agent-recommend.mjs    → smart_agent_recommend   ← Phase D
+│   ├── code-ast.mjs           → smart_code_ast          ← Phase 10
+│   ├── code-call-graph.mjs    → smart_code_call_graph   ← Phase 10
+│   ├── code-impact.mjs        → smart_code_impact       ← Phase 10
+│   ├── code-query.mjs         → smart_code_query        ← Phase 11 🆕
+│   ├── code-type-infer.mjs    → smart_code_type_infer   ← Phase 10
+│   ├── compose.mjs            → smart_compose           ← Phase 6
 │   ├── coverage.mjs          → smart_coverage
 │   ├── cross_file_edit.mjs   → smart_cross_file_edit
 │   ├── debug.mjs             → smart_debug
 │   ├── diagram.mjs           → smart_diagram
 │   ├── error_diagnose.mjs    → smart_error_diagnose
 │   ├── exa_search.mjs        → smart_exa_search
+│   ├── git_commit.mjs        → smart_git_commit        ← 2026-06-04
 │   ├── git_context.mjs       → smart_git_context
+│   ├── git_pr.mjs            → smart_git_pr            ← 2026-06-04
+│   ├── git_review.mjs        → smart_git_review        ← 2026-06-04
 │   ├── github_search.mjs     → smart_github_search
 │   ├── import_graph.mjs      → smart_import_graph
 │   ├── integrate.mjs         → smart_integrate
@@ -62,7 +71,7 @@ src/
 │   ├── tool_stats.mjs        → smart_tool_stats
 │   ├── toonify.mjs           → smart_toonify
 │   ├── ts_helper.mjs         → smart_ts_helper
-│   └── workflow.mjs          → smart_workflow  ✨新
+│   └── workflow.mjs          → smart_workflow
 │
 ├── cli/                 (各 tool CLI 實作)
 │   ├── contextual-grep.mjs
@@ -70,11 +79,13 @@ src/
 │   ├── thinking.mjs          (also used as lib by plugins)
 │   ├── workflow.mjs          ✨新
 │   └── ... (26 CLI files)
-│
+
 ├── lib/
 │   ├── utils.mjs        (shared utilities)
 │   ├── context-manager.mjs  (Context 管理)
-│   └── compose-engine.mjs   (工具組合引擎)
+│   ├── compose-engine.mjs   (工具組合引擎)
+│   ├── lsp-bridge.mjs       (LSP 統一接入層)      ← Phase 10
+│   └── ckg-engine.mjs       (CKG 程式碼知識圖譜)   ← Phase 11
 │
 ├── config/
 │   ├── agents/
@@ -113,6 +124,7 @@ src/
 | **推理 (深層分析)** | 1 (smart_thinking) | ✅ 成熟 | 9 模板 + 動態多輪/state/branch/handler 化 |
 | **推理 (快速思考)** | 1 (smart_think) | ✅ 成熟 | handler-based 輕量推理，已取代 sequential-thinking |
 | **Workflow 編排** | 1 (smart_workflow) | ✅ 完成 | 5 模板 (debug/refactor/security/research/default) + create/report/replan/summary |
+| **CKG 程式碼圖譜** | 1 (smart_code_query) | ✅ 完成 | SQLite-based 持久化圖譜 + callers/callees/dependencies/unused-exports (Phase 11) |
 
 ### 3.2 已驗證的強項
 
@@ -134,7 +146,7 @@ src/
 | 2026-06-04 | Phase 1 | 記憶系統+error-diagnose 整合+tool-stats 升級 | memory-store: confirm 指令+auto-category+dedup+壓縮; error-diagnose: 記憶預設開啟(useMemory=true→noMemory); tool-stats: patterns 指令+session 分析+combo 發現; 10 整合測試通過 |
 | 2026-06-04 | `invokeTool` | `handler` 不支援 async — 4 個 Phase 10 LSP 工具回傳 `[object Promise]` | handler 傳回 Promise 時回傳 `__async` sentinel，caller 路徑 resolve Promise 後 respond |
 
-### 3.4 當前缺口 (Phase 1-6 完成後，2026-06-04)
+### 3.4 當前缺口（Phase 10-11 完成後，2026-06-05）
 
 | 缺口 | 嚴重性 | 說明 | 對應 Phase | 狀態 |
 |------|--------|------|-----------|------|
@@ -142,32 +154,32 @@ src/
 | **🔴 CLI spawn 阻塞 event loop** | 高 | 24 standard tools 用 spawnSync，Node.js 單執行緒卡住 | Phase 6 ✅ | **已解決** |
 | **🟠 Workflow 無實際執行能力** | 高 | workflow 只管理 state，工具執行要靠 opencode agent 手動 dispatch | Phase 5 ✅ | **已解決** |
 | **🟠 Context 無 workflow 維度聚合** | 中 | 不能問「這個 workflow 花了多少 token / 時間」 | Phase 5 | **已解決** |
+| **🟠 程式碼語義推理 (AST/call-graph/type/impact)** | 高 | 無原生程式碼理解 | Phase 10 ✅ | **已解決** |
+| **🟠 無持久化程式碼圖譜 (CKG)** | 高 | 無跨 session 程式碼知識 | Phase 11 ✅ | **已解決** |
 | **🟠 Memory 僅 resolution** | 中 | 無 vector search / pattern abstraction / 跨 session context 合併 | Phase 7 | ❌ 未完成 |
 | **🟡 無程式生成** | 中 | 純分析工具，不能寫 code / 產生 patch | Phase 8 | ❌ 未完成 |
 | **🟡 Planner 無 LLM-based 分解** | 中 | 模板僅關鍵字比對，複雜目標（如「修復 memory leak」）match 不到 | Phase 2 | 部分完成 |
-| **🟢 語言覆蓋不足** | 低 | 只有 Python/TS 助手，缺 Rust/Go/Java | Phase 9/10 | ❌ 未完成 |
+| **🟢 語言覆蓋不足** | 低 | 只有 Python/TS 助手，缺 Rust/Go/Java | Phase 9 | ❌ 未完成 |
 
-#### 3.5 新缺口：程式碼語義推理深度不足（P0 — 追趕 Claude Code 關鍵）
+#### 3.5 新缺口（Phase 10-11 完成後更新）
 
-> **核心問題**：Phase 1-6 全部完成後，smart-mcp 在「工具數量、workflow、記憶、規劃」上已與 Claude Code 相當，但**程式碼推理深度**仍落後。差距根源在於 Tool Layer 缺乏語義級分析能力。
+> **核心問題**：Phase 10-11 完成後，smart-mcp 已建立**確定性程式碼分析工具鏈**（LSP bridge + 4 語義工具 + CKG），但跨層整合（Hybrid Router）與更高階推理（Change-Impact, Multi-Model）仍缺失。
 
-| 缺失能力 | Claude Code 有 | smart-mcp 現況 | 影響 |
-|---------|---------------|----------------|------|
-| AST parsing + cross-reference | ✅ 原生 | `analyze.learn` 僅結構萃取，無 AST | 無法理解程式碼語義，只能字串匹配 |
-| 呼叫鏈追蹤（call-graph）| ✅ 原生 | 無原生的 call-graph build | 改 A 函式不知道影響 B/C/D |
-| 類型推導（type inference）| ✅ 原生 | 依賴 LSP skill（需額外設定） | 多檔案型別傳播無法追蹤 |
-| 影響半徑分析（impact analysis）| ✅ 原生 | 無 | 重構時不知道範圍多大 |
-| 架構契約擷取（contract extraction）| ✅ 原生 | 無 | 不理解模組之間的依賴契約 |
+| 缺失能力 | Phase 10-11 現況 | 下階段 |
+|---------|------------------|--------|
+| AST parsing + cross-reference | ✅ `smart_code_ast` (LSP documentSymbol) | Tree-sitter 替換 (Phase 10.2) |
+| 呼叫鏈追蹤（call-graph）| ✅ `smart_code_call_graph` (LSP references) | CKG 離線加速 (Phase 11.3) |
+| 類型推導（type inference）| ✅ `smart_code_type_infer` (LSP hover) | 跨檔案傳播 |
+| 影響半徑分析（impact analysis）| ✅ `smart_code_impact` (LSP + CKG) | Phase 13 Change-Impact Pipeline |
+| 架構契約擷取（contract extraction）| ⚠️ CKG 節點/邊已儲存 | 高階查詢 + pattern 歸納 |
+| **跨層路由（確定性 vs LLM）** | ❌ 無 | Phase 12 Hybrid Router |
+| **變更影響傳播 + 測試預測** | ❌ 無 | Phase 13 Change-Impact Pipeline |
+| **多模型成本最佳化** | ❌ 無 | Phase 14 Multi-Model |
 
-**差距本質**：
-- Claude Code 的推理深度來自 **Anthropic 模型的程式碼理解 + 原生 tool use 整合**
-- smart-mcp 的 `grep` / `analyze.learn` 只做到**結構察覺**（structure-aware），達不到**語義推理**（semantic reasoning）層次
-- 差距不在規劃層（planner/DAG 已完善），而在**工具本身能理解多深的程式碼**
-
-**突破口**（三層修改對應三個 Phase）：
-1. **Tool Layer** → Phase 10：整合 LSP 引擎（Tree-sitter / typescript-lsp / sourcekit-lsp）作為語義分析 backbone
-2. **Memory Layer** → Phase 7：新增 `code-fact` 類型（function signature / dependency contract）長期保留跨 session 架構認知
-3. **Planner Layer** → Phase 10：整合 call-graph 約束， Planner 具備「改 X 會影響 Y」的感知能力
+**突破口**（三層）：
+1. **Tool Layer** ✅ — Phase 10 LSP bridge + 4 code tools + Phase 11 CKG
+2. **Memory Layer** ⏳ — Phase 7 vector search 待完成
+3. **Planner Layer** ❌ — 待 Phase 12-14 整合確定性分析與 LLM 推理
 
 ---
 
@@ -823,20 +835,22 @@ class LspBridge {
 
 ---
 
-### Phase 11: Code Knowledge Graph（P0 — 殺手級能力）
+### Phase 11: Code Knowledge Graph（P0 — 殺手級能力）✅
 
 **對應分析**：plan.md 三-3.5
 **目標**：建立持久化的專案級程式碼知識圖譜。這是 Claude Code 架構上永遠做不到的能力。
 **前置**：Phase 10 工具鏈完成
+**狀態**：✅ 已完成（2026-06-05）
 
 #### 11.1 架構
 
 ```
 CKG 儲存層：
-  ┌─ SQLite ─────────────────────────────┐
+  ┌─ SQLite（node:sqlite DatabaseSync，零依賴）───┐
   │  nodes: (id, name, kind, file, range) │  ← function/class/module/file
   │  edges: (from, to, kind)              │  ← calls/imports/extends/implements
   │  facts: (node_id, key, value, version)│  ← signature / type / metrics
+  │  file_versions: (file, hash, updated) │  ← 增量更新追蹤
   └────────────────────────────────────────┘
   ┌─ JSON cache ──────────────────────────┐
   │  熱節點快取（最近 1000 次查詢）         │
@@ -860,14 +874,15 @@ CKG 儲存層：
 - `parameterOf` — A 是 B 的參數型別
 - `returnTypeOf` — A 是 B 的回傳型別
 
-#### 11.2 增量更新
+#### 11.2 增量更新 ✅
 
-- **首次建立**：全量掃描專案檔案，透過 Phase 10 工具產生 CKG 節點
-- **增量更新**：watch mode（`chokidar` + debounce）監聽檔案變更
-  - 檔案修改 → `smart_code_ast` 重新分析單檔 → 更新對應節點 + 邊
-  - 檔案新增 → 新增節點 + 找到 import 邊
-  - 檔案刪除 → 標記節點失效（不刪除，保留歷史）
-- **git hook**：`post-commit` / `post-checkout` 觸發增量更新
+- **首次建立**：`build(root)` — 全量掃描專案檔案（透過 LSP bridge 分析 symbols + 建立 edges）
+- **增量更新**：`incrementalUpdate(file)` — 單檔 re-scan + hash 比對
+  - `watch(root, opts)` — Node.js fs.watch + debounce（500ms）
+  - 檔案修改 → 重新 `documentSymbol` → 更新對應節點 + 邊
+  - 檔案新增 → 新增節點 + import edges
+  - 檔案刪除 → 標記節點 `stale: true`（保留 30 天）
+- 使用專案 hash + file content hash 決定是否需要更新
 
 #### 11.3 查詢介面
 
@@ -908,11 +923,14 @@ smart_code_query({
 - 大型重構（git reset / rebase）→ 觸發部份重建
 
 **驗收標準**：
-- [ ] 1000 檔案專案 CKG 建立 < 30 秒
-- [ ] 增量更新單檔 < 100ms
-- [ ] `smart_code_query({query: "callers", symbol: "foo"})` 回傳正確呼叫者
-- [ ] 檔案修改後 1 秒內 CKG 自動更新
-- [ ] 跨 session 查詢同一資訊不需重掃
+- [x] 1000 檔案專案 CKG 建立 < 30 秒
+- [x] 增量更新單檔 < 100ms
+- [x] `smart_code_query({query: "callers", symbol: "foo", file: "src/foo.ts"})` 回傳正確呼叫者
+- [x] `smart_code_query({query: "dependencies", file: "src/bar.ts"})` 回傳依賴結構
+- [x] `smart_code_query({query: "unused-exports", root: "."})` 回傳未使用導出
+- [x] `smart_code_query({query: "stats"})` 回傳 CKG 統計
+- [x] 跨 session 查詢同一資訊不需重掃（SQLite 持久化）
+- [ ] 檔案修改後 1 秒內 CKG 自動更新（watch mode 實作，待驗證）
 
 ---
 
@@ -1078,7 +1096,7 @@ src/server/index.mjs
 
 ## 六、架構演進
 
-### 當前 v3.3.1（Phase 0-6 + Agent Phase D + Compose Engine 完成）
+### 當前 v3.4.0（Phase 0-11 + Agent Phase D + Compose Engine + CKG 完成）
 
 ```
 src/server/index.mjs
@@ -1090,20 +1108,30 @@ src/server/index.mjs
   │   ├── test.mjs         → smart_test
   │   └── thinking.mjs     → smart_thinking
   │
-  ├── plugins/standard/ (24 router)
+  ├── plugins/standard/ (33 router)
   │   ├── agent-execute.mjs   → smart_agent_execute   ← Phase D
   │   ├── agent-plan.mjs      → smart_agent_plan       ← Phase D
   │   ├── agent-recommend.mjs → smart_agent_recommend  ← Phase D
-  │   ├── workflow.mjs     → smart_workflow            ← Phase 4/5
-  │   ├── compose.mjs      → smart_compose             ← Phase 6
-  │   ├── planner.mjs      → smart_planner             ← Phase 2
+  │   ├── code-ast.mjs        → smart_code_ast         ← Phase 10
+  │   ├── code-call-graph.mjs → smart_code_call_graph  ← Phase 10
+  │   ├── code-impact.mjs     → smart_code_impact      ← Phase 10
+  │   ├── code-query.mjs      → smart_code_query       ← Phase 11
+  │   ├── code-type-infer.mjs → smart_code_type_infer  ← Phase 10
+  │   ├── compose.mjs         → smart_compose          ← Phase 6
+  │   ├── git_commit.mjs      → smart_git_commit       ←
+  │   ├── git_pr.mjs          → smart_git_pr           ←
+  │   ├── git_review.mjs      → smart_git_review       ←
+  │   ├── workflow.mjs        → smart_workflow         ← Phase 4/5
+  │   ├── planner.mjs         → smart_planner          ← Phase 2
   │   └── ... (18 既有工具)
   │
-  ├── cli/                 (24 CLI 實作 — 全部非阻塞)
+  ├── cli/                 (30 CLI 實作 — 全部非阻塞)
   └── lib/
       ├── utils.mjs
       ├── context-manager.mjs     ← Phase 3
-      └── compose-engine.mjs      ← Phase 6
+      ├── compose-engine.mjs      ← Phase 6
+      ├── lsp-bridge.mjs          ← Phase 10
+      └── ckg-engine.mjs          ← Phase 11
 ```
 
 ### 目標 v4.0
@@ -1113,16 +1141,20 @@ src/server/index.mjs
   ├── plugins/core/ (6 原生 — 全部 handler-based)
   │   ├── ... (smart_grep, smart_learn, smart_think, smart_security, smart_test, smart_thinking)
   │
-  ├── plugins/standard/ (30+ router)
-  │   ├── agent-recommend.mjs → smart_agent_recommend ← Agent Phase
-  │   ├── agent-execute.mjs   → smart_agent_execute   ← Agent Phase
-  │   ├── agent-plan.mjs      → smart_agent_plan      ← Agent Phase
-  │   ├── workflow.mjs     → smart_workflow       ← Phase 5 (dispatch)
-  │   ├── compose.mjs      → smart_compose        ← Phase 6
-  │   ├── memory_store.mjs → smart_memory_store   ← Phase 7 升級 (vector)
-  │   ├── patch-gen.mjs    → smart_patch_gen       ← Phase 8 新增
-  │   ├── rs-helper.mjs    → smart_rs_helper       ← Phase 9 新增
-  │   ├── go-helper.mjs    → smart_go_helper       → Phase 9 新增
+  ├── plugins/standard/ (33+ router)
+  │   ├── agent-execute.mjs   → smart_agent_execute   ← Phase D
+  │   ├── agent-plan.mjs      → smart_agent_plan       ← Phase D
+  │   ├── agent-recommend.mjs → smart_agent_recommend  ← Phase D
+  │   ├── code-ast.mjs        → smart_code_ast         ← Phase 10 ✅
+  │   ├── code-call-graph.mjs → smart_code_call_graph  ← Phase 10 ✅
+  │   ├── code-impact.mjs     → smart_code_impact      ← Phase 10 ✅
+  │   ├── code-query.mjs      → smart_code_query       ← Phase 11 ✅
+  │   ├── code-type-infer.mjs → smart_code_type_infer  ← Phase 10 ✅
+  │   ├── workflow.mjs        → smart_workflow         ← Phase 5 (dispatch)
+  │   ├── compose.mjs         → smart_compose          ← Phase 6
+  │   ├── memory_store.mjs    → smart_memory_store     ← Phase 7 升級 (vector)
+  │   ├── patch-gen.mjs       → smart_patch_gen        ← Phase 8 新增
+  │   ├── hybrid-router.mjs   → smart_hybrid_router    ← Phase 12 新增
   │   └── ... (既有 27 工具)
   │
   ├── config/agents/
@@ -1132,29 +1164,32 @@ src/server/index.mjs
   └── lib/
       ├── utils.mjs
       ├── context-manager.mjs
-      └── compose-engine.mjs                    ← Phase 6
+      ├── compose-engine.mjs                    ← Phase 6
+      ├── lsp-bridge.mjs                        ← Phase 10 ✅
+      └── ckg-engine.mjs                        ← Phase 11 ✅
 
-#### v3.3.1 → v4.0 關鍵轉變
+#### v3.4.0 → v4.0 關鍵轉變
 
-| 面向 | v3.3.1 (當前) | v4.0 (目標) |
+| 面向 | v3.4.0 (當前) | v4.0 (目標) |
 |------|--------------|-------------|
-| 推理工具架構 | 6 handler + 24 CLI 非阻塞 | 全部 handler (in-process) |
+| 推理工具架構 | 6 handler + 30 CLI 非阻塞 | 全部 handler (in-process) |
 | 輸出內容 | 真實推理 + 工具鏈計畫 | 真實推理 + action 指令 |
 | Workflow 策略 | ✅ dispatch + compose (Phase 5/6) | dispatch + 自動 replan |
 | 工具組合原語 | ✅ compose/pipe/parallel (Phase 6) | ✅ 強化 |
-| 工具數量 | 36 (6 core + 27 standard + 3 agent) | 42+ (含 code-ast/code-call-graph 等 Phase 10) |
-| Agent 人格定義 | ✅ smart-mcp.md (220 行) | ✅ 持續強化 |
+| 工具數量 | 39 (6 core + 33 router — 含 Phase 10 code tools + Phase 11 CKG) | 42+ (含 patch-gen/hybrid-router 等) |
+| Agent 人格定義 | ✅ smart-mcp.md (240 行) | ✅ 持續強化 |
 | 小模型兜底 | ✅ 3 個 agent MCP tools | ✅ 持續強化 |
 | Memory 搜尋 | Fuzzy string match | Vector semantic search + code-fact |
 | Context 傳遞 | ✅ ContextManager 自動 | ✅+ workflow 維度聚合 |
-| 程式碼推理 | ❌ 無原生 AST/call-graph | ✅ LSP-based semantic analysis (Phase 10) |
-| 影響半徑分析 | ❌ 無 | ✅ smart_code_impact + call-graph |
+| 程式碼推理 | ✅ LSP-based semantic analysis (Phase 10) | ✅+ Hybrid Router (Phase 12) |
+| 影響半徑分析 | ✅ smart_code_impact + CKG | ✅ + Change-Impact Pipeline (Phase 13) |
+| CKG 程式碼圖譜 | ✅ SQLite 持久化 (Phase 11) | ✅ + Multi-Model (Phase 14) |
 
 ---
 
 ## 七、成功指標
 
-| 指標 | 當前 v3.3.1 | 目標 v4.0 (2026 Q3) | 衡量方式 |
+| 指標 | 當前 v3.4.0 | 目標 v4.0 (2026 Q3) | 衡量方式 |
 |------|------------|---------------------|---------|
 | 推理工具延遲 | <1ms (handler) ✅ | <1ms | smart_think 呼叫時間 |
 | 可取代 sequential-thinking | ✅ 已取代 | ✅ | agent 預設使用 smart_think |
@@ -1169,11 +1204,10 @@ src/server/index.mjs
 | **CLI 非阻塞** | ✅ 全部 async spawn (Phase 6) | ✅ 全部 handler | 無 spawnSync 殘留 |
 | **Memory 搜尋** | fuzzy string match | vector semantic search + code-fact | 語意匹配成功率 |
 | **Workflow 範本數** | 5 | 8+ (含 compose/parallel) | workflow_template_list |
-| **程式碼語義推理** | ❌ 無原生 AST/call-graph | ✅ smart_code_* 工具套件 (Phase 10) | 重構任務完成率 |
-| **影響半徑分析** | ❌ 無法 | ✅ 100ms / 1000 檔案 | smart_code_impact 延遲 |
-| **增量 diff 感知** | ❌ 無 | ⚠️ 部分 (需額外實作) | diff-aware workflow |
-| **CKG 建立時間** | ❌ 無 | ✅ 1000 檔案 < 30 秒 (Phase 11) | sqlite query |
-| **CKG 增量更新** | ❌ 無 | ✅ 單檔更新 < 100ms (Phase 11) | watch mode 測試 |
+| **程式碼語義推理** | ✅ LSP-based (smart_code_*) Phase 10 | ✅+ Hybrid Router Phase 12 | 重構任務完成率 |
+| **影響半徑分析** | ✅ smart_code_impact + CKG | ✅ + Change-Impact Pipeline | smart_code_impact 延遲 |
+| **CKG 建立時間** | ✅ Phase 11 完成 | ✅ 1000 檔案 < 30 秒 | sqlite query |
+| **CKG 增量更新** | ✅ Phase 11 完成 | ✅ 單檔更新 < 100ms | watch mode 測試 |
 | **Hybrid Router 準確率** | ❌ 無 | ✅ > 90% (Phase 12) | 100 題分類測試集 |
 | **Change-Impact 精確率** | ❌ 無 | ✅ > 95% (Phase 13) | 測試專案比對 |
 | **多模型成本節省** | ❌ 單一模型 | ✅ 成本降低 60%+ (Phase 14) | API 帳單比較 |
@@ -1209,7 +1243,16 @@ src/server/index.mjs
 | `smart_tool_stats` | standard/tool_stats.mjs | tool-stats.mjs | 工具使用統計 |
 | `smart_toonify` | standard/toonify.mjs | toonify.mjs | TOON token 優化 (閾值 10%, 原 30%) |
 | `smart_ts_helper` | standard/ts_helper.mjs | ts-helper.mjs | TypeScript 分析 |
-| `smart_workflow` | standard/workflow.mjs | workflow.mjs | 多工具工作流編排 (create/report/replan/summary) |
+| `smart_compose` | standard/compose.mjs | compose.mjs | 工具組合原語 (seq/par/cond pipeline) — Phase 6 |
+| `smart_git_commit` | standard/git_commit.mjs | git-commit.mjs | Git commit 輔助 (message/dry-run/template) |
+| `smart_git_pr` | standard/git_pr.mjs | git-pr.mjs | PR 生成 (noPublish/draft/title/body) |
+| `smart_git_review` | standard/git_review.mjs | git-review.mjs | 程式碼審查 (all/focus/commit) |
+| `smart_workflow` | standard/workflow.mjs | workflow.mjs | 多工具工作流編排 (create/report/replan/summary/dispatch) |
+| `smart_code_ast` | standard/code-ast.mjs | handler-based | AST 結構查詢 (LSP documentSymbol) — Phase 10 |
+| `smart_code_call_graph` | standard/code-call-graph.mjs | handler-based | 呼叫鏈追蹤 (LSP references) — Phase 10 |
+| `smart_code_type_infer` | standard/code-type-infer.mjs | handler-based | 型別推導 (LSP hover) — Phase 10 |
+| `smart_code_impact` | standard/code-impact.mjs | handler-based | 影響半徑分析 (LSP + diff) — Phase 10 |
+| `smart_code_query` | standard/code-query.mjs | handler-based | CKG 程式碼知識圖譜查詢 (SQLite) — Phase 11 |
 | `smart_agent_recommend` | standard/agent-recommend.mjs | handler-based, no CLI | 工具推薦引擎 (12 種任務, 小模型兜底) |
 | `smart_agent_execute` | standard/agent-execute.mjs | handler-based, no CLI | 工作流自動化計畫 (6 模板) |
 | `smart_agent_plan` | standard/agent-plan.mjs | handler-based, no CLI | 複雜目標分解 (DAG + 風險分析) |
