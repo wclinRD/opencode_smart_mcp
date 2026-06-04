@@ -7,10 +7,10 @@
 
 ## 一、現狀摘要
 
-Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 30 個開發工具。當前版本 3.2.0（Plugin Loader + Router 架構 + 動態多輪推理 + Context 管理 + Workflow 引擎）。
+Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 36 個開發工具 + 專屬 agent personality。當前版本 3.3.0（Plugin Loader + Router 架構 + 動態多輪推理 + Context 管理 + Workflow 引擎 + Agent 人格定義 + 小模型兜底工具）。
 
 ### 核心數據
-- **工具總數**：30（6 原生 + 24 經 router）
+- **工具總數**：36（6 原生 + 27 經 router + 3 agent 輔助工具）
 - **架構**：Plugin Loader → src/plugins/core/（6 原生 handler）/ src/plugins/standard/（24 router CLI）
 - **Workflow 引擎**：Phase 4 完成 — 5 模板、平行提示、replan、summary
 - **語言**：JavaScript (ESM)
@@ -38,7 +38,10 @@ src/
 │   └── thinking.mjs          → smart_thinking (深層分析, handler-based)
 
 │
-├── plugins/standard/    (24 standard tools, 經 smart_run router)
+├── plugins/standard/    (30 standard tools, 經 smart_run router)
+│   ├── agent-execute.mjs      → smart_agent_execute (小模型用)
+│   ├── agent-plan.mjs         → smart_agent_plan (小模型用)
+│   ├── agent-recommend.mjs    → smart_agent_recommend (小模型用)
 │   ├── coverage.mjs          → smart_coverage
 │   ├── cross_file_edit.mjs   → smart_cross_file_edit
 │   ├── debug.mjs             → smart_debug
@@ -69,9 +72,23 @@ src/
 │   └── ... (26 CLI files)
 │
 ├── lib/
-│   └── utils.mjs        (shared utilities)
+│   ├── utils.mjs        (shared utilities)
+│   ├── context-manager.mjs  (Context 管理)
+│   └── compose-engine.mjs   (工具組合引擎)
 │
-└── ... (config, docs, reports)
+├── config/
+│   ├── agents/
+│   │   └── smart-mcp.md  (Agent personality 定義檔)
+│   └── opencode.json     (opencode 設定範例)
+│
+├── smart-agent/          (npm 安裝工具包)
+│   ├── src/
+│   │   ├── agent/        (策略引擎: tool-strategy/workflow/memory/planner)
+│   │   ├── install/      (安裝腳本: install-agent/generate-config/detect-project)
+│   │   └── index.mjs     (主入口)
+│   └── tests/            (5 套件, 65 項測試)
+│
+└── docs/                 (plan.md, todo.md, README...)
 ```
 
 ---
@@ -605,7 +622,7 @@ thinking.mjs
 
 ## 六、架構演進
 
-### 當前 v3.2（Phase 0-4 完成）
+### 當前 v3.3（Phase 0-6 + Agent Personality 完成）
 
 ```
 src/server/index.mjs
@@ -635,6 +652,31 @@ src/server/index.mjs
   ├── plugins/core/ (6 原生 — 全部 handler-based)
   │   ├── ... (smart_grep, smart_learn, smart_think, smart_security, smart_test, smart_thinking)
   │
+  ├── plugins/standard/ (30+ router)
+  │   ├── agent-recommend.mjs → smart_agent_recommend ← Agent Phase
+  │   ├── agent-execute.mjs   → smart_agent_execute   ← Agent Phase
+  │   ├── agent-plan.mjs      → smart_agent_plan      ← Agent Phase
+  │   ├── workflow.mjs     → smart_workflow       ← Phase 5 (dispatch)
+  │   ├── compose.mjs      → smart_compose        ← Phase 6
+  │   ├── memory_store.mjs → smart_memory_store   ← Phase 7 升級 (vector)
+  │   ├── patch-gen.mjs    → smart_patch_gen       ← Phase 8 新增
+  │   ├── rs-helper.mjs    → smart_rs_helper       ← Phase 9 新增
+  │   ├── go-helper.mjs    → smart_go_helper       → Phase 9 新增
+  │   └── ... (既有 27 工具)
+  │
+  ├── config/agents/
+  │   └── smart-mcp.md     ← Agent personality 定義
+  │
+  ├── cli/                 (全部 handler 化，無 spawnSync)
+  └── lib/
+      ├── utils.mjs
+      ├── context-manager.mjs
+      └── compose-engine.mjs                    ← Phase 6
+```
+src/server/index.mjs
+  ├── plugins/core/ (6 原生 — 全部 handler-based)
+  │   ├── ... (smart_grep, smart_learn, smart_think, smart_security, smart_test, smart_thinking)
+  │
   ├── plugins/standard/ (28+ router)
   │   ├── workflow.mjs     → smart_workflow       ← Phase 5 強化 (dispatch)
   │   ├── compose.mjs      → smart_compose        ← Phase 6 新增
@@ -653,13 +695,15 @@ src/server/index.mjs
 
 #### v3.2 → v4.0 關鍵轉變
 
-| 面向 | v3.2 | v4.0 |
-|------|------|------|
+| 面向 | v3.3 (當前) | v4.0 (目標) |
+|------|------------|-------------|
 | 推理工具架構 | 6 handler + 24 CLI spawn | 全部 handler (in-process) |
-| 輸出內容 | 真實推理 | 真實推理 + action 指令 |
-| Workflow 策略 | State tracker only | 實際執行引擎 |
-| 工具組合原語 | ❌ 無 | ✅ compose/pipe/parallel |
-| 工具數量 | 30 (6 core + 24 standard) | 34+ (6 core + 28+ standard) |
+| 輸出內容 | 真實推理 + 工具鏈計畫 | 真實推理 + action 指令 |
+| Workflow 策略 | dispatch 引擎 (Phase 5) | dispatch + 自動 replan |
+| 工具組合原語 | ✅ compose/pipe/parallel (Phase 6) | ✅ 強化 |
+| 工具數量 | 36 (6 core + 27 standard + 3 agent) | 38+ (6 core + 29+ standard + 3 agent) |
+| Agent 人格定義 | ✅ smart-mcp.md (220 行) | ✅ 持續強化 |
+| 小模型兜底 | ✅ 3 個 agent MCP tools | ✅ 持續強化 |
 | Memory 搜尋 | Fuzzy string match | Vector semantic search |
 | Context 傳遞 | ✅ ContextManager 自動 | ✅+ workflow 維度聚合 |
 
@@ -667,7 +711,7 @@ src/server/index.mjs
 
 ## 七、成功指標
 
-| 指標 | 當前 v3.2 | 目標 v4.0 (2026 Q3) | 衡量方式 |
+| 指標 | 當前 v3.3 | 目標 v4.0 (2026 Q3) | 衡量方式 |
 |------|-----------|---------------------|---------|
 | 推理工具延遲 | <1ms (handler) ✅ | <1ms | smart_think 呼叫時間 |
 | 可取代 sequential-thinking | ✅ 已取代 | ✅ | agent 預設使用 smart_think |
@@ -715,3 +759,6 @@ src/server/index.mjs
 | `smart_toonify` | standard/toonify.mjs | toonify.mjs | TOON token 優化 (閾值 10%, 原 30%) |
 | `smart_ts_helper` | standard/ts_helper.mjs | ts-helper.mjs | TypeScript 分析 |
 | `smart_workflow` | standard/workflow.mjs | workflow.mjs | 多工具工作流編排 (create/report/replan/summary) |
+| `smart_agent_recommend` | standard/agent-recommend.mjs | handler-based, no CLI | 工具推薦引擎 (12 種任務, 小模型兜底) |
+| `smart_agent_execute` | standard/agent-execute.mjs | handler-based, no CLI | 工作流自動化計畫 (6 模板) |
+| `smart_agent_plan` | standard/agent-plan.mjs | handler-based, no CLI | 複雜目標分解 (DAG + 風險分析) |

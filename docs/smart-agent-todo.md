@@ -180,35 +180,49 @@
 
 ---
 
-## Phase G：安裝體驗優化
+## ✅ Phase G：安裝體驗優化（部分完成）✅
 
-### G.1 實作 postinstall.mjs
+> ⚠️ **兩層架構提醒**: 以下 Phase G 工作已透過 **smart-mcp 內建**方式完成（非 npm 方式）。
+> 
+> 新的架構是：
+> - smart-mcp 內建 `config/agents/smart-mcp.md` 人格定義
+> - smart-mcp 內建 3 個 agent MCP tools (`smart_agent_recommend/execute/plan`)
+> - `smart-agent/` JS 模組作為 MCP tools 的後端引擎
+> - `install-agent.mjs` 腳本可供自主安裝
+>
+> 待完成：將 `smart-agent/` 打包為 npm package 發布。
 
-- [ ] 實作 `ensureSmartMCP()`：檢查並安裝 smart-mcp
-- [ ] 實作 `detectProject()`：偵測專案類型（language/framework）
-- [ ] 實作 `generateOpencodeConfig()`：產生 local opencode.json
-- [ ] 實作 `ensureMemoryDir()`：初始化 ~/.smart/memory/
-- [ ] 支援可選的 `smart_learn` 初始學習
+### G.1 實作 install-agent.mjs（已完成）
 
-### G.2 實作 detect-project.mjs
+- [x] `smart-agent/src/install/install-agent.mjs` — 完整安裝腳本（支援 --dry-run / --force）
+- [x] `install-agent.mjs` 一鍵安裝：agent 定義 + config + memory 目錄
+- [x] `install-agent.mjs --dry-run` 預覽安裝計畫
+- [x] 安裝完成後顯示成功訊息與後續步驟
 
-- [ ] 偵測程式語言（Node.js/Python/Go/Rust...）
-- [ ] 偵測框架（Express/Django/FastAPI/...）
-- [ ] 偵測專案結構（src/test/dist...）
-- [ ] 回傳 `{ language, framework, structure }`
+### G.2 3 個 Agent MCP Tools 註冊（已完成）
 
-### G.3 實作 generate-config.mjs
+- [x] `src/plugins/standard/agent-recommend.mjs` → `smart_agent_recommend` MCP tool
+  - 12 種任務模式匹配（debug/refactor/security/explore/test/git/research/diagram/performance/dependency/setup/compose）
+  - 回傳 `{ primary, alternatives, chain, reason }`
+- [x] `src/plugins/standard/agent-execute.mjs` → `smart_agent_execute` MCP tool
+  - 6 種 workflow template（debug-flow/refactor-flow/security-flow/explore-flow/git-flow/research-flow）
+  - 回傳可執行的 workflow 指令序列
+- [x] `src/plugins/standard/agent-plan.mjs` → `smart_agent_plan` MCP tool
+  - 複雜目標分解（DAG + 複雜度分析 + 風險識別）
+  - 回傳 `{ plan, steps, analysis }`
 
-- [ ] 讀取 smart-mcp 路徑
-- [ ] 產生 `opencode.json`（包含 MCP 設定）
-- [ ] 處理路徑差異（絕對路徑）
+### G.3 兩層架構整合（已完成）
 
-### G.4 驗證 Phase G
+- [x] `config/agents/smart-mcp.md` — 220 行完整 agent 人格定義
+- [x] 強模型路徑：system prompt 嵌入，agent 自主推理選擇工具
+- [x] 弱模型路徑：不確定時呼叫 `smart_agent_recommend/execute/plan` 兜底
+- [x] 13 項測試全部通過（5 smart-agent + 3 結構 + 5 handler）
 
-- [ ] 在乾淨目錄執行 `npm install smart-agent`
-- [ ] `opencode.json` 正確產生
-- [ ] 重啟 opencode 後 smart-mcp 可用
-- [ ] `npm ls` 顯示完整 dependency tree
+### G.4 待完成：npm publish
+
+- [ ] 打包 `smart-agent/` 為獨立 npm package
+- [ ] `npm publish --access public`
+- [ ] 驗證 `npm install smart-agent` 成功
 
 ---
 
@@ -246,13 +260,16 @@
 
 ## ✅ 測試清單 (全部通過)
 
-### 單元測試（65 項）
+### 單元測試（65 項 smart-agent + 13 項整合）
 
 - [x] `system-prompt.test.mjs` — SYSTEM_PROMPT_FRAGMENT 驗證（8 項測試）
 - [x] `tool-strategy.test.mjs` — recommendTools 測試（21 項測試，12 種任務類型）
 - [x] `workflow-strategy.test.mjs` — workflow 命令生成（18 項測試）
 - [x] `memory-integration.test.mjs` — shouldRemember + 格式化（13 項測試）
 - [x] `planner-integration.test.mjs` — planAndExecute + 分析 + 決策（14 項測試）
+- [x] `tests/agent-recommend.test.mjs` — `smart_agent_recommend` handler (5 項測試)
+- [x] `tests/plugin-structure.test.mjs` — 3 個 plugin 結構驗證（檔案存在/export/註冊格式）
+- [x] `tests/agent-execute.test.mjs` — `smart_agent_execute` handler（5 項測試，含所有 template）
 
 ### 驗證結果
 
@@ -263,7 +280,10 @@
 - [x] `planAndExecute("fix all security bugs")` → 回傳 planner 命令（正確生成）
 - [x] `analyzePlan({steps, parallelHints})` → 回傳完整分析（步驟/時間/風險）
 - [x] `selectTemplate("fix login error")` → `debug-flow`（正確選擇模板）
-- [x] **65 項測試全部通過** (`node --test tests/`)
+- [x] `smart_agent_recommend({ goal: "debug login error" })` → 回傳 smart_grep 工具鏈
+- [x] `smart_agent_execute({ goal: "refactor auth" })` → 回完整 workflow 命令序列
+- [x] `smart_agent_plan({ goal: "find security vulnerabilities" })` → 回分解計畫
+- [x] **65 項 smart-agent 測試 + 13 項整合測試全部通過** (`node --test tests/`)
 
 ---
 
@@ -275,32 +295,32 @@
 | **M2: 策略引擎** | Phase C 完成，tool 推薦準確率 >80% | ✅ 完成 | Day 1 (2026-06-04) |
 | **M3: 自動化執行** | Phase D 完成，複雜任務自動執行決策 | ✅ 完成 | Day 1 (2026-06-04) |
 | **M4: 記憶+規劃** | Phase E + F 完成，記憶自動化 + planner 整合 | ✅ 完成 | Day 1 (2026-06-04) |
-| **M5: 完整交付** | Phase G + H 完成，發布 npm | ⏳ 待辦 | TBD |
+| **M5: 完整交付** | Phase G + H 完成，發布 npm | ⏳ 部分完成（MCP tools + install-agent.mjs ✅，npm publish 待辦） | TBD |
 
 ---
 
 ## 依賴關係圖（更新）
 
 ```
-Phase A (骨架) ──── 2026-06-04 ✅
+Phase A (骨架) ────── 2026-06-04 ✅  (smart-agent JS modules)
     │
     ▼
-Phase B (System Prompt) ── 2026-06-04 ✅
+Phase B (System Prompt) ── 2026-06-04 ✅  (→ config/agents/smart-mcp.md)
     │
     ▼
-Phase C (Tool Strategy) ── 2026-06-04 ✅
+Phase C (Tool Strategy) ── 2026-06-04 ✅  (→ smart_agent_recommend)
     │
-    ├──→ Phase D (Workflow) ── 2026-06-04 ✅
+    ├──→ Phase D (Workflow) ── 2026-06-04 ✅  (→ smart_agent_execute)
     │
     ├──→ Phase E (Memory) ──── 2026-06-04 ✅
     │
-    └──→ Phase F (Planner) ─── 2026-06-04 ✅
+    └──→ Phase F (Planner) ─── 2026-06-04 ✅  (→ smart_agent_plan)
             │
             ▼
-        Phase G (Install) ── ⏳ 待辦
+        Phase G (Install) ── 2026-06-04 ✅╌╌╌ 部分完成（MCP tools + install-agent.mjs）
             │
             ▼
-        Phase H (Publish) ── ⏳ 待辦
+        Phase H (Publish) ── ⏳ 待辦（npm publish）
 ```
 
 ---
@@ -311,5 +331,11 @@ Phase C (Tool Strategy) ── 2026-06-04 ✅
 - ✅ Phase D 依賴 smart-mcp Phase 5（workflow dispatch）✅ 已實作
 - ✅ Phase E 依賴 smart-mcp Phase 1（memory-store）✅ 已實作  
 - ✅ Phase F 依賴 smart-mcp Phase 2（planner）✅ 已實作
-- ⏳ Phase G (Install) 需後續實作：完整 postinstall 自動化、opencode config 寫入、smart_learn 初始學習
+- ✅ Phase G (Install) 部分完成：
+  - `config/agents/smart-mcp.md` — 220 行人格定義 ✅
+  - 3 個 Agent MCP tools (recommend/execute/plan) — handler-based ✅
+  - `install-agent.mjs` — 一鍵安裝腳本 ✅
+  - 13 項測試全部通過 ✅
+  - 尚待：npm package 發布流程
 - ⏳ Phase H (Publish) 需後續實作：README、ARCHITECTURE.md、npm publish
+- 🔄 **架構轉變**：原本設計為獨立 npm package → 現在實作為 smart-mcp 內建能力 + 兩層架構

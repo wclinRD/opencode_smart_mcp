@@ -301,7 +301,7 @@
 - [x] context-manager.mjs — 注入/捕獲/持久化
 - [x] invokeTool + captureAndReturn — 自動 context 記錄
 - [x] 9 任務模板 + 條件分支
-- [x] 26 CLI tools → 30 tools (6 core + 24 standard)
+- [x] 26 CLI tools → 36 tools (6 core + 27 standard + 3 agent)
 - [x] memory-store — 跨 session 記憶
 
 ---
@@ -539,6 +539,20 @@
 - [x] smart_toonify — TOON token 優化 (30-65% 節省)
 - [x] smart_ts_helper — TypeScript 分析 (config/exports/modules)
 - [x] smart_workflow — Plan-based orchestration (create/report/replan/summary/dispatch)
+
+### Agent Personality + 小模型兜底工具 (2026-06-04)
+- [x] `config/agents/smart-mcp.md` — 220 行完整 agent 人格定義，含：
+  - 33+ 工具策略表（任務類型→首選工具對照）
+  - 常見任務工具鏈（除錯/重構/安全/探索/Git/研究）
+  - Workflow 自動化（6 模板 + dispatch/replan/summary）
+  - Pipeline 組合（seq/par/cond）
+  - 記憶整合 + Context 管理 + 任務規劃
+  - 小模型兜底策略（不確定時呼叫輔助工具）
+- [x] `smart_agent_recommend` — 工具推薦引擎（handler-based, 12 種任務模式）
+- [x] `smart_agent_execute` — 工作流自動化計畫產生器（6 種模板）
+- [x] `smart_agent_plan` — 複雜目標分解（DAG + 複雜度分析 + 風險識別）
+- [x] `smart-agent/src/install/install-agent.mjs` — 一鍵安裝腳本
+- [x] 兩層架構：強模型用 system prompt 推理，弱模型用 JS 引擎兜底
 
 ### Bug Fixes
 - [x] toonify.mjs — 修復 `Cannot find module '../../package.json'`
