@@ -1060,6 +1060,178 @@ export class CkgEngine {
   }
 
   /**
+   * Analyze usage patterns of an API across the codebase.
+   * Finds all callers and classifies each into a usage pattern type.
+   *
+   * Pattern types:
+   *   direct-call     — simple function/method call
+   *   event-handler   — called from on* / handle* function
+   *   class-method    — called from a class method
+   *   module-init     — called at module top-level / init scope
+   *   factory         — called from a function that creates/returns objects
+   *   property-access — accessed as property (obj.api)
+   *
+   * @param {string} symbol - API symbol name
+   * @param {string} file - File containing the API definition
+   * @param {object} [opts]
+   * @param {boolean} [opts.includeStale=false]
+   * @returns {object} { symbol, file, totalUsages, patterns, usages }
+   */
+  queryUsagePatterns(symbol, file, opts = {}) {
+    const db = this._getDb();
+    const staleFilter = opts.includeStale ? '' : 'AND n.stale = 0';
+
+    const cacheKey = `patterns:${file}:${symbol}`;
+    const cached = this._cache.get(cacheKey);
+    if (cached) return cached;
+
+    // Find API node
+    const apiNode = db.prepare(
+      `SELECT id, name, kind, file, range_start_line as line, signature FROM nodes n
+       WHERE n.project_id = ? AND n.name = ? AND n.file = ? ${staleFilter}
+       LIMIT 1`
+    ).get(this._projectId, symbol, file);
+
+    if (!apiNode) {
+      const result = { symbol, file, totalUsages: 0, patterns: [], usages: [] };
+      this._cache.set(cacheKey, result);
+      return result;
+    }
+
+    // Get all callers (direct edges where this node is the target)
+    const callerRows = db.prepare(
+      `SELECT DISTINCT n.id, n.name, n.kind, n.file, n.range_start_line as line, n.signature
+       FROM edges e
+       JOIN nodes n ON e.from_node_id = n.id
+       WHERE e.to_node_id = ? AND e.kind = 'calls' ${staleFilter}
+       ORDER BY n.file, n.name`
+    ).all(apiNode.id);
+
+    if (callerRows.length === 0) {
+      // No direct callers — check for property access patterns
+      // (e.g., obj.method where 'method' is the symbol)
+      const propUsages = db.prepare(
+        `SELECT DISTINCT n.id, n.name, n.kind, n.file, n.range_start_line as line, n.signature
+         FROM edges e
+         JOIN nodes n ON e.from_node_id = n.id
+         WHERE e.to_node_id = ? AND e.kind = 'contains' ${staleFilter}
+           AND (n.kind = 'property' OR n.kind = 'field')
+         ORDER BY n.file, n.name`
+      ).all(apiNode.id);
+
+      if (propUsages.length === 0) {
+        const result = { symbol, file, totalUsages: 0, patterns: [], usages: [] };
+        this._cache.set(cacheKey, result);
+        return result;
+      }
+
+      // Property access usages
+      const usages = propUsages.map(pu => ({
+        caller: { name: pu.name, kind: pu.kind, file: pu.file, line: pu.line, signature: pu.signature || '' },
+        pattern: 'property-access',
+        confidence: 0.7,
+      }));
+
+      const result = {
+        symbol,
+        file,
+        totalUsages: usages.length,
+        patterns: [{ type: 'property-access', count: usages.length, description: 'Accessed as property/member' }],
+        usages,
+      };
+      this._cache.set(cacheKey, result);
+      return result;
+    }
+
+    // Build pattern classification for each caller
+    const usages = [];
+    const patternCounts = {};
+
+    for (const caller of callerRows) {
+      let pattern = 'direct-call';
+
+      // Determine the wrapper/context around this caller
+      // Check if caller is inside a class: look for 'contains' edges from a class to this caller
+      const container = db.prepare(
+        `SELECT n.name, n.kind FROM edges e
+         JOIN nodes n ON e.from_node_id = n.id
+         WHERE e.to_node_id = ? AND e.kind = 'contains' AND n.stale = 0
+         LIMIT 1`
+      ).get(caller.id);
+
+      const callerName = caller.name || '';
+      const callerKind = caller.kind || '';
+
+      // Pattern classification
+      if (callerKind === 'method' || (container && container.kind === 'class')) {
+        pattern = 'class-method';
+      } else if (/^(on|handle|before|after|_on|_handle)/i.test(callerName)) {
+        pattern = 'event-handler';
+      } else if (/^(create|build|make|factory|construct|new)/i.test(callerName)) {
+        pattern = 'factory';
+      } else if (callerKind === 'constant' || callerKind === 'variable' || callerKind === 'file' || callerKind === 'module') {
+        // Top-level assignment or initializer
+        const calledInInit = db.prepare(
+          `SELECT COUNT(*) as cnt FROM edges e
+           JOIN nodes n ON e.from_node_id = n.id
+           WHERE e.to_node_id = ? AND (n.kind = 'module' OR n.kind = 'file')
+           ${staleFilter}`
+        ).get(caller.id);
+        if (calledInInit && calledInInit.cnt > 0) {
+          pattern = 'module-init';
+        } else {
+          pattern = 'direct-call';
+        }
+      }
+
+      patternCounts[pattern] = (patternCounts[pattern] || 0) + 1;
+
+      usages.push({
+        caller: {
+          name: callerName,
+          kind: callerKind,
+          file: caller.file,
+          line: caller.line,
+          signature: caller.signature || '',
+          container: container ? { name: container.name, kind: container.kind } : null,
+        },
+        pattern,
+        confidence: pattern === 'direct-call' ? 0.6 : 0.8,
+      });
+    }
+
+    // Build pattern summary
+    const patternLabels = {
+      'direct-call': 'Direct function/method call',
+      'event-handler': 'Called from event handler (on*/handle*)',
+      'class-method': 'Called from a class method',
+      'module-init': 'Called at module initialization scope',
+      'factory': 'Called from a factory/create function',
+      'property-access': 'Accessed as property/member',
+    };
+
+    const patterns = Object.entries(patternCounts).map(([type, count]) => ({
+      type,
+      count,
+      description: patternLabels[type] || type,
+    }));
+
+    // Sort patterns by count descending
+    patterns.sort((a, b) => b.count - a.count);
+
+    const result = {
+      symbol,
+      file,
+      totalUsages: usages.length,
+      patterns,
+      usages,
+    };
+
+    this._cache.set(cacheKey, result);
+    return result;
+  }
+
+  /**
    * Query dependency structure of a file.
    * @param {string} file - File path
    * @returns {object} Dependencies (imports from, imported by)

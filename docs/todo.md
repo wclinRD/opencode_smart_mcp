@@ -822,12 +822,17 @@
 **對應 plan.md 五-Phase C**
 **目標**：將架構 moats 產品化，做 Claude Code 做不到的事
 
-### C.1 CKG-based 重構助手（P2）
+### C.1 CKG-based 重構助手（P2）⏳
 
-- [ ] API 使用分析：CKG 追蹤 API 所有使用位置
+- [x] API 使用分析：CKG 追蹤 API 所有使用位置
+  - [x] `queryUsagePatterns()` — 6 種模式分類 (direct/call/event-handler/class-method/module-init/factory/property-access)
   - [ ] 使用模式歸納（事件監聽/工廠/策略）
-  - [ ] 遷移計畫生成（結構化步驟）
-  - [ ] 安全閘門（影響 X 檔案需確認）
+- [x] 遷移計畫生成（結構化步驟）
+  - [x] `refactor-planner.mjs` — generateMigrationPlan + estimateDifficulty
+  - [x] `smart_refactor_plan` MCP tool
+  - [x] 10/10 planner 單元測試通過
+- [ ] 安全閘門（影響 X 檔案需確認）
+- [ ] CKG 整合：buildReferences 建立 calls edge → queryUsagePatterns 可查
 
 ### C.2 回歸測試預測強化（P2）
 
