@@ -1606,9 +1606,196 @@ Change-Impact Pipeline 已有基礎測試預測。強化方向：
 
 ---
 
+### Phase F: Fast Apply 強化 + Token 節省策略（P0 — 立即）
+
+**對應分析**：plan.md B.3 + B.6 + fast-apply 競爭比較
+**目標**：將 smart_mcp 的 fast-apply 從「安全離線工具」升級為「兼具 token 效率 + 安全 + 多格式」的編輯引擎
+**戰略依據**：與 opencode-fast-apply (tickernelz) 比較後發現 3 個關鍵缺失
+
+#### F.0 問題分析：為什麼目前方案不省 token？
+
+當前 smart MCP fast-apply 的運作模式：
+
+```
+LLM 輸出 (完整 SEARCH + REPLACE block):
+  src/foo.ts
+  <<<<<<< SEARCH
+  function hello() {          ← 100 行原文
+    console.log("old");       ← 改了 1 行 (old → new)
+    // ... 98 more lines ...
+  }
+  =======
+  function hello() {          ← 100 行改完版
+    console.log("new");       ← 只有這行不同
+    // ... 98 more lines ...
+  }
+  >>>>>>> REPLACE
+```
+
+**token 消耗分析**：
+
+| 項目 | 目前 (SEARCH/REPLACE) | opencode-fast-apply 的作法 | 節省 |
+|------|---------------------|--------------------------|------|
+| LLM 輸出 SEARCH block | 100 lines (100% of file) | `// ... existing code ...` (1 line) | **99%** |
+| LLM 輸出 REPLACE block | 100 lines (100% of file) | 只輸出改的 2 lines + context | **98%** |
+| LLM 讀取檔案 context | 完整檔案 (全文) | 50-500 lines (partial) | **80-95%** |
+| LLM 輸出格式 | SEARCH/REPLACE 完整區塊 | Lazy markers + partial | **90%+** |
+
+**根本問題**：SEARCH/REPLACE 要求 LLM **完整寫出未改部分**，這在 Aider 設計中可接受（本地模型不計 token cost），但在 API 付費場景、context window 有限的情況下是巨大浪費。
+
+#### F.1 Token 節省策略 — 三管齊下
+
+##### 策略 A：Lazy Edit Markers（主要，預估節省 80-98%）
+
+引入 `// ... existing code ...` (JS/TS)、`# ... existing code ...` (Python)、`/* ... existing code ... */` (多語言) 標記：
+
+```
+// LLM 輸出內容大幅縮減：
+src/foo.ts
+<<<<<<< SEARCH
+// ... existing code ...
+console.log("old");
+// ... existing code ...
+=======
+// ... existing code ...
+console.log("new");  ← 只有這行不同
+// ... existing code ...
+>>>>>>> REPLACE
+```
+
+**實作方式**：在 `apply-engine.mjs` 的 `fuzzyMatch()` / `parseSearchReplaceText()` 中：
+1. 解析 lazy marker 行（regex: `(//|#|<!--|--|%|;)\s*\.\.\.\s*(existing\s+)?code\.\.\.`）
+2. 比對時自動跳過 marker 行，只檢查非 marker 行
+3. 保留時，marker 對應到原始檔案的實際行數
+4. 融合 token → 保持 marker 定位準確
+
+##### 策略 B：Partial Context Mode（次要，預估節省 80-95%）
+
+新增 `format: "partial"` 模式，類似 opencode-fast-apply 的 `original_code` + `code_edit` 輸入：
+
+```
+smart_fast_apply({
+  format: "partial",
+  original_code: "function hello() {\n  console.log(\"old\");\n}",  // 檔案片段
+  code_edit: "function hello() {\n  console.log(\"new\");\n}",       // 改完的片段
+  target_file: "src/foo.ts"
+})
+```
+
+**實作方式**：新增 `applyPartial()` 函式 → `findExactMatch()` → `findNormalizedMatch()` → multi-occurrence check
+
+##### 策略 C：Unified Diff Output（輔助，預估節省 40-60%）
+
+鼓勵 LLM 以 unified diff 格式輸出修改：
+
+```
+diff --git a/src/foo.ts b/src/foo.ts
+--- a/src/foo.ts
++++ b/src/foo.ts
+@@ -1,5 +1,5 @@
+ function hello() {
+-  console.log("old");
++  console.log("new");
+ }
+```
+
+比起 SEARCH/REPLACE，diff 只需輸出 +/- 行，無需完整區塊。
+
+#### F.2 技術強化整合路線
+
+##### Tier 1: Quick Wins (1-3 days each)
+
+| 項目 | 預估工時 | Token 節省 | 實作內容 |
+|------|---------|-----------|---------|
+| **Lazy edit markers** | 2-3 days | 80-98% | parseSearchReplaceText + fuzzyMatch 加入 lazy marker 解析 |
+| **Multi-occurrence detection** | 0.5 day | 間接 | 複製 opencode-fast-apply 的 multiple matches check |
+| **Partial mode** | 1-2 days | 80-95% | 新增 applyPartial() + original_code/code_edit input |
+| **Better error messages** | 0.5 day | 間接 | suggestNearest() 強化 + 除錯指引 |
+| **File access checks** | 0.5 day | 間接 | binary detection + permission check |
+
+##### Tier 2: Structural (1-3 weeks each)
+
+| 項目 | 預估工時 | 效益 | 實作內容 |
+|------|---------|------|---------|
+| **AST-aware editing (tree-sitter)** | 1-2 weeks | 消除 whitespace 問題 | 取代 string matching，以 AST node 為單位 |
+| **External AI merge (optional)** | 1-2 weeks | conflict 時有 fallback | 新增 callAIMerge()，LM Studio / OpenAI 相容 |
+| **Semantic diff engine** | 1 week | 更好的 diff 顯示 | 用 `diff` npm package 取代手寫 diff |
+
+##### Tier 3: Transformative (3-6 weeks each)
+
+| 項目 | 預估工時 | 效益 | 實作內容 |
+|------|---------|------|---------|
+| **Vector code search** | 3-4 weeks | 自然語言搜尋程式碼 | Embedding + vector DB，取代純 regex |
+| **LSP-powered refactoring** | 2-3 weeks | 語法感知操作 | LSP rename/codeAction/formatting |
+| **Interactive diff TUI** | 2-3 weeks | 互動式 diff 檢視 | 鍵盤控制的 diff 確認流程 |
+
+#### F.3 整合架構
+
+```
+新增/修改流程：
+
+src/lib/apply-engine.mjs (強化)
+  ├── existing: parseSearchReplace, parseUnifiedDiff, fuzzyMatch, applySearchReplace, etc.
+  ├── NEW:     expandLazyMarkers()     ← 預處理 lazy markers
+  ├── NEW:     applyPartial()          ← partial context mode
+  ├── NEW:     callAIMerge()           ← 可選外部 LLM merge
+  └── ENHANCE: fuzzyMatch() → multi-occurrence check
+  
+src/plugins/standard/fast-apply.mjs (強化)
+  ├── input 新增: format=partial, lazy, aiMerge
+  ├── handler 強化: lazy marker 解析 + multi-occurrence 檢查
+  └── 選項新增: --lazy, --partial
+
+src/cli/fast-apply.mjs (強化)
+  └── --lazy, --partial, --merge-api flags
+
+與既有工具整合：
+  smart_patch_gen → (輸出格式強化) → smart_fast_apply
+  smart_cross_file_edit → (import graph 感知) → smart_fast_apply
+  smart_compose → (pipeline) → workflow { edit → test }
+```
+
+#### F.4 競爭定位
+
+| 面向 | smart MCP (強化後) | opencode-fast-apply | 優勢 |
+|------|-------------------|-------------------|------|
+| **離線可用** | ✅ 全部本地 | ❌ 需 API | 🟢 smart |
+| **Lazy markers** | ✅ 支援 | ✅ 核心 | 持平 |
+| **多格式** | ✅ SR/diff/whole/partial | ❌ 僅 partial | 🟢 smart |
+| **Dry-run** | ✅ 預設 | ❌ 無 | 🟢 smart |
+| **Atomic rollback** | ✅ 支援 | ❌ 無 | 🟢 smart |
+| **Undo backup** | ✅ .apply.bak | ❌ 無 | 🟢 smart |
+| **4-level fuzzy** | ✅ L1-L4 | ❌ 僅 2 層 | 🟢 smart |
+| **Multi-file batch** | ✅ 支援 | ❌ 單檔 | 🟢 smart |
+| **Token 節省** | ✅ 80-98% (含 lazy markers) | 80-98% | 持平 |
+| **AI merge** | ✅ 可選 | ✅ 強制 | 可選更好 |
+
+**目標**：強化後 smart MCP 成為**唯一同時具備離線安全 + token 效率 + 多格式支援**的 fast-apply 方案。
+
+#### F.5 執行優先級
+
+```
+P0 (本週):
+  1. Lazy edit markers — parseSearchReplaceText + fuzzyMatch 升級
+  2. Multi-occurrence detection — 明確錯誤訊息
+  3. Partial context mode — applyPartial() 實作
+
+P1 (下週):
+  4. AST-aware editing (tree-sitter) 評估 + prototype
+  5. Better error messages (suggestNearest 強化)
+  6. File access checks (binary/permission)
+
+P2 (本月):
+  7. AI merge 選項 (external LLM backend)
+  8. Semantic diff engine
+  9. Integration: patch_gen → fast_apply 閉環
+```
+
+---
+
 ## 六、架構演進
 
-### 當前 v3.7.0（Phase 0-13 + Agent Phase D + Compose Engine + CKG + Hybrid Engine + Impact Pipeline + Auto-Toonify + Context Merge 完成）
+### 當前 v3.8.0（Phase 0-13 + Agent Phase D + Compose Engine + CKG + Hybrid Engine + Impact Pipeline + Auto-Toonify + Context Merge + Phase F 完成）
 
 ```
 src/server/index.mjs
@@ -1852,7 +2039,7 @@ Smart MCP 是「理解程式碼的儀器」
 | 記憶自動化 | auto-store: 所有工具失敗自動寫入記憶; pre-check: 工具前自動查詢 | P0 | 🔜 待啟動 |
 | C.1 使用模式歸納 | queryUsagePatterns 輸出擴充: event-listener/factory/strategy 模式分類 | P0 | 🔜 待啟動 |
 | npm publish smart-agent | README.md + ARCHITECTURE.md + npm publish --access public | P1 | 🔜 待啟動 |
-| Fast Apply 工具 | SEARCH/REPLACE block + unified diff apply + 4 層模糊匹配 | P1 | 🔜 待啟動 |
+| Fast Apply 工具 | SEARCH/REPLACE block + unified diff apply + 4 層模糊匹配 + Lazy markers + Partial + Multi-occurrence | P1 | ✅ 已完成 |
 | Change-Impact 驗收 | AST diff 正確率 >95% benchmark + 傳播延遲 <200ms 驗證 | P1 | 🔜 待啟動 |
 | C.2 測試覆蓋率地圖 | CKG 記錄函式→測試映射 + 信心標記 + 增量執行 | P1 | 🔜 待啟動 |
 | C.3 健康儀表板 | 循環依賴檢測 + 技術債指數 + 未使用 export 趨勢 | P2 | 🔜 待啟動 |

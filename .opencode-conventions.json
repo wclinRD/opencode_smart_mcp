@@ -2,49 +2,47 @@
   "conventions": {
     "naming": {
       "file": {
-        "kebabCase": 58,
-        "camelCase": 28,
-        "other": 20,
-        "snake_case": 15
+        "kebabCase": 9,
+        "camelCase": 2
       },
       "variable": {
-        "camelCase": 3512,
-        "UPPER_CASE": 125,
-        "other": 26,
-        "PascalCase": 9
+        "camelCase": 704,
+        "UPPER_CASE": 26,
+        "PascalCase": 4,
+        "other": 5
       },
       "function": {
-        "camelCase": 636
+        "camelCase": 91
       },
       "class": {
-        "camelCase": 12,
-        "PascalCase": 14
+        "PascalCase": 9,
+        "camelCase": 4
       }
     },
     "imports": {
-      "commonjs": 6,
-      "esm": 92,
+      "commonjs": 1,
+      "esm": 11,
       "mixed": true
     },
     "testing": {
-      "hasTests": true,
-      "framework": "node",
+      "hasTests": false,
+      "framework": null,
       "pattern": null
     },
     "structure": {
-      "src": true,
-      "test": true,
-      "lib": true,
+      "src": false,
+      "test": false,
+      "lib": false,
       "app": false
     },
     "languages": [
       "javascript"
     ],
     "exports": {
-      "default": 48,
-      "named": 83
+      "default": 0,
+      "named": 43
     }
   },
   "preferences": {},
-  "lastAnalyzed": "2026-06-05T02:08:04.828Z"
+  "lastAnalyzed": "2026-06-05T02:52:06.993Z"
 }

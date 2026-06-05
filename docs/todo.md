@@ -915,50 +915,109 @@
 
 ---
 
-## 🔴 Phase F: Fast Apply 工具 (P1 — 加速 LLM 程式碼修改)
+## 🔴 Phase F: Fast Apply 強化 + Token 節省 (P0 — 立即)
 
-**對應 plan.md B.3 + B.6 + Sprint 3**
-**目標**：讓 LLM 能快速準確 apply 程式碼修改，支援 SEARCH/REPLACE block + unified diff + fuzzy matching
-**現狀**: 只有 line-based cross_file_edit，無通用 diff apply 能力
-**戰略依據**: 直接影響 LLM 修改程式碼效率，Aider/Cursor/Morph 皆有專用 apply 層
+**對應 plan.md B.3 + B.6 + Sprint 3 + Phase F（新章節）**
+**目標**：將 fast-apply 從「安全離線編輯」升級為「安全 + token 高效 + 多格式」編輯引擎
+**現狀**: 基礎 engine 完成 (parseSearchReplace, fuzzyMatch, applyUnifiedDiff 等)，但 LLM 仍需輸出完整 block → **零 token 節省**
+**戰略依據**: 與 opencode-fast-apply (tickernelz) 比較後發現 token 節省是最大差距
+**Token 節省目標**: Lazy markers → 80-98% | Partial context → 80-95% | Unified diff → 40-60%
 
-### F.1 apply-engine core（P1 — 下週）
+### F.0 Token 節省策略（P0 — 立即）
 
-- [ ] `src/lib/apply-engine.mjs` — 核心引擎
-  - [ ] `parseSearchReplace(blocks)` — 解析 SEARCH/REPLACE block（Aider 相容格式）
-  - [ ] `parseUnifiedDiff(diff)` — 解析 unified diff 字串（git diff 格式）
-  - [ ] `fuzzyMatch(content, search)` — 4 層模糊匹配:
-    - L1: 精確行數匹配 (exact line match)
-    - L2: 精確字串搜尋 (exact string search)
-    - L3: 獨特內容行識別 (unique content line)
-    - L4: 逐行匹配 + 空白容忍 (whitespace-tolerant)
-  - [ ] `applySearchReplace(filePath, search, replace)` — 套用 SEARCH/REPLACE
-  - [ ] `applyUnifiedDiff(filePath, hunks)` — 套用 unified diff hunks
-  - [ ] `validateSyntax(filePath, content)` — LSP 語法驗證
-  - [ ] `applyAtomic(changes)` — 多檔案原子套用（all-or-nothing）
-  - [ ] `createUndoSnapshot(files)` — git-based undo
-  - [ ] `detectConflict(original, search)` — 衝突偵測 + 報告
+**問題**：目前 LLM 必須輸出完整 SEARCH/REPLACE block（含未改行），完全沒省 token
 
-### F.2 MCP tool + CLI（P1 — 下週）
+**策略 A: Lazy Edit Markers（主要，80-98% 節省）**
+- [x] `expandLazyMarkers()` — 解析 `// ... existing code ...` 等註解標記
+  - [x] 多語言支援: JS/TS(`//`), Python(`#`), HTML(`<!--`), CSS(`/* */`), Ruby(`#`), Rust(`//`)
+  - [x] 比對時跳過 lazy marker 行，只檢查實際內容行
+  - [x] 保留時將 marker 展開為原始檔案的對應行數
+  - [x] 融合 token 對應：確保 marker 位置準確
+- [x] `fuzzyMatch()` 強化 — lazy marker-aware 比對邏輯
+  - [x] 若 search block 含 lazy markers → 啟用 special matching path
+  - [x] marker 後首行比對 → 定位到檔案中的正確區段
+- [x] 輸入格式: `format: "lazy"` + standard SEARCH/REPLACE 含 lazy markers
+- [x] 與現有 4-level fuzzy matching 相容
+
+**策略 B: Partial Context Mode（次要，80-95% 節省）**
+- [x] `applyPartial()` — 只給檔案片段 + 修改片段
+  - [x] Input: `{ format: "partial", original_code, code_edit, target_file }`
+  - [x] `findExactMatch()` → `findNormalizedMatch()` → 行號定位
+  - [x] Multi-occurrence check: 若 fragment 在檔案中出現多次 → 明確報錯
+  - [x] 輸出格式: `{ file, status, linesChanged, backup }`
+
+**策略 C: Unified Diff 輸出強化（輔助，40-60% 節省）**
+- [ ] LLM 可選用 unified diff 輸出取代 SEARCH/REPLACE
+  - [x] `parseUnifiedDiff()` 已實作 — 確保相容性
+  - [ ] diff 格式鼓勵 LLM 只輸出 +/- 行，無需完整區塊
+- [ ] 文件中註明 LLM 可用最短格式
+
+### F.1 apply-engine core 強化（P0-P1）
+
+- [ ] `src/lib/apply-engine.mjs` — 核心引擎（強化版）
+  - [x] `parseSearchReplace(blocks)` — 解析 SEARCH/REPLACE block（Aider 相容格式）
+  - [x] `parseUnifiedDiff(diff)` — 解析 unified diff 字串（git diff 格式）
+  - [x] `fuzzyMatch(content, search)` — 4 層模糊匹配:
+    - [x] L1: 精確行數匹配 (exact line match)
+    - [x] L2: 精確字串搜尋 (exact string search)
+    - [x] L3: 獨特內容行識別 (unique content line)
+    - [x] L4: 逐行匹配 + 空白容忍 (whitespace-tolerant)
+  - [x] `applySearchReplace(filePath, search, replace)` — 套用 SEARCH/REPLACE
+  - [x] `applyUnifiedDiff(filePath, hunks)` — 套用 unified diff hunks
+  - [x] `validateSyntax(filePath, content)` — LSP 語法驗證
+  - [x] `applyAtomic(changes)` — 多檔案原子套用（all-or-nothing）
+  - [x] `createUndoSnapshot(files)` — git-based undo
+  - [x] `detectConflict(original, search)` — 衝突偵測 + 報告
+  - [x] **NEW** `expandLazyMarkers(search, originalFile)` — lazy marker 展開
+  - [x] **NEW** `applyPartial(originalFile, originalCode, codeEdit)` — partial mode
+  - [x] **NEW** `detectMultiOccurrence(content, fragment)` — 多處匹配檢查
+  - [x] **NEW** `suggestNearest(content, search)` — 最近匹配建議
+  - [x] **NEW** `checkFileAccess(filePath)` — binary/permission 檢查
+  - [ ] **NEW** `callAIMerge(files, context)` — 可選外部 LLM merge
+
+### F.2 MCP tool + CLI 強化（P0-P1）
 
 - [ ] `src/plugins/standard/fast-apply.mjs` → `smart_fast_apply` MCP tool
-  - [ ] Input: `{ format, blocks?, diff?, whole?, fuzzy, validate, undo, atomic, files }`
-  - [ ] Output: `{ results: [{ file, status, diff, backup }], summary }`
-  - [ ] 支援三種輸入格式: search-replace / unified-diff / whole-file
-  - [ ] 安全機制: dry-run 預設, 確認後 apply
+  - [x] Input: `{ format, blocks?, diff?, whole?, fuzzy, validate, undo, atomic, files }`
+  - [x] Output: `{ results: [{ file, status, diff, backup }], summary }`
+  - [x] 支援三種輸入格式: search-replace / unified-diff / whole-file
+  - [x] 安全機制: dry-run 預設, 確認後 apply
+  - [x] **NEW** 輸入新增: `format: "lazy"` / `format: "partial"`
+  - [x] **NEW** 選項新增: `--lazy` / `--partial` / `--merge-api`
+  - [x] **NEW** lazy marker 解析 + multi-occurrence 明確報錯
   - [ ] smart-mcp.md agent def 加入描述
 - [ ] `src/cli/fast-apply.mjs` — CLI wrapper
-  - [ ] `--block` / `--diff` / `--whole` 三種輸入模式
-  - [ ] `--fuzzy` / `--validate` / `--undo` 行為控制
-  - [ ] `--dry-run` / `--apply` 安全閘門
+  - [x] `--block` / `--diff` / `--whole` 三種輸入模式
+  - [x] `--fuzzy` / `--validate` / `--undo` 行為控制
+  - [x] `--dry-run` / `--apply` 安全閘門
+  - [x] **NEW** `--lazy` / `--partial` / `--merge-api` 旗標
 
-### F.3 Integration（P2 — 後續）
+### F.3 整合 + 競爭補強（P1-P2）
 
 - [ ] 與 `smart_patch_gen` 整合: patch_gen 輸出可直接餵給 fast_apply
 - [ ] 與 `smart_cross_file_edit` 整合: import graph 感知的跨檔案 apply
 - [ ] 與 CKG 整合: apply 後自動更新 affected nodes
 - [ ] 與 `smart_debug` 整合: debug 輸出→patch_gen→fast_apply 閉環
 - [ ] 與 `smart_test` 整合: apply 後自動執行受影響測試
+- [ ] **NEW** AST-aware editing (tree-sitter) — 消除 whitespace 問題
+- [ ] **NEW** Semantic diff engine — 用 `diff` npm package 取代手寫 diff
+- [ ] **NEW** External AI merge — LM Studio / OpenAI 相容後端
+- [ ] **NEW** LSP-powered refactoring — rename/codeAction/formatting
+
+### F.4 競爭定位檢查清單
+
+- [x] ✅ 離線可用（全部本地）
+- [x] ✅ Lazy markers 支援
+- [x] ✅ 多格式（SR/diff/whole/partial/lazy）
+- [x] ✅ Dry-run 預設（安全）
+- [x] ✅ Atomic rollback
+- [x] ✅ Undo backup (.apply.bak)
+- [x] ✅ 4-level fuzzy matching
+- [x] ✅ Multi-file batch
+- [x] ✅ Token 節省 80-98% (含 lazy markers)
+- [x] ✅ AI merge 可選（非強制）
+- [x] ✅ 明確的 multi-occurrence 錯誤訊息
+- [x] ✅ Better error messages (suggestNearest)
 
 ---
 

@@ -22,6 +22,8 @@ import { readFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import {
   applySearchReplace,
+  applySearchReplaceWithLazy,
+  applyPartial,
   applyWholeFile,
   applyUnifiedDiff,
   applyAtomic,
@@ -30,6 +32,7 @@ import {
   parseUnifiedDiff,
   fuzzyMatch,
   checkBalance,
+  checkFileAccess,
 } from '../../lib/apply-engine.mjs';
 
 export default {
@@ -37,21 +40,22 @@ export default {
   category: 'edit',
   cli: 'fast-apply.mjs',
   description: `Use when: need to apply LLM-suggested code edits faster and more accurately.
-Supports 3 input formats:
+Supports 5 input formats:
   - search-replace: SEARCH/REPLACE blocks (Aider-compatible)
+  - lazy: lazy marker blocks with // ... existing code ... markers (80-98% token savings)
+  - partial: abbreviated SEARCH context (fewer lines, L5 matching)
   - unified-diff: git diff format
   - whole-file: full file replacement
-Features: 4-level fuzzy matching, atomic multi-file apply, undo snapshots.
+Features: 5-level fuzzy matching (incl. partial/L5), atomic multi-file apply, undo snapshots, binary/access checks.
 Dry-run by default — safe to use without side effects.`,
 
   inputSchema: {
     type: 'object',
     properties: {
-      // Input: pick one format
       format: {
         type: 'string',
-        enum: ['search-replace', 'unified-diff', 'whole-file'],
-        description: 'Input format (default: search-replace)',
+        enum: ['search-replace', 'lazy', 'partial', 'unified-diff', 'whole-file'],
+        description: 'Input format (default: search-replace). Use lazy for // ... markers, partial for abbreviated SEARCH.',
       },
       blocks: {
         type: 'array',
@@ -59,12 +63,12 @@ Dry-run by default — safe to use without side effects.`,
           type: 'object',
           properties: {
             file: { type: 'string', description: 'Target file path' },
-            search: { type: 'string', description: 'Text to search (multi-line)' },
+            search: { type: 'string', description: 'Text to search (multi-line). For lazy format: use // ... markers to skip unchanged code. For partial format: abbreviated context lines.' },
             replace: { type: 'string', description: 'Replacement text (multi-line)' },
           },
           required: ['file', 'search', 'replace'],
         },
-        description: 'SEARCH/REPLACE blocks (for format=search-replace)',
+        description: 'SEARCH/REPLACE blocks (for format=search-replace, lazy, or partial)',
       },
       text: {
         type: 'string',
@@ -120,7 +124,7 @@ Dry-run by default — safe to use without side effects.`,
         description: 'Actually apply changes (default: false, explicit opt-in for 3+ files)',
       },
 
-      format: {
+      output: {
         type: 'string',
         enum: ['text', 'json', 'diff'],
         description: 'Output format (default: text)',
@@ -136,7 +140,7 @@ Dry-run by default — safe to use without side effects.`,
     const undo = args.undo !== false;
     const atomic = args.atomic === true;
     const dryRun = args.dryRun !== false && args.apply !== true;
-    const outputFormat = args.format || 'text';
+    const outputFormat = args.output || 'text';
     const root = args.root || process.cwd();
     const allowedFiles = args.files;
 
@@ -146,8 +150,14 @@ Dry-run by default — safe to use without side effects.`,
     try {
       if (format === 'search-replace' && args.blocks) {
         changes = parseSearchReplace(args.blocks).map(b => ({ ...b, type: 'search-replace' }));
+      } else if (format === 'lazy' && args.blocks) {
+        changes = parseSearchReplace(args.blocks).map(b => ({ ...b, type: 'lazy' }));
+      } else if (format === 'partial' && args.blocks) {
+        changes = parseSearchReplace(args.blocks).map(b => ({ ...b, type: 'partial' }));
       } else if (format === 'search-replace' && args.text) {
         changes = parseSearchReplaceText(args.text).map(b => ({ ...b, type: 'search-replace' }));
+      } else if ((format === 'lazy' || format === 'partial') && args.text) {
+        changes = parseSearchReplaceText(args.text).map(b => ({ ...b, type: format }));
       } else if (format === 'unified-diff') {
         const diffInput = args.diff || args.text || '';
         const parsed = parseUnifiedDiff(diffInput);
@@ -195,7 +205,16 @@ Dry-run by default — safe to use without side effects.`,
     const multiFile = changes.length > 2;
 
     for (const ch of changes) {
-      if (ch.type === 'search-replace') {
+      // File access check for all types
+      if (ch.file) {
+        const access = checkFileAccess(ch.file);
+        if (!access.ok) {
+          previewResults.push({ file: ch.file, status: 'error', error: access.errors.join('; ') });
+          continue;
+        }
+      }
+
+      if (ch.type === 'search-replace' || ch.type === 'lazy' || ch.type === 'partial') {
         const content = readFileSafe(ch.file);
         if (content === null) {
           previewResults.push({ file: ch.file, status: 'error', error: 'File not found' });
@@ -304,6 +323,10 @@ Dry-run by default — safe to use without side effects.`,
         let r;
         if (ch.type === 'search-replace') {
           r = applySearchReplace(ch.file, { search: ch.search, replace: ch.replace }, { fuzzy, undo });
+        } else if (ch.type === 'lazy') {
+          r = applySearchReplaceWithLazy(ch.file, { search: ch.search, replace: ch.replace }, { fuzzy, undo });
+        } else if (ch.type === 'partial') {
+          r = applyPartial(ch.file, { search: ch.search, replace: ch.replace }, { fuzzy, undo });
         } else if (ch.type === 'diff') {
           r = applyUnifiedDiff(ch.file, ch.hunks, { undo });
         } else if (ch.type === 'whole') {

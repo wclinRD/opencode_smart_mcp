@@ -4,6 +4,8 @@
 //
 // Usage:
 //   node fast-apply.mjs search-replace --block file.js "old code" "new code"
+//   node fast-apply.mjs lazy --block file.js "// ... marker block" "full replace"
+//   node fast-apply.mjs partial --block file.js "abbreviated search" "full replace"
 //   node fast-apply.mjs unified-diff --diff < unified.diff
 //   node fast-apply.mjs whole-file --whole file.js --content "new content"
 //
@@ -12,6 +14,8 @@
 //   --apply               Actually apply changes
 //   --fuzzy               Enable fuzzy matching (default: true)
 //   --no-fuzzy            Disable fuzzy matching
+//   --lazy                Enable lazy marker expansion
+//   --partial             Enable partial context matching (L5)
 //   --validate            Check syntax after apply
 //   --undo                Create .bak snapshots (default: true)
 //   --no-undo             Skip backups
@@ -24,6 +28,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   applySearchReplace,
+  applySearchReplaceWithLazy,
+  applyPartial,
   applyWholeFile,
   applyUnifiedDiff,
   parseSearchReplaceText,
@@ -36,14 +42,18 @@ USAGE:
   node fast-apply.mjs <mode> [options]
 
 MODES:
-  search-replace    Apply SEARCH/REPLACE blocks
+  search-replace    Apply SEARCH/REPLACE blocks (default)
+  lazy              Apply with lazy marker expansion (// ... existing code ...)
+  partial           Apply with abbreviated SEARCH context (L5 matching)
   unified-diff      Apply unified diff (from stdin or --diff)
   whole-file        Replace entire file
 
-OPTIONS (search-replace):
-  --block <file> <search> <replace>   Single SEARCH/REPLACE block
+OPTIONS (search-replace / lazy / partial):
+  --block <file> <search> <replace>   Single block
   --text <text>                       Raw text with <<<<<<< SEARCH blocks
   --file <path>                       Read SEARCH/REPLACE text from file
+  --lazy                              Use lazy marker expansion (auto-detect from mode)
+  --partial                           Use partial context matching
 
 OPTIONS (unified-diff):
   --diff <text>                       Diff string to apply
@@ -68,6 +78,8 @@ BEHAVIOR:
 
 EXAMPLES:
   node fast-apply.mjs search-replace --block src/a.js "old()" "new()" --dry-run
+  node fast-apply.mjs lazy --block src/a.js "//...existing..." "full replace" --apply
+  node fast-apply.mjs partial --block src/a.js "abbreviated" "full replace" --apply
   node fast-apply.mjs search-replace --text "\$(cat patch.txt)" --apply
   diff -u old.js new.js | node fast-apply.mjs unified-diff --apply
   node fast-apply.mjs whole-file --file src/a.js --content "\$(cat new.js)" --apply
@@ -81,7 +93,7 @@ function parseArgs() {
   }
 
   const mode = args[0] || 'search-replace';
-  if (!['search-replace', 'unified-diff', 'whole-file'].includes(mode)) {
+  if (!['search-replace', 'lazy', 'partial', 'unified-diff', 'whole-file'].includes(mode)) {
     console.error(`Unknown mode: ${mode}\n${HELP}`);
     process.exit(1);
   }
@@ -166,8 +178,13 @@ function log(...args) { console.log(...args); }
 async function main() {
   const opts = parseArgs();
 
-  if (opts.mode === 'search-replace') {
+  if (opts.mode === 'search-replace' || opts.mode === 'lazy' || opts.mode === 'partial') {
     let blocks = opts.blocks;
+
+    // Determine apply function based on mode
+    const applyFn = opts.mode === 'lazy' ? applySearchReplaceWithLazy
+      : opts.mode === 'partial' ? applyPartial
+      : applySearchReplace;
 
     // Parse from text if provided
     if (opts.text) {
@@ -211,7 +228,7 @@ async function main() {
 
     // Apply
     for (const b of blocks) {
-      const r = applySearchReplace(b.file, { search: b.search, replace: b.replace }, {
+      const r = applyFn(b.file, { search: b.search, replace: b.replace }, {
         fuzzy: opts.fuzzy,
         validate: opts.validate,
         undo: opts.undo,
