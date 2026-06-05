@@ -802,13 +802,16 @@
 - [ ] 記憶感知：工具錯誤時自動檢查 memory store
 - [ ] 自動錯誤分類：已知模式自動跳過診斷
 
-### B.3 Pre-built Workflow 模板（P1）
+### B.3 Pre-built Workflow 模板（P1）✅
 
-- [ ] api-explore-flow：learn → ast → call_graph → diagram
-- [ ] migration-flow：impact → impact → thinking → edit → test
-- [ ] code-review-flow：grep → ast → call_graph → thinking → report
-- [ ] perf-diagnose-flow：grep(perf) → call_graph → debug → report
-- [ ] onboard-flow：learn → import_graph → naming → diagram → report
+- [x] api-explore-flow：learn → ast → call_graph → diagram
+- [x] migration-flow：impact → impact → thinking → edit → test
+- [x] code-review-flow：grep → ast → call_graph → thinking → report
+- [x] perf-diagnose-flow：grep(perf) → call_graph → debug → report
+- [x] onboard-flow：learn → import_graph → naming → diagram → report
+- [x] 新增 CLI wrappers：code-ast.mjs, code-call-graph.mjs, impact-flow.mjs
+- [x] TOOL_CLI_MAP 更新 + help text 更新
+- [x] 13/13 workflow tests 通過
 
 ---
 
@@ -1028,3 +1031,146 @@
 - [x] CKG Engine 多語言：.swift SUPPORTED_EXTS + parseSwiftImports() + resolveImportSource()
 - [x] rustup default stable 設定 (未設定工具鏈問題修復)
 - [x] 14 tests pass, 0 regression
+
+---
+
+## ✅ Sprint 1：基礎強化（已完成）
+
+**對應 plan.md 九-Sprint 1**
+**目標**：CKG 效能優化 + Workflow 模板擴充，雙線平行進行。
+
+### A.3 CKG 效能優化 ✅
+
+- [x] CKG build 速度優化
+  - [x] 分析當前 build 瓶頸（LSP documentSymbol 佔 80%+ 時間）
+  - [x] 引入批次 SQLite transaction（SAVEPOINT/RELEASE 包裝每檔 SQL）
+  - [x] 平行掃描（chunk-based concurrency=20, env CKG_BUILD_CONCURRENCY）
+  - [x] getReferences 移到 transaction 外修復非同步問題
+- [x] LRU cache 擴充：500 → 5000（env CKG_CACHE_SIZE）
+- [x] 可配置 concurrency/cache age 環境變數
+
+### B.3 Pre-built Workflow 模板擴充 ✅
+
+- [x] 新增 `api-explore-flow`：learn → ast → call_graph → diagram
+- [x] 新增 `migration-flow`：impact → impact → thinking → edit → test
+- [x] 新增 `code-review-flow`：grep → ast → call_graph → thinking → report
+- [x] 新增 `perf-diagnose-flow`：grep(perf) → call_graph → debug → report
+- [x] 新增 `onboard-flow`：learn → import_graph → naming → diagram → report
+- [x] 驗收：12 模板全部 `workflow list-templates` 顯示
+- [x] CLI wrappers：code-ast.mjs, code-call-graph.mjs, impact-flow.mjs
+- [x] 13/13 workflow tests pass
+
+---
+
+## 🟠 Sprint 2：Agent 升級（P0 — 次日優先）
+
+**對應 plan.md 九-Sprint 2**
+**目標**：Agent Personality v2 自動路由 + 補測試品質
+
+### B.2 Agent Personality v2（P0）
+
+- [ ] CKG 感知 — agent 自動呼叫 smart_code_query
+  - [ ] 更新 smart-mcp.md：遇到程式碼結構問題優先查 CKG
+  - [ ] 範例 prompt：「找出 foo() 的 callers」→ 自動 smart_code_query 而非 LLM 猜
+- [ ] 成本感知 — agent 根據任務選擇 model-router 路徑
+  - [ ] 簡單問題（型別查詢、結構查詢）→ T1 確定性
+  - [ ] 中等問題（除錯、影響分析）→ T2/T3 混合
+  - [ ] 複雜問題（重構、生成）→ T4 LLM
+- [ ] 記憶感知 — 工具錯誤時自動檢查 memory store
+  - [ ] smart_error_diagnose 呼叫前先 query memory
+  - [ ] 已知錯誤（confidence > 0.8）直接跳過診斷
+- [ ] 更新 `config/agents/smart-mcp.md` 文件
+- [ ] 發 PR 更新 agent 定義
+
+### Phase 9: Devtool 自身品質（P2）
+
+- [ ] 為缺失工具補單元測試
+  - [ ] `tests/workflow.test.mjs`（既有）
+  - [ ] `tests/compose.test.mjs`
+  - [ ] `tests/lsp-bridge.test.mjs`
+  - [ ] `tests/ckg-engine.test.mjs`
+  - [ ] `tests/impact-engine.test.mjs`
+  - [ ] `tests/model-router.test.mjs`
+- [ ] smart/stats 端點擴充
+  - [ ] per-tool p50/p95/p99 延遲統計
+  - [ ] 記憶體使用趨勢
+  - [ ] 自動警報：某工具延遲突然飆升 2x
+
+---
+
+## 🟡 Sprint 3：殺手功能（P2 — 後續）
+
+**對應 plan.md 九-Sprint 3**
+**目標**：打造 Claude Code 完全做不到的功能
+
+### C.1 CKG-based 重構助手（P2）
+
+- [ ] API 使用分析：CKG 追蹤 API 所有使用位置
+  - [ ] 查詢型 query：「找出 express.Router() 的所有使用方式」
+  - [ ] 模式歸納：事件監聽 / 工廠 / 策略
+  - [ ] 輸出結構化使用報告（檔案×位置×模式）
+- [ ] 遷移計畫生成
+  - [ ] 輸入：舊 API → 新 API 映射
+  - [ ] 輸出：結構化遷移步驟（誰先改、誰後改）
+  - [ ] 安全閘門：影響 > 5 檔案需確認
+- [ ] Workflow 模板整合：`migration-flow` 使用重構助手
+
+### C.2 回歸測試預測強化（P2）
+
+- [ ] CKG 記錄函式→測試映射
+  - [ ] 掃描 test 檔案，建立 test → testedFunction 邊
+  - [ ] 支援命名啟發式（`test_foo` → `foo`，`testFoo` → `foo`）
+  - [ ] 支援 import 鏈追蹤（test import module → module function）
+- [ ] 精確預測：修改 foo() → 只跑相關測試
+- [ ] 信心標記：確定性 vs 推測
+- [ ] 增量執行整合：workflow dispatch 只跑受影響測試
+
+### C.3 程式碼健康儀表板（P2）
+
+- [ ] 每次 CKG build 產生健康報告 JSON
+  - [ ] 函式總數 / 複雜度分布
+  - [ ] 未使用 exports 數量
+  - [ ] 循環依賴檢測（CKG edge → DFS cycle detection）
+  - [ ] 技術債指數（複合指標）
+- [ ] 跨 session 對比健康度變化
+- [ ] 循環依賴可視化 (Mermaid diagram)
+- [ ] smart_diagram 整合：`diagram type=graph` 輸出 CKG graph
+
+### Phase H: 文檔與發布（P3）
+
+- [ ] 補完 docs/README.md 文件
+  - [ ] 安裝指引（npm / git clone 兩種方式）
+  - [ ] 快速開始（5 分鐘上手）
+  - [ ] 各工具模組說明
+  - [ ] 常見問題
+- [ ] 補完 docs/ARCHITECTURE.md
+  - [ ] 系統架構圖
+  - [ ] 各 lib 模組職責（lsp-bridge / ckg-engine / hybrid-engine / impact-engine / model-router）
+  - [ ] 設計決策說明
+- [ ] npm publish smart-agent
+  - [ ] 驗證 `npm publish --access public` 流程
+  - [ ] 驗證 `npm install smart-agent` 成功
+
+---
+
+## ✅ 已完成 (v3.7.1)
+
+**Phase 0-14 全部完成**：
+- Phase 0: thinking.mjs → smart_think + handler 化 ✅
+- Phase 1: 記憶系統 (fuzzy + vector + TF-IDF) ✅
+- Phase 2: 動態規劃引擎 (9 模板 + DAG + condition + replan) ✅
+- Phase 3: Context Management (auto inject/capture/persist) ✅
+- Phase 4: Workflow Engine (plan-based orchestration) ✅
+- Phase 5: Workflow Dispatch (實際執行) ✅
+- Phase 6: Compose Engine (seq/par/cond + 非阻塞 CLI) ✅
+- Phase 7: Memory Upgrade (vector search + pattern + cross-session merge) ✅
+- Phase 8: Patch Generation ✅
+- Phase 10: Code Semantic Tools (LSP bridge + 4 tools) ✅
+- Phase 11: CKG (SQLite-based code knowledge graph) ✅
+- Phase 12: Hybrid Reasoning (6-class classifier + merge) ✅
+- Phase 13: Change-Impact Pipeline ✅
+- Phase 14: Multi-Model Orchestration ✅
+- Phase D: Agent Personality (smart-mcp.md + 3 agent tools) ✅
+- Phase A.1: rs-helper + A.2: CKG 多語言 (Rust/Swift/Python) ✅
+- Auto-Toonify interceptor ✅
+- smart_git tools (commit/pr/review) ✅

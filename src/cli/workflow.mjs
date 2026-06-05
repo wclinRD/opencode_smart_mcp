@@ -99,6 +99,56 @@ const WORKFLOW_TEMPLATES = {
       { tool: 'smart_git_review',  args: { all: true, focus: 'all' }, description: 'Review all changes for issues', dependsOn: [0], onFailure: 'skip' },
     ],
   },
+  // --- New in Sprint 1 (v4.0) ---
+
+  'api-explore-flow': {
+    description: 'Explore API surface: learn project, extract AST symbols, trace call graph, generate architecture diagram',
+    steps: [
+      { tool: 'smart_learn',           args: {}, description: 'Learn project structure & conventions', dependsOn: [], onFailure: 'abort' },
+      { tool: 'smart_code_ast',        args: {}, description: 'Extract AST symbol tree from source', dependsOn: [0], onFailure: 'warn' },
+      { tool: 'smart_code_call_graph', args: { depth: 2 }, description: 'Trace call graph between symbols', dependsOn: [1], onFailure: 'warn' },
+      { tool: 'smart_diagram',         args: { type: 'flowchart', title: '$goal' }, description: 'Generate architecture diagram', dependsOn: [1, 2], onFailure: 'skip' },
+    ],
+  },
+  'migration-flow': {
+    description: 'Safe migration: impact analysis, call graph confirmation, structured thinking, apply changes, verify with tests',
+    steps: [
+      { tool: 'smart_impact_flow',    args: {}, description: 'Analyze change impact via CKG', dependsOn: [], onFailure: 'abort' },
+      { tool: 'smart_code_call_graph', args: { depth: 2 }, description: 'Confirm impact scope with call graph', dependsOn: [0], onFailure: 'warn' },
+      { tool: 'smart_thinking',       args: { template: 'refactor', topic: '$goal' }, description: 'Plan migration steps from impact data', dependsOn: [0, 1], onFailure: 'abort' },
+      { tool: 'smart_cross_file_edit', args: {}, description: 'Apply migration changes across files', dependsOn: [2], onFailure: 'warn' },
+      { tool: 'smart_test',           args: {}, description: 'Run tests after migration', dependsOn: [3], onFailure: 'warn' },
+    ],
+  },
+  'code-review-flow': {
+    description: 'Automated code review: grep patterns, extract AST, trace call graph, think, generate review report',
+    steps: [
+      { tool: 'smart_grep',           args: { pattern: '$goal' }, description: 'Search codebase for relevant patterns', dependsOn: [], onFailure: 'skip' },
+      { tool: 'smart_code_ast',       args: {}, description: 'Extract AST symbols for context', dependsOn: [0], onFailure: 'skip' },
+      { tool: 'smart_code_call_graph', args: { depth: 1 }, description: 'Trace call graph relationships', dependsOn: [0, 1], onFailure: 'skip' },
+      { tool: 'smart_thinking',       args: { template: 'analyze', topic: '$goal' }, description: 'Analyze findings and identify issues', dependsOn: [0, 1, 2], onFailure: 'skip' },
+      { tool: 'smart_report',         args: { type: 'custom', title: '$goal' }, description: 'Generate code review report', dependsOn: [3], onFailure: 'skip' },
+    ],
+  },
+  'perf-diagnose-flow': {
+    description: 'Performance diagnosis: find hotspots via grep, analyze patterns, deep debug, generate report with recommendations',
+    steps: [
+      { tool: 'smart_grep',           args: { pattern: 'O(n)|bottleneck|slow|perf|performance|optimize|leak|lazy|memoize|cache|debounce|throttle|O(1)|O(n²)|O(log)' }, description: 'Find performance-sensitive patterns', dependsOn: [], onFailure: 'skip' },
+      { tool: 'smart_error_diagnose', args: { error: '$goal' }, description: 'Diagnose performance patterns from grep results', dependsOn: [0], onFailure: 'skip' },
+      { tool: 'smart_debug',          args: { error: '$goal' }, description: 'Deep debug analysis of perf issues', dependsOn: [0, 1], onFailure: 'skip' },
+      { tool: 'smart_report',         args: { type: 'custom', title: '$goal' }, description: 'Generate performance diagnosis report', dependsOn: [1, 2], onFailure: 'skip' },
+    ],
+  },
+  'onboard-flow': {
+    description: 'Project onboarding: learn structure, analyze imports, check conventions, generate map and onboarding report',
+    steps: [
+      { tool: 'smart_learn',          args: {}, description: 'Learn project language, structure, deps', dependsOn: [], onFailure: 'abort' },
+      { tool: 'smart_import_graph',   args: { depth: 2 }, description: 'Analyze import dependency graph', dependsOn: [0], onFailure: 'warn' },
+      { tool: 'smart_naming',         args: {}, description: 'Check naming conventions across project', dependsOn: [0], onFailure: 'skip' },
+      { tool: 'smart_diagram',        args: { type: 'flowchart', title: '$goal' }, description: 'Generate project map diagram', dependsOn: [1, 2], onFailure: 'skip' },
+      { tool: 'smart_report',         args: { type: 'custom', title: '$goal' }, description: 'Generate onboarding report', dependsOn: [3], onFailure: 'skip' },
+    ],
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -148,6 +198,11 @@ const TOOL_CLI_MAP = {
 
   // Compose (Phase 6)
   smart_compose: 'compose.mjs',
+
+  // Handler-based tools (new CLI wrappers for dispatch support, v4.0)
+  smart_code_ast: 'code-ast.mjs',
+  smart_code_call_graph: 'code-call-graph.mjs',
+  smart_impact_flow: 'impact-flow.mjs',
 };
 
 const CLI_DIR = resolve(dirname(process.argv[1] || '.'));
@@ -182,7 +237,7 @@ Usage:
   node workflow.mjs list-templates
 
 Options:
-  --template <name>   Workflow template (debug-flow, refactor-flow, refactor-safe-flow, security-flow, research-flow, default-flow, git-flow)
+  --template <name>   Workflow template (debug-flow, refactor-flow, refactor-safe-flow, security-flow, research-flow, default-flow, git-flow, api-explore-flow, migration-flow, code-review-flow, perf-diagnose-flow, onboard-flow)
   --state <path>      Path to workflow state file (default: .workflows/<uuid>.json)
   --context <text>    Extra context (project info, constraints) for plan generation
   --step <N>          Run a specific step (for dispatch/report)
