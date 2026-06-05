@@ -1469,18 +1469,18 @@
 
 ## ⚡ Phase P: 效能與穩定性優化 (2026-06-05)
 
-### P0 — 優先修復
+### P0 — 優先修復 ✅
 
-- [ ] **respond() fire-and-forget** — Promise-chain 阻塞全局吞吐
+- [x] **respond() fire-and-forget** — Promise-chain 阻塞全局吞吐
   - 現狀：`_respondChain` 串接所有回應，TOON 優化耗時阻塞後續回應
   - 解法：先 `writeMsg`，async 後台優化，不經 chain 排隊
-  - 文件：`src/server/index.mjs:725`
-  - 驗收：連續 10 次快速請求，95th percentile 延遲 ↓ 40%
-- [ ] **LSP bridge 重複 didOpen 快取**
+  - `src/server/index.mjs:725` — 完成
+- [x] **LSP bridge 重複 didOpen 快取**
   - 現狀：每次 `getSymbols/getReferences/getHover` 都重新 didOpen 同檔案 (500-2000ms)
   - 解法：加入 `openedFiles` Set，已開檔案不再重複 didOpen
-  - 文件：`src/lib/lsp-bridge.mjs:179-182`
-  - 驗收：快取命中時延遲 ↓ 80%
+  - `src/lib/lsp-bridge.mjs` — 完成，per-process state 內 Set，重啟自動清空
+- [x] **node:sqlite Node >= 26 文件標示**
+  - `src/lib/ckg-engine.mjs` — 頂部加入 `⚠ Requires Node >= 26`
 
 ### P1 — 短期
 

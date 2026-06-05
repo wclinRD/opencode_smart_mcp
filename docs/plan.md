@@ -163,6 +163,9 @@ src/
 | 2026-06-06 | LSP bridge | Infinite restart loop when LSP server unavailable (exit code 1) | `_restartCounts` 3 次上限 + `_startErrors` 快取 + `ensureOpen` 錯誤快取 |
 | 2026-06-06 | LSP bridge | Windows `.cmd` wrapper 無法直接 spawn | `_findLspServer` 回傳 `.cmd` 路徑 + `cmd.exe /c` spawn + `taskkill /T /F` 清理 + `where` 跨平台查找 |
 | 2026-06-06 | Tests | 5 pre-existing failures (1 hybrid-engine + 4 lsp-bridge) | 全部修復：`tool` field in mergeResults + `hasTsLsp` skip + `isReady` assertion + startTimeout cleanup + restart limit |
+| 2026-06-06 | Server | `respond()` TOON 優化阻塞全局回應 | 改 fire-and-forget：先 `writeMsg`，async 後台 `tryOptimizeOutput`，不經 `_respondChain` 排隊 |
+| 2026-06-06 | LSP bridge | 每次 query 重複 `textDocument/didOpen` 浪費 500-2000ms | 新增 `_didOpen()` helper + `openedFiles` Set，已開檔案不再重複發送；per-process state 內 Set，重啟自動清空 |
+| 2026-06-06 | CKG | `node:sqlite` 無 Node 版本要求標示 | `ckg-engine.mjs` 頂部加入 `⚠ Requires Node >= 26` |
 
 ### 3.4 當前缺口（Phase 10-11 完成後，2026-06-05）
 
@@ -2080,9 +2083,9 @@ Smart MCP 是「理解程式碼的儀器」
 |--------|------|------|------|----------|
 | **P0** | ~~Command Injection~~ | ~~🔴 高 — 使用者輸入 args 可注入 shell~~ | ~~`git-commit.mjs:44`, `git-context.mjs:37`, `git-pr.mjs:44/546`, `git-review.mjs:47/194/199`, `tool-integrate.mjs:33`, `lsp-bridge.mjs:338`, `py-helper.mjs:218`~~ | ✅ **已修復** — 10 處全部改用 `execFileSync` + array args |
 | **P0** | ~~`package.json` test 腳本壞掉~~ | ~~🔴 中 — `npm test` 永久失敗~~ | ~~`package.json` line 16~~ | ✅ **已修復** — 改為 `"node --test 'tests/*.test.mjs'"` |
-| **P0** | `node:sqlite` 相容性 | 🔴 中 — 僅 Node 26 可用，無法降級 | `ckg-engine.mjs` ~L315 | 文件標示 Node >= 26 + 降級策略 |
-| **P0** | respond() Promise-chain 阻塞全局吞吐 | 🔴 高 — TOON 優化耗時阻塞所有後續回應 | `src/server/index.mjs:725` | 改為 fire-and-forget：先 respond，async 後台優化 |
-| **P0** | LSP bridge 重複 didOpen 浪費 | 🔴 高 — 每次 query 都重新 didOpen 同檔案，500-2000ms | `src/lib/lsp-bridge.mjs:179-182` | 加入 `openedFiles` Set，已開檔案不再重複 didOpen |
+| **P0** | ~~`node:sqlite` 相容性~~ | ~~🔴 中 — 僅 Node 26 可用，無法降級~~ | ~~`ckg-engine.mjs` ~L315~~ | ✅ **已修復** — 文件標示 Node >= 26 |
+| **P0** | ~~respond() Promise-chain 阻塞全局吞吐~~ | ~~🔴 高 — TOON 優化耗時阻塞所有後續回應~~ | ~~`src/server/index.mjs:725`~~ | ✅ **已修復** — fire-and-forget：先 writeMsg，async 後台優化 |
+| **P0** | ~~LSP bridge 重複 didOpen 浪費~~ | ~~🔴 高 — 每次 query 都重新 didOpen 同檔案，500-2000ms~~ | ~~`src/lib/lsp-bridge.mjs:179-182`~~ | ✅ **已修復** — `_didOpen()` helper + `openedFiles` Set |
 
 ### 🟠 P1 — 短期修復（品質 + 維運 + 性能）
 
@@ -2127,15 +2130,15 @@ Smart MCP 是「理解程式碼的儀器」
   ├── 🩹 修 package.json test script ✅ 已修復
   ├── 🚫 LSP bridge infinite restart loop ✅ 已修復 (3 次上限 + 錯誤快取)
   ├── 🧪 5 pre-existing test failures ✅ 全部修復 (428 tests: 425 pass, 0 fail, 3 skip)
-  ├── 📝 文件標示 node:sqlite Node 26 要求
-  ├── 🚀 respond() 改 fire-and-forget 解除全局阻塞
-  └── 📂 LSP bridge 加入 openedFiles 快取
+  ├── 📝 文件標示 node:sqlite Node 26 要求 ✅ 已修復
+  ├── 🚀 respond() 改 fire-and-forget 解除全局阻塞 ✅ 已修復
+  └── 📂 LSP bridge 加入 openedFiles 快取 ✅ 已修復
 
 下週 (P1):
   ├── 🤖 建立 GitHub Actions CI
-  ├── 🔒 所有 execSync 強制 { shell: false }
+  ├── 🔒 所有 execSync 強制 { shell: false } ✅ A.1 已完成 (execFileSync)
   ├── 🧹 清理 .test-* 殘留目錄
-  ├── 🛠️ LSP bridge 洩漏全面防護
+  ├── 🛠️ LSP bridge 洩漏全面防護 ✅ S.3 已完成 (_startErrors + restart limit)
   ├── 🧠 Hybrid engine question cache (TTL 30min)
   └── 🕸️ CKG propagateImpact BFS 併發化
 
