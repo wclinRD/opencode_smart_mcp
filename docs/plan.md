@@ -7,19 +7,22 @@
 
 ## 一、現狀摘要
 
-Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 44 個開發工具 + 專屬 agent personality。當前版本 3.7.3（Plugin Loader + Router 架構 + 動態多輪推理 + Context 管理 + Workflow 引擎 + Compose 引擎 + LSP 程式碼語義分析 + CKG 程式碼知識圖譜 + Hybrid Reasoning Engine + Change-Impact Pipeline + Patch Generation + Agent Personality v2 + 全面非阻塞 CLI + auto-toonify 輸出攔截器 + 多語言支援 (Rust/Swift) + Phase 9 核心元件測試 34/34 通過 + C.1 refactoring assistant 基礎層完成 (queryUsagePatterns + refactor-planner + smart_refactor_plan)）。
+Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 46 個開發工具 + 專屬 agent personality。當前版本 3.8.0（Plugin Loader + Router 架構 + 動態多輪推理 + Context 管理 + Workflow 引擎 + Compose 引擎 + LSP 程式碼語義分析 + CKG 程式碼知識圖譜 + Hybrid Reasoning Engine + Change-Impact Pipeline + Patch Generation + Agent Personality v2 + 全面非阻塞 CLI + auto-toonify 輸出攔截器 + 多語言支援 (Rust/Swift) + Phase 9 核心元件測試 34/34 通過 + C.1 refactoring assistant 基礎層完成 + Phase D 記憶自動化 (auto-store + pre-check)）。
 
 ### 核心數據
-- **工具總數**：44（6 原生 + 38 經 router — 含 1 Phase 8 patch-gen + 4 Phase 10 程式碼語義工具 + 1 Phase 11 CKG 查詢工具 + 1 Phase 12 Hybrid Router + 1 Phase 13 Impact Flow + 3 Phase D agent 輔助工具 + 1 Phase A rs-helper）
-- **架構**：Plugin Loader → src/plugins/core/（6 原生 handler）/ src/plugins/standard/（24 router CLI — 全部非阻塞 async spawn）
-- **Workflow 引擎**：Phase 4-6 完成 — dispatch 實際執行 + 5 模板 + compose/pipe/parallel 三種原語 + replan + summary
-- **語言**：JavaScript (ESM) — 6 核心 handler + 24 CLI 全數非阻塞化 (Phase 6)
+- **工具總數**：46（6 原生 + 40 經 router — 含 1 Phase 8 patch-gen + 4 Phase 10 程式碼語義工具 + 1 Phase 11 CKG 查詢工具 + 1 Phase 12 Hybrid Router + 1 Phase 13 Impact Flow + 3 Phase D agent 輔助工具 + 1 Phase A rs-helper + 1 Phase D memory_store）
+- **架構**：Plugin Loader → src/plugins/core/（6 原生 handler）/ src/plugins/standard/（40 router — 部分 handler, 部分 CLI 非阻塞 async spawn）
+- **Workflow 引擎**：Phase 4-6 完成 — dispatch 實際執行 + 7 模板 + compose/pipe/parallel 三種原語 + replan + summary
+- **語言**：JavaScript (ESM) — 6 核心 handler + 34 standard tools 全數非阻塞化 (Phase 6)
 - **輸出保護**：512KB buffer / 200K chars soft limit
 - **Auto-Toonify 攔截器**：`respond()` 自動對 ≥500 chars 的 JSON-like 輸出執行 TOON 優化（lazy-init TokenOptimizer, best-effort, Promise-chain 保證順序），可透過 `respond(id, result, {optimize: false})` 跳過
-- **測試狀態**: 22 suites / 22 test files / 0 failures（含 smart-agent 測試）
+- **測試狀態**: 493 tests / 100 suites / 0 failures（21 test files + 5 smart-agent tests）
 - **Health Endpoint**：`smart/health`（含 context 資訊）
 - **Context 管理**：`smart_context` MCP tool + `smart/context` 端點 + 自動注入/捕獲/持久化
 - **動態推理**：thinking v3.1 — state persistence, branching, multi-round, context accumulation
+- **記憶自動化**：Phase D — 所有工具失敗 auto-store, smart_debug/smart_test/smart_cross_file_edit 執行前 pre-check 記憶庫
+- **Instrumentation 計數器**：memoryAutoStoreCount / memoryPreCheckCount / memoryPreCheckHitCount / memoryPreCheckSavedMs 暴露在 smart/stats 端點
+- **Smart MCP First 指令**：agent config 新增 Built-in→Smart MCP 映射表，強制優先使用 smart MCP 工具
 
 ---
 
@@ -153,6 +156,7 @@ src/
 | 2026-06-04 | Phase 1 | 記憶系統+error-diagnose 整合+tool-stats 升級 | memory-store: confirm 指令+auto-category+dedup+壓縮; error-diagnose: 記憶預設開啟(useMemory=true→noMemory); tool-stats: patterns 指令+session 分析+combo 發現; 10 整合測試通過 |
 | 2026-06-04 | `invokeTool` | `handler` 不支援 async — 4 個 Phase 10 LSP 工具回傳 `[object Promise]` | handler 傳回 Promise 時回傳 `__async` sentinel，caller 路徑 resolve Promise 後 respond |
 | 2026-06-05 | `toonify` (server) | 無自動優化機制，每次手動呼叫 smart_toonify 才能省 token | `respond()` 新增 auto-toonify 攔截器：Promise-chain interceptor 自動對 ≥500 chars 的 JSON-like 輸出執行 TOON 優化，lazy-init TokenOptimizer，best-effort catch |
+| 2026-06-05 | Phase D | 記憶未自動化，需手動呼叫 memory_store | `captureAndReturn()` 失敗自動 `autoStoreToMemory()` + `invokeTool()` 前 `preCheckMemory()` 搜尋 debug/test/cross-file-edit |
 
 ### 3.4 當前缺口（Phase 10-11 完成後，2026-06-05）
 
@@ -286,14 +290,13 @@ Smart MCP:   seq + par + cond 三種組合原語
 | 缺口 | 嚴重性 | 影響 | 對應策略 |
 |------|--------|------|---------|
 | CKG moat 未極大化 | 🔴 高 | CKG 是最強差異化，但 build 速度未驗證、使用模式未歸納、無測試地圖 | C.1/C.2/C.3 |
-| 記憶未自動化 | 🟠 中 | 已有 vector+pattern+merge，但非預設行為（僅 error-diagnose 整合） | Memory 強化 |
 | 無 npm package | 🟠 中 | smart-agent 程式碼完成但未發布，無法形成生態 | Phase H |
 | Change-Impact 未驗收 | 🟡 中 | pipeline 已建置但驗收標準未過（AST 正確率、傳播延遲） | Phase 13 |
-| 無 Fast Apply 工具 | 🟠 中 | LLM 修改程式碼只能逐字編輯，無統一 diff/SEARCH-REPLACE apply | Phase F |
 | 無 Plugin Registry | 🟡 低 | 第三方無法貢獻工具 | Phase B |
 | 缺 Go 語言支援 | 🟢 低 | 依賴 gopls 安裝，使用者少 | Phase A |
 | 無排程/自動化 | 🟢 低 | Claude Code 有雲端 cron + PR auto-fix | 未來 |
 | 子代理/平行 | 🟢 低 | 需 opencode 支援，短期效益有限 | 依賴 host |
+| ~~記憶未自動化~~ | ~~🟠 中~~ | ✅ **已解決** auto-store + pre-check 已實作為預設行為 | Phase D ✅ |
 
 ### B.4 戰略定位
 
@@ -2040,14 +2043,15 @@ Smart MCP 是「理解程式碼的儀器」
 | 記憶感知 | 工具錯誤時自動檢查 memory store | ✅ memory-aware error prevention |
 | Phase 9 | 補缺失測試 + smart/stats 端點擴充 (p50/p95/p99) | ✅ compose(9) + ckg(8) + lsp(7) + impact(10) = 34 tests |
 
-#### Sprint 3：CKG Moat 加深（進行中）
+#### Sprint 3：CKG Moat 加深（2026-06-05 完成）
 
 目標：將 CKG 從基礎設施升級為開發者日常工具。
 
 | 任務 | 詳細 | 優先級 | 狀態 |
 |------|------|--------|------|
 | CKG build speed benchmark | 建立大專案 (1000+ 檔) 效能測試 + LRU 快取擴充至 5000 筆 | P0 | 🔜 待啟動 |
-| 記憶自動化 | auto-store: 所有工具失敗自動寫入記憶; pre-check: 工具前自動查詢 | P0 | 🔜 待啟動 |
+| 記憶自動化 | auto-store + pre-check + instrumentation counters (smart/stats) + speed benchmark (95% saved) | P0 | ✅ 已完成 |
+| Smart MCP First 指令 | agent config 新增 Built-in→Smart MCP 映射表，兩處 agent config 同步更新 | P0 | ✅ 已完成 |
 | C.1 使用模式歸納 | queryUsagePatterns 輸出擴充: event-listener/factory/strategy 模式分類 | P0 | 🔜 待啟動 |
 | npm publish smart-agent | README.md + ARCHITECTURE.md + npm publish --access public | P1 | 🔜 待啟動 |
 | Fast Apply 工具 | SEARCH/REPLACE block + unified diff apply + 4 層模糊匹配 + Lazy markers + Partial + Multi-occurrence | P1 | ✅ 已完成 |

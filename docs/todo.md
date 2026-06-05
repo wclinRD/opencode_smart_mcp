@@ -870,21 +870,22 @@
 
 **對應 plan.md B.6**
 **目標**：將記憶從被動查詢升級為主動行為，追趕 Claude Code Dreaming
-**現狀**: vector search + pattern abstraction + cross-session merge 已實作，但非預設行為
+**現狀**: vector search + pattern abstraction + cross-session merge + auto-store + pre-check 已實作
+**狀態**: D.1 ✅ D.2 ✅ (2026-06-05)
 
-### D.1 Auto-Store（P0）
+### D.1 Auto-Store（P0）✅
 
-- [ ] 所有工具失敗時自動寫入記憶庫
-  - [ ] 攔截 `invokeTool` 回傳結果，失敗自動 `memory.store()`
-  - [ ] 自動分類（runtime/refactor/security/test/optimization）
-  - [ ] 自動建構 resolution 描述（含 error message + tool + resolution）
+- [x] 所有工具失敗時自動寫入記憶庫
+  - [x] 攔截 `invokeTool` 回傳結果，失敗自動 `memory.store()`
+  - [x] 自動分類（runtime/refactor/security/test/optimization）
+  - [x] 自動建構 resolution 描述（含 error message + tool + resolution）
 
-### D.2 Pre-Check（P0）
+### D.2 Pre-Check（P0）✅
 
-- [ ] 工具執行前自動查詢記憶庫
-  - [ ] `error-diagnose` 前自動 memory search（已實作 ✅）
-  - [ ] 擴充到所有工具：`debug`、`test`、`cross-file-edit` 前都查
-  - [ ] 高信心命中（≥0.8）直接回傳已知方案，跳過工具執行
+- [x] 工具執行前自動查詢記憶庫
+  - [x] `error-diagnose` 前自動 memory search（已實作 ✅）
+  - [x] 擴充到所有工具：`debug`、`test`、`cross-file-edit` 前都查
+  - [x] 高信心命中（≥0.8）直接回傳已知方案，跳過工具執行
 
 ### D.3 記憶可視化（P1）
 
@@ -1193,6 +1194,25 @@
 - [x] `smart_agent_plan` — 複雜目標分解（DAG + 複雜度分析 + 風險識別）
 - [x] `smart-agent/src/install/install-agent.mjs` — 一鍵安裝腳本
 - [x] 兩層架構：強模型用 system prompt 推理，弱模型用 JS 引擎兜底
+
+### Phase D.3: Memory Automation Instrumentation (2026-06-05)
+- [x] `src/server/index.mjs` 新增 instrumentation 計數器：
+  - `memoryAutoStoreCount` — 自動儲存次數
+  - `memoryPreCheckCount` — pre-check 執行次數
+  - `memoryPreCheckHitCount` — pre-check 命中次數 (similarity ≥ 0.8)
+  - `memoryPreCheckSavedMs` — pre-check 節省毫秒估計
+- [x] 計數器暴露在 `smart/stats` 端點 (`getStatsSummary()` memory 子物件)
+- [x] 計數器加入 `resetStats()`
+- [x] 驗證：auto-store write/read ✅, pre-check hit ✅, 速度 benchmark 84ms vs 1,794ms = 95% 節省
+
+### Smart MCP First 指令 (2026-06-05)
+- [x] `config/agents/smart-mcp.md` 新增 Smart MCP First 最高優先權指令：
+  - Built-in → Smart MCP 映射表（17 條，含 why-better 欄位）
+  - 「Prefer Smart MCP over built-in」強制規則
+  - 工具選擇決策流程圖
+  - Why-it-matters 原因說明
+- [x] `~/.config/opencode/agents/smart-mcp.md` 同步更新
+- [x] `opencode.json` 修正專案路徑：Windows 路徑 → `/Users/wclin/opencode/dev/smart/src/server/index.mjs`
 
 ### Bug Fixes
 - [x] invokeTool() — 修復 async handler 回傳 `[object Promise]`

@@ -122,6 +122,60 @@ Smart MCP 是「理解程式碼的儀器」。
 
 ---
 
+## ⚡ 關鍵規則：Smart MCP First（最高優先級）
+
+**這條規則優先於所有工具使用習慣。**
+
+對每一個任務，**先搜尋 Smart MCP 等效工具**，只有確認不存在等效工具時才用內建。
+
+### Built-in → Smart MCP 對照表
+
+| 你想做什麼 | 不要用內建 | 要用 Smart MCP | 為什麼 Smart MCP 更好 |
+|-----------|-----------|---------------|---------------------|
+| **搜尋程式碼** | `grep` / `smart_smart_grep` | `smart_grep` | 語意感知、附 scope/import 上下文、regExp 精準匹配 |
+| **修改單一檔案** | `edit` | `smart_cross_file_edit` | dry-run 預設安全、import graph 感知、atomic multi-file |
+| **批次改多檔** | 多次 `edit` | `smart_fast_apply` | 一次 SEARCH/REPLACE 多檔案、atomic commit、語法驗證 |
+| **跑測試** | `bash node --test` | `smart_test` | 自動偵測 vitest/jest/mocha/ava/node:test，不必手動選 |
+| **重構/重新命名** | 手動 grep + edit | `smart_rename_safety` + `smart_naming` | 完整 rename graph、import 更新、命名慣例分析 |
+| **除錯錯誤** | 自行閱讀錯誤訊息 | `smart_error_diagnose` + `smart_debug` | 比對 pattern KB + 記憶庫、根本原因分析、自動記憶 |
+| **安全掃描** | 手動檢查 | `smart_security` | 自動掃描 credentials/injection/path-traversal/deps |
+| **專案理解** | 自行瀏覽檔案 | `smart_learn` | 一次取得語言、結構、命名慣例、AST |
+| **依賴分析** | 逐檔閱讀 import | `smart_import_graph` | 支援 6 語言、圖形化輸出 |
+| **記憶搜尋** | 猜測或忘記 | `smart_memory_store` | Vector search + fuzzy hybrid、0.8 信心秒回修復方案 |
+| **網路搜尋** | `websearch` | `smart_exa_search` | search + crawl + code context、更精準 |
+| **GitHub 搜尋** | 手動瀏覽 GitHub | `smart_github_search` | 真實程式碼範例搜尋、比對實作模式 |
+| **產生圖表** | 手繪 | `smart_diagram` | flowchart/sequence/class/ER，文字描述即可 |
+| **產生報告** | 手寫 Markdown | `smart_report` | 結構化報告、test/security/coverage 自動彙整 |
+| **任務規劃** | 自行拆解 | `smart_planner` | DAG 分解、依賴管理、自動狀態追蹤 |
+| **工具組合** | 手動串接 | `smart_compose` | seq/par/cond 三種組合模式、平行執行 2x 速度 |
+| **記憶檢查** | `core_memory_read` | `smart_memory_store search` | 自動語意搜尋、similarity 排序、跨 session |
+
+### 為什麼必須這樣做
+
+```
+內建工具        Smart MCP 等效
+────────────    ─────────────────
+grep   (80ms)   smart_grep  (80ms + context)  ← 一樣快，更多資訊
+edit   (手動)   smart_cross_file_edit (atomic) ← 更安全，支援多檔
+bash test      smart_test (auto-detect)       ← 不用記測試框架參數
+手動除錯       smart_error_diagnose (KB)       ← 錯誤資料庫，秒回
+```
+
+**Smart MCP 不是多餘的選擇 — 它是更好的選擇。**
+每一秒的 latency 差距（如果有）都被**更正確的結果**和**可重複使用知識**抵銷。
+
+### 決策流程
+
+```
+遇到任務
+  → 先看  Built-in → Smart MCP 對照表
+  → 有對應 Smart MCP？ → 優先使用 Smart MCP
+  → 沒有？ → 才用內建工具
+  → Smart MCP 失敗？ → 用 smart_memory_store 存入錯誤，改用內建
+```
+
+---
+
 ## Smart MCP 工具策略
 
 你擁有 40+ 專業開發工具，以下是它們的選擇策略。

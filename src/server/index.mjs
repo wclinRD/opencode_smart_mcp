@@ -20,7 +20,8 @@
 //
 // Adding a new tool: create tools/standard/xxx.mjs → restart → done
 
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
@@ -65,7 +66,7 @@ function gracefulShutdown(signal) {
 // ---------------------------------------------------------------------------
 // Usage stats
 // ---------------------------------------------------------------------------
-const stats = { startTime: Date.now(), totalCalls: 0, totalErrors: 0, totalDurationMs: 0, byTool: new Map() };
+const stats = { startTime: Date.now(), totalCalls: 0, totalErrors: 0, totalDurationMs: 0, byTool: new Map(), memoryAutoStoreCount: 0, memoryPreCheckCount: 0, memoryPreCheckHitCount: 0, memoryPreCheckSavedMs: 0 };
 
 // ---------------------------------------------------------------------------
 // Session context
@@ -97,15 +98,25 @@ function getStatsSummary() {
   for (const [name, s] of stats.byTool) {
     byTool[name] = { calls: s.calls, errors: s.errors, avgMs: s.calls > 0 ? Math.round(s.durationMs / s.calls) : 0 };
   }
+  const preCheckHits = stats.memoryPreCheckHitCount;
+  const preCheckTotal = stats.memoryPreCheckCount;
   return {
     uptimeMs: Date.now() - stats.startTime, totalCalls: stats.totalCalls, totalErrors: stats.totalErrors,
     errorRate: stats.totalCalls > 0 ? (stats.totalErrors / stats.totalCalls * 100).toFixed(1) + '%' : '0%',
     avgDurationMs: stats.totalCalls > 0 ? Math.round(stats.totalDurationMs / stats.totalCalls) : 0,
     byTool,
+    memory: {
+      autoStored: stats.memoryAutoStoreCount,
+      preCheckLookups: preCheckTotal,
+      preCheckHits,
+      preCheckHitRate: preCheckTotal > 0 ? (preCheckHits / preCheckTotal * 100).toFixed(1) + '%' : '0%',
+      preCheckTimeSavedMs: stats.memoryPreCheckSavedMs,
+      preCheckAvgSavedMs: preCheckHits > 0 ? Math.round(stats.memoryPreCheckSavedMs / preCheckHits) : 0,
+    },
   };
 }
 
-function resetStats() { stats.startTime = Date.now(); stats.totalCalls = 0; stats.totalErrors = 0; stats.totalDurationMs = 0; stats.byTool.clear(); }
+function resetStats() { stats.startTime = Date.now(); stats.totalCalls = 0; stats.totalErrors = 0; stats.totalDurationMs = 0; stats.byTool.clear(); stats.memoryAutoStoreCount = 0; stats.memoryPreCheckCount = 0; stats.memoryPreCheckHitCount = 0; stats.memoryPreCheckSavedMs = 0; }
 
 // ---------------------------------------------------------------------------
 // Runtime config
@@ -267,6 +278,131 @@ function getErrorFix(toolName, errorType, errorMsg = '') {
 }
 
 // ---------------------------------------------------------------------------
+// Memory auto-store + pre-check (Phase D: Memory Automation)
+// ---------------------------------------------------------------------------
+
+const MEMORY_CLI_PATH = resolve(__dirname, '../cli/memory-store.mjs');
+
+/**
+ * Auto-classify an error message into a memory category.
+ * Uses keyword matching — mirrors error KB categories.
+ */
+function classifyErrorForMemory(errorMsg) {
+  const l = (errorMsg || '').toLowerCase();
+  if (l.includes('timeout') || l.includes('timed out')) return 'runtime';
+  if (l.includes('syntax') || l.includes('unexpected token') || l.includes('parse')) return 'build';
+  if (l.includes('cannot find module') || l.includes('module not found')) return 'build';
+  if (l.includes('referenceerror') || l.includes('is not defined')) return 'runtime';
+  if (l.includes('test') && (l.includes('fail') || l.includes('assert') || l.includes('expect'))) return 'test';
+  if (l.includes('eacces') || l.includes('permission denied') || l.includes('eperm')) return 'permission';
+  if (l.includes('enoent') || l.includes('not found') || l.includes('does not exist')) return 'path';
+  if (l.includes('econnrefused') || l.includes('connection refused') || l.includes('network')) return 'network';
+  if (l.includes('format') || l.includes('lint') || l.includes('prettier') || l.includes('eslint')) return 'lint';
+  if (l.includes('git') || l.includes('merge conflict') || l.includes('branch')) return 'git';
+  return 'unknown';
+}
+
+/**
+ * Extract a meaningful error key from tool args + error result.
+ * Prioritises explicit error fields, falls back to generic patterns.
+ */
+function extractErrorKey(toolName, args, result) {
+  // Error message from result
+  if (result && result.error) return result.error.slice(0, 500);
+  // Tool-specific arg patterns that contain the user's intent
+  const errorCandidates = ['query', 'error', 'pattern', 'diff', 'file'];
+  for (const key of errorCandidates) {
+    if (args && args[key] && typeof args[key] === 'string' && args[key].length > 5) {
+      return `${toolName} ${key}=${args[key].slice(0, 200)}`;
+    }
+  }
+  return `${toolName} failed`;
+}
+
+/**
+ * D.1 Auto-Store: Non-blocking write of failed tool result to memory store.
+ * Fast async spawn with unref — does NOT block the response.
+ */
+function autoStoreToMemory(toolName, args, result, errorCategory) {
+  stats.memoryAutoStoreCount++;
+  try {
+    if (!existsSync(MEMORY_CLI_PATH)) return;
+
+    const errorKey = extractErrorKey(toolName, args, result);
+    if (!errorKey || errorKey.length < 10) return; // skip noise
+
+    const resolution = `Tool ${toolName} returned error. Fix: ${(result && result.error) ? result.error.split('\n')[0] : 'Check tool args and input.'}`;
+    const toolsUsed = toolName;
+    const category = errorCategory || classifyErrorForMemory(errorKey);
+
+    const child = spawn('node', [
+      MEMORY_CLI_PATH, 'store', errorKey,
+      '--resolution', resolution.slice(0, 500),
+      '--tools', toolsUsed,
+      '--category', category,
+      '--success', 'false',
+    ], {
+      timeout: 3000,
+      stdio: 'ignore',
+    });
+    child.unref();
+    setTimeout(() => { try { child.kill(); } catch { /* ok */ } }, 2000).unref();
+  } catch {
+    // Best-effort — never throw from auto-store
+  }
+}
+
+/**
+ * D.2 Pre-Check: Query memory store for known resolution before tool execution.
+ * Returns { found: true, output: string } if high-confidence hit, null otherwise.
+ */
+function preCheckMemory(toolName, args) {
+  stats.memoryPreCheckCount++;
+  try {
+    if (!existsSync(MEMORY_CLI_PATH)) return null;
+
+    // Extract search query from tool args — what error is the user trying to fix?
+    let query = null;
+    if (args.error && typeof args.error === 'string') query = args.error;
+    else if (args.pattern && typeof args.pattern === 'string') query = args.pattern;
+    else if (args.query && typeof args.query === 'string') query = args.query;
+    else if (args.diff && typeof args.diff === 'string') query = args.diff;
+
+    if (!query || query.length < 10) return null;
+
+    const result = spawnSync('node', [
+      MEMORY_CLI_PATH, 'search', query,
+      '--threshold', '0.4',
+      '--limit', '3',
+      '--format', 'json',
+    ], { encoding: 'utf-8', timeout: 3000, maxBuffer: 1024 * 10 });
+
+    if (result.status !== 0 || !result.stdout) return null;
+
+    const parsed = JSON.parse(result.stdout);
+    if (!parsed || !parsed.found || !parsed.entries || parsed.entries.length === 0) return null;
+
+    // Check for high-confidence match (similarity ≥ 0.8)
+    const topMatch = parsed.entries[0];
+    if (topMatch.similarity >= 0.8) {
+      stats.memoryPreCheckHitCount++;
+      stats.memoryPreCheckSavedMs += 1500; // rough avg saved per tool execution skipped
+      return {
+        found: true,
+        id: topMatch.id,
+        score: topMatch.similarity,
+        resolution: topMatch.resolution || '(no resolution stored)',
+        output: `[Memory Pre-Check: Known resolution found (confidence ${(topMatch.similarity * 100).toFixed(0)}%)]\n\n${topMatch.resolution || '(no resolution stored)'}\n\n(Pre-check skipped tool execution — returned known fix from memory)`,
+      };
+    }
+
+    return null;
+  } catch {
+    return null; // best-effort
+  }
+}
+
+// ---------------------------------------------------------------------------
 // smart_run — Router dispatcher for standard tools
 // ---------------------------------------------------------------------------
 
@@ -412,6 +548,10 @@ function captureAndReturn(toolName, args, result, elapsedMs) {
   recordStats(toolName, elapsedMs, success);
   ensureContext();
   contextManager.capture(toolName, args, result, elapsedMs);
+  // D.1 Auto-Store: non-blocking write failed tool results to memory
+  if (!success && toolName !== 'smart_memory_store') {
+    autoStoreToMemory(toolName, args, result);
+  }
   return result;
 }
 
@@ -424,6 +564,17 @@ function captureAndReturn(toolName, args, result, elapsedMs) {
  */
 function invokeTool(def, args, timeoutOverride, signal) {
   const startTime = process.hrtime.bigint();
+
+  // D.2 Pre-Check: before executing, check memory for known resolution
+  // Applies to diagnostic/fix tools where user provides an error description
+  const PRECHECK_TOOLS = new Set(['smart_debug', 'smart_test', 'smart_cross_file_edit']);
+  if (PRECHECK_TOOLS.has(def.name)) {
+    const precheck = preCheckMemory(def.name, args);
+    if (precheck) {
+      const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+      return captureAndReturn(def.name, args, { ok: true, output: precheck.output }, elapsedMs);
+    }
+  }
 
   // Direct handler path — no process spawn overhead
   // Inject context summary into args for handler-based tools
