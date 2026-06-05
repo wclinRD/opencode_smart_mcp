@@ -1,10 +1,12 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "default_agent": "smart",
+  "default_agent": "smart-mcp",
+  "model": "opencode/big-pickle",
+  "temperature": 0.3,
   "mcp": {
     "smart": {
       "type": "local",
-      "command": ["node", "/path/to/opencode_smart_mcp/src/server/index.mjs"],
+      "command": ["node", "/Users/wclin/opencode/dev/smart/src/server/index.mjs"],
       "enabled": true
     }
   }
