@@ -475,7 +475,10 @@ export class CkgEngine {
     }
 
     // Concurrency config
-    const CONCURRENCY = Math.max(1, parseInt(process.env.CKG_BUILD_CONCURRENCY || '20', 10));
+    // When buildReferences is true, force serial processing (concurrency=1)
+    // to avoid LSP race: cross-file references need prior files indexed first.
+    const rawConcurrency = parseInt(process.env.CKG_BUILD_CONCURRENCY || '20', 10);
+    const CONCURRENCY = buildReferences ? 1 : Math.max(1, rawConcurrency);
 
     // Process files in concurrent chunks (improves throughput by overlapping LSP wait times)
     for (let i = 0; i < allFiles.length; i += CONCURRENCY) {
@@ -624,29 +627,31 @@ export class CkgEngine {
       }
 
       // Insert pre-fetched reference edges
+      // Direction: caller-file → callee-definition
+      // (queryCallers/queryUsagePatterns query WHERE to_node_id = ? AND kind = 'calls')
       for (const { sym, refs } of refData) {
-        const fromNode = db.prepare(
+        const defNode = db.prepare(
           'SELECT id FROM nodes WHERE project_id = ? AND file = ? AND name = ? AND kind = ? AND stale = 0 LIMIT 1'
         ).get(this._projectId, file, sym.name, sym.kind);
-        if (!fromNode) continue;
+        if (!defNode) continue;
 
         for (const ref of refs) {
           const refRel = relative(this.projectRoot, ref.file);
           if (refRel === file) continue;
 
-          let toNode = db.prepare(
+          let callerFileNode = db.prepare(
             'SELECT id FROM nodes WHERE project_id = ? AND file = ? AND kind = ? LIMIT 1'
           ).get(this._projectId, refRel, 'file');
-          if (!toNode) {
+          if (!callerFileNode) {
             const r = db.prepare(
               'INSERT INTO nodes (project_id, name, kind, file, exported, stale, content_hash) VALUES (?, ?, ?, ?, ?, 0, ?)'
             ).run(this._projectId, basename(refRel), 'file', refRel, 1, '');
-            toNode = { id: Number(r.lastInsertRowid) };
+            callerFileNode = { id: Number(r.lastInsertRowid) };
           }
-          if (toNode) {
+          if (callerFileNode) {
             db.prepare(
               'INSERT INTO edges (project_id, from_node_id, to_node_id, kind, metadata) VALUES (?, ?, ?, ?, ?)'
-            ).run(this._projectId, fromNode.id, toNode.id, 'calls',
+            ).run(this._projectId, callerFileNode.id, defNode.id, 'calls',
               JSON.stringify({ file: refRel, line: ref.line, col: ref.col }));
             edgeCount++;
           }
