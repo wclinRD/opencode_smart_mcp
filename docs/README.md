@@ -10,8 +10,8 @@ MCP server 提供 26 個開發工具，可在 opencode 中直接呼叫。
 >
 > | 平台 | 路徑格式範例 | 路徑分隔符號 |
 > |------|-------------|-------------|
-> | **macOS** | `/Users/dennis/opencode/smart/src/server/index.mjs` | `/` (forward slash) |
-> | **Windows** | `C:\\Users\\dennis\\opencode\\smart\\src\\server\\index.mjs` | `\\` (double backslash) |
+> | **macOS** | `/Users/您的帳號/opencode_smart_mcp/src/server/index.mjs` | `/` (forward slash) |
+> | **Windows** | `C:\\Users\\您的帳號\\opencode_smart_mcp\\src\\server\\index.mjs` | `\\` (double backslash) |
 >
 > ### LLM 自動修正規則
 >
