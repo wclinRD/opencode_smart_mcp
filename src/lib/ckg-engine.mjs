@@ -627,8 +627,10 @@ export class CkgEngine {
       }
 
       // Insert pre-fetched reference edges
-      // Direction: caller-file → callee-definition
+      // Direction: caller → callee-definition
       // (queryCallers/queryUsagePatterns query WHERE to_node_id = ? AND kind = 'calls')
+      // Resolves caller to the containing function node (not just file node)
+      // for actionable refactoring plans.
       for (const { sym, refs } of refData) {
         const defNode = db.prepare(
           'SELECT id FROM nodes WHERE project_id = ? AND file = ? AND name = ? AND kind = ? AND stale = 0 LIMIT 1'
@@ -638,23 +640,37 @@ export class CkgEngine {
         for (const ref of refs) {
           const refRel = relative(this.projectRoot, ref.file);
           if (refRel === file) continue;
+          const refLine = ref.line;
 
-          let callerFileNode = db.prepare(
-            'SELECT id FROM nodes WHERE project_id = ? AND file = ? AND kind = ? LIMIT 1'
-          ).get(this._projectId, refRel, 'file');
-          if (!callerFileNode) {
+          // Find containing function node in caller file (range-based)
+          // Uses range_start_line <= refLine and end_line >= refLine (or unknown)
+          let callerNode = db.prepare(
+            `SELECT id, name, kind FROM nodes
+             WHERE project_id = ? AND file = ? AND stale = 0
+               AND kind IN ('function','method','class','constructor')
+               AND range_start_line IS NOT NULL AND range_start_line <= ?
+               AND (range_end_line IS NULL OR range_end_line >= ?)
+             ORDER BY range_start_line DESC
+             LIMIT 1`
+          ).get(this._projectId, refRel, refLine, refLine);
+
+          // Fallback: file-level node if no containing function found
+          if (!callerNode) {
+            callerNode = db.prepare(
+              'SELECT id, name, kind FROM nodes WHERE project_id = ? AND file = ? AND kind = ? LIMIT 1'
+            ).get(this._projectId, refRel, 'file');
+          }
+          if (!callerNode) {
             const r = db.prepare(
               'INSERT INTO nodes (project_id, name, kind, file, exported, stale, content_hash) VALUES (?, ?, ?, ?, ?, 0, ?)'
             ).run(this._projectId, basename(refRel), 'file', refRel, 1, '');
-            callerFileNode = { id: Number(r.lastInsertRowid) };
+            callerNode = { id: Number(r.lastInsertRowid), name: basename(refRel), kind: 'file' };
           }
-          if (callerFileNode) {
-            db.prepare(
-              'INSERT INTO edges (project_id, from_node_id, to_node_id, kind, metadata) VALUES (?, ?, ?, ?, ?)'
-            ).run(this._projectId, callerFileNode.id, defNode.id, 'calls',
-              JSON.stringify({ file: refRel, line: ref.line, col: ref.col }));
-            edgeCount++;
-          }
+          db.prepare(
+            'INSERT INTO edges (project_id, from_node_id, to_node_id, kind, metadata) VALUES (?, ?, ?, ?, ?)'
+          ).run(this._projectId, callerNode.id, defNode.id, 'calls',
+            JSON.stringify({ file: refRel, line: refLine, col: ref.col, callerName: callerNode.name, callerKind: callerNode.kind }));
+          edgeCount++;
         }
       }
 
@@ -728,7 +744,7 @@ export class CkgEngine {
         const symResult = symStmt.run(
           projectId, sym.name, sym.kind, file,
           sym.line || null, sym.col || null,
-          null, null,  // end line/col not always available
+          sym.end_line || null, sym.end_col || null,
           sym.signature || sym.name,
           sym.kind === 'function' || sym.kind === 'class' ? 1 : 0,
           contentHash, now, now
