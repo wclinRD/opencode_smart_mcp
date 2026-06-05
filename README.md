@@ -28,6 +28,32 @@ MCP server 提供 **33 個開發工具** + **專屬 agent personality**，可在
 > - 若當前環境是 **Windows**（`process.platform === 'win32'`）→ 使用 `C:\\Users\\...` 格式
 >
 > **安裝腳本已自動處理**：`smart-agent/src/install/install-agent.mjs` 和 `src/install/generate-config.mjs` 使用 Node.js `path.resolve()`，自動產生正確的平台路徑。建議 LLM 直接執行安裝腳本而非手動編輯路徑。
+>
+> ### 🔍 Agent 定義檔換行格式注意
+>
+> **`config/agents/smart-mcp.md` 的前置 YAML frontmatter 必須使用 LF (`\n`) 換行**，即使是在 Windows 上也是如此。opencode 的 frontmatter parser **不接受 CRLF (`\r\n`)**，若使用 Windows 預設 CRLF 格式會導致 agent 無法被載入，`opencode agent list` 中不會顯示 `smart-mcp` agent。
+>
+> 當你（LLM）看到以下情況時：
+> - `opencode agent list` 沒有 `smart-mcp` 但檔案 `~/.config/opencode/agents/smart-mcp.md` 存在
+>
+> 請執行（**Windows 上的 LLM 特別注意**）：
+> ```bash
+> # 將 smart-mcp.md 的 CRLF 換行轉換為 LF
+> node -e "
+> const fs = require('fs');
+> const p = require('os').homedir() + '/.config/opencode/agents/smart-mcp.md';
+> let c = fs.readFileSync(p, 'utf-8');
+> c = c.replace(/\r\n/g, '\n');
+> fs.writeFileSync(p, c, 'utf-8');
+> console.log('Converted to LF');
+> "
+> ```
+>
+> **判斷方式**：
+> - **macOS / Linux**（`process.platform !== 'win32'`）→ git clone 自動使用 LF，無需處理
+> - **Windows**（`process.platform === 'win32'`）→ **必須手動轉換為 LF**，否則 opencode 會略過該 agent
+>
+> **安裝腳本提醒**：`smart-agent/src/install/install-agent.mjs` 使用 `fs.copyFileSync()` 原樣複製檔案，**不會自動轉換換行符號**。若在 Windows 上執行安裝腳本後，請以上述 `node -e` 指令確認 agent 檔案使用 LF 換行。
 
 ---
 
@@ -136,7 +162,7 @@ node smart-agent/src/install/install-agent.mjs --dry-run
 | `4/5 startup requests failed` | opencode.json 頂層含有非標準欄位 | 移除 `name`、`version`、`description` 等 |
 | `ECONNREFUSED` / tool 沒回應 | command 路徑錯誤或 node 找不到 | 檢查 `command[1]` 是否為正確絕對路徑 |
 | tool 不存在 / unknown tool | plugin 未正確載入 | 確認 `.opencode/node_modules/` 已安裝 |
-| `default_agent not found` | agent 定義檔不在 `~/.config/opencode/agents/` | 執行 `node smart-agent/src/install/install-agent.mjs` |
+| `default_agent not found` 或 agent 未出現在 `opencode agent list` 中 | agent 定義檔不存在或 frontmatter 換行格式錯誤（Windows CRLF） | 確認 `~/.config/opencode/agents/smart-mcp.md` 存在，且使用 **LF** 換行（參閱跨平台注意事項） |
 
 ---
 
