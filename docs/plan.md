@@ -30,6 +30,7 @@ Smart MCP 是一個 **LLM 認知捷徑伺服器**，透過 MCP 協定為 LLM age
 - **記憶自動化**：Phase D — 所有工具失敗 auto-store, smart_debug/smart_test/smart_cross_file_edit 執行前 pre-check 記憶庫
 - **Instrumentation 計數器**：memoryAutoStoreCount / memoryPreCheckCount / memoryPreCheckHitCount / memoryPreCheckSavedMs 暴露在 smart/stats 端點
 - **Smart MCP First 指令**：agent config 新增 Built-in→Smart MCP 映射表，強制優先使用 smart MCP 工具
+- **Exa 雙模支援**：exa-search-mjs 支援無 API key 時自動 fallback 到 MCP free tier (mcp.exa.ai, IP rate-limited)，有 key 時走 REST API
 
 ---
 
@@ -134,7 +135,7 @@ src/
 | **重構** | 2 | ✅ 成熟 | cross-file-edit + rename-safety (皆有 dry-run) |
 | **Git** | 1 | ✅ 成熟 | git-context (diff/commit/impact) |
 | **語言助手** | 3 | 🟡 中等 | py-helper + ts-helper + rs-helper (Python/TS/Rust) |
-| **搜尋** | 3 | ✅ 成熟 | exa-search + github-search + grep |
+| **搜尋** | 3 | ✅ 成熟 | exa-search (雙模: REST/MCP free-tier fallback) + github-search + grep |
 | **可視化** | 2 | ✅ 成熟 | diagram (Mermaid) + report (HTML) |
 | **後設** | 3 | ✅ 成熟 | integrate + tool-stats + toonify（含 auto-interceptor 自動優化輸出） |
 | **推理 (深層分析)** | 1 (smart_thinking) | ✅ 成熟 | 9 模板 + 動態多輪/state/branch/handler 化 |
@@ -2062,7 +2063,7 @@ src/server/index.mjs
 | `smart_debug` | standard/debug.mjs | debug-assist.mjs | 錯誤分析與除錯 |
 | `smart_diagram` | standard/diagram.mjs | diagram.mjs | Mermaid.js 圖表生成 |
 | `smart_error_diagnose` | standard/error_diagnose.mjs | error-diagnose.mjs | 錯誤模式診斷 |
-| `smart_exa_search` | standard/exa_search.mjs | exa-search.mjs | Exa 網路搜尋 |
+| `smart_exa_search` | standard/exa_search.mjs | exa-search.mjs | Exa 網路搜尋 (雙模: REST + MCP free tier fallback) |
 | `smart_git_context` | standard/git_context.mjs | git-context.mjs | Git 脈絡分析 |
 | `smart_github_search` | standard/github_search.mjs | github-search.mjs | GitHub 程式碼搜尋 |
 | `smart_import_graph` | standard/import_graph.mjs | import-graph.mjs | 跨檔案依賴分析 |

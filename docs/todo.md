@@ -1615,3 +1615,18 @@
   - smart_context TOON JSON.parse ✅
   - hybrid/impact-engine LSP bridge hanging ✅
   - 22/22 tests all green ✅
+
+### 🔴 Exa 雙模支援：免 key fallback (2026-06-06)
+
+**目標**：exa-search.mjs 無 API key 時自動 fallback 到 MCP free tier
+
+- [x] `src/cli/exa-search.mjs` — 雙模架構：
+  - [x] **有 key** → REST API (`https://api.exa.ai`，原始行為不變)
+  - [x] **無 key** → MCP free tier (`https://mcp.exa.ai/mcp`，IP rate-limited)
+- [x] 新增 `mcpToolCall()` — JSON-RPC call 到 Exa MCP server
+- [x] 新增 `parseSseResponse()` — 解析 Streamable HTTP SSE 回應
+- [x] 新增 `callMcp()` — CLI 指令→MCP tool 統一 dispatch
+- [x] Tool 對應：`search`→`web_search_exa`, `crawl`→`web_fetch_exa`, `code`→`get_code_context_exa`
+- [x] 驗證：search/crawl/code/--format json 全部通過
+- [x] `--help` 自動顯示目前模式（REST API 或 MCP free tier）
+- [x] docs/plan.md + docs/todo.md 同步更新
