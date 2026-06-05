@@ -79,10 +79,19 @@ function formatUsagePatterns(result) {
 
   let text = `Usage patterns for ${result.symbol} in ${result.file}\n`;
   text += '─'.repeat(55) + '\n';
-  text += `${result.totalUsages} total usage(s)\n\n`;
+  text += `${result.totalUsages} total usage(s)\n`;
+
+  // Induced patterns (high-level)
+  if (result.inducedPatterns && result.inducedPatterns.length > 0) {
+    text += '\n🔍 Induced patterns:\n';
+    for (const ip of result.inducedPatterns) {
+      const bar = Math.round(ip.confidence * 100);
+      text += `  ╰ ${ip.type.padEnd(18)} confidence: ${bar}%  ${ip.description}\n`;
+    }
+  }
 
   // Pattern summary
-  text += 'Pattern breakdown:\n';
+  text += '\nPattern breakdown:\n';
   for (const p of result.patterns) {
     const bar = '█'.repeat(Math.max(1, Math.round(p.count / result.totalUsages * 20)));
     text += `  ${p.type.padEnd(17)} ${String(p.count).padStart(3)} ${bar}  ${p.description}\n`;
@@ -102,6 +111,31 @@ function formatUsagePatterns(result) {
         ? ` (in ${u.caller.container.name}:${u.caller.container.kind})`
         : '';
       text += `    L${String(u.caller.line).padStart(4)}  [${u.pattern.padEnd(15)}] ${u.caller.name}${ctx}\n`;
+    }
+  }
+
+  return text;
+}
+
+function formatStrategyPatterns(result) {
+  if (result.strategies.length === 0) {
+    return `No strategy/interace patterns found for ${result.symbol} in ${result.file}.`;
+  }
+
+  let text = `Strategy/Interface patterns for ${result.symbol} in ${result.file}\n`;
+  text += '─'.repeat(55) + '\n';
+
+  for (const s of result.strategies) {
+    text += `\n📐 ${s.type} (confidence: ${Math.round(s.confidence * 100)}%)\n`;
+    text += `   ${s.description}\n`;
+    for (const impl of s.implementations) {
+      const detail = impl.sharedCallers
+        ? ` (sharedCallers: ${impl.sharedCallers})`
+        : impl.exported ? ' (exported)' : '';
+      text += `   ╰ ${impl.file}`;
+      if (impl.name) text += ` → ${impl.name}`;
+      if (impl.signature) text += ` ${impl.signature}`;
+      text += `${detail}\n`;
     }
   }
 
@@ -250,7 +284,7 @@ Examples:
     properties: {
       query: {
         type: 'string',
-        enum: ['build', 'update', 'callers', 'callees', 'usage-patterns', 'dependencies', 'unused-exports', 'symbol', 'stats'],
+        enum: ['build', 'update', 'callers', 'callees', 'usage-patterns', 'strategy-patterns', 'dependencies', 'unused-exports', 'symbol', 'stats'],
         description: 'Query type',
       },
       symbol: { type: 'string', description: 'Symbol name (for callers/callees/symbol queries)' },
@@ -333,6 +367,18 @@ Examples:
           return formatUsagePatterns(result);
         }
 
+        // -- Strategy/interface patterns --
+        case 'strategy-patterns': {
+          if (!args.symbol || !args.file) {
+            return 'symbol and file are required for strategy-patterns query.';
+          }
+          result = engine.queryStrategyPatterns(args.symbol, args.file, {
+            includeStale: args.includeStale,
+          });
+          if (format === 'json') return JSON.stringify(result, null, 2);
+          return formatStrategyPatterns(result);
+        }
+
         // -- Dependencies --
         case 'dependencies': {
           if (!args.file) return 'file is required for dependencies query.';
@@ -368,7 +414,7 @@ Examples:
         }
 
         default:
-          return `Unknown query type: "${query}". Supported: build, update, callers, callees, dependencies, unused-exports, symbol, stats`;
+          return `Unknown query type: "${query}". Supported: build, update, callers, callees, usage-patterns, strategy-patterns, dependencies, unused-exports, symbol, stats`;
       }
     } catch (err) {
       return `CKG error: ${err.message}`;

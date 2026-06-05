@@ -831,13 +831,14 @@
   - [ ] 大專案 (10000+ 檔) 增量更新測試
   - [ ] 記憶體優化：分頁式節點載入
 
-### C.1 CKG 使用模式歸納（P0 — 本週）
+### C.1 CKG 使用模式歸納（P0 — 本週）✅
 
 - [x] `queryUsagePatterns()` — 6 種模式分類 (direct/call/event-handler/class-method/module-init/factory/property-access)
-- [ ] 升級 pattern induction engine：從 queryUsagePatterns 原始輸出自動歸納
-  - [ ] event-listener 模式：`on('click', handler)` → `handler` 是 listener
-  - [ ] factory 模式：`createX()` → 回傳型別推斷工廠
-  - [ ] strategy 模式：多個實作同一 interface 互換
+- [x] 升級 pattern induction engine：從 queryUsagePatterns 原始輸出自動歸納 ✅
+  - [x] event-listener 模式：`on('click', handler)` → 讀取參考行原始碼，檢查 `.on(` / `.addEventListener(` 等註冊模式
+  - [x] factory 模式：`createX()` → signature 回傳型別推斷 (`_inferReturnType`)
+  - [x] strategy 模式：`queryStrategyPatterns()` — 同名跨檔案多型檢測 + 共享 caller 介面檢測
+- [x] `inducedPatterns` 輸出：從 aggregate 資料歸納高階模式（event-listener / factory / utility）
 - [x] `refactor-planner.mjs` — generateMigrationPlan + estimateDifficulty
 - [x] `smart_refactor_plan` MCP tool
 - [x] 10/10 planner 單元測試通過

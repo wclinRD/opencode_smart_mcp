@@ -166,6 +166,7 @@ src/
 | 2026-06-06 | Server | `respond()` TOON 優化阻塞全局回應 | 改 fire-and-forget：先 `writeMsg`，async 後台 `tryOptimizeOutput`，不經 `_respondChain` 排隊 |
 | 2026-06-06 | LSP bridge | 每次 query 重複 `textDocument/didOpen` 浪費 500-2000ms | 新增 `_didOpen()` helper + `openedFiles` Set，已開檔案不再重複發送；per-process state 內 Set，重啟自動清空 |
 | 2026-06-06 | CKG | `node:sqlite` 無 Node 版本要求標示 | `ckg-engine.mjs` 頂部加入 `⚠ Requires Node >= 26` |
+| 2026-06-06 | C.1 | Pattern induction engine 升級 | `queryUsagePatterns()` 新增 event-listener 偵測 (source-level)、factory type inference、inducedPatterns 歸納；新增 `queryStrategyPatterns()` (多型 + 共享介面) |
 
 ### 3.4 當前缺口（Phase 10-11 完成後，2026-06-05）
 
@@ -2020,7 +2021,7 @@ Smart MCP 是「理解程式碼的儀器」
 |--------|------|------|---------|------|---------|
 | **P0** | CKG | CKG build speed benchmark + 優化 (1000檔<30s, LRU 5000) | 4h | 🔴 CKG moat 體驗 | Claude Code 無法複製 |
 | **P0** | Memory | 記憶自動化: auto-store (所有工具失敗), pre-check (工具前) | 3h | 🔴 追趕 Dreaming | Claude Code Dreaming 剛出 |
-| **P0** | C.1 | CKG 使用模式歸納 (queryUsagePatterns → pattern induction) | 4h | 🔴 最強差異化 | Claude Code 做不到 |
+| **P0** | ~~C.1~~ | ~~CKG 使用模式歸納 (queryUsagePatterns → pattern induction)~~ | ~~4h~~ | ~~🔴 最強差異化~~ | ✅ **已修復** — event-listener / factory type / strategy / inducedPatterns |
 | **P1** | Phase H | npm publish smart-agent (README + npm publish) | 4h | 🟠 解鎖生態系 | 追趕 Skills/Plugins |
 | **P1** | Phase 13 | Change-Impact 驗收 (AST diff >95%, 傳播 <200ms) | 3h | 🟠 完成 moat | 已建立 pipeline |
 | **P1** | C.2 | CKG 測試覆蓋率地圖 (函式→測試映射 + 增量執行) | 6h | 🟠 殺手級功能 | Claude Code 只能猜 |
@@ -2061,7 +2062,7 @@ Smart MCP 是「理解程式碼的儀器」
 | CKG build speed benchmark | 建立大專案 (1000+ 檔) 效能測試 + LRU 快取擴充至 5000 筆 | P0 | 🔜 待啟動 |
 | 記憶自動化 | auto-store + pre-check + instrumentation counters (smart/stats) + speed benchmark (95% saved) | P0 | ✅ 已完成 |
 | Smart MCP First 指令 | agent config 新增 Built-in→Smart MCP 映射表，兩處 agent config 同步更新 | P0 | ✅ 已完成 |
-| C.1 使用模式歸納 | queryUsagePatterns 輸出擴充: event-listener/factory/strategy 模式分類 | P0 | 🔜 待啟動 |
+| C.1 使用模式歸納 | queryUsagePatterns 輸出擴充: event-listener/factory/strategy 模式分類 + inducedPatterns + queryStrategyPatterns | P0 | ✅ 已完成 |
 | npm publish smart-agent | README.md + ARCHITECTURE.md + npm publish --access public | P1 | 🔜 待啟動 |
 | Fast Apply 工具 | SEARCH/REPLACE block + unified diff apply + 4 層模糊匹配 + Lazy markers + Partial + Multi-occurrence | P1 | ✅ 已完成 |
 | Change-Impact 驗收 | AST diff 正確率 >95% benchmark + 傳播延遲 <200ms 驗證 | P1 | 🔜 待啟動 |

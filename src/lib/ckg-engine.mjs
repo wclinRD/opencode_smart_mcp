@@ -1115,14 +1115,15 @@ export class CkgEngine {
     ).get(this._projectId, symbol, file);
 
     if (!apiNode) {
-      const result = { symbol, file, totalUsages: 0, patterns: [], usages: [] };
+      const result = { symbol, file, totalUsages: 0, patterns: [], inducedPatterns: [], usages: [] };
       this._cache.set(cacheKey, result);
       return result;
     }
 
-    // Get all callers (direct edges where this node is the target)
+    // Get all callers WITH edge metadata (contains reference line for source-level analysis)
     const callerRows = db.prepare(
-      `SELECT DISTINCT n.id, n.name, n.kind, n.file, n.range_start_line as line, n.signature
+      `SELECT DISTINCT n.id, n.name, n.kind, n.file, n.range_start_line as line, n.signature,
+              e.metadata
        FROM edges e
        JOIN nodes n ON e.from_node_id = n.id
        WHERE e.to_node_id = ? AND e.kind = 'calls' ${staleFilter}
@@ -1142,7 +1143,7 @@ export class CkgEngine {
       ).all(apiNode.id);
 
       if (propUsages.length === 0) {
-        const result = { symbol, file, totalUsages: 0, patterns: [], usages: [] };
+        const result = { symbol, file, totalUsages: 0, patterns: [], inducedPatterns: [], usages: [] };
         this._cache.set(cacheKey, result);
         return result;
       }
@@ -1159,6 +1160,7 @@ export class CkgEngine {
         file,
         totalUsages: usages.length,
         patterns: [{ type: 'property-access', count: usages.length, description: 'Accessed as property/member' }],
+        inducedPatterns: [],
         usages,
       };
       this._cache.set(cacheKey, result);
@@ -1172,8 +1174,14 @@ export class CkgEngine {
     for (const caller of callerRows) {
       let pattern = 'direct-call';
 
+      // Parse edge metadata to get the exact reference line
+      let refLine = null;
+      try {
+        const meta = JSON.parse(caller.metadata || '{}');
+        refLine = meta.line || null;
+      } catch { /* ignore malformed metadata */ }
+
       // Determine the wrapper/context around this caller
-      // Check if caller is inside a class: look for 'contains' edges from a class to this caller
       const container = db.prepare(
         `SELECT n.name, n.kind FROM edges e
          JOIN nodes n ON e.from_node_id = n.id
@@ -1184,25 +1192,53 @@ export class CkgEngine {
       const callerName = caller.name || '';
       const callerKind = caller.kind || '';
 
-      // Pattern classification
-      if (callerKind === 'method' || (container && container.kind === 'class')) {
-        pattern = 'class-method';
-      } else if (/^(on|handle|before|after|_on|_handle)/i.test(callerName)) {
-        pattern = 'event-handler';
-      } else if (/^(create|build|make|factory|construct|new)/i.test(callerName)) {
-        pattern = 'factory';
-      } else if (callerKind === 'constant' || callerKind === 'variable' || callerKind === 'file' || callerKind === 'module') {
-        // Top-level assignment or initializer
-        const calledInInit = db.prepare(
-          `SELECT COUNT(*) as cnt FROM edges e
-           JOIN nodes n ON e.from_node_id = n.id
-           WHERE e.to_node_id = ? AND (n.kind = 'module' OR n.kind = 'file')
-           ${staleFilter}`
-        ).get(caller.id);
-        if (calledInInit && calledInInit.cnt > 0) {
-          pattern = 'module-init';
-        } else {
-          pattern = 'direct-call';
+      // ---- Pattern classification (priority-ordered) ----
+
+      // 1. Event-listener: target used as callback argument
+      //    e.g. `emitter.on('click', targetFn)` or `button.addEventListener('click', handler)`
+      if (refLine) {
+        const contextText = this._readSourceContext(caller.file, refLine, 2);
+        if (contextText) {
+          const listenerPattern = /\.\s*(on|addEventListener|subscribe|listen|watch|observe)\s*\(/;
+          if (listenerPattern.test(contextText) && new RegExp(`\\b${this._escapeRegex(symbol)}\\b`).test(contextText)) {
+            pattern = 'event-listener';
+          }
+        }
+      }
+
+      // 2. Class method
+      if (pattern === 'direct-call') {
+        if (callerKind === 'method' || (container && container.kind === 'class')) {
+          pattern = 'class-method';
+        }
+      }
+
+      // 3. Event handler (caller is handler, target is called within)
+      if (pattern === 'direct-call') {
+        if (/^(on|handle|before|after|_on|_handle)/i.test(callerName)) {
+          pattern = 'event-handler';
+        }
+      }
+
+      // 4. Factory (caller creates things)
+      if (pattern === 'direct-call') {
+        if (/^(create|build|make|factory|construct|new)/i.test(callerName)) {
+          pattern = 'factory';
+        }
+      }
+
+      // 5. Module init
+      if (pattern === 'direct-call') {
+        if (callerKind === 'constant' || callerKind === 'variable' || callerKind === 'file' || callerKind === 'module') {
+          const calledInInit = db.prepare(
+            `SELECT COUNT(*) as cnt FROM edges e
+             JOIN nodes n ON e.from_node_id = n.id
+             WHERE e.to_node_id = ? AND (n.kind = 'module' OR n.kind = 'file')
+             ${staleFilter}`
+          ).get(caller.id);
+          if (calledInInit && calledInInit.cnt > 0) {
+            pattern = 'module-init';
+          }
         }
       }
 
@@ -1222,10 +1258,47 @@ export class CkgEngine {
       });
     }
 
+    // ---- Induced patterns: higher-level patterns derived from aggregate data ----
+    const inducedPatterns = [];
+
+    // 1. If >50% of usages are event-listener, induce that the symbol IS an event listener
+    const listenerCount = patternCounts['event-listener'] || 0;
+    if (listenerCount > 0 && listenerCount / usages.length >= 0.5) {
+      inducedPatterns.push({
+        type: 'event-listener',
+        confidence: +(listenerCount / usages.length).toFixed(2),
+        description: `Primarily used as event listener/callback (${listenerCount}/${usages.length} usages)`,
+      });
+    }
+
+    // 2. Factory return type inference
+    if (/^(create|build|make|factory|construct|new)/i.test(symbol)) {
+      const returnType = this._inferReturnType(apiNode.signature);
+      inducedPatterns.push({
+        type: 'factory',
+        confidence: 0.7,
+        returnType: returnType || null,
+        description: `Factory function${returnType ? ` (creates \`${returnType}\`)` : ''}`,
+      });
+    }
+
+    // 3. Utility/helper induction: many callers across diverse patterns
+    if (usages.length >= 3) {
+      const uniqueCallers = new Set(usages.map(u => u.caller.name)).size;
+      if (uniqueCallers >= 3 && Object.keys(patternCounts).length >= 2) {
+        inducedPatterns.push({
+          type: 'utility',
+          confidence: 0.6,
+          description: `General utility/helper — used by ${uniqueCallers} different callers across ${Object.keys(patternCounts).length} pattern types`,
+        });
+      }
+    }
+
     // Build pattern summary
     const patternLabels = {
       'direct-call': 'Direct function/method call',
       'event-handler': 'Called from event handler (on*/handle*)',
+      'event-listener': 'Used as event listener/callback argument',
       'class-method': 'Called from a class method',
       'module-init': 'Called at module initialization scope',
       'factory': 'Called from a factory/create function',
@@ -1238,7 +1311,6 @@ export class CkgEngine {
       description: patternLabels[type] || type,
     }));
 
-    // Sort patterns by count descending
     patterns.sort((a, b) => b.count - a.count);
 
     const result = {
@@ -1246,9 +1318,139 @@ export class CkgEngine {
       file,
       totalUsages: usages.length,
       patterns,
+      inducedPatterns,
       usages,
     };
 
+    this._cache.set(cacheKey, result);
+    return result;
+  }
+
+  /**
+   * Infer return type from a function signature.
+   * e.g. `createUser(name: string): User` → `User`
+   */
+  _inferReturnType(signature) {
+    if (!signature) return null;
+    const match = signature.match(/[:(]\s*(\w+(?:<[^>]+>)?)\s*$/);
+    return match ? match[1] : null;
+  }
+
+  /**
+   * Read a few lines of source context around a reference line.
+   * Returns joined text or null if file not found/readable.
+   */
+  _readSourceContext(relFile, refLine, radius = 2) {
+    try {
+      const absPath = resolve(this.projectRoot, relFile);
+      if (!existsSync(absPath)) return null;
+      const content = readFileSync(absPath, 'utf-8');
+      const lines = content.split('\n');
+      const start = Math.max(0, refLine - 1 - radius);
+      const end = Math.min(lines.length, refLine - 1 + radius + 1);
+      return lines.slice(start, end).join(' ');
+    } catch {
+      return null;
+    }
+  }
+
+  _escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /**
+   * Query strategy/interace patterns.
+   * Detects:
+   *   1. Polymorphism — same-named functions across files (e.g. multiple `save()` implementations)
+   *   2. Shared-interface — functions called by the same callers (strategy pattern)
+   * @param {string} symbol - Symbol name
+   * @param {string} file - File containing this symbol
+   * @param {object} [opts]
+   * @param {boolean} [opts.includeStale=false]
+   * @returns {object} { symbol, file, strategies: [] }
+   */
+  queryStrategyPatterns(symbol, file, opts = {}) {
+    const db = this._getDb();
+    const staleFilter = opts.includeStale ? '' : 'AND n.stale = 0';
+
+    const cacheKey = `strategy:${file}:${symbol}`;
+    const cached = this._cache.get(cacheKey);
+    if (cached) return cached;
+
+    const apiNode = db.prepare(
+      `SELECT id, name, kind, file, signature FROM nodes n
+       WHERE n.project_id = ? AND n.name = ? AND n.file = ? ${staleFilter}
+       LIMIT 1`
+    ).get(this._projectId, symbol, file);
+
+    if (!apiNode) {
+      const result = { symbol, file, strategies: [] };
+      this._cache.set(cacheKey, result);
+      return result;
+    }
+
+    const strategies = [];
+
+    // Strategy 1: Same-named symbols in other files (polymorphism / duck typing)
+    const sameName = db.prepare(
+      `SELECT n.name, n.kind, n.file, n.signature, n.exported
+       FROM nodes n
+       WHERE n.project_id = ? AND n.name = ? AND n.file != ? ${staleFilter}
+         AND n.kind IN ('function','method','class')
+       ORDER BY n.file`
+    ).all(this._projectId, symbol, file);
+
+    if (sameName.length > 0) {
+      strategies.push({
+        type: 'polymorphism',
+        confidence: 0.7,
+        description: `Same name "${symbol}" found in ${sameName.length} other file(s) — possible polymorphic implementations`,
+        implementations: sameName.map(c => ({
+          name: c.name, kind: c.kind, file: c.file,
+          signature: c.signature || '',
+          exported: !!c.exported,
+        })),
+      });
+    }
+
+    // Strategy 2: Symbols sharing the same callers (used interchangeably via interface)
+    const callerIds = db.prepare(
+      `SELECT DISTINCT e.from_node_id as id FROM edges e
+       WHERE e.to_node_id = ? AND e.kind = 'calls' ${staleFilter}`
+    ).all(apiNode.id).map(r => r.id);
+
+    if (callerIds.length > 0) {
+      const ph = callerIds.map(() => '?').join(',');
+      const minShared = Math.min(2, callerIds.length);
+      const sharedCallers = db.prepare(
+        `SELECT n.name, n.kind, n.file, n.signature, COUNT(*) as sharedCallers
+         FROM edges e
+         JOIN nodes n ON e.to_node_id = n.id
+         WHERE e.from_node_id IN (${ph})
+           AND e.kind = 'calls'
+           AND NOT (n.name = ? AND n.file = ?)
+           ${staleFilter}
+         GROUP BY n.name, n.kind, n.file, n.signature
+         HAVING sharedCallers >= ?
+         ORDER BY sharedCallers DESC
+         LIMIT 20`
+      ).all(...callerIds, symbol, file, minShared);
+
+      if (sharedCallers.length > 0) {
+        strategies.push({
+          type: 'shared-interface',
+          confidence: 0.5,
+          description: `Symbols called by the same callers as "${symbol}" — potential strategy/interface pattern`,
+          implementations: sharedCallers.map(c => ({
+            name: c.name, kind: c.kind, file: c.file,
+            signature: c.signature || '',
+            sharedCallers: c.sharedCallers,
+          })),
+        });
+      }
+    }
+
+    const result = { symbol, file, strategies };
     this._cache.set(cacheKey, result);
     return result;
   }
