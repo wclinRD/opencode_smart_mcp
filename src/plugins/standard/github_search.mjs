@@ -1,0 +1,8 @@
+export default {
+  name: 'smart_github_search',
+  category: 'search',
+  description: 'Use when: need to find real-world code examples from public GitHub repos. Filter by repo, path, language, case. Best for: seeing how others use an API, finding production patterns. Avoid when: need to search your own codebase (use grep instead).',
+  inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Code pattern (supports regex)' }, repo: { type: 'string', description: 'Filter repo (e.g., facebook/react)' }, path: { type: 'string', description: 'Filter path (e.g., src/)**' }, language: { type: 'string', description: 'Filter langs, comma-separated' }, matchCase: { type: 'boolean', description: 'Case-sensitive' }, matchWholeWords: { type: 'boolean', description: 'Whole words only' }, maxResults: { type: 'number', description: 'Max results (default: 10, max: 100)' }, format: { type: 'string', enum: ['text', 'json'], description: 'Output format' } }, required: ['query'] },
+  cli: 'github-search.mjs',
+  mapArgs(a) { const cli = []; if (a.query) cli.push(String(a.query)); if (a.repo) cli.push('--repo', String(a.repo)); if (a.path) cli.push('--path', String(a.path)); if (a.language) { const langs = String(a.language).split(',').map(l => l.trim()).filter(Boolean); for (const lang of langs) cli.push('--language', lang); } if (a.matchCase) cli.push('--match-case'); if (a.matchWholeWords) cli.push('--match-words'); if (a.maxResults) cli.push('--max-results', String(a.maxResults)); if (a.format) cli.push('--format', String(a.format)); cli.push('--no-color'); return cli; },
+};

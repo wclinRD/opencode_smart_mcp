@@ -1,0 +1,28 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "language": "javascript",
+  "framework": "node",
+  "structure": {
+    "src": "src/",
+    "tests": "tests/",
+    "config": "src/config/"
+  },
+  "naming": {
+    "files": "kebab-case",
+    "classes": "PascalCase",
+    "functions": "camelCase",
+    "constants": "UPPER_CASE"
+  },
+  "testing": {
+    "framework": "node:test",
+    "pattern": "**/*.test.mjs",
+    "coverage": false
+  },
+  "codeStyle": {
+    "indentation": "spaces",
+    "indentSize": 2,
+    "quotes": "single",
+    "semicolons": true,
+    "trailingComma": true
+  }
+}

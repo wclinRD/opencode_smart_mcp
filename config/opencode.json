@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "smart": {
+      "type": "local",
+      "command": ["node", "/Users/wclin/opencode/dev/smart/src/server/index.mjs"],
+      "enabled": true
+    },
+    "sequential-thinking": {
+      "enabled": false
+    }
+  }
+}

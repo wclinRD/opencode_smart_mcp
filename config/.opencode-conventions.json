@@ -1,0 +1,49 @@
+{
+  "conventions": {
+    "naming": {
+      "file": {
+        "kebabCase": 23,
+        "camelCase": 19,
+        "snake_case": 12
+      },
+      "variable": {
+        "UPPER_CASE": 40,
+        "camelCase": 1444,
+        "other": 6,
+        "PascalCase": 5
+      },
+      "function": {
+        "camelCase": 349
+      },
+      "class": {
+        "camelCase": 4,
+        "PascalCase": 2
+      }
+    },
+    "imports": {
+      "commonjs": 5,
+      "esm": 32,
+      "mixed": true
+    },
+    "testing": {
+      "hasTests": true,
+      "framework": null,
+      "pattern": null
+    },
+    "structure": {
+      "src": false,
+      "test": false,
+      "lib": true,
+      "app": false
+    },
+    "languages": [
+      "javascript"
+    ],
+    "exports": {
+      "default": 28,
+      "named": 15
+    }
+  },
+  "preferences": {},
+  "lastAnalyzed": "2026-06-04T01:47:33.601Z"
+}

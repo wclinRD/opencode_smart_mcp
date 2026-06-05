@@ -1,0 +1,39 @@
+{
+  "name": "smart-agent",
+  "version": "0.1.0",
+  "description": "Agent intelligence layer for opencode — tool strategies, workflow automation, memory integration, and planner orchestration on top of smart-mcp",
+  "type": "module",
+  "main": "src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./system-prompt": "./src/agent/system-prompt.mjs",
+    "./tool-strategy": "./src/agent/tool-strategy.mjs",
+    "./workflow-strategy": "./src/agent/workflow-strategy.mjs",
+    "./memory-integration": "./src/agent/memory-integration.mjs",
+    "./planner-integration": "./src/agent/planner-integration.mjs",
+    "./install/install-agent": "./src/install/install-agent.mjs"
+  },
+  "scripts": {
+    "postinstall": "node src/install/postinstall.mjs",
+    "setup": "node src/install/postinstall.mjs --setup-agent",
+    "install-agent": "node src/install/install-agent.mjs",
+    "test": "node --test tests/"
+  },
+  "peerDependencies": {
+    "smart-mcp": "^3.2.0"
+  },
+  "peerDependenciesMeta": {
+    "smart-mcp": {
+      "optional": true
+    }
+  },
+  "keywords": [
+    "opencode",
+    "smart-mcp",
+    "agent",
+    "mcp",
+    "ai",
+    "coding-agent"
+  ],
+  "license": "MIT"
+}
