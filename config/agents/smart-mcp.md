@@ -137,13 +137,14 @@ Smart MCP 是「理解程式碼的儀器」。
 | 你想做什麼 | 不要用內建 | 要用 Smart MCP | 呼叫方式 |
 |-----------|-----------|---------------|---------|
 | **搜尋程式碼** | `grep` | `smart_smart_grep` | 直接呼叫 `smart_smart_grep({ pattern: "...", root: "src/" })` |
-| **單檔修改** | `edit` | `smart_smart_run` + `fast_apply` (首選) / `edit.cross_file_edit` | `smart_smart_run({ tool: "fast_apply", args: { format: "search-replace", blocks: [{file, search, replace}], apply: true } })` |
-| **批次改多檔** | 多次 `edit` | `smart_smart_run` + `edit.cross_file_edit` / `fast_apply` + `--files` | `fast_apply` 支援 5 格式(search-replace/lazy/partial/unified-diff/whole-file)；`cross_file_edit` 有 import graph 感知 |
+| **單檔修改** | `edit` | `smart_smart_run` + `smart_edit`（**首選**） | `smart_smart_run({ tool: "smart_edit", args: { file: "...", oldString: "...", newString: "...", format: "json" } })` — 精確字串取代 + dry-run + nextCommand |
+| **批次改多檔** | 多次 `edit` | `smart_smart_run` + `smart_edit` / `fast_apply` | `smart_edit` 支援 `files: [...]` 多檔 + regex 模式；`fast_apply` 5 格式(search-replace/lazy/partial/unified-diff/whole-file) |
+| **架構理解** | 逐檔瀏覽 | `smart_smart_run` + `arch_overview` | `smart_smart_run({ tool: "arch_overview", args: { root: "." } })` — 一次拿到 layers + dependencies + violations + critical functions |
 | **跑測試** | `bash` + node/npm | `smart_smart_test` | 直接呼叫 `smart_smart_test({ root: "." })`，自動偵測框架 |
 | **重構/重新命名** | 手動 grep+edit | `smart_smart_run` + tools | `smart_smart_run({ tool: "naming", args: { file } })` → `smart_smart_run({ tool: "rename_safety", args: { name, newName } })` |
 | **除錯錯誤** | 自行閱讀 | `smart_smart_run` + `debug` tools | `smart_smart_run({ tool: "debug", args: { error: "..." } })` / `smart_smart_run({ tool: "error_diagnose", args: { error: "..." } })` |
 | **安全掃描** | 手動檢查 | `smart_smart_security` | 直接呼叫 `smart_smart_security({ scan: "credentials", root: "." })` |
-| **專案理解** | 自行瀏覽 | `smart_smart_learn` | 直接呼叫 `smart_smart_learn({ root: "." })` |
+| **專案理解** | 自行瀏覽 | `smart_smart_learn` / `smart_smart_run` + `arch_overview` | `smart_smart_learn({ root: "." })` 看概覽；`smart_smart_run({ tool: "arch_overview" })` 拿完整 JSON 架構圖 |
 | **依賴分析** | 逐檔閱讀 | `smart_smart_run` + `import_graph` | `smart_smart_run({ tool: "import_graph", args: { root: "src/" } })` |
 | **記憶搜尋** | 猜測/忘記 | `smart_smart_run` + `memory_store` | `smart_smart_run({ tool: "memory_store", args: { command: "search", query: "..." } })` |
 | **網路搜尋** | `websearch` | `smart_smart_run` + `exa_search` | `smart_smart_run({ tool: "exa_search", args: { query: "..." } })` |
@@ -155,7 +156,7 @@ Smart MCP 是「理解程式碼的儀器」。
 | **深度思考** | 無（LLM 自己猜） | `smart_smart_think` / `smart_smart_thinking` | 直接呼叫 `smart_smart_think({ thought: "...", nextThoughtNeeded: true })` 或 `smart_smart_thinking({ topic: "...", template: "analyze" })` |
 | **Git 操作** | `bash git` | `smart_smart_run` + `git_*` | `smart_smart_run({ tool: "git_context", args: {} })` / `smart_smart_run({ tool: "git_commit", args: { message: "..." } })` |
 
-> **捷徑**：直接可用的 8 個 Native 工具：`smart_smart_grep`、`smart_smart_learn`、`smart_smart_security`、`smart_smart_test`、`smart_smart_think`、`smart_smart_thinking`、`smart_smart_run`（router）、`smart_smart_context`。其餘 30+ 工具透過 `smart_smart_run({ tool: "<name>", args: {...} })` 存取。
+> **捷徑**：直接可用的 8 個 Native 工具：`smart_smart_grep`、`smart_smart_learn`、`smart_smart_security`、`smart_smart_test`、`smart_smart_think`、`smart_smart_thinking`、`smart_smart_run`（router）、`smart_smart_context`。其餘 30+ 工具透過 `smart_smart_run({ tool: "<name>", args: {...} })` 存取，**包含新工具 `smart_edit`（取代 edit）和 `arch_overview`（架構總覽）**。
 
 ### 為什麼必須這樣做
 
@@ -163,9 +164,10 @@ Smart MCP 是「理解程式碼的儀器」。
 內建工具            Smart MCP 等效
 ────────────        ─────────────────────────
 grep   (80ms)       smart_smart_grep (80ms + context)     ← 一樣快，更多資訊
-edit   (手動)       smart_smart_run → fast_apply           ← 5 格式、dry-run 內建、unified-diff 省 40-60% token
+edit   (手動)       smart_smart_run → smart_edit           ← 精確字串取代 + dry-run + nextCommand，可直接取代 edit
 test   (bash+npm)   smart_smart_test (auto-detect)        ← 不用記測試框架參數
 手動除錯            smart_smart_run → error_diagnose       ← 錯誤資料庫，秒回
+架構理解 (逐檔讀)   smart_smart_run → arch_overview        ← 一次拿完整架構 JSON map，0 token 浪費
 websearch           smart_smart_run → exa_search           ← search + crawl + code context
 依賴分析 (逐檔讀)   smart_smart_run → code_query            ← CKG 確定性分析，0 hallucination
 ```
@@ -202,8 +204,9 @@ websearch           smart_smart_run → exa_search           ← search + crawl 
 | **執行測試** | `smart_smart_test` | 自動偵測 vitest / jest / mocha / ava / node:test |
 | **診斷錯誤** | `smart_smart_run({ tool: "error_diagnose", args: { error } })` | 比對 pattern KB + 記憶庫（自動 vector search） |
 | **除錯分析** | `smart_smart_run({ tool: "debug", args: { error } })` | 深層錯誤分類與根本原因分析 |
-| **修改檔案 (單檔)** | `smart_smart_run({ tool: "fast_apply", args: { format, blocks, apply } })` | 5 格式(search-replace/lazy/partial/unified-diff/whole-file)、dry-run 內建、unified-diff 省 40-60% token |
-| **跨檔案編輯** | `smart_smart_run({ tool: "edit.cross_file_edit", args: { file, pattern, replacement } })` | dry-run 預設安全，import graph 感知 |
+| **修改檔案 (單檔)** | `smart_smart_run({ tool: "smart_edit", args: { file, oldString, newString, format: "json" } })` | 精確字串取代 + dry-run 預設 + nextCommand 自動建議下一步。**首選 edit 替代方案** |
+| **跨檔案編輯** | `smart_smart_run({ tool: "smart_edit", args: { files, oldString, newString, regex: true } })` | 多檔編輯 + regex 模式；或 `fast_apply` 5 格式(search-replace/lazy/partial/unified-diff/whole-file) |
+| **理解架構** | `smart_smart_run({ tool: "arch_overview", args: { root } })` | **全新** — 一次取得完整架構 JSON：layers + dependencies + violations + critical functions |
 | **依賴分析** | `smart_smart_run({ tool: "import_graph", args: { root } })` | 支援 6 語言：JS/TS/Python/Ruby/Rust/Go |
 | **命名慣例** | `smart_smart_run({ tool: "naming", args: { file } })` | kebab / camel / Pascal / UPPER 分析 |
 | **Git 流程** | `smart_smart_run({ tool: "git_context" })` → `smart_smart_run({ tool: "git_commit" })` → `smart_smart_run({ tool: "git_pr" })` → `smart_smart_run({ tool: "git_review" })` | 完整 Git 工作流 |
@@ -248,21 +251,21 @@ websearch           smart_smart_run → exa_search           ← search + crawl 
   → smart_smart_grep({pattern:"<error>"})
   → smart_smart_run({tool:"error_diagnose", args:{error:"<error>"}})
   → smart_smart_run({tool:"debug", args:{error:"<error>"}})
-  → smart_smart_run({tool:"fast_apply", args:{format:"search-replace", blocks:[{file, search, replace}], apply:true}})
+  → smart_smart_run({tool:"smart_edit", args:{file:"...", oldString:"...", newString:"...", format:"json"}})
   → smart_smart_test({root:"."})
 
 重構任務（含影響分析）:
   smart_smart_run({tool:"impact_flow", args:{files:[...], predictTests:true}})
   → smart_smart_run({tool:"code_call_graph", args:{file, symbol, depth:3}})
   → smart_smart_thinking({template:"refactor", topic:"結果"})
-  → smart_smart_run({tool:"fast_apply", args:{format:"unified-diff", text:"...", apply:true}})
+  → smart_smart_run({tool:"smart_edit", args:{files:[...], oldString:"...", newString:"...", apply:true}})
   → smart_smart_test({root:"."})
 
 安全審計:
   smart_smart_security({scan:"credentials"})
   → smart_smart_security({scan:"injection"})
   → smart_smart_grep({pattern:"高風險模式"})
-  → smart_smart_run({tool:"fast_apply", args:{format:"search-replace", blocks:[{file, search, replace}], apply:true}})
+  → smart_smart_run({tool:"smart_edit", args:{file:"...", oldString:"...", newString:"...", format:"json"}})
   → smart_smart_test({root:"."})
 
 程式碼探索:
