@@ -535,6 +535,57 @@ export class ImpactEngine {
       }
     }
 
+    // Heuristic 4: CKG test coverage map (function-level precision)
+    // Uses tested_by edges from CKG to find exact tests covering impacted symbols.
+    if (ckg) {
+      const impactedSymbols = new Map(); // relFile → Set<symbolName>
+      for (const d of impactResult.direct) {
+        for (const imp of d.impacted) {
+          if (!impactedSymbols.has(imp.file)) impactedSymbols.set(imp.file, new Set());
+          impactedSymbols.get(imp.file).add(d.symbol);
+        }
+      }
+
+      for (const [impFile, symbols] of impactedSymbols) {
+        // Normalize path separators (CKG always uses forward slashes)
+        const relFile = relative(root, impFile).replace(/\\/g, '/');
+        for (const symbol of symbols) {
+          try {
+            const cov = ckg.queryTestCoverage(symbol, relFile);
+            if (cov.totalTests === 0) continue;
+
+            // Deterministic matches → high relevance
+            for (const t of cov.deterministic) {
+              const key = `ckg-det:${t.testFile}:${t.testBlock}`;
+              if (!seen.has(key)) {
+                seen.add(key);
+                tests.push({
+                  file: resolve(root, t.testFile),
+                  name: t.testBlock,
+                  relevance: 'high',
+                  reason: `CKG coverage: ${symbol} → ${t.testBlock} (deterministic, ${(t.confidence * 100).toFixed(0)}%)`,
+                });
+              }
+            }
+
+            // Speculative matches → medium relevance
+            for (const t of cov.speculative) {
+              const key = `ckg-spec:${t.testFile}:${t.testBlock}`;
+              if (!seen.has(key)) {
+                seen.add(key);
+                tests.push({
+                  file: resolve(root, t.testFile),
+                  name: t.testBlock,
+                  relevance: 'medium',
+                  reason: `CKG coverage: ${symbol} → ${t.testBlock} (${t.matchType}, ${(t.confidence * 100).toFixed(0)}%)`,
+                });
+              }
+            }
+          } catch { /* skip if CKG query fails */ }
+        }
+      }
+    }
+
     // Sort by relevance
     const rank = { high: 0, medium: 1, low: 2 };
     tests.sort((a, b) => rank[a.relevance] - rank[b.relevance]);
@@ -672,12 +723,14 @@ export class ImpactEngine {
     text += `   ${impact.stats.totalDirectSymbols} direct call(s), ${impact.stats.totalTransitiveSymbols} transitive call(s)\n`;
 
     if (tests && tests.length > 0) {
-      text += `\nAffected tests: ${tests.length}\n`;
-      for (const t of tests.slice(0, 5)) {
+      const detCount = tests.filter(t => t.relevance === 'high').length;
+      const specCount = tests.filter(t => t.relevance === 'medium').length;
+      text += `\nAffected tests: ${tests.length} (${detCount} deterministic, ${specCount} speculative)\n`;
+      for (const t of tests.slice(0, 8)) {
         text += `  [${t.relevance}] ${t.name}: ${t.reason}\n`;
       }
-      if (tests.length > 5) {
-        text += `  ... and ${tests.length - 5} more\n`;
+      if (tests.length > 8) {
+        text += `  ... and ${tests.length - 8} more\n`;
       }
     }
 

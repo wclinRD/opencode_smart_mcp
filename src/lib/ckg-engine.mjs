@@ -43,11 +43,11 @@ const CKG_DIR = resolve(homedir(), '.smart', 'ckg');
 const NODE_KINDS = new Set([
   'file', 'module', 'namespace', 'package', 'class', 'method', 'property',
   'field', 'constructor', 'enum', 'interface', 'function', 'variable',
-  'constant', 'struct', 'type-parameter',
+  'constant', 'struct', 'type-parameter', 'test-block',
 ]);
 const EDGE_KINDS = new Set([
   'calls', 'imports', 'extends', 'implements', 'defines', 'parameterOf',
-  'returnTypeOf', 'contains',
+  'returnTypeOf', 'contains', 'tested_by',
 ]);
 const SUPPORTED_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.rs', '.py', '.pyw', '.swift']);
 const STALE_DAYS = 30; // keep stale nodes for 30 days before hard deletion
@@ -197,6 +197,146 @@ function parseImports(content, filePath) {
   if (ext === '.py' || ext === '.pyw') return parsePythonImports(content);
   if (ext === '.swift') return parseSwiftImports(content);
   return parseJsImports(content);
+}
+
+// ---------------------------------------------------------------------------
+// Test file / coverage helpers
+// ---------------------------------------------------------------------------
+
+/** Regex patterns to identify test files */
+const TEST_PATTERNS = [
+  /\.test\.(js|ts|jsx|tsx|mjs|mts)$/,
+  /\.spec\.(js|ts|jsx|tsx|mjs|mts)$/,
+  /\.(test|spec)\.(js|ts)$/,
+  /__tests__\//,
+  /__test__\//,
+  /test\//,
+  /tests\//,
+  /spec\//,
+];
+
+/** Check if a relative file path matches test file patterns */
+function isTestFile(filePath) {
+  return TEST_PATTERNS.some(p => p.test(filePath));
+}
+
+/**
+ * Parse test block descriptions from test file content.
+ * Returns array of { kind, name, line, col, raw } objects.
+ */
+function parseTestBlocks(content) {
+  const blocks = [];
+  const patterns = [
+    // describe('name', ...), it('name', ...), test('name', ...)
+    { re: /(describe|it|test)\s*\(\s*['"]([^'"]+)['"]/g, kindMap: { describe: 'test-suite', it: 'test-case', test: 'test-case' } },
+    // Template literals: describe(`name`, ...)
+    { re: /(describe|it|test)\s*\(\s*`([^`]+)`/g, kindMap: { describe: 'test-suite', it: 'test-case', test: 'test-case' } },
+  ];
+  // Track nesting depth for describe blocks to build full path
+  const describeStack = [];
+
+  for (const { re, kindMap } of patterns) {
+    let m;
+    while ((m = re.exec(content)) !== null) {
+      const keyword = m[1];
+      const name = m[2].trim();
+      const kind = kindMap[keyword] || 'test-case';
+      const pos = m.index;
+      const line = content.slice(0, pos).split('\n').length;
+      const col = pos - content.lastIndexOf('\n', pos) - 1;
+
+      if (kind === 'test-suite') {
+        describeStack.push(name);
+        blocks.push({ kind, name, line, col, raw: m[0].trim(), fullPath: describeStack.join(' > ') });
+      } else {
+        const fullPath = describeStack.length > 0
+          ? [...describeStack, name].join(' > ')
+          : name;
+        blocks.push({ kind, name, line, col, raw: m[0].trim(), fullPath });
+      }
+    }
+  }
+
+  // Also handle test.each / it.each / describe.each
+  const eachRe = /(describe|it|test)\.each\s*\([^)]*\)\s*\(\s*['"]([^'"]+)['"]/g;
+  let m;
+  while ((m = eachRe.exec(content)) !== null) {
+    const name = m[2].trim();
+    const pos = m.index;
+    const line = content.slice(0, pos).split('\n').length;
+    const col = pos - content.lastIndexOf('\n', pos) - 1;
+    blocks.push({
+      kind: 'test-case',
+      name,
+      line, col,
+      raw: m[0].trim(),
+      fullPath: describeStack.length > 0 ? [...describeStack, name].join(' > ') : name,
+    });
+  }
+
+  return blocks;
+}
+
+/**
+ * Match a test block description to a source function name.
+ * Returns a confidence score 0.0–1.0.
+ * Uses several heuristics:
+ *   - Exact match (case-insensitive): 1.0
+ *   - Test name contains function name as a word: 0.9
+ *   - Function name is a substring of test name: 0.8
+ *   - Common words overlap: 0.6
+ *   - No match: 0.0
+ */
+function matchTestToFunction(testName, functionName) {
+  const t = testName.toLowerCase().trim();
+  const f = functionName.toLowerCase().trim();
+  if (!t || !f) return 0;
+
+  // Exact match
+  if (t === f) return 1.0;
+
+  // Split into words
+  const testWords = t.split(/[\s_-]+/).filter(w => w.length > 0);
+  const funcWords = f.split(/[\s_-]+/).filter(w => w.length > 0);
+
+  // Remove common test jargon words
+  const jargon = new Set(['should', 'test', 'when', 'then', 'given', 'works',
+    'correctly', 'properly', 'handles', 'can', 'will', 'does', 'not',
+    'throws', 'returns', 'calls', 'creates', 'builds', 'validates']);
+  const meaningfulWords = testWords.filter(w => !jargon.has(w));
+
+  // Function name appears as a word in test name
+  if (meaningfulWords.includes(f)) return 0.9;
+
+  // Any meaningful test word matches function name
+  for (const tw of meaningfulWords) {
+    if (tw === f) return 0.9;
+    if (tw.length >= 3 && f.includes(tw)) return 0.7;
+  }
+
+  // Function name words appear in test name
+  for (const fw of funcWords) {
+    if (meaningfulWords.includes(fw)) return 0.85;
+    if (fw.length >= 3 && t.includes(fw)) return 0.75;
+  }
+
+  // Substring match (test name contains function name)
+  if (t.length >= 3 && f.length >= 3) {
+    if (t.includes(f)) return 0.8;
+    if (f.includes(t)) return 0.6;
+  }
+
+  // Common prefix match
+  const minLen = Math.min(t.length, f.length);
+  if (minLen >= 4) {
+    let prefixLen = 0;
+    for (let i = 0; i < minLen; i++) {
+      if (t[i] === f[i]) prefixLen++; else break;
+    }
+    if (prefixLen >= 4) return 0.5;
+  }
+
+  return 0;
 }
 
 /** Resolve import source to an actual file path */
@@ -1512,6 +1652,382 @@ export class CkgEngine {
 
     this._cache.set(cacheKey, result);
     return result;
+  }
+
+  // -----------------------------------------------------------------------
+  // Test Coverage Map
+  // -----------------------------------------------------------------------
+
+  /**
+   * Build test coverage map: parse test files, match test blocks to source functions,
+   * and store `tested_by` edges in CKG.
+   *
+   * Call this after the main build() so import edges exist.
+   * @param {object} [opts]
+   * @param {boolean} [opts.force=false] - Rebuild all coverage data
+   * @param {function} [opts.onProgress] - Progress callback
+   * @returns {object} { testFiles, testBlocks, deterministic, speculative, edges }
+   */
+  buildTestCoverage(opts = {}) {
+    const db = this._getDb();
+    const force = opts.force === true;
+    const onProgress = opts.onProgress || (() => {});
+    const startTime = Date.now();
+
+    // Clear existing coverage if force rebuild
+    if (force) {
+      db.prepare('DELETE FROM edges WHERE kind = ? AND project_id = ?').run('tested_by', this._projectId);
+      db.prepare('DELETE FROM nodes WHERE kind = ? AND project_id = ?').run('test-block', this._projectId);
+    }
+
+    // Find test files
+    const allFiles = this._findProjectFiles();
+    const testFiles = allFiles.filter(f => {
+      try { return isTestFile(f); } catch { return false; }
+    });
+
+    let totalTestBlocks = 0;
+    let totalDeterministic = 0;
+    let totalSpeculative = 0;
+    let totalEdges = 0;
+
+    // Pre-fetch source functions grouped by file for faster matching
+    const sourceFunctionsByFile = {};
+
+    for (let i = 0; i < testFiles.length; i++) {
+      const testFile = testFiles[i];
+      onProgress(testFile, i + 1, testFiles.length);
+      const absPath = resolve(this.projectRoot, testFile);
+
+      let content;
+      try {
+        content = readFileSync(absPath, 'utf-8');
+      } catch { continue; }
+
+      // Parse test blocks
+      const testBlocks = parseTestBlocks(content);
+      if (testBlocks.length === 0) continue;
+
+      // Get the test file's node
+      const testFileNode = db.prepare(
+        'SELECT id FROM nodes WHERE project_id = ? AND file = ? AND kind = ? LIMIT 1'
+      ).get(this._projectId, testFile, 'file');
+      if (!testFileNode) continue;
+
+      // Get source files imported by this test file (via CKG import edges)
+      const deps = this.queryDependencies(testFile);
+      const importedFiles = deps.imports
+        .map(i => i.file)
+        .filter(Boolean)
+        .filter(f => !isTestFile(f));
+
+      // Collect source functions from imported files
+      const candidateFunctions = [];
+      for (const srcFile of importedFiles) {
+        if (!sourceFunctionsByFile[srcFile]) {
+          sourceFunctionsByFile[srcFile] = db.prepare(
+            `SELECT id, name, kind, file FROM nodes
+             WHERE project_id = ? AND file = ? AND stale = 0
+               AND kind IN ('function','method','class','constructor')`
+          ).all(this._projectId, srcFile);
+        }
+        candidateFunctions.push(...sourceFunctionsByFile[srcFile]);
+      }
+
+      // Also try name-only matching against all functions in non-test files
+      // (only if we have no imported source functions)
+      const useGlobalMatch = candidateFunctions.length === 0 && testBlocks.length > 0;
+
+      if (useGlobalMatch) {
+        // Lazy-load all project functions once
+        if (!this._allFunctions) {
+          this._allFunctions = db.prepare(
+            `SELECT id, name, kind, file FROM nodes
+             WHERE project_id = ? AND stale = 0
+               AND kind IN ('function','method','class','constructor')
+               AND NOT (file LIKE '%test%' OR file LIKE '%spec%' OR file LIKE '%__test%')
+             ORDER BY file`
+          ).all(this._projectId);
+        }
+      }
+
+      // Process test blocks in a transaction for this file
+      db.exec('SAVEPOINT coverage_tx');
+      try {
+        // Remove stale test-block nodes and tested_by edges for this file
+        db.prepare(
+          'DELETE FROM edges WHERE to_node_id IN (SELECT id FROM nodes WHERE project_id = ? AND file = ? AND kind = ?) AND kind = ?'
+        ).run(this._projectId, testFile, 'test-block', 'tested_by');
+        db.prepare(
+          'DELETE FROM nodes WHERE project_id = ? AND file = ? AND kind = ?'
+        ).run(this._projectId, testFile, 'test-block');
+
+        for (const block of testBlocks) {
+          // Create test-block node
+          const rawLines = content.split('\n');
+          const blockEndLine = Math.min(block.line + 2, rawLines.length);
+          const blockSignature = rawLines.slice(block.line - 1, blockEndLine).join('\n');
+
+          const r = db.prepare(
+            `INSERT INTO nodes (project_id, name, kind, file, range_start_line, range_start_col, range_end_line, signature, exported, stale, content_hash)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, '')`
+          ).run(
+            this._projectId, block.fullPath, 'test-block', testFile,
+            block.line, block.col, blockEndLine, blockSignature
+          );
+          const tbNodeId = Number(r.lastInsertRowid);
+          totalTestBlocks++;
+
+          // Find best matching source function
+          let bestMatch = { confidence: 0, func: null, matchType: '' };
+
+          // Phase 1: Match against imported source file functions (deterministic)
+          for (const func of candidateFunctions) {
+            const conf = matchTestToFunction(block.fullPath, func.name);
+            if (conf > bestMatch.confidence) {
+              bestMatch = { confidence: conf, func, matchType: conf >= 0.8 ? 'deterministic' : 'speculative' };
+            }
+          }
+
+          // Phase 2: If no good match, try global name-only matching (speculative)
+          if (bestMatch.confidence < 0.5 && useGlobalMatch) {
+            for (const func of this._allFunctions) {
+              const conf = matchTestToFunction(block.fullPath, func.name);
+              if (conf > bestMatch.confidence) {
+                bestMatch = { confidence: conf, func, matchType: 'name-only' };
+              }
+            }
+          }
+
+          // Create tested_by edge if confidence >= threshold
+          if (bestMatch.confidence >= 0.4 && bestMatch.func) {
+            db.prepare(
+              `INSERT INTO edges (project_id, from_node_id, to_node_id, kind, metadata)
+               VALUES (?, ?, ?, ?, ?)`
+            ).run(
+              this._projectId, bestMatch.func.id, tbNodeId, 'tested_by',
+              JSON.stringify({
+                confidence: +bestMatch.confidence.toFixed(2),
+                matchType: bestMatch.matchType,
+                testFile,
+                testBlock: block.fullPath,
+                testLine: block.line,
+              })
+            );
+            totalEdges++;
+            if (bestMatch.matchType === 'deterministic') totalDeterministic++;
+            else totalSpeculative++;
+          }
+
+          // Phase 3: File-level coverage — if any imported source functions exist,
+          // create low-confidence tested_by edges from the file node
+          if (candidateFunctions.length > 0 && bestMatch.confidence < 0.4) {
+            // Still create a file-level edge from the file node to this test block
+            // to indicate this test file likely covers something in the imported files
+            for (const srcFile of importedFiles) {
+              const srcFileNode = db.prepare(
+                'SELECT id FROM nodes WHERE project_id = ? AND file = ? AND kind = ? LIMIT 1'
+              ).get(this._projectId, srcFile, 'file');
+              if (srcFileNode) {
+                db.prepare(
+                  `INSERT INTO edges (project_id, from_node_id, to_node_id, kind, metadata)
+                   VALUES (?, ?, ?, ?, ?)`
+                ).run(
+                  this._projectId, srcFileNode.id, tbNodeId, 'tested_by',
+                  JSON.stringify({
+                    confidence: 0.3,
+                    matchType: 'file-level',
+                    testFile,
+                    testBlock: block.fullPath,
+                    testLine: block.line,
+                  })
+                );
+                totalEdges++;
+                totalSpeculative++;
+              }
+            }
+          }
+        }
+
+        db.exec('RELEASE coverage_tx');
+      } catch (txErr) {
+        db.exec('ROLLBACK TO coverage_tx');
+      }
+    }
+
+    // Clean up cached allFunctions
+    this._allFunctions = null;
+
+    const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+
+    return {
+      testFiles: testFiles.length,
+      testBlocks: totalTestBlocks,
+      deterministic: totalDeterministic,
+      speculative: totalSpeculative,
+      edges: totalEdges,
+      duration: `${duration}s`,
+    };
+  }
+
+  /**
+   * Incrementally rebuild test coverage for a single file.
+   * Called after a test file or source file is updated.
+   * @param {string} file - Relative file path
+   * @returns {object|null} Coverage rebuild stats or null if not a test file
+   */
+  rebuildCoverageForFile(file) {
+    if (!isTestFile(file)) return null;
+    return this.buildTestCoverage({ force: true });
+  }
+
+  /**
+   * Query test coverage for a specific source symbol.
+   * Returns which test blocks cover the given function.
+   * @param {string} symbol - Source function name
+   * @param {string} file - File containing the symbol
+   * @param {object} [opts]
+   * @param {boolean} [opts.includeStale=false]
+   * @returns {object} { symbol, file, totalTests, deterministic, speculative }
+   */
+  queryTestCoverage(symbol, file, opts = {}) {
+    const db = this._getDb();
+    const staleFilter = opts.includeStale ? '' : 'AND n.stale = 0';
+    // Normalize path separators (CKG always uses forward slashes)
+    const normFile = file.replace(/\\/g, '/');
+
+    const cacheKey = `cov:${normFile}:${symbol}`;
+    const cached = this._cache.get(cacheKey);
+    if (cached) return cached;
+
+    // Find source function node
+    const funcNode = db.prepare(
+      `SELECT id, name, kind, file, signature FROM nodes n
+       WHERE n.project_id = ? AND n.name = ? AND n.file = ? ${staleFilter}
+         AND n.kind IN ('function','method','class','constructor')
+       LIMIT 1`
+    ).get(this._projectId, symbol, normFile);
+
+    if (!funcNode) {
+      const result = { symbol, file, totalTests: 0, deterministic: [], speculative: [] };
+      this._cache.set(cacheKey, result);
+      return result;
+    }
+
+    // Query tested_by edges from this source function → test blocks
+    const testBlocks = db.prepare(
+      `SELECT n.name as testBlock, n.file as testFile, n.range_start_line as line,
+              e.metadata
+       FROM edges e
+       JOIN nodes n ON e.to_node_id = n.id
+       WHERE e.from_node_id = ? AND e.kind = 'tested_by' ${staleFilter}
+       ORDER BY n.file, n.name`
+    ).all(funcNode.id);
+
+    // Also query file-level tested_by edges (from the file node)
+    const fileNode = db.prepare(
+      'SELECT id FROM nodes WHERE project_id = ? AND file = ? AND kind = ? LIMIT 1'
+    ).get(this._projectId, normFile, 'file');
+
+    let fileLevelBlocks = [];
+    if (fileNode) {
+      fileLevelBlocks = db.prepare(
+        `SELECT n.name as testBlock, n.file as testFile, n.range_start_line as line,
+                e.metadata
+         FROM edges e
+         JOIN nodes n ON e.to_node_id = n.id
+         WHERE e.from_node_id = ? AND e.kind = 'tested_by' ${staleFilter}
+         ORDER BY n.file, n.name`
+      ).all(fileNode.id);
+    }
+
+    // Merge and classify by confidence
+    const deterministic = [];
+    const speculative = [];
+    const seen = new Set();
+
+    const classify = (tb) => {
+      const meta = tb.metadata ? JSON.parse(tb.metadata) : {};
+      const key = `${tb.testFile}:${tb.testBlock}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+
+      const entry = {
+        testBlock: tb.testBlock,
+        testFile: tb.testFile,
+        line: tb.line,
+        confidence: meta.confidence || 0,
+        matchType: meta.matchType || 'unknown',
+      };
+
+      if (meta.matchType === 'deterministic') {
+        deterministic.push(entry);
+      } else {
+        speculative.push(entry);
+      }
+    };
+
+    for (const tb of testBlocks) classify(tb);
+    for (const tb of fileLevelBlocks) classify(tb);
+
+    const result = {
+      symbol,
+      file,
+      totalTests: deterministic.length + speculative.length,
+      deterministic,
+      speculative,
+    };
+
+    this._cache.set(cacheKey, result);
+    return result;
+  }
+
+  /**
+   * Query test coverage for an entire source file.
+   * Returns coverage map for all functions in the file.
+   * @param {string} file - Source file path
+   * @param {object} [opts]
+   * @param {boolean} [opts.includeStale=false]
+   * @returns {object} { file, functions, totalFunctions, coveredFunctions }
+   */
+  queryTestCoverageForFile(file, opts = {}) {
+    const db = this._getDb();
+    const staleFilter = opts.includeStale ? '' : 'AND n.stale = 0';
+    const normFile = file.replace(/\\/g, '/');
+
+    const functions = db.prepare(
+      `SELECT id, name, kind, file, range_start_line as line, signature
+       FROM nodes
+       WHERE project_id = ? AND file = ? AND stale = 0
+         AND kind IN ('function','method','class','constructor')
+       ORDER BY range_start_line`
+    ).all(this._projectId, normFile);
+
+    const coverageMap = functions.map(fn => {
+      const coverage = this.queryTestCoverage(fn.name, file, opts);
+      return {
+        name: fn.name,
+        kind: fn.kind,
+        line: fn.line,
+        signature: fn.signature || '',
+        covered: coverage.totalTests > 0,
+        totalTests: coverage.totalTests,
+        deterministic: coverage.deterministic.length,
+        speculative: coverage.speculative.length,
+      };
+    });
+
+    const covered = coverageMap.filter(f => f.covered);
+
+    return {
+      file,
+      totalFunctions: functions.length,
+      coveredFunctions: covered.length,
+      coveragePct: functions.length > 0
+        ? +((covered.length / functions.length) * 100).toFixed(1)
+        : 0,
+      functions: coverageMap,
+    };
   }
 
   /**

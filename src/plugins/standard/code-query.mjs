@@ -253,6 +253,76 @@ function formatStats(stats) {
 }
 
 // ---------------------------------------------------------------------------
+// Test Coverage formatters
+// ---------------------------------------------------------------------------
+
+function formatTestCoverage(result) {
+  if (result.totalTests === 0) {
+    return `No test coverage found for ${result.symbol} in ${result.file}.`;
+  }
+
+  let text = `Test Coverage: ${result.symbol} (${result.file})\n`;
+  text += '─'.repeat(50) + '\n';
+  text += `  Total tests: ${result.totalTests}\n`;
+
+  if (result.deterministic.length > 0) {
+    text += `\n  ✓ Deterministic (import + name match):\n`;
+    for (const t of result.deterministic) {
+      text += `    • ${t.testBlock}\n`;
+      text += `      File: ${t.testFile}:${t.line}\n`;
+      text += `      Confidence: ${(t.confidence * 100).toFixed(0)}%\n`;
+    }
+  }
+
+  if (result.speculative.length > 0) {
+    text += `\n  ? Speculative:\n`;
+    for (const t of result.speculative) {
+      text += `    • ${t.testBlock}\n`;
+      text += `      File: ${t.testFile}:${t.line}\n`;
+      text += `      Match: ${t.matchType} (${(t.confidence * 100).toFixed(0)}%)\n`;
+    }
+  }
+
+  return text;
+}
+
+function formatTestCoverageFile(result) {
+  let text = `File Coverage: ${result.file}\n`;
+  text += '─'.repeat(50) + '\n';
+  text += `  Functions: ${result.totalFunctions}\n`;
+  text += `  Covered:   ${result.coveredFunctions}\n`;
+  text += `  Coverage:  ${result.coveragePct}%\n`;
+
+  if (result.functions.length > 0) {
+    text += `\n  Per-function:\n`;
+    for (const fn of result.functions) {
+      const icon = fn.covered ? '✓' : ' ';
+      text += `  ${icon} ${fn.name} (${fn.kind})`;
+      if (fn.covered) {
+        text += ` — ${fn.totalTests} test(s)`;
+        if (fn.deterministic > 0) text += `, ${fn.deterministic} deterministic`;
+        if (fn.speculative > 0) text += `, ${fn.speculative} speculative`;
+      }
+      text += '\n';
+    }
+  }
+
+  return text;
+}
+
+function formatBuildCoverage(result) {
+  let text = `CKG Coverage Build\n`;
+  text += '─'.repeat(50) + '\n';
+  text += `  Test files:  ${result.testFiles}\n`;
+  text += `  Test blocks: ${result.testBlocks}\n`;
+  text += `  Edges:       ${result.edges}\n`;
+  text += `  Deterministic: ${result.deterministic}\n`;
+  text += `  Speculative:   ${result.speculative}\n`;
+  text += `  Duration:    ${result.duration}\n`;
+  return text;
+}
+
+// ---------------------------------------------------------------------------
 // Plugin definition
 // ---------------------------------------------------------------------------
 
@@ -274,17 +344,24 @@ Queries:
 Phase 11: Builds on LSP bridge to create a persistent SQLite-based knowledge graph.
 CKG is stored at ~/.smart/ckg/ and persists across sessions.
 
+Phase C.2: Test Coverage Map — CKG records which tests cover which functions.
+  - test-coverage         — Query which tests cover a specific source function
+  - test-coverage-file    — Query coverage map for an entire source file
+  - build-coverage        — Build/rebuild test coverage map (call after build)
+
 Examples:
   { query: "build", root: "." }
   { query: "callers", symbol: "foo", file: "src/foo.ts", depth: 2 }
   { query: "unused-exports", root: "." }
-  { query: "dependencies", file: "src/bar.ts" }`,
+  { query: "dependencies", file: "src/bar.ts" }
+  { query: "test-coverage", symbol: "add", file: "src/math.ts" }
+  { query: "build-coverage", root: "." }`,
   inputSchema: {
     type: 'object',
     properties: {
       query: {
         type: 'string',
-        enum: ['build', 'update', 'callers', 'callees', 'usage-patterns', 'strategy-patterns', 'dependencies', 'unused-exports', 'symbol', 'stats'],
+        enum: ['build', 'update', 'callers', 'callees', 'usage-patterns', 'strategy-patterns', 'dependencies', 'unused-exports', 'symbol', 'stats', 'test-coverage', 'test-coverage-file', 'build-coverage'],
         description: 'Query type',
       },
       symbol: { type: 'string', description: 'Symbol name (for callers/callees/symbol queries)' },
@@ -413,8 +490,37 @@ Examples:
           return formatStats(result);
         }
 
+        // -- Test coverage (single symbol) --
+        case 'test-coverage': {
+          if (!args.symbol || !args.file) {
+            return 'symbol and file are required for test-coverage query.';
+          }
+          result = engine.queryTestCoverage(args.symbol, args.file, {
+            includeStale: args.includeStale,
+          });
+          if (format === 'json') return JSON.stringify(result, null, 2);
+          return formatTestCoverage(result);
+        }
+
+        // -- Test coverage (entire file) --
+        case 'test-coverage-file': {
+          if (!args.file) return 'file is required for test-coverage-file query.';
+          result = engine.queryTestCoverageForFile(args.file, {
+            includeStale: args.includeStale,
+          });
+          if (format === 'json') return JSON.stringify(result, null, 2);
+          return formatTestCoverageFile(result);
+        }
+
+        // -- Build test coverage map --
+        case 'build-coverage': {
+          result = engine.buildTestCoverage({ force: args.force });
+          if (format === 'json') return JSON.stringify(result, null, 2);
+          return formatBuildCoverage(result);
+        }
+
         default:
-          return `Unknown query type: "${query}". Supported: build, update, callers, callees, usage-patterns, strategy-patterns, dependencies, unused-exports, symbol, stats`;
+          return `Unknown query type: "${query}". Supported: build, update, callers, callees, usage-patterns, strategy-patterns, dependencies, unused-exports, symbol, stats, test-coverage, test-coverage-file, build-coverage`;
       }
     } catch (err) {
       return `CKG error: ${err.message}`;
