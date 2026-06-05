@@ -96,9 +96,35 @@ permission:
 
 ---
 
+## 戰略定位：確定性工具層
+
+```
+Smart MCP 不是「會寫程式碼的 AI」。
+Smart MCP 是「理解程式碼的儀器」。
+
+核心主張：
+  LLM 會 hallucinate。工具不會。
+  Claude Code 猜你的程式碼。Smart MCP 測量你的程式碼。
+```
+
+**5 個架構級 Moat：**
+
+1. **確定性程式碼分析工具鏈** — CKG + LSP 從不亂猜，SQLite 跨 session 保留程式碼拓撲 (Claude Code 每次從零理解)
+2. **Hybrid Reasoning Engine** — Task Classifier 6 分類，確定性 $0 / 混合 / LLM 三層自動路由，結構問題不走 LLM
+3. **Change-Impact Pipeline** — git diff → CKG query → 確定性影響傳播，非 LLM 猜測
+4. **記憶 + 自我學習系統** — Vector search + TF-IDF hybrid，錯誤第二次秒回修復方案
+5. **Tool Composition Engine** — seq + par + cond 三種組合原語，平行執行速度 2x
+
+```
+工具與模型分離：模型可換（Claude → GPT → Gemini），
+確定性工具層的 moat 會越來越深。
+```
+
+---
+
 ## Smart MCP 工具策略
 
-你擁有 33+ 專業開發工具，以下是它們的選擇策略。
+你擁有 40+ 專業開發工具，以下是它們的選擇策略。
 伺服器已內建 auto-toonify 攔截器：所有大型 JSON 輸出自動 TOON 優化（≥500 chars, best-effort），不須手動呼叫。
 
 ### 工具選擇原則
@@ -111,7 +137,7 @@ permission:
 | **深層分析** | `smart_thinking` | 9 模板：analyze/debug/refactor/research/decision/architecture/retrospect/feature/plan_execute |
 | **安全掃描** | `smart_security` | credentials / injection / path-traversal / dependencies |
 | **執行測試** | `smart_test` | 自動偵測 vitest / jest / mocha / ava / node:test |
-| **診斷錯誤** | `smart_error_diagnose` | 比對 pattern KB + 記憶庫 |
+| **診斷錯誤** | `smart_error_diagnose` | 比對 pattern KB + 記憶庫（自動 vector search） |
 | **除錯分析** | `smart_debug` | 深層錯誤分類與根本原因分析 |
 | **跨檔案編輯** | `smart_cross_file_edit` | dry-run 預設安全，import graph 感知 |
 | **依賴分析** | `smart_import_graph` | 支援 6 語言：JS/TS/Python/Ruby/Rust/Go |
@@ -123,12 +149,26 @@ permission:
 | **產生報告** | `smart_report` | test / security / coverage / custom HTML |
 | **覆蓋率分析** | `smart_coverage` | if/else/switch/loop/ternary 分支覆蓋 |
 | **測試建議** | `smart_test_suggest` | edge case / error flow / main flow |
-| **TOON 優化** | `smart_toonify`（手動優化）/ 伺服器 auto-interceptor（自動） | 回應自動優化（≥500 chars JSON），亦可手動呼叫 smart_toonify |
-| **語言助手** | `smart_py_helper` / `smart_ts_helper` | Python / TypeScript 專案分析 |
-| **工具統計** | `smart_tool_stats` | 使用統計 / 趨勢 / 建議 |
+| **TOON 優化** | auto-interceptor（自動，≥500 chars JSON） / `smart_toonify`（手動） | 輸出自動 TOON 優化，省 token 30-65% |
+| **語言助手** | `smart_py_helper` / `smart_ts_helper` / `smart_rs_helper` | Python / TypeScript / Rust 專案分析 |
+
+### Phase 10-14 進階工具
+
+| 任務類型 | 首選工具 | 說明 |
+|---------|---------|------|
+| **AST 結構查詢** | `smart_code_ast` | LSP documentSymbol → 函式/類別/變數定義位置，取代 LLM 猜測 |
+| **呼叫鏈追蹤** | `smart_code_call_graph` | 給定函式回傳完整 caller/callee 鏈（depth 1-3，跨檔案） |
+| **型別推導** | `smart_code_type_infer` | LSP hover → 精確型別（Array<string>、Promise<void> 等） |
+| **影響半徑分析** | `smart_code_impact` | git diff + LSP references → 直接/間接影響檔案清單 |
+| **CKG 查詢（殺手級）** | `smart_code_query` | 8 種查詢：callers/callees/dependencies/unused-exports/symbol/stats/build/update |
+| **混合推理（6 分類）** | `smart_hybrid_router` | 問題自動分類→確定性/混合/LLM 路徑路由 |
+| **變更影響傳播** | `smart_impact_flow` | git diff → CKG → 影響傳播 + 測試預測（3 種啟發式） |
+| **成本感知路由** | `smart_model_router` | T1（$0 結構）/ T2（簡單語義）/ T3（複雜）/ T4（LLM）自動分層 |
+| **修補生成** | `smart_patch_gen` | 從分析結果自動萃取代碼變更 patch（text/json/diff 三格式） |
+| **工具統計** | `smart_tool_stats` | 使用統計 / 趨勢 / 建議 / failure clusters |
 | **工具鏈管理** | `smart_integrate` | list / suggest-commit / generate-pr / diagnose |
 | **工具推薦（弱模型用）** | `smart_agent_recommend` | 不確定用什麼工具時，讓程式碼幫你決定 |
-| **工作流自動化（弱模型用）** | `smart_agent_execute` | 5+ 步驟複雜任務，生成完整 workflow 計畫 |
+| **工作流自動化（弱模型用）** | `smart_agent_execute` | 5+ 步驟複雜任務，生成完整 workflow 命令序列 |
 | **任務分解（弱模型用）** | `smart_agent_plan` | 複雜目標自動分解為子步驟 + DAG |
 
 ### 常見任務的工具鏈
@@ -139,37 +179,55 @@ permission:
 除錯任務:
   smart_memory_store(search) → smart_grep → smart_error_diagnose → smart_debug → smart_cross_file_edit → smart_test
 
-重構任務:
-  smart_learn → smart_import_graph → smart_naming → smart_rename_safety → smart_cross_file_edit → smart_test
+重構任務（含影響分析）:
+  smart_impact_flow → smart_code_call_graph → smart_thinking → smart_cross_file_edit → smart_test
 
 安全審計:
   smart_security(credentials) → smart_security(injection) → smart_grep(高風險模式) → smart_cross_file_edit → smart_test
 
 程式碼探索:
-  smart_learn → smart_import_graph → smart_grep → smart_diagram
+  smart_learn → smart_code_ast → smart_code_call_graph → smart_diagram
+
+CKG 查詢（取代 LLM 猜測）:
+  smart_code_query({query:"callers", symbol:"foo"}) → smart_code_query({query:"dependencies"})
+
+影響分析:
+  smart_impact_flow({files:["src/foo.ts"], predictTests:true}) → 回傳影響檔案 + 建議測試
 
 Git 工作流:
   smart_git_context → smart_git_commit → smart_git_pr → smart_git_review
 
 研究調查:
   smart_exa_search → smart_github_search → smart_thinking → smart_report
+
+混合推理（不確定走哪條路）:
+  smart_hybrid_router({question:"解釋這個模組的架構", files:[...]})
 ```
 
 ### Workflow 自動化（5+ 步驟的複雜任務）
 
-對於需要 5 個以上工具協作的複雜任務，使用 Workflow 引擎：
+對於需要 5 個以上工具協作的複雜任務，使用 Workflow 引擎。現有 12 種內建模板：
 
 ```
 1. 建立計畫:
    smart_workflow create "<目標>" --template <flow> --state wf.json --json
 
-   可用模板:
-   - debug-flow   : memory_search → grep → diagnose → debug → edit → test
-   - refactor-flow: import_graph → naming → rename_safety → edit → test
-   - security-flow: scan(creds) → scan(injection) → grep → edit → test
-   - research-flow: exa_search → thinking → report
-   - git-flow     : git_context → git_commit → git_pr → git_review
-   - default-flow : planner → test
+   可用模板（12種）:
+   ── 基礎流程 ──
+   - debug-flow      : memory_search → grep → diagnose → debug → edit → test
+   - refactor-flow   : import_graph → naming → rename_safety → edit → test
+   - security-flow   : scan(creds) → scan(injection) → grep → edit → test
+   - research-flow   : exa_search → thinking → report
+   - git-flow        : git_context → git_commit → git_pr → git_review
+   - default-flow    : planner → test
+
+   ── 進階流程（Phase 10-14 工具）──
+   - refactor-safe-flow : impact_flow → call_graph → thinking → edit → test
+   - api-explore-flow   : learn → ast → call_graph → diagram
+   - migration-flow     : impact → impact → thinking → edit → test
+   - code-review-flow   : grep → ast → call_graph → thinking → report
+   - perf-diagnose-flow : grep(perf) → call_graph → debug → report
+   - onboard-flow       : learn → import_graph → naming → diagram → report
 
 2. 執行步驟:
    smart_workflow dispatch --state wf.json --group 0   (執行第一批)
@@ -181,6 +239,44 @@ Git 工作流:
 4. 完成報告:
    smart_workflow summary --state wf.json --json
 ```
+
+### CKG 感知路由（取代 LLM 猜程式碼）
+
+遇到程式碼結構問題，**不要用 LLM 猜**。優先使用確定性工具：
+
+| 你想知道 | 不要這樣做 | 要這樣做 |
+|---------|-----------|---------|
+| 「foo() 被誰呼叫？」 | LLM 猜測呼叫者（可能遺漏） | `smart_code_query({query:"callers", symbol:"foo", file:"..."})` |
+| 「這個模組有哪些 exports？」 | LLM 掃描程式碼 | `smart_code_ast({file:"src/bar.ts"})` |
+| 「改這個會影響誰？」 | LLM 推理影響範圍 | `smart_impact_flow({files:["src/foo.ts"], depth:2, predictTests:true})` |
+| 「這個型別是什麼？」 | 閱讀程式碼推導 | `smart_code_type_infer({file:"src/baz.ts", line:42})` |
+| 「這個專案有哪些未使用的 exports？」 | 人工 grep | `smart_code_query({query:"unused-exports", root:"."})` |
+| 「解釋這個符號的呼叫鏈」 | 人工 tracing | `smart_code_call_graph({file:"...", symbol:"foo", depth:3})` |
+
+**原則**：結構化問題 → 確定性工具（$0，不 hallucinate）。只有需要語意理解（「這個設計合理嗎？」）時才走 LLM。
+
+### 成本感知路由（T1-T4 自動分層）
+
+使用 `smart_model_router` 自動選擇最划算的處理層級：
+
+| 層級 | 成本 | 延遲 | 適合任務 |
+|------|------|------|---------|
+| **T1 確定性** | $0 | 50-200ms | 型別查詢、AST 結構、呼叫鏈、grep、依賴分析 |
+| **T2 簡單語義** | 低 | 200-500ms | 命名慣例、基礎除錯（error_diagnose + memory） |
+| **T3 複雜語義** | 中 | 1-5s | 影響分析、程式碼審查、安全掃描 |
+| **T4 LLM 推理** | 高 | 5-30s | 重構生成、架構設計、複雜除錯 |
+
+```
+# 讓系統自動路由
+smart_model_router({command:"route", task:"找出模組依賴關係"})  → T1 ($0)
+smart_model_router({command:"route", task:"重構認證模組"})       → T4 (LLM)
+
+# 查詢最佳 tier
+smart_model_router({command:"suggest", question:"foo 的型別是？"})
+smart_model_router({command:"savings"})  # 查看省了多少錢
+```
+
+**原則**：簡單問題走 T1（$0, 快），複雜問題才用 T4（貴, 慢）。整體 API 成本可降 60-86%。
 
 ### Pipeline 組合（自訂工具鏈）
 
@@ -200,13 +296,64 @@ smart_compose({ pipeline: [
 - `mode: "par"` — 平行執行，同時跑多個獨立工具
 - `mode: "cond"` — 條件分支，根據前一步結果決定
 
-### 記憶整合
+### 混合推理路由（不確定時自動分類）
 
-- 錯誤發生時 → `smart_error_diagnose` 自動搜尋記憶庫（相似錯誤秒回修復方案）
-- 修復成功 → `smart_memory_store confirm` 提高權重（hitCount +2）
-- 工具統計 → `smart_tool_stats patterns` 顯示組合分析、失敗趨勢、替代建議
-- 手動查詢 → `smart_memory_store search --query "<錯誤訊息>"`
-- 記憶列表 → `smart_memory_store list`
+當問題不確定該用確定性工具還是 LLM 時，使用 `smart_hybrid_router`：
+
+```
+smart_hybrid_router({question:"foo() 被誰呼叫，可能受影響的模組有？"})
+  → 自動分類：change-impact（T1 確定性）
+  → 來源：smart_code_query(callers) + smart_impact_flow
+  → 回傳結構化答案 + 信心度 + 來源追溯
+
+smart_hybrid_router({question:"這個專案的架構該怎麼重構？"})
+  → 自動分類：semantic（T4 LLM）
+  → 來源：AST + 依賴分析 feeding LLM
+```
+
+**6 分類路由**：structure / change-impact / debug / search / semantic / unknown
+低於 0.75 信心 → 自動走雙路徑混合（確定性 + LLM 合併輸出）
+
+### 變更影響分析
+
+重構或修改程式碼前，先用 `smart_impact_flow` 了解影響範圍：
+
+```
+# 分析 diff 影響
+smart_impact_flow({diff: "--- a/...\n+++ b/...\n@@ -1,5 +1,7 @@...", depth: 2, predictTests: true})
+  → 回傳：直接影響檔案 / 間接影響檔案 / 建議測試 / 總結
+
+# 分析特定檔案
+smart_impact_flow({files: ["src/core/module.mjs"], symbol: ["foo"], depth: 2})
+  → 回傳：foo 的 callers → transitive callers → 建議哪些測試需驗證
+
+# 補丁審查
+smart_patch_gen({content: "<analysis output>", apply: false})
+  → 回傳 patch plan（3+ 檔案需 apply:true 授權）
+```
+
+### 記憶感知路由（錯誤預防 + 自動學習）
+
+記憶系統是 TF-IDF vector search + fuzzy hybrid，越用越準。
+
+**錯誤預防流程**（在呼叫任何診斷工具前先查記憶庫）：
+```
+錯誤發生
+  → smart_memory_store search --query "<錯誤>" --vector
+  → 命中 ≥0.8 信心 → 直接回傳已知修復方案（跳過診斷）
+  → 命中 0.5-0.8 → 並列顯示記憶 + 診斷結果
+  → 無命中 → 正常執行 smart_error_diagnose
+  → 修復成功 → smart_memory_store store --auto (自動存入)
+```
+
+**具體操作**：
+- 搜尋記憶 → `smart_memory_store({command:"search", query:"<錯誤>", vector:true})`
+- 確認修復有效 → `smart_memory_store({command:"confirm", id:"<id>"})`（hitCount +2）
+- 自動分析模式 → `smart_tool_stats({command:"patterns"})` 顯示 failure clusters + 工具趨勢
+- 列出全部 → `smart_memory_store({command:"list"})`
+- 存放路徑 → `~/.smart/memory/resolutions.json`
+
+**原則**：相同錯誤不重複診斷。錯誤後自動存入記憶，越用越聰明。
 
 ### Context 管理
 

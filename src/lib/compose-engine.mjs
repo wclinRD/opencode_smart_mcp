@@ -73,7 +73,7 @@ const TOOL_ARGS_CONVERTERS = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const CLI_DIR = resolve(dirname(process.argv[1] || '.'), '..', 'cli');
+const CLI_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'cli');
 
 function resolveToolCli(toolName) {
   const cliFile = TOOL_CLI_MAP[toolName];
@@ -109,8 +109,15 @@ const EXEC_TIMEOUT = 30000;
 function executeTool(toolName, args, opts = {}) {
   return new Promise((resolve) => {
     const startMs = Date.now();
-    const cliPath = resolveToolCli(toolName);
-    const cliArgs = argsToCLI(toolName, args);
+    let cliPath;
+    let cliArgs;
+    try {
+      cliPath = resolveToolCli(toolName);
+      cliArgs = argsToCLI(toolName, args);
+    } catch (err) {
+      resolve({ ok: false, output: '', error: `Resolve error: ${err.message}`, duration: 0 });
+      return;
+    }
     const timeout = opts.timeout || EXEC_TIMEOUT;
 
     const child = spawn('node', [cliPath, ...cliArgs], {

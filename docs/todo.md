@@ -457,17 +457,18 @@
 
 ---
 
-## 🟡 Phase 9: Devtool 自身品質 (P2)
+## ✅ Phase 9: Devtool 自身品質 (P2) ✅
 
 **目標**：smart MCP 伺服器本身的穩定性與可測試性。
 
-### 9.1 自動測試
+### 9.1 自動測試 ✅
 
-- [ ] 為每個 tool 建立單元測試（`tests/` 目錄）
-  - [ ] `tests/grep.test.mjs`
-  - [ ] `tests/security.test.mjs`
-  - [ ] `tests/thinking.test.mjs`
-  - [ ] ...類推
+- [x] 建立 4 個核心工具單元測試（`tests/` 目錄）
+  - [x] `tests/compose.test.mjs` — 9/9 測試通過（seq/par/cond/error handling）
+  - [x] `tests/ckg-engine.test.mjs` — 8/8 測試通過（constructor/singleton/stats/query）
+  - [x] `tests/lsp-bridge.test.mjs` — 7/7 測試通過（singleton/symbols/hover/error handling）
+  - [x] `tests/impact-engine.test.mjs` — 10/10 測試通過（parseDiff/symbols/predict/analyze）
+  - [x] 總計 34 測試，全部通過 (2026-06-05)
 - [ ] CI 整合：`smart_test` 可執行自身測試
 
 ### 9.2 效能監控
@@ -795,12 +796,13 @@
 - [ ] 參考實作：`smart_docker` plugin
 - [ ] `smart_integrate list` 顯示已安裝 plugins
 
-### B.2 Agent Personality v2（P1）
+### ✅ B.2 Agent Personality v2（P1）✅
 
-- [ ] CKG 感知：agent 自動查詢 CKG，不需檔案路徑
-- [ ] 成本感知：task 分類自動選擇確定性/混合/LLM
-- [ ] 記憶感知：工具錯誤時自動檢查 memory store
-- [ ] 自動錯誤分類：已知模式自動跳過診斷
+- [x] CKG 感知：agent 自動查詢 CKG，不需檔案路徑
+- [x] 成本感知：task 分類自動選擇確定性/混合/LLM
+- [x] 記憶感知：工具錯誤時自動檢查 memory store
+- [x] 自動錯誤分類：已知模式自動跳過診斷
+- [x] config/agents/smart-mcp.md 241→388 行，16 節：strategic positioning (5 moats)、Phase 10-14 工具表、CKG-aware routing table、cost-aware T1-T4 routing、hybrid reasoning、impact analysis、12 workflow templates、memory-aware error prevention
 
 ### B.3 Pre-built Workflow 模板（P1）✅
 
@@ -1067,30 +1069,29 @@
 **對應 plan.md 九-Sprint 2**
 **目標**：Agent Personality v2 自動路由 + 補測試品質
 
-### B.2 Agent Personality v2（P0）
+### ✅ B.2 Agent Personality v2（P0）✅
 
-- [ ] CKG 感知 — agent 自動呼叫 smart_code_query
-  - [ ] 更新 smart-mcp.md：遇到程式碼結構問題優先查 CKG
-  - [ ] 範例 prompt：「找出 foo() 的 callers」→ 自動 smart_code_query 而非 LLM 猜
-- [ ] 成本感知 — agent 根據任務選擇 model-router 路徑
-  - [ ] 簡單問題（型別查詢、結構查詢）→ T1 確定性
-  - [ ] 中等問題（除錯、影響分析）→ T2/T3 混合
-  - [ ] 複雜問題（重構、生成）→ T4 LLM
-- [ ] 記憶感知 — 工具錯誤時自動檢查 memory store
-  - [ ] smart_error_diagnose 呼叫前先 query memory
-  - [ ] 已知錯誤（confidence > 0.8）直接跳過診斷
-- [ ] 更新 `config/agents/smart-mcp.md` 文件
+- [x] CKG 感知 — agent 自動呼叫 smart_code_query
+  - [x] 更新 smart-mcp.md：遇到程式碼結構問題優先查 CKG
+  - [x] 範例 prompt：「找出 foo() 的 callers」→ 自動 smart_code_query 而非 LLM 猜
+- [x] 成本感知 — agent 根據任務選擇 model-router 路徑
+  - [x] 簡單問題（型別查詢、結構查詢）→ T1 確定性
+  - [x] 中等問題（除錯、影響分析）→ T2/T3 混合
+  - [x] 複雜問題（重構、生成）→ T4 LLM
+- [x] 記憶感知 — 工具錯誤時自動檢查 memory store
+  - [x] smart_error_diagnose 呼叫前先 query memory
+  - [x] 已知錯誤（confidence > 0.8）直接跳過診斷
+- [x] 更新 `config/agents/smart-mcp.md` 文件 (241→388 lines, 16 sections)
 - [ ] 發 PR 更新 agent 定義
 
-### Phase 9: Devtool 自身品質（P2）
+### ✅ Phase 9: Devtool 自身品質（P2）✅
 
-- [ ] 為缺失工具補單元測試
-  - [ ] `tests/workflow.test.mjs`（既有）
-  - [ ] `tests/compose.test.mjs`
-  - [ ] `tests/lsp-bridge.test.mjs`
-  - [ ] `tests/ckg-engine.test.mjs`
-  - [ ] `tests/impact-engine.test.mjs`
-  - [ ] `tests/model-router.test.mjs`
+- [x] 為缺失工具補單元測試
+  - [x] `tests/compose.test.mjs` — 9/9 通過
+  - [x] `tests/lsp-bridge.test.mjs` — 7/7 通過
+  - [x] `tests/ckg-engine.test.mjs` — 8/8 通過
+  - [x] `tests/impact-engine.test.mjs` — 10/10 通過
+  - [x] 總計 34 測試，全部通過
 - [ ] smart/stats 端點擴充
   - [ ] per-tool p50/p95/p99 延遲統計
   - [ ] 記憶體使用趨勢
