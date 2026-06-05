@@ -8,13 +8,13 @@
         "snake_case": 15
       },
       "variable": {
-        "camelCase": 3509,
+        "camelCase": 3512,
         "UPPER_CASE": 125,
         "other": 26,
         "PascalCase": 9
       },
       "function": {
-        "camelCase": 633
+        "camelCase": 636
       },
       "class": {
         "camelCase": 12,
@@ -46,5 +46,5 @@
     }
   },
   "preferences": {},
-  "lastAnalyzed": "2026-06-05T01:11:44.290Z"
+  "lastAnalyzed": "2026-06-05T02:08:04.828Z"
 }
