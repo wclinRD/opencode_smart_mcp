@@ -8,13 +8,13 @@
         "snake_case": 15
       },
       "variable": {
-        "camelCase": 4372,
-        "UPPER_CASE": 145,
+        "camelCase": 4399,
+        "UPPER_CASE": 148,
         "other": 28,
         "PascalCase": 12
       },
       "function": {
-        "camelCase": 764,
+        "camelCase": 770,
         "PascalCase": 3
       },
       "class": {
@@ -24,7 +24,7 @@
     },
     "imports": {
       "commonjs": 6,
-      "esm": 114,
+      "esm": 115,
       "mixed": true
     },
     "testing": {
@@ -47,5 +47,5 @@
     }
   },
   "preferences": {},
-  "lastAnalyzed": "2026-06-05T16:59:31.843Z"
+  "lastAnalyzed": "2026-06-05T18:22:59.490Z"
 }

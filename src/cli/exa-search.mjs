@@ -6,7 +6,7 @@
 // - With key: calls https://api.exa.ai directly (full speed, no rate limit)
 // - Without key: calls https://mcp.exa.ai/mcp via JSON-RPC (free tier, rate-limited)
 //
-// Usage:
+// Usages:
 //   node exa-search.mjs search <query> [options]
 //   node exa-search.mjs crawl <url> [url...]
 //   node exa-search.mjs code <query> [options]
@@ -16,10 +16,15 @@
 //   --max-chars <n>       Max characters per result (default: 3000)
 //   --format <fmt>        Output: text, json (default: text)
 //   --no-color            Disable color output
+//   --fetch-only          Force native HTTP fetch (skip Exa, no API key needed)
+//   --no-cache            Bypass cache
 //   -h, --help            Show this help
 
 const EXA_API_KEY = process.env.EXA_API_KEY || '';
 const hasApiKey = !!EXA_API_KEY;
+
+// Caching layer (zero-dependency, node:sqlite)
+import { get as cacheGet, set as cacheSet, makeKey as cacheKey } from './lib/cache.mjs';
 
 const API_BASE = 'https://api.exa.ai';
 // Include ?tools= to enable non-default tools (get_code_context_exa, etc.)
@@ -200,6 +205,274 @@ async function callMcp(command, cmdArgs, opts) {
 }
 
 // ---------------------------------------------------------------------------
+// Playwright Rendering (optional — lazy load, not a hard dependency)
+// ---------------------------------------------------------------------------
+
+/**
+ * Render a JS-heavy page with Playwright and extract text content.
+ * Uses dynamic import so playwright is NOT a hard dependency.
+ * @param {string} url - The URL to render
+ * @returns {Promise<string>} - Rendered text content
+ */
+async function renderWithPlaywright(url) {
+  let playwright;
+  try {
+    // Dynamic import — fails gracefully if playwright not installed
+    playwright = await import('playwright');
+  } catch {
+    throw new Error(
+      'Playwright is required for --render mode.\n' +
+      'Install it with: npm install playwright\n' +
+      'Or use without --render for static HTML content.'
+    );
+  }
+
+  const { chromium } = playwright;
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    // Set a reasonable timeout for page load
+    await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+    // Wait a bit more for any lazy-loaded content
+    await page.waitForTimeout(1000);
+    // Extract all visible text
+    const text = await page.evaluate(() => document.body.innerText);
+    return text;
+  } finally {
+    await browser.close();
+  }
+}
+
+/**
+ * Check if content appears to be truncated (ends mid-sentence).
+ * @param {string} text
+ * @returns {boolean}
+ */
+function isContentTruncated(text) {
+  if (!text || text.length < 100) return false;
+  const trimmed = text.trimEnd();
+  if (trimmed.length === 0) return false;
+  // Check the last non-empty line
+  const lastLine = trimmed.split('\n').filter(l => l.trim()).pop() || '';
+  // Content likely truncated if it ends mid-sentence
+  // (no sentence-ending punctuation and no newline after it)
+  const endsProperly = /[.!?)\n]\s*$/.test(lastLine);
+  return !endsProperly;
+}
+
+/**
+ * Truncate text to maxChars, preserving word boundaries.
+ * @param {string} text
+ * @param {number} maxChars
+ * @returns {string}
+ */
+function truncateTo(text, maxChars) {
+  if (!text || text.length <= maxChars) return text;
+  return text.slice(0, maxChars).replace(/\s+\S*$/, '') + '\n\n[Content truncated at ' + maxChars + ' chars]';
+}
+
+// ---------------------------------------------------------------------------
+// Content cleanup pipeline (Readability + Turndown)
+// Both use dynamic import — not hard dependencies.
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract clean article content from HTML using Mozilla Readability.
+ * @param {string} html - Raw HTML string
+ * @param {string} [url] - Optional URL for base resolution
+ * @returns {Promise<{title: string|null, content: string|null, textContent: string|null}>}
+ */
+async function cleanHtml(html, url) {
+  let linkedom;
+  try {
+    linkedom = await import('linkedom');
+  } catch {
+    throw new Error(
+      'linkedom is required for --clean mode.\n' +
+      'Install it with: npm install linkedom\n' +
+      'Or use without --clean for raw content.'
+    );
+  }
+
+  let Readability;
+  try {
+    Readability = (await import('@mozilla/readability')).Readability;
+  } catch {
+    throw new Error(
+      '@mozilla/readability is required for --clean mode.\n' +
+      'Install it with: npm install @mozilla/readability\n' +
+      'Then also: npm install linkedom\n' +
+      'Or use without --clean for raw content.'
+    );
+  }
+
+  const { document } = linkedom.parseHTML(html);
+  const reader = new Readability(document);
+  const article = reader.parse();
+
+  if (!article) {
+    // Readability couldn't extract an article; return stripped text instead
+    return {
+      title: null,
+      content: null,
+      textContent: html
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim(),
+    };
+  }
+
+  return {
+    title: article.title || null,
+    content: article.content || null,    // HTML format
+    textContent: article.textContent || null,  // Plain text format
+  };
+}
+
+/**
+ * Convert HTML to Markdown using Turndown.
+ * @param {string} html - HTML string
+ * @returns {Promise<string>} - Markdown string
+ */
+async function htmlToMarkdown(html) {
+  let turndown;
+  try {
+    turndown = (await import('turndown')).default;
+  } catch {
+    throw new Error(
+      'turndown is required for --markdown mode.\n' +
+      'Install it with: npm install turndown\n' +
+      'Or use without --markdown for raw content.'
+    );
+  }
+
+  const service = new turndown({
+    headingStyle: 'atx',
+    codeBlockStyle: 'fenced',
+    emDelimiter: '*',
+    bulletListMarker: '-',
+  });
+
+  return service.turndown(html);
+}
+
+// ---------------------------------------------------------------------------
+// Native fetch crawl (zero deps, no API key needed)
+// ---------------------------------------------------------------------------
+
+/**
+ * Crawl a URL using native Node.js fetch.
+ * No API key required. Supports Readability + turndown via --clean / --markdown.
+ * @param {string} url
+ * @param {object} opts
+ * @param {number} opts.maxChars
+ * @returns {Promise<string>} - fetched text content
+ */
+async function fetchCrawl(url, opts = {}) {
+  const resp = await fetch(url, {
+    signal: AbortSignal.timeout(15000),
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (compatible; Smart-MCP/1.0; +https://github.com/wclin/smart-mcp)',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    },
+  });
+
+  if (!resp.ok) {
+    throw new Error(`HTTP ${resp.status}${resp.statusText ? ': ' + resp.statusText : ''}`);
+  }
+
+  const contentType = resp.headers.get('content-type') || '';
+  const isHtml = contentType.includes('text/html') || contentType.includes('application/xhtml');
+  const rawText = await resp.text();
+  const maxChars = opts.maxChars || 8000;
+
+  return { text: rawText, isHtml };
+}
+
+/**
+ * Fetch raw HTML from a URL (used by --clean pipeline).
+ * @param {string} url
+ * @returns {Promise<string>} raw HTML text
+ */
+async function fetchHtml(url) {
+  const { text } = await fetchCrawl(url);
+  return text;
+}
+
+/**
+ * Process fetched content through the cleanup pipeline:
+ * Raw HTML → [--clean: Readability] → [--markdown: turndown] → final text
+ * @param {string} rawHtml - Raw HTML from fetch
+ * @param {boolean} isHtml - Whether the content is HTML
+ * @param {object} opts
+ * @param {boolean} opts.clean - Apply Readability extraction
+ * @param {boolean} opts.markdown - Convert to Markdown
+ * @param {string} [opts.url] - Original URL for Readability
+ * @param {number} opts.maxChars - Max chars
+ * @returns {Promise<string>} - Processed text content
+ */
+async function processContent(rawHtml, isHtml, opts = {}) {
+  const maxChars = opts.maxChars || 8000;
+
+  // --- Not HTML: just truncate and return ---
+  if (!isHtml) {
+    return truncateTo(rawHtml, maxChars);
+  }
+
+  // --- Clean pipeline: Readability extraction ---
+  if (opts.clean) {
+    const article = await cleanHtml(rawHtml, opts.url);
+    const textContent = article.textContent || '';
+    const title = article.title || '';
+
+    if (opts.markdown && article.content) {
+      // Clean + Markdown: Readability HTML → turndown → final text
+      const md = await htmlToMarkdown(article.content);
+      const header = title ? `# ${title}\n\n` : '';
+      return truncateTo(header + md, maxChars);
+    }
+
+    if (opts.markdown && !article.content) {
+      // Readability couldn't extract, but user wants markdown: convert stripped HTML
+      const md = await htmlToMarkdown(`<p>${article.textContent}</p>`);
+      return truncateTo(md, maxChars);
+    }
+
+    // Clean only: return plain text from Readability
+    const text = title ? `${title}\n\n${textContent}` : textContent;
+    return truncateTo(text, maxChars);
+  }
+
+  // --- Markdown only (no clean) ---
+  if (opts.markdown) {
+    const md = await htmlToMarkdown(rawHtml);
+    return truncateTo(md, maxChars);
+  }
+
+  // --- No cleaning, no markdown: strip basic tags ---
+  const stripped = rawHtml
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return truncateTo(stripped, maxChars);
+}
+
+/**
+ * Check if a URL is fetchable (non-binary content).
+ */
+function isFetchableUrl(url) {
+  const binaryExts = /\.(pdf|zip|gz|tar|bz2|png|jpg|jpeg|gif|webp|ico|mp4|mp3|avi|mov|exe|dmg|bin)$/i;
+  return !binaryExts.test(url);
+}
+
+// ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
 
@@ -245,6 +518,82 @@ async function cmdSearch(query, opts) {
 }
 
 /**
+ * Crawl URLs using native HTTP fetch (zero deps, no API key).
+ * Supports --no-cache to bypass cache, --extended for more content,
+ * --clean for Readability extraction, --markdown for MD output.
+ */
+async function cmdCrawlFetch(urls, opts) {
+  if (!urls || urls.length === 0) {
+    return 'Error: At least one URL is required.\nUsage: node exa-search.mjs crawl <url> [url...]';
+  }
+
+  const results = [];
+
+  for (const url of urls) {
+    // --- Check cache first ---
+    const cKey = cacheKey('crawl', url, opts);
+    if (!opts.noCache) {
+      const cached = cacheGet(cKey);
+      if (cached) {
+        results.push({ url, text: cached, cached: true });
+        continue;
+      }
+    }
+
+    try {
+      if (!isFetchableUrl(url)) {
+        throw new Error(`Skipped: URL appears to be a binary file (${url.match(/\.\w+$/)?.[0] || 'unknown'})`);
+      }
+
+      // Fetch raw HTML
+      const { text: rawHtml, isHtml } = await fetchCrawl(url, opts);
+
+      // Process through cleanup pipeline (--clean, --markdown, or basic stripping)
+      const text = await processContent(rawHtml, isHtml, { ...opts, url });
+
+      // --- Store in cache ---
+      if (!opts.noCache) {
+        cacheSet(cKey, text, 300);
+      }
+
+      results.push({ url, text, cached: false });
+    } catch (err) {
+      results.push({ url, error: err.message });
+    }
+  }
+
+  // --- JSON output ---
+  if (opts.format === 'json') {
+    return JSON.stringify({ mode: 'fetch', results }, null, 2);
+  }
+
+  // --- Text output ---
+  const lines = [];
+  for (const r of results) {
+    if (r.error) {
+      lines.push(`URL: ${r.url}`);
+      lines.push('-'.repeat(60));
+      lines.push(`(Fetch failed: ${r.error})`);
+    } else {
+      const modeTag = opts.clean
+        ? (opts.markdown ? ', cleaned + markdown' : ', cleaned')
+        : (opts.markdown ? ', markdown' : '');
+      lines.push(`URL: ${r.url}${r.cached ? ' (cached, fetch)' : ` (fetch${modeTag})`}`);
+      lines.push('-'.repeat(60));
+      lines.push(r.text);
+      if (isContentTruncated(r.text)) {
+        lines.push('');
+        lines.push('(Content may be truncated; use --extended for more)');
+      }
+    }
+    lines.push('');
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
+/**
  * Crawl / read URLs
  */
 async function cmdCrawl(urls, opts) {
@@ -252,6 +601,31 @@ async function cmdCrawl(urls, opts) {
     return 'Error: At least one URL is required.\nUsage: node exa-search.mjs crawl <url> [url...]';
   }
 
+  // --- Render mode: use Playwright instead of Exa crawl ---
+  if (opts.render) {
+    const lines = [];
+    for (const url of urls) {
+      try {
+        const text = await renderWithPlaywright(url);
+        lines.push(`URL: ${url} (rendered)`);
+        lines.push('-'.repeat(60));
+        lines.push(text);
+        if (isContentTruncated(text)) {
+          lines.push('');
+          lines.push('(Content may be truncated; use --extended for more)');
+        }
+      } catch (err) {
+        lines.push(`URL: ${url}`);
+        lines.push('-'.repeat(60));
+        lines.push(`(Rendering failed: ${err.message})`);
+      }
+      lines.push('');
+      lines.push('');
+    }
+    return lines.join('\n');
+  }
+
+  // --- Standard Exa crawl ---
   const body = {
     urls: urls.map(u => ({ url: u, text: { maxCharacters: opts.maxChars || 3000 } })),
   };
@@ -269,8 +643,42 @@ async function cmdCrawl(urls, opts) {
     lines.push('-'.repeat(60));
     if (r.text) {
       lines.push(r.text);
+      if (isContentTruncated(r.text)) {
+        lines.push('');
+        lines.push('(Content may be truncated; use --extended for full content)');
+      }
     } else {
       lines.push('(No content retrieved)');
+    }
+    lines.push('');
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Crawl URLs using Playwright rendering (shared by REST API and MCP modes)
+ */
+async function cmdCrawlRendered(urls, opts) {
+  if (!urls || urls.length === 0) {
+    return 'Error: At least one URL is required.\nUsage: node exa-search.mjs crawl <url> [url...]';
+  }
+
+  const lines = [];
+  for (const url of urls) {
+    try {
+      const text = await renderWithPlaywright(url);
+      lines.push(`URL: ${url} (rendered)`);
+      lines.push('-'.repeat(60));
+      lines.push(text);
+      if (isContentTruncated(text)) {
+        lines.push('');
+        lines.push('(Content may be truncated; use --extended for more)');
+      }
+    } catch (err) {
+      lines.push(`URL: ${url}`);
+      lines.push('-'.repeat(60));
+      lines.push(`(Rendering failed: ${err.message})`);
     }
     lines.push('');
     lines.push('');
@@ -336,18 +744,42 @@ function parseArgs() {
     numResults: 10,
     maxChars: 3000,
     format: 'text',
+    render: false,
+    extended: false,
+    fetchOnly: false,
+    noCache: false,
+    clean: false,
+    markdown: false,
   };
 
   let i = 1;
   while (i < args.length) {
     switch (args[i]) {
-      case '--num-results':
-      case '--num':
-        opts.numResults = parseInt(args[++i], 10) || 10;
+        case '--num-results':
+          opts.numResults = parseInt(args[i + 1], 10);
+          i++;
+          break;
+        case '--max-chars':
+          opts.maxChars = parseInt(args[i + 1], 10);
+          i++;
+          break;
+        case '--render':
+          opts.render = true;
+          break;
+        case '--extended':
+          opts.extended = true;
+          break;
+      case '--fetch-only':
+        opts.fetchOnly = true;
         break;
-      case '--max-chars':
-      case '--chars':
-        opts.maxChars = parseInt(args[++i], 10) || 3000;
+      case '--no-cache':
+        opts.noCache = true;
+        break;
+      case '--clean':
+        opts.clean = true;
+        break;
+      case '--markdown':
+        opts.markdown = true;
         break;
       case '--format':
         opts.format = args[++i];
@@ -383,24 +815,70 @@ Commands:
 
 Options:
   --num-results <n>     Number of results (default: 10)
-  --max-chars <n>       Max characters per result (default: 3000)
+  --max-chars <n>       Max characters per result
+                        (crawl default: 8000, search/code: 3000)
+  --extended            Extended mode — up to 30,000 chars per result
+  --render              Render JS-heavy pages with Playwright (crawl only)
+  --fetch-only          Force native fetch (skip Exa, no API key, crawl only)
+  --clean               Extract article body via Readability (crawl, removes nav/ads/footer)
+  --markdown            Convert HTML to Markdown (crawl, LLM-friendly format)
+  --no-cache            Bypass cache
   --format <fmt>        Output: text, json (default: text)
   --no-color            Disable color output
   -h, --help            Show this help
+
+Combinations:
+  --clean --markdown    Best combo: Readability article → Markdown output
+  --fetch-only --clean --markdown  Full offline: fetch + clean + MD (no API key)
 
 Examples:
   node exa-search.mjs search "React Server Components"
   node exa-search.mjs crawl https://example.com/docs
   node exa-search.mjs code "Python fastapi middleware"
   node exa-search.mjs search "latest AI news" --num-results 5
+  node exa-search.mjs crawl https://react-spa.example.com --render
+  node exa-search.mjs crawl https://long-article.example.com --extended
+  node exa-search.mjs crawl https://example.com --fetch-only
+  node exa-search.mjs crawl https://example.com --clean --markdown
+  node exa-search.mjs crawl https://example.com --fetch-only --clean --markdown
 `);
 }
 
 async function main() {
   const { command, args: cmdArgs, opts } = parseArgs();
 
+  // --- Per-command default adjustments ---
+  if (opts.extended) {
+    opts.maxChars = 30000;
+  } else if (command === 'crawl' && opts.maxChars === 3000) {
+    // crawl default: 8000 (vs search/code which stay at 3000)
+    opts.maxChars = 8000;
+  }
+
   try {
     let output;
+
+    // --- Render mode for crawl (works in both REST API and MCP mode) ---
+    if (command === 'crawl' && opts.render) {
+      output = await cmdCrawlRendered(cmdArgs, opts);
+      console.log(output);
+      return;
+    }
+
+    // --- Fetch-only mode: native HTTP fetch, no Exa, no API key needed ---
+    if (command === 'crawl' && opts.fetchOnly) {
+      output = await cmdCrawlFetch(cmdArgs, opts);
+      console.log(output);
+      return;
+    }
+
+    // --- Auto-fallback to native fetch when no API key and command is crawl ---
+    // Native fetch is faster than MCP free tier (no rate limit, no JSON-RPC overhead)
+    if (command === 'crawl' && !hasApiKey) {
+      output = await cmdCrawlFetch(cmdArgs, opts);
+      console.log(output);
+      return;
+    }
 
     if (hasApiKey) {
       // REST API mode (requires EXA_API_KEY)
@@ -429,6 +907,8 @@ async function main() {
       }
     } else {
       // Free tier MCP mode (no key needed, IP rate-limited)
+      // Note: crawl is handled above (auto-fallback to native fetch), so here
+      // only search/code go through MCP
       output = await callMcp(command, cmdArgs, opts);
     }
 

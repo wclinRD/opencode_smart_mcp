@@ -1631,3 +1631,131 @@
 - [x] 驗證：search/crawl/code/--format json 全部通過
 - [x] `--help` 自動顯示目前模式（REST API 或 MCP free tier）
 - [x] docs/plan.md + docs/todo.md 同步更新
+
+---
+
+## 🔴 Phase W: Web 強化 — exa_search 能力升級 (P0 — 立即)
+
+**對應 plan.md**：五-Phase W
+**目標**：補強 exa_search 的三個關鍵缺口：JS 渲染、長內容支援、Hybrid Router 整合
+**狀態**：🆕 新增（2026-06-06）
+
+### W.1 可選 Playwright 渲染（弱項 4）
+
+- [x] `src/cli/exa-search.mjs` — 新增 `renderWithPlaywright(url)` 函式
+  - [x] 動態 `import('playwright')`，lazy load（非預設依賴）
+  - [x] headless Chromium + `networkidle` 等待
+  - [x] `page.evaluate(() => document.body.innerText)` 提取文字
+  - [x] 超時 30 秒，無 playwright 時顯示安裝指示
+- [x] `parseArgs()` — 新增 `--render` 選項支援
+- [x] `cmdCrawl()` — 當 `opts.render` 為 true 時改走 Playwright 渲染路徑
+- [x] `printHelp()` — 加入 `--render` 說明
+- [x] `src/plugins/standard/exa_search.mjs` — inputSchema 新增 `render` 欄位（boolean）
+- [x] 驗證：`node exa-search.mjs crawl <url> --render` 正確回傳渲染後文字
+
+### W.2 爬取長度優化（弱項 5）
+
+- [x] `src/cli/exa-search.mjs` — crawl 預設 maxChars 從 3000 → 8000
+- [x] `parseArgs()` — 新增 `--extended` 選項（maxChars = 30000）
+- [x] `cmdCrawl()` — 截斷偵測：檢查文字結尾完整度
+  - [x] 文字結尾無句號 `.` 且無換行 `\n` 時判定為截斷
+  - [x] 截斷時輸出 `(content truncated, use --extended for full content)`
+- [x] `printHelp()` — 加入 `--extended` 說明
+- [x] `src/plugins/standard/exa_search.mjs` — inputSchema 新增 `extended` 欄位（boolean）
+- [x] 驗證：crawl 預設 8000，`--extended` 30000
+
+### W.3 Hybrid Router 整合 exa_search（弱項 6）
+
+- [x] `src/lib/hybrid-engine.mjs` — SEARCH 分類 tools 陣列新增 `'smart_exa_search'`
+- [x] 更新 SEARCH 分類 description 文字
+- [x] 驗證：`classifyQuestion("搜尋 React Server Components")` 回傳 tools 含 smart_exa_search
+- [x] `npm test` — 確認 hybrid-engine 既有測試全部通過（40 tests）
+
+### 驗收標準
+
+- [x] `--render` crawl 正確回傳 JS 渲染後文字
+- [x] crawl 預設 maxChars: 8000，`--extended` 30000
+- [x] 截斷內容顯示提示
+- [x] Hybrid Router SEARCH 分類含 smart_exa_search
+
+---
+
+## 🟢 Phase W+: 搜尋/爬蟲強化 (Tier 1-2, 待實作)
+
+**對應 plan.md**：五-Phase W+
+**目標**：離線爬蟲品質再升級 — Crawlee 自適應爬蟲、Playwright MCP bridge、Semantic chunking
+**狀態**：待實作 (2026-06-05)
+
+### F.3 Crawlee 整合 — 取代/強化 Playwright `--render`（P1 — 近期，3-5 天）
+
+**相依性**：`npm install crawlee` | API key: ❌ 不需要
+
+- [ ] 建立 `src/cli/lib/crawler.mjs` — 自適應爬蟲引擎
+  - [ ] `createAdaptiveCrawler()` — 自動偵測靜態/SPA 網站
+    - [ ] 靜態 HTML → CheerioCrawler（~15MB RAM, < 1s）
+    - [ ] SPA 特徵（`<div id="root">`、文字量 < 100 chars）→ PlaywrightCrawler（~200MB RAM, ~3s）
+  - [ ] `SessionPool` — 管理 cookies/fingerprints（anti-bot）
+  - [ ] 自動重試 (retry with exponential backoff)
+  - [ ] Rate limiting（避免被封鎖）
+  - [ ] 錯誤處理：網路錯誤 / 4xx / 5xx 清晰訊息
+- [ ] `exa-search.mjs` 整合
+  - [ ] `--crawlee` 選項使用 Crawlee 引擎
+  - [ ] 無 `--render` 且無 `--crawlee` 時維持現有行為
+  - [ ] 與 `--clean` / `--markdown` / `--fetch-only` 組合相容
+- [ ] Plugin 更新
+  - [ ] `src/plugins/standard/exa_search.mjs` — inputSchema 新增 `crawlee` 欄位 (boolean)
+- [ ] 測試
+  - [ ] Adaptive: 靜態站走 Cheerio (< 1s)
+  - [ ] Adaptive: SPA 自動升級 Playwright (~3s)
+  - [ ] Anti-bot SessionPool 正常運作
+  - [ ] 現有 `--render` 完全向下相容
+
+### F.4 Playwright MCP bridge（P1 — 近期，3-5 天）
+
+**相依性**：`npm install @playwright/mcp` | API key: ❌ 不需要
+
+- [ ] 建立 `src/plugins/standard/playwright_mcp.mjs` — MCP plugin
+  - [ ] `browser_navigate` — 導航到 URL
+  - [ ] `browser_snapshot` — 回傳 accessibility tree（結構化內容）
+  - [ ] `browser_click` — 點擊元素 (by accessibility ref)
+  - [ ] `browser_fill` — 填寫表單
+  - [ ] `browser_screenshot` — 截圖
+  - [ ] `browser_run_code` — 執行自訂 JS
+- [ ] Handler-based 實作（in-process，不 spawn 子行程）
+  - [ ] 動態 `import('@playwright/mcp')`（非預設依賴）
+  - [ ] 工具名稱 prefix: `smart_pw_*`
+- [ ] 與現有架構整合
+  - [ ] 工具註冊至 server/index.mjs
+  - [ ] Hybrid Router 可路由至 playwright_mcp
+  - [ ] Compose engine / workflow 支援
+  - [ ] 保留 `--render` 作為向下相容捷徑
+- [ ] 測試
+  - [ ] MCP 工具可操作瀏覽器（導航/點擊/填表）
+  - [ ] accessibility tree 回傳結構化內容
+  - [ ] 與現有 `--render` 命令相容
+  - [ ] Playwright 未安裝時拋清晰錯誤訊息
+
+### F.7 Semantic chunking 內容分塊（P2 — 視需求，2 天）
+
+**相依性**：無（純程式碼） | API key: ❌ 不需要
+
+- [ ] `src/cli/lib/chunker.mjs` — 內容分塊引擎
+  - [ ] `chunkContent(text, options)` — 主入口
+    - [ ] `maxChunkSize: 2000` (default)
+    - [ ] `chunkOverlap: 200`
+    - [ ] boundaries: heading-based (h1/h2/h3)
+    - [ ] fallback: paragraph-based splitting
+  - [ ] `validateChunks(chunks)` — 檢查 chunk 邊界完整性
+  - [ ] 輸出格式：`[{ heading, content, startLine, endLine, size }]`
+- [ ] `exa-search.mjs` 整合
+  - [ ] `--chunk` 選項使用 chunker
+  - [ ] 與 `--clean` / `--markdown` 組合相容（先 clean/md 再 chunk）
+  - [ ] JSON 格式輸出 chunks 陣列
+  - [ ] Text 格式輸出分隔段落 (---)
+- [ ] Plugin 更新
+  - [ ] `src/plugins/standard/exa_search.mjs` — inputSchema 新增 `chunk` 欄位 (boolean)
+- [ ] 測試
+  - [ ] heading-boundary 分塊正確
+  - [ ] `--chunk` 選項在 crawl 模式可用
+  - [ ] 分塊結果可指定 maxChunkSize
+  - [ ] 與 `--clean` + `--markdown` 組合無異常

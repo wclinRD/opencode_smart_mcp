@@ -2,7 +2,6 @@
   "$schema": "https://opencode.ai/config.json",
   "default_agent": "smart-mcp",
   "model": "opencode/big-pickle",
-  "temperature": 0.3,
   "mcp": {
     "smart": {
       "type": "local",
