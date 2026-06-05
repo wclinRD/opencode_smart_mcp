@@ -16,7 +16,7 @@ Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode
 - **語言**：JavaScript (ESM) — 6 核心 handler + 34 standard tools 全數非阻塞化 (Phase 6)
 - **輸出保護**：512KB buffer / 200K chars soft limit
 - **Auto-Toonify 攔截器**：`respond()` 自動對 ≥500 chars 的 JSON-like 輸出執行 TOON 優化（lazy-init TokenOptimizer, best-effort, Promise-chain 保證順序），可透過 `respond(id, result, {optimize: false})` 跳過
-- **測試狀態**: 493 tests / 100 suites / 0 failures（21 test files + 5 smart-agent tests）
+- **測試狀態**: 428 tests / 82 suites / 0 failures / 3 skip (Windows LSP)
 - **Health Endpoint**：`smart/health`（含 context 資訊）
 - **Context 管理**：`smart_context` MCP tool + `smart/context` 端點 + 自動注入/捕獲/持久化
 - **動態推理**：thinking v3.1 — state persistence, branching, multi-round, context accumulation
@@ -157,6 +157,12 @@ src/
 | 2026-06-04 | `invokeTool` | `handler` 不支援 async — 4 個 Phase 10 LSP 工具回傳 `[object Promise]` | handler 傳回 Promise 時回傳 `__async` sentinel，caller 路徑 resolve Promise 後 respond |
 | 2026-06-05 | `toonify` (server) | 無自動優化機制，每次手動呼叫 smart_toonify 才能省 token | `respond()` 新增 auto-toonify 攔截器：Promise-chain interceptor 自動對 ≥500 chars 的 JSON-like 輸出執行 TOON 優化，lazy-init TokenOptimizer，best-effort catch |
 | 2026-06-05 | Phase D | 記憶未自動化，需手動呼叫 memory_store | `captureAndReturn()` 失敗自動 `autoStoreToMemory()` + `invokeTool()` 前 `preCheckMemory()` 搜尋 debug/test/cross-file-edit |
+| 2026-06-06 | Phase S | 10 處 Command Injection (`execSync` + string interpolation) | 全部改用 `execFileSync` + array args + `{ shell: false }` |
+| 2026-06-06 | Phase S | `package.json` test script glob 錯誤 (`tests/` → `tests/*.test.mjs`) | 修正 double-star glob pattern |
+| 2026-06-06 | LSP bridge | `_start()` 殘留 `clearTimeout(startTimeout)` / `resolved = true` 造成 `ReferenceError` | 移除殘留變數引用 |
+| 2026-06-06 | LSP bridge | Infinite restart loop when LSP server unavailable (exit code 1) | `_restartCounts` 3 次上限 + `_startErrors` 快取 + `ensureOpen` 錯誤快取 |
+| 2026-06-06 | LSP bridge | Windows `.cmd` wrapper 無法直接 spawn | `_findLspServer` 回傳 `.cmd` 路徑 + `cmd.exe /c` spawn + `taskkill /T /F` 清理 + `where` 跨平台查找 |
+| 2026-06-06 | Tests | 5 pre-existing failures (1 hybrid-engine + 4 lsp-bridge) | 全部修復：`tool` field in mergeResults + `hasTsLsp` skip + `isReady` assertion + startTimeout cleanup + restart limit |
 
 ### 3.4 當前缺口（Phase 10-11 完成後，2026-06-05）
 
@@ -2072,8 +2078,8 @@ Smart MCP 是「理解程式碼的儀器」
 
 | 優先級 | 問題 | 衝擊 | 位置 | 修復方式 |
 |--------|------|------|------|----------|
-| **P0** | Command Injection | 🔴 高 — 使用者輸入 args 可注入 shell | `git-commit.mjs:44`, `git-context.mjs:37`, `git-pr.mjs:44/546`, `git-review.mjs:47/194/199`, `tool-integrate.mjs:33`, `lsp-bridge.mjs:338`, `py-helper.mjs:218` | 改用 `execSync` + array args + `{ shell: false }` |
-| **P0** | `package.json` test 腳本壞掉 | 🔴 中 — `npm test` 永久失敗 | `package.json` line 16 | 改為 `"node --test 'tests/*.test.mjs'"` |
+| **P0** | ~~Command Injection~~ | ~~🔴 高 — 使用者輸入 args 可注入 shell~~ | ~~`git-commit.mjs:44`, `git-context.mjs:37`, `git-pr.mjs:44/546`, `git-review.mjs:47/194/199`, `tool-integrate.mjs:33`, `lsp-bridge.mjs:338`, `py-helper.mjs:218`~~ | ✅ **已修復** — 10 處全部改用 `execFileSync` + array args |
+| **P0** | ~~`package.json` test 腳本壞掉~~ | ~~🔴 中 — `npm test` 永久失敗~~ | ~~`package.json` line 16~~ | ✅ **已修復** — 改為 `"node --test 'tests/*.test.mjs'"` |
 | **P0** | `node:sqlite` 相容性 | 🔴 中 — 僅 Node 26 可用，無法降級 | `ckg-engine.mjs` ~L315 | 文件標示 Node >= 26 + 降級策略 |
 | **P0** | respond() Promise-chain 阻塞全局吞吐 | 🔴 高 — TOON 優化耗時阻塞所有後續回應 | `src/server/index.mjs:725` | 改為 fire-and-forget：先 respond，async 後台優化 |
 | **P0** | LSP bridge 重複 didOpen 浪費 | 🔴 高 — 每次 query 都重新 didOpen 同檔案，500-2000ms | `src/lib/lsp-bridge.mjs:179-182` | 加入 `openedFiles` Set，已開檔案不再重複 didOpen |
@@ -2084,7 +2090,7 @@ Smart MCP 是「理解程式碼的儀器」
 |--------|------|------|----------|
 | **P1** | 無 CI/CD | 🟠 中 — 無法自動驗證 PR 是否破測試 | 建立 GitHub Actions: `npm test` on push + PR |
 | **P1** | execSync 無 shell 安全強化 | 🟠 中 — 6 處 git 操作可 inject | 全部 `execSync` 強制 `{ shell: false }`，args 一律 array |
-| **P1** | LSP bridge 程序洩漏 | 🟠 中 — process hang 殘留 | `hybrid-engine` / `impact-engine` 加 `after()` / `finally()` 關閉 |
+| **P1** | ~~LSP bridge 程序洩漏~~ | ~~🟠 中 — process hang 殘留~~ | ✅ **已修復** — `_startErrors` 快取 + 3 次 restart 上限 + cleanup hooks |
 | **P1** | Temp 目錄汙染 | 🟢 低 — 13 個 `.test-*` 殘留目錄 | `.gitignore` 已有 pattern，清理既存目錄 |
 | **P1** | `@xenova/transformers` 過重 | 🟢 低 — 80MB+ 僅 memory embedding 用 | 標示為 optional dep，TF-IDF 為預設 |
 | **P1** | Hybrid engine 重複運算 | 🟠 中 — `classifyQuestion+planPath` 對同一問題重複計算 | question hash → cache result，TTL 30min |
@@ -2117,8 +2123,10 @@ Smart MCP 是「理解程式碼的儀器」
 
 ```
 本週 (P0):
-  ├── 🛡️ 修 Command Injection (7 處: git tools + LSP + py-helper)
-  ├── 🩹 修 package.json test script
+  ├── 🛡️ 修 Command Injection (7 處: git tools + LSP + py-helper) ✅ 已修復
+  ├── 🩹 修 package.json test script ✅ 已修復
+  ├── 🚫 LSP bridge infinite restart loop ✅ 已修復 (3 次上限 + 錯誤快取)
+  ├── 🧪 5 pre-existing test failures ✅ 全部修復 (428 tests: 425 pass, 0 fail, 3 skip)
   ├── 📝 文件標示 node:sqlite Node 26 要求
   ├── 🚀 respond() 改 fire-and-forget 解除全局阻塞
   └── 📂 LSP bridge 加入 openedFiles 快取
