@@ -22,7 +22,7 @@
 
 import { readFileSync, statSync, readdirSync, existsSync, writeFileSync } from 'node:fs';
 import { resolve, relative, extname, dirname } from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { COLORS, useColor } from '../lib/utils.mjs';
 
 // ---------------------------------------------------------------------------
@@ -30,7 +30,7 @@ import { COLORS, useColor } from '../lib/utils.mjs';
 // ---------------------------------------------------------------------------
 function git(args, cwd) {
   try {
-    return execSync(`git ${args.join(' ')}`, { cwd, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+    return execFileSync('git', args, { cwd, shell: false, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
   } catch (e) {
     return '';
   }

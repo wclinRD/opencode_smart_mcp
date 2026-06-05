@@ -29,7 +29,7 @@
  *   node git-pr.mjs --title "feat: add user auth" --body "Implements login flow"
  */
 
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 
@@ -41,7 +41,7 @@ import { COLORS, useColor } from '../lib/utils.mjs';
 
 function git(root, ...args) {
   try {
-    return execSync(`git -C "${root}" ${args.join(' ')}`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+    return execFileSync('git', ['-C', root, ...args], { shell: false, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
   } catch (e) {
     throw new Error(`git ${args[0]} failed: ${e.stderr ? e.stderr.toString().trim() : e.message}`);
   }
@@ -543,8 +543,9 @@ function main() {
     ];
     if (opts.draft) ghArgs.push('--draft');
 
-    const result = execSync(`gh ${ghArgs.join(' ')}`, {
+    const result = execFileSync('gh', ghArgs, {
       cwd: root,
+      shell: false,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });

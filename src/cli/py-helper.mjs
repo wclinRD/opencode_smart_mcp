@@ -30,7 +30,7 @@
 
 import { readFileSync, statSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, basename, dirname } from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { COLORS, useColor } from '../lib/utils.mjs';
 
 // ---------------------------------------------------------------------------
@@ -215,10 +215,10 @@ function cmdTypecheck(root) {
 
   // Run mypy
   try {
-    const output = execSync(`mypy --show-error-codes --ignore-missing-imports "${root}" 2>&1`, {
-      encoding: 'utf-8', timeout: 60000,
+    const output = execFileSync('mypy', ['--show-error-codes', '--ignore-missing-imports', root], {
+      shell: false, encoding: 'utf-8', timeout: 60000,
     });
-    results.output = output.trim();
+    results.output = (output || '').trim();
 
     // Parse errors
     const errorLines = output.split('\n').filter(l => l.includes(': error:'));

@@ -128,6 +128,8 @@ export class LspBridge {
     this._closing = false;
     this._cache = new LRUCache(200, 30_000);
     this._serverCapabilities = new Map();
+    this._restartCounts = new Map();
+    this._startErrors = new Map();
   }
 
   // -----------------------------------------------------------------------
@@ -158,7 +160,15 @@ export class LspBridge {
     const existing = this._processes.get(lang);
     if (existing && existing.ready) return;
 
-    await this._start(lang);
+    const errState = this._startErrors.get(lang);
+    if (errState) throw errState;
+
+    try {
+      await this._start(lang);
+    } catch (err) {
+      this._startErrors.set(lang, err instanceof Error ? err : new Error(String(err)));
+      throw err;
+    }
   }
 
   /** 取得檔案中的符號列表 */
@@ -304,7 +314,16 @@ export class LspBridge {
         await this._sendRequest('shutdown', {}, lang);
         await this._sendNotification('exit', {}, lang);
       } catch { /* ignore */ }
-      try { state.process.kill(); } catch { /* ignore */ }
+      try {
+        state.process.kill();
+        // On Windows, force-kill the process tree to clean up cmd.exe wrappers
+        if (process.platform === 'win32' && state.process.pid) {
+          try {
+            execFileSync('taskkill', ['/T', '/F', '/PID', String(state.process.pid)],
+              { stdio: 'ignore' });
+          } catch { /* process already dead */ }
+        }
+      } catch { /* ignore */ }
     }
     this._processes.clear();
     this._cache.clear();
@@ -325,7 +344,15 @@ export class LspBridge {
 
     // Try local node_modules
     const local = resolve(__dirname, '../../node_modules/.bin', cfg.name);
-    if (existsSync(local)) return local;
+    if (existsSync(local)) {
+      // On Windows, skip Unix shell scripts (no .cmd/.exe extension) — cannot spawn
+      if (process.platform !== 'win32' || local.endsWith('.cmd') || local.endsWith('.exe')) {
+        return local;
+      }
+      // Try .cmd wrapper (npm creates these on Windows)
+      const localCmd = local + '.cmd';
+      if (existsSync(localCmd)) return localCmd;
+    }
 
     // Try user's npm global
     if (process.env.HOME) {
@@ -333,10 +360,15 @@ export class LspBridge {
       if (existsSync(homeDir)) return homeDir;
     }
 
-    // Fallback: resolve via PATH
+    // Fallback: resolve via PATH (cross-platform: which on Unix, where on Windows)
     try {
-      const which = execSync(`which ${cfg.name}`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
-      if (which) return which;
+      const whichCmd = process.platform === 'win32' ? 'where' : 'which';
+      const pathResult = execFileSync(whichCmd, [cfg.name], { shell: false, encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
+      if (pathResult) {
+        // where.exe may return multiple matches; take the first line
+        const firstMatch = pathResult.split('\n')[0].trim();
+        if (firstMatch) return firstMatch;
+      }
     } catch { /* not in PATH */ }
 
     return null;
@@ -348,16 +380,36 @@ export class LspBridge {
       throw new Error(`Unsupported language: ${lang}`);
     }
 
-    const serverPath = this._findLspServer(lang);
+    const prevCount = this._restartCounts.get(lang) || 0;
+    if (prevCount > 3) {
+      throw new Error(`${cfg.name} unavailable after ${prevCount - 1} restart attempts`);
+    }
+
+    let serverPath = this._findLspServer(lang);
     if (!serverPath) {
       throw new Error(`${cfg.name} not found. Install with your package manager.`);
     }
 
+    // On Windows, npm .bin scripts are .cmd files; spawn needs explicit extension
+    if (process.platform === 'win32') {
+      const ext = '.cmd';
+      if (!serverPath.endsWith(ext) && !serverPath.endsWith('.exe') && existsSync(serverPath + ext)) {
+        serverPath += ext;
+      }
+    }
+
     return new Promise((resolve, reject) => {
-      const child = spawn(serverPath, cfg.args, {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, ...cfg.env },
-      });
+      // On Windows, .cmd wrappers from npm require shell intervention
+      const isWinCmd = process.platform === 'win32' && serverPath.endsWith('.cmd');
+      const child = isWinCmd
+        ? spawn(process.env.COMSPEC || 'cmd.exe', ['/d', '/s', '/c', `"${serverPath}"`, ...cfg.args], {
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: { ...process.env, ...cfg.env },
+          })
+        : spawn(serverPath, cfg.args, {
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: { ...process.env, ...cfg.env },
+          });
 
       const state = {
         process: child,
@@ -388,7 +440,14 @@ export class LspBridge {
 
       child.on('exit', (code) => {
         if (this._closing) return;
-        console.warn(`[lsp-bridge:${lang}] Exited with code ${code}, restarting...`);
+        const count = (this._restartCounts.get(lang) || 0) + 1;
+        this._restartCounts.set(lang, count);
+        if (count > 3) {
+          console.warn(`[lsp-bridge:${lang}] Exited with code ${code}, giving up after 3 retries`);
+          this._processes.delete(lang);
+          return;
+        }
+        console.warn(`[lsp-bridge:${lang}] Exited with code ${code}, restarting (${count}/3)...`);
         this._processes.delete(lang);
         setTimeout(() => {
           if (!this._closing) this._start(lang).catch(() => {});
@@ -410,9 +469,13 @@ export class LspBridge {
       }, lang).then((cap) => {
         this._serverCapabilities.set(lang, cap);
         state.ready = true;
+        this._restartCounts.delete(lang);
+        this._startErrors.delete(lang);
         this._sendNotification('initialized', {}, lang);
         resolve();
-      }).catch(reject);
+      }).catch((err) => {
+        reject(err);
+      });
     });
   }
 

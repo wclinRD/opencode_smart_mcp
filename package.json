@@ -14,7 +14,7 @@
   },
   "scripts": {
     "postinstall": "node src/install/postinstall.mjs",
-    "test": "node --test tests/"
+    "test": "node --test \"tests/*.test.mjs\""
   },
   "peerDependencies": {
     "smart-mcp": "^3.2.0"
@@ -32,5 +32,8 @@
     "ai",
     "coding-agent"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "typescript-language-server": "^5.3.0"
+  }
 }

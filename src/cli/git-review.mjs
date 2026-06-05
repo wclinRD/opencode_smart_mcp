@@ -32,7 +32,7 @@
  *   node git-review.mjs --all --format markdown --output review.md
  */
 
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, extname, relative } from 'node:path';
 
@@ -44,7 +44,7 @@ import { COLORS, useColor } from '../lib/utils.mjs';
 
 function git(root, ...args) {
   try {
-    return execSync(`git -C "${root}" ${args.join(' ')}`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+    return execFileSync('git', ['-C', root, ...args], { shell: false, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
   } catch (e) {
     throw new Error(`git ${args[0]} failed: ${e.stderr ? e.stderr.toString().trim() : e.message}`);
   }
@@ -191,12 +191,14 @@ async function fetchPRDiff(prUrl) {
     // Use gh CLI if available
     const prMatch = prUrl.match(/\/pull\/(\d+)$/);
     if (prMatch && isGhAvailable()) {
-      const result = execSync(`gh pr view ${prMatch[1]} --json body,title,headRefName,baseRefName,additions,deletions,files`, {
+      const result = execFileSync('gh', ['pr', 'view', prMatch[1], '--json', 'body,title,headRefName,baseRefName,additions,deletions,files'], {
+        shell: false,
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       const prInfo = JSON.parse(result);
-      const diffResult = execSync(`gh pr diff ${prMatch[1]}`, {
+      const diffResult = execFileSync('gh', ['pr', 'diff', prMatch[1]], {
+        shell: false,
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
       });

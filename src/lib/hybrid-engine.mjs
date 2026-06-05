@@ -627,6 +627,7 @@ export function mergeResults(classification, execResult, question) {
       sources.push({
         type: 'error',
         stepId,
+        tool: stepId.split('_')[0] || stepId,
         error: result.error,
       });
     }

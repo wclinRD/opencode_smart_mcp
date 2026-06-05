@@ -23,7 +23,7 @@
  *   -h, --help            Show this help
  */
 
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { readFileSync, statSync, existsSync } from 'node:fs';
 import { resolve, relative, extname, dirname } from 'node:path';
 
@@ -34,7 +34,7 @@ import { COLORS, useColor } from '../lib/utils.mjs';
 // ---------------------------------------------------------------------------
 function git(...args) {
   try {
-    return execSync(`git ${args.join(' ')}`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+    return execFileSync('git', args, { shell: false, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
   } catch (e) {
     throw new Error(`git ${args[0]} failed: ${e.stderr ? e.stderr.toString().trim() : e.message}`);
   }

@@ -29,7 +29,7 @@
  *   node git-commit.mjs --all --amend
  */
 
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { extname, resolve, relative } from 'node:path';
 import { existsSync } from 'node:fs';
 
@@ -41,7 +41,7 @@ import { COLORS, useColor } from '../lib/utils.mjs';
 
 function git(...args) {
   try {
-    return execSync(`git ${args.join(' ')}`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+    return execFileSync('git', args, { shell: false, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
   } catch (e) {
     throw new Error(`git ${args[0]} failed: ${e.stderr ? e.stderr.toString().trim() : e.message}`);
   }
