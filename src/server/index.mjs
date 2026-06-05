@@ -723,14 +723,23 @@ async function tryOptimizeOutput(text) {
 }
 
 function respond(id, result, opts = {}) {
-  _respondChain = _respondChain
-    .then(async () => {
-      if (opts.optimize !== false && result?.content?.[0]?.type === 'text' && typeof result.content[0].text === 'string') {
-        result.content[0].text = await tryOptimizeOutput(result.content[0].text);
+  // Fire-and-forget: write immediately, optimize in background
+  // TOON optimization can take up to 20s per response; awaiting it here
+  // would block ALL subsequent responses through the _respondChain.
+  if (opts.optimize !== false && result?.content?.[0]?.type === 'text' && typeof result.content[0].text === 'string') {
+    const originalText = result.content[0].text;
+    tryOptimizeOutput(originalText).then(optimized => {
+      if (optimized !== originalText) {
+        debugLog(`Toonify: background opt saved ${((originalText.length - optimized.length) / originalText.length * 100).toFixed(1)}%`);
       }
-      writeMsg({ jsonrpc: '2.0', id, result });
-    })
-    .catch(() => { writeMsg({ jsonrpc: '2.0', id, result }); });
+    }).catch(() => {});
+  }
+  // Write chain — only serializes writes, no await on async operations
+  _respondChain = _respondChain.then(() => {
+    writeMsg({ jsonrpc: '2.0', id, result });
+  }).catch(() => {
+    writeMsg({ jsonrpc: '2.0', id, result });
+  });
 }
 function respondError(id, code, message, data) {
   const err = { code, message };

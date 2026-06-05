@@ -5,6 +5,7 @@
 // and edges (calls, imports, extends, implements, contains, defines).
 //
 // Uses Node.js built-in node:sqlite (DatabaseSync) — zero dependencies.
+// ⚠ Requires Node >= 26 (node:sqlite added in Node 26). On older Node, skip CKG.
 // Builds on LSP bridge from Phase 10 for symbol/reference analysis.
 //
 // Schema:

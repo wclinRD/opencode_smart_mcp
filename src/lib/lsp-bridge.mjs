@@ -187,9 +187,7 @@ export class LspBridge {
     const languageId = cfg ? cfg.languageId : 'typescript';
 
     await this.ensureOpen(lang);
-    await this._sendNotification('textDocument/didOpen', {
-      textDocument: { uri: this._toUri(absPath), languageId, version: 1 }
-    }, lang);
+    await this._didOpen(absPath, lang, languageId);
 
     const result = await this._sendRequest('textDocument/documentSymbol', {
       textDocument: { uri: this._toUri(absPath) }
@@ -217,9 +215,7 @@ export class LspBridge {
     const languageId = cfg ? cfg.languageId : 'typescript';
 
     await this.ensureOpen(lang);
-    await this._sendNotification('textDocument/didOpen', {
-      textDocument: { uri: this._toUri(absPath), languageId, version: 1 }
-    }, lang);
+    await this._didOpen(absPath, lang, languageId);
 
     const result = await this._sendRequest('textDocument/references', {
       textDocument: { uri: this._toUri(absPath) },
@@ -253,9 +249,7 @@ export class LspBridge {
     const languageId = cfg ? cfg.languageId : 'typescript';
 
     await this.ensureOpen(lang);
-    await this._sendNotification('textDocument/didOpen', {
-      textDocument: { uri: this._toUri(absPath), languageId, version: 1 }
-    }, lang);
+    await this._didOpen(absPath, lang, languageId);
 
     const result = await this._sendRequest('textDocument/hover', {
       textDocument: { uri: this._toUri(absPath) },
@@ -286,9 +280,7 @@ export class LspBridge {
     const languageId = cfg ? cfg.languageId : 'typescript';
 
     await this.ensureOpen(lang);
-    await this._sendNotification('textDocument/didOpen', {
-      textDocument: { uri: this._toUri(absPath), languageId, version: 1 }
-    }, lang);
+    await this._didOpen(absPath, lang, languageId);
 
     const result = await this._sendRequest('textDocument/definition', {
       textDocument: { uri: this._toUri(absPath) },
@@ -417,6 +409,7 @@ export class LspBridge {
         pending: new Map(),
         buffer: '',
         ready: false,
+        openedFiles: new Set(),  // tracks didOpen'd URIs to avoid redundant notifications
       };
       this._processes.set(lang, state);
 
@@ -502,6 +495,21 @@ export class LspBridge {
       const header = `Content-Length: ${Buffer.byteLength(msg, 'utf8')}\r\n\r\n`;
       state.process.stdin.write(header + msg);
     });
+  }
+
+  /**
+   * Send textDocument/didOpen notification with deduplication.
+   * Skips if the file URI was already opened for this LSP session.
+   */
+  async _didOpen(absPath, lang, languageId) {
+    const state = this._processes.get(lang);
+    if (!state) return;
+    const uri = this._toUri(absPath);
+    if (state.openedFiles.has(uri)) return;
+    state.openedFiles.add(uri);
+    await this._sendNotification('textDocument/didOpen', {
+      textDocument: { uri, languageId, version: 1 }
+    }, lang);
   }
 
   _sendNotification(method, params = {}, lang = 'typescript') {
