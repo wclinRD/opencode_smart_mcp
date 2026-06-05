@@ -2,7 +2,7 @@
 // 影響半徑分析：給定 git diff 或檔案列表 + 符號，分析改動影響哪些下游模組。
 // 使用 LSP references + call-graph 交叉比對。
 
-import { getLspBridge } from '../../lib/lsp-bridge.mjs';
+import { getLspBridge, closeAllLspBridges } from '../../lib/lsp-bridge.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -78,152 +78,156 @@ Supports both git-diff input and direct file+symbol queries. Uses LSP references
     required: [],
   },
   handler: async (args) => {
-    const root = args.root || process.cwd();
-    const bridge = getLspBridge(root);
-    const depth = Math.min(args.depth || 1, 3);
+    try {
+      const root = args.root || process.cwd();
+      const bridge = getLspBridge(root);
+      const depth = Math.min(args.depth || 1, 3);
 
-    // Step 1: Determine what changed
-    let changedFiles = [];
-    let targetSymbols = args.symbols || [];
+      // Step 1: Determine what changed
+      let changedFiles = [];
+      let targetSymbols = args.symbols || [];
 
-    if (args.diff) {
-      changedFiles = parseDiff(args.diff);
-    } else if (args.files && args.files.length > 0) {
-      changedFiles = args.files.map(f => ({ file: f, startLine: 0, lineCount: 0 }));
-    } else {
-      return 'Provide either "diff" (git diff text) or "files" (array of file paths).';
-    }
-
-    if (changedFiles.length === 0) {
-      return 'No changes detected.';
-    }
-
-    // Step 2: Get symbols for changed files
-    const directImpacts = [];
-    const visited = new Set();
-
-    for (const change of changedFiles) {
-      const file = change.file;
-      if (!existsSync(resolve(root, file))) continue;
-
-      const symbols = targetSymbols.length > 0
-        ? targetSymbols.map(s => ({ name: s }))
-        : await getFileSymbols(bridge, file);
-
-      for (const sym of symbols) {
-        if (!sym.name) continue;
-
-        // Get references (who uses this symbol)
-        try {
-          const refs = await bridge.getReferences(file, sym.line || 1, sym.col || 0);
-          const callers = (refs.references || [])
-            .filter(r => r.file !== resolve(root, file)) // exclude self
-            .map(r => ({
-              file: r.file,
-              line: r.line,
-              confidence: 'high',
-            }));
-
-          if (callers.length > 0) {
-            directImpacts.push({
-              changedFile: file,
-              symbol: sym.name,
-              impacted: callers,
-            });
-          }
-        } catch {
-          // LSP might not have the file open
-        }
+      if (args.diff) {
+        changedFiles = parseDiff(args.diff);
+      } else if (args.files && args.files.length > 0) {
+        changedFiles = args.files.map(f => ({ file: f, startLine: 0, lineCount: 0 }));
+      } else {
+        return 'Provide either "diff" (git diff text) or "files" (array of file paths).';
       }
-    }
 
-    // Step 3: Compute transitive impacts if depth > 1
-    let transitiveImpacts = [];
-    if (depth > 1) {
-      for (const impact of directImpacts) {
-        for (const caller of impact.impacted) {
-          const key = `${caller.file}`;
-          if (visited.has(key)) continue;
-          visited.add(key);
+      if (changedFiles.length === 0) {
+        return 'No changes detected.';
+      }
 
-          // Get symbols in impacted file
-          const callerSymbols = await getFileSymbols(bridge, caller.file);
-          for (const csym of callerSymbols) {
-            if (csym.kind !== 'function' && csym.kind !== 'class') continue;
-            try {
-              const refs = await bridge.getReferences(caller.file, csym.line || 1, csym.col || 0);
-              const transitive = (refs.references || [])
-                .filter(r => r.file !== resolve(root, caller.file))
-                .map(r => ({ file: r.file, line: r.line }));
+      // Step 2: Get symbols for changed files
+      const directImpacts = [];
+      const visited = new Set();
 
-              if (transitive.length > 0) {
-                transitiveImpacts.push({
-                  via: caller.file,
-                  symbol: csym.name,
-                  impacted: transitive,
-                });
-              }
-            } catch { /* skip */ }
+      for (const change of changedFiles) {
+        const file = change.file;
+        if (!existsSync(resolve(root, file))) continue;
+
+        const symbols = targetSymbols.length > 0
+          ? targetSymbols.map(s => ({ name: s }))
+          : await getFileSymbols(bridge, file);
+
+        for (const sym of symbols) {
+          if (!sym.name) continue;
+
+          // Get references (who uses this symbol)
+          try {
+            const refs = await bridge.getReferences(file, sym.line || 1, sym.col || 0);
+            const callers = (refs.references || [])
+              .filter(r => r.file !== resolve(root, file)) // exclude self
+              .map(r => ({
+                file: r.file,
+                line: r.line,
+                confidence: 'high',
+              }));
+
+            if (callers.length > 0) {
+              directImpacts.push({
+                changedFile: file,
+                symbol: sym.name,
+                impacted: callers,
+              });
+            }
+          } catch {
+            // LSP might not have the file open
           }
         }
       }
-    }
 
-    // Step 4: De-duplicate
-    const allImpactedFiles = new Set();
-    for (const di of directImpacts) {
-      for (const imp of di.impacted) allImpactedFiles.add(imp.file);
-    }
-    for (const ti of transitiveImpacts) {
-      for (const imp of ti.impacted) allImpactedFiles.add(imp.file);
-    }
+      // Step 3: Compute transitive impacts if depth > 1
+      let transitiveImpacts = [];
+      if (depth > 1) {
+        for (const impact of directImpacts) {
+          for (const caller of impact.impacted) {
+            const key = `${caller.file}`;
+            if (visited.has(key)) continue;
+            visited.add(key);
 
-    const output = {
-      direct: directImpacts,
-      transitive: transitiveImpacts,
-      totalFiles: allImpactedFiles.size,
-      totalSymbols: directImpacts.length,
-      depth,
-      confidence: depth <= 1 ? 'high' : 'medium',
-    };
+            // Get symbols in impacted file
+            const callerSymbols = await getFileSymbols(bridge, caller.file);
+            for (const csym of callerSymbols) {
+              if (csym.kind !== 'function' && csym.kind !== 'class') continue;
+              try {
+                const refs = await bridge.getReferences(caller.file, csym.line || 1, csym.col || 0);
+                const transitive = (refs.references || [])
+                  .filter(r => r.file !== resolve(root, caller.file))
+                  .map(r => ({ file: r.file, line: r.line }));
 
-    if (args.format === 'json') {
-      return JSON.stringify(output, null, 2);
-    }
-
-    // Text format
-    let text = `Impact Analysis (depth=${depth})\n`;
-    text += '─'.repeat(50) + '\n';
-
-    if (directImpacts.length === 0) {
-      text += 'No downstream impacts detected. Safe to modify.\n';
-      return text;
-    }
-
-    text += `\n⚠️  ${allImpactedFiles.size} file(s) potentially impacted:\n\n`;
-
-    for (const di of directImpacts) {
-      text += `  ${di.symbol} changed in ${di.changedFile}\n`;
-      for (const imp of di.impacted) {
-        const shortFile = imp.file.replace(root, '').replace(/^\//, '');
-        text += `    ← ${shortFile}:L${imp.line}\n`;
+                if (transitive.length > 0) {
+                  transitiveImpacts.push({
+                    via: caller.file,
+                    symbol: csym.name,
+                    impacted: transitive,
+                  });
+                }
+              } catch { /* skip */ }
+            }
+          }
+        }
       }
-      text += '\n';
-    }
 
-    if (transitiveImpacts.length > 0) {
-      text += `\nTransitive impacts (depth ${depth}):\n`;
+      // Step 4: De-duplicate
+      const allImpactedFiles = new Set();
+      for (const di of directImpacts) {
+        for (const imp of di.impacted) allImpactedFiles.add(imp.file);
+      }
       for (const ti of transitiveImpacts) {
-        const shortVia = ti.via.replace(root, '').replace(/^\//, '');
-        text += `  via ${shortVia} → ${ti.symbol}\n`;
-        for (const imp of ti.impacted) {
+        for (const imp of ti.impacted) allImpactedFiles.add(imp.file);
+      }
+
+      const output = {
+        direct: directImpacts,
+        transitive: transitiveImpacts,
+        totalFiles: allImpactedFiles.size,
+        totalSymbols: directImpacts.length,
+        depth,
+        confidence: depth <= 1 ? 'high' : 'medium',
+      };
+
+      if (args.format === 'json') {
+        return JSON.stringify(output, null, 2);
+      }
+
+      // Text format
+      let text = `Impact Analysis (depth=${depth})\n`;
+      text += '─'.repeat(50) + '\n';
+
+      if (directImpacts.length === 0) {
+        text += 'No downstream impacts detected. Safe to modify.\n';
+        return text;
+      }
+
+      text += `\n⚠️  ${allImpactedFiles.size} file(s) potentially impacted:\n\n`;
+
+      for (const di of directImpacts) {
+        text += `  ${di.symbol} changed in ${di.changedFile}\n`;
+        for (const imp of di.impacted) {
           const shortFile = imp.file.replace(root, '').replace(/^\//, '');
           text += `    ← ${shortFile}:L${imp.line}\n`;
         }
+        text += '\n';
       }
-    }
 
-    text += `\nConfidence: ${output.confidence}`;
-    return text;
+      if (transitiveImpacts.length > 0) {
+        text += `\nTransitive impacts (depth ${depth}):\n`;
+        for (const ti of transitiveImpacts) {
+          const shortVia = ti.via.replace(root, '').replace(/^\//, '');
+          text += `  via ${shortVia} → ${ti.symbol}\n`;
+          for (const imp of ti.impacted) {
+            const shortFile = imp.file.replace(root, '').replace(/^\//, '');
+            text += `    ← ${shortFile}:L${imp.line}\n`;
+          }
+        }
+      }
+
+      text += `\nConfidence: ${output.confidence}`;
+      return text;
+    } finally {
+      await closeAllLspBridges();
+    }
   },
 };

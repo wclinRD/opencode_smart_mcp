@@ -11,6 +11,7 @@
 // - Supports refactor-safe-flow workflow template
 
 import { ImpactEngine } from '../../lib/impact-engine.mjs';
+import { closeAllLspBridges } from '../../lib/lsp-bridge.mjs';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -39,57 +40,61 @@ Output: structured JSON with direct/transitive impacts, affected test files, con
     required: [],
   },
   handler: async (args) => {
-    const root = args.root || process.cwd();
-    const depth = args.depth ?? 2;
-    const doPredictTests = args.predictTests !== false;
-    const format = args.format || 'text';
+    try {
+      const root = args.root || process.cwd();
+      const depth = args.depth ?? 2;
+      const doPredictTests = args.predictTests !== false;
+      const format = args.format || 'text';
 
-    const engine = new ImpactEngine(root);
+      const engine = new ImpactEngine(root);
 
-    // Determine input mode
-    let result;
+      // Determine input mode
+      let result;
 
-    if (args.diff) {
-      result = await engine.analyzeImpact({
-        diff: args.diff,
-        depth,
-        predictTests: doPredictTests,
-      });
-    } else if (args.files && args.files.length > 0) {
-      result = await engine.analyzeImpact({
-        files: args.files,
-        symbols: args.symbols,
-        depth,
-        predictTests: doPredictTests,
-      });
-    } else {
-      return 'Provide either "diff" (git diff text) or "files" (array of file paths).';
+      if (args.diff) {
+        result = await engine.analyzeImpact({
+          diff: args.diff,
+          depth,
+          predictTests: doPredictTests,
+        });
+      } else if (args.files && args.files.length > 0) {
+        result = await engine.analyzeImpact({
+          files: args.files,
+          symbols: args.symbols,
+          depth,
+          predictTests: doPredictTests,
+        });
+      } else {
+        return 'Provide either "diff" (git diff text) or "files" (array of file paths).';
+      }
+
+      if (format === 'json') {
+        return JSON.stringify(result, null, 2);
+      }
+
+      // Text format — use the engine's built-in summary
+      let text = result.summary;
+
+      // If no impact, summarize empty result
+      if (result.impact.stats.totalImpactedFiles === 0 && !result.summary.includes('No changes')) {
+        text = 'No downstream impact detected. Safe to modify.';
+      }
+
+      // Append engine metadata
+      text += `\n\nEngine: impact-flow (depth=${depth}, predictTests=${doPredictTests})`;
+      text += `\nImpact source: ${result.impact.stats.source}`;
+
+      // Append full detail for JSON-level data
+      if (result.impact.direct.length > 0 && depth > 1) {
+        // Only show full detail for non-trivial results
+        const totalDirect = result.impact.stats.totalDirectSymbols;
+        const totalTransitive = result.impact.stats.totalTransitiveSymbols;
+        text += `\nTotal: ${totalDirect} direct + ${totalTransitive} transitive calls across ${result.impact.stats.totalImpactedFiles} files`;
+      }
+
+      return text;
+    } finally {
+      await closeAllLspBridges();
     }
-
-    if (format === 'json') {
-      return JSON.stringify(result, null, 2);
-    }
-
-    // Text format — use the engine's built-in summary
-    let text = result.summary;
-
-    // If no impact, summarize empty result
-    if (result.impact.stats.totalImpactedFiles === 0 && !result.summary.includes('No changes')) {
-      text = 'No downstream impact detected. Safe to modify.';
-    }
-
-    // Append engine metadata
-    text += `\n\nEngine: impact-flow (depth=${depth}, predictTests=${doPredictTests})`;
-    text += `\nImpact source: ${result.impact.stats.source}`;
-
-    // Append full detail for JSON-level data
-    if (result.impact.direct.length > 0 && depth > 1) {
-      // Only show full detail for non-trivial results
-      const totalDirect = result.impact.stats.totalDirectSymbols;
-      const totalTransitive = result.impact.stats.totalTransitiveSymbols;
-      text += `\nTotal: ${totalDirect} direct + ${totalTransitive} transitive calls across ${result.impact.stats.totalImpactedFiles} files`;
-    }
-
-    return text;
   },
 };

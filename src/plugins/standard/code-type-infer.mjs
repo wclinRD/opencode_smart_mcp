@@ -2,7 +2,7 @@
 // 給定檔案 + 位置，使用 LSP hover 取得型別資訊。
 // 跨檔案的型別推導依賴 LSP 的型別檢查器。
 
-import { getLspBridge } from '../../lib/lsp-bridge.mjs';
+import { getLspBridge, closeAllLspBridges } from '../../lib/lsp-bridge.mjs';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -24,31 +24,35 @@ Uses LSP hover capability. Requires a running TypeScript LSP server.`,
     required: ['file', 'line'],
   },
   handler: async (args) => {
-    const root = args.root || process.cwd();
-    const absPath = resolve(root, args.file);
-    if (!existsSync(absPath)) {
-      return `File not found: ${args.file}`;
+    try {
+      const root = args.root || process.cwd();
+
+      if (!existsSync(resolve(root, args.file))) {
+        return `File not found: ${args.file}`;
+      }
+
+      const bridge = getLspBridge(root);
+      const result = await bridge.getHover(args.file, args.line, args.col || 0);
+
+      if (args.format === 'json') {
+        return JSON.stringify(result, null, 2);
+      }
+
+      if (result.error) return result.error;
+      if (!result.type) {
+        return `No type information at ${args.file}:L${args.line}`;
+      }
+
+      let text = `Type at ${args.file}:L${args.line}`;
+      if (result.range) {
+        text += `:C${result.range.start.col}-C${result.range.end.col}`;
+      }
+      text += '\n' + '─'.repeat(40) + '\n';
+      text += result.type;
+
+      return text;
+    } finally {
+      await closeAllLspBridges();
     }
-
-    const bridge = getLspBridge(root);
-    const result = await bridge.getHover(args.file, args.line, args.col || 0);
-
-    if (args.format === 'json') {
-      return JSON.stringify(result, null, 2);
-    }
-
-    if (result.error) return result.error;
-    if (!result.type) {
-      return `No type information at ${args.file}:L${args.line}`;
-    }
-
-    let text = `Type at ${args.file}:L${args.line}`;
-    if (result.range) {
-      text += `:C${result.range.start.col}-C${result.range.end.col}`;
-    }
-    text += '\n' + '─'.repeat(40) + '\n';
-    text += result.type;
-
-    return text;
   },
 };

@@ -18,6 +18,7 @@ import {
   mergeResults,
   extractSymbols,
 } from '../../lib/hybrid-engine.mjs';
+import { closeAllLspBridges } from '../../lib/lsp-bridge.mjs';
 
 // ---------------------------------------------------------------------------
 // Plugin Definition
@@ -76,82 +77,86 @@ Examples:
     required: ['question'],
   },
   handler: async (args) => {
-    const question = args.question;
-    const root = args.root || process.cwd();
-    const files = args.files || [];
-    const symbols = args.symbols || extractSymbols(question);
-    const format = args.format || 'text';
+    try {
+      const question = args.question;
+      const root = args.root || process.cwd();
+      const files = args.files || [];
+      const symbols = args.symbols || extractSymbols(question);
+      const format = args.format || 'text';
 
-    if (!question) {
-      return format === 'json'
-        ? JSON.stringify({ error: 'question is required' })
-        : 'Error: question is required.';
-    }
-
-    // Step 1: Classify the question
-    const classification = classifyQuestion(question, { files, symbols });
-
-    // Step 2: Generate execution plan
-    const plan = planPath(classification, question, { root, files, symbols });
-
-    // Step 3: Execute deterministic tools
-    const execResult = await executePlan(plan);
-
-    // Step 4: Merge outputs
-    const merged = mergeResults(classification, execResult, question);
-
-    if (format === 'json') {
-      return JSON.stringify(merged, null, 2);
-    }
-
-    // Build human-readable text output
-    let text = '';
-
-    // Header with classification
-    if (classification.isHybrid) {
-      text += `🔀 Hybrid Analysis`;
-    } else {
-      text += `🎯 Deterministic Analysis`;
-    }
-    text += ` — ${classification.description}\n`;
-    text += `${'─'.repeat(60)}\n`;
-
-    // Classification info
-    text += `\nCategory:   ${classification.category}`;
-    text += `\nConfidence: ${Math.round(classification.confidence * 100)}%`;
-    text += `\nDuration:   ${merged.metadata.duration}ms`;
-    text += `\nTools:      ${merged.metadata.toolsUsed} executed, ${merged.metadata.toolsErrored} errors`;
-    text += '\n';
-
-    // Answer
-    text += `\n${merged.answer}\n`;
-
-    // Source attribution
-    if (merged.sources.length > 0) {
-      text += `\n${'─'.repeat(60)}`;
-      text += '\nSources:\n';
-      for (const src of merged.sources.slice(0, 8)) {
-        const status = src.hasData ? '✓' : (src.error ? '✗' : '·');
-        const confidence = src.confidence ? ` (${Math.round(src.confidence * 100)}%)` : '';
-        text += `  ${status} ${src.tool}${confidence}\n`;
+      if (!question) {
+        return format === 'json'
+          ? JSON.stringify({ error: 'question is required' })
+          : 'Error: question is required.';
       }
-    }
 
-    // Errors
-    if (merged._raw?.errors?.length > 0) {
-      text += `\n⚠️  ${merged._raw.errors.length} tool error(s):\n`;
-      for (const err of merged._raw.errors.slice(0, 3)) {
-        text += `  ${err.tool}: ${err.error.slice(0, 100)}\n`;
+      // Step 1: Classify the question
+      const classification = classifyQuestion(question, { files, symbols });
+
+      // Step 2: Generate execution plan
+      const plan = planPath(classification, question, { root, files, symbols });
+
+      // Step 3: Execute deterministic tools
+      const execResult = await executePlan(plan);
+
+      // Step 4: Merge outputs
+      const merged = mergeResults(classification, execResult, question);
+
+      if (format === 'json') {
+        return JSON.stringify(merged, null, 2);
       }
-    }
 
-    // Guidance for hybrid mode
-    if (classification.isHybrid) {
-      text += `\n${'─'.repeat(60)}`;
-      text += `\n💡 This is a hybrid query. The deterministic context above can be fed to an LLM for deeper analysis.\n`;
-      text += `   Alternatively, refine your question with file/symbol context: add files=[...] or improve phrasing.\n`;
-    }
+      // Build human-readable text output
+      let text = '';
 
-    return text;
+      // Header with classification
+      if (classification.isHybrid) {
+        text += `🔀 Hybrid Analysis`;
+      } else {
+        text += `🎯 Deterministic Analysis`;
+      }
+      text += ` — ${classification.description}\n`;
+      text += `${'─'.repeat(60)}\n`;
+
+      // Classification info
+      text += `\nCategory:   ${classification.category}`;
+      text += `\nConfidence: ${Math.round(classification.confidence * 100)}%`;
+      text += `\nDuration:   ${merged.metadata.duration}ms`;
+      text += `\nTools:      ${merged.metadata.toolsUsed} executed, ${merged.metadata.toolsErrored} errors`;
+      text += '\n';
+
+      // Answer
+      text += `\n${merged.answer}\n`;
+
+      // Source attribution
+      if (merged.sources.length > 0) {
+        text += `\n${'─'.repeat(60)}`;
+        text += '\nSources:\n';
+        for (const src of merged.sources.slice(0, 8)) {
+          const status = src.hasData ? '✓' : (src.error ? '✗' : '·');
+          const confidence = src.confidence ? ` (${Math.round(src.confidence * 100)}%)` : '';
+          text += `  ${status} ${src.tool}${confidence}\n`;
+        }
+      }
+
+      // Errors
+      if (merged._raw?.errors?.length > 0) {
+        text += `\n⚠️  ${merged._raw.errors.length} tool error(s):\n`;
+        for (const err of merged._raw.errors.slice(0, 3)) {
+          text += `  ${err.tool}: ${err.error.slice(0, 100)}\n`;
+        }
+      }
+
+      // Guidance for hybrid mode
+      if (classification.isHybrid) {
+        text += `\n${'─'.repeat(60)}`;
+        text += `\n💡 This is a hybrid query. The deterministic context above can be fed to an LLM for deeper analysis.\n`;
+        text += `   Alternatively, refine your question with file/symbol context: add files=[...] or improve phrasing.\n`;
+      }
+
+      return text;
+    } finally {
+      await closeAllLspBridges();
+    }
   },
 };

@@ -2,7 +2,7 @@
 // 給定函式名稱 + 檔案，追蹤 caller/callee 鏈。
 // 使用 LSP textDocument/references 為基礎，遞迴追蹤跨檔案呼叫關係。
 
-import { getLspBridge } from '../../lib/lsp-bridge.mjs';
+import { getLspBridge, closeAllLspBridges } from '../../lib/lsp-bridge.mjs';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -97,46 +97,50 @@ Supports configurable depth (1-3 levels) and cross-file tracking. Cannot determi
     required: ['file', 'symbol'],
   },
   handler: async (args) => {
-    const root = args.root || process.cwd();
-    const absPath = resolve(root, args.file);
-    if (!existsSync(absPath)) {
-      return `File not found: ${args.file} (resolved: ${absPath})`;
-    }
+    try {
+      const root = args.root || process.cwd();
+      const absPath = resolve(root, args.file);
+      if (!existsSync(absPath)) {
+        return `File not found: ${args.file} (resolved: ${absPath})`;
+      }
 
-    const bridge = getLspBridge(root);
-    const direction = args.direction || 'callers';
-    const depth = Math.min(args.depth || 1, 3);
-    const visited = new Set();
+      const bridge = getLspBridge(root);
+      const direction = args.direction || 'callers';
+      const depth = Math.min(args.depth || 1, 3);
+      const visited = new Set();
 
-    const callers = await buildGraph(
-      bridge, args.file, args.symbol, direction,
-      1, depth, visited, root
-    );
+      const callers = await buildGraph(
+        bridge, args.file, args.symbol, direction,
+        1, depth, visited, root
+      );
 
-    const output = {
-      root: { file: args.file, symbol: args.symbol },
-      direction,
-      depth,
-      [direction]: callers,
-    };
+      const output = {
+        root: { file: args.file, symbol: args.symbol },
+        direction,
+        depth,
+        [direction]: callers,
+      };
 
-    if (args.format === 'json') {
-      return JSON.stringify(output, null, 2);
-    }
+      if (args.format === 'json') {
+        return JSON.stringify(output, null, 2);
+      }
 
-    // Text format
-    let text = `Call Graph: ${args.symbol}() in ${args.file}\n`;
-    text += `Direction: ${direction}  Depth: ${depth}\n`;
-    text += '─'.repeat(50) + '\n';
+      // Text format
+      let text = `Call Graph: ${args.symbol}() in ${args.file}\n`;
+      text += `Direction: ${direction}  Depth: ${depth}\n`;
+      text += '─'.repeat(50) + '\n';
 
-    if (callers.length === 0) {
-      text += `No ${direction} found.`;
+      if (callers.length === 0) {
+        text += `No ${direction} found.`;
+        return text;
+      }
+
+      text += `${direction === 'callers' ? 'Called by:' : 'Calls:'}\n`;
+      text += formatGraph(null, callers, direction, 0);
+
       return text;
+    } finally {
+      await closeAllLspBridges();
     }
-
-    text += `${direction === 'callers' ? 'Called by:' : 'Calls:'}\n`;
-    text += formatGraph(null, callers, direction, 0);
-
-    return text;
   },
 };

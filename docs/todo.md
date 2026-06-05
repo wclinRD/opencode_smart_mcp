@@ -1018,7 +1018,8 @@
 - [x] **Bug fix**: applyUnifiedDiff 遺漏 context 行（` ` line）→ 加入 addLines 保留
 - [x] **Bug fix**: smart_context response 被 TOON 優化破壞 JSON.parse → respond() 加 `{optimize: false}` 參數
 - [x] **Bug fix**: hybrid-engine + impact-engine tests 用完 LSP bridge 未關閉 → after() hook closeAllLspBridges
-- [x] 22/22 tests pass (2026-06-05)
+- [x] **Bug fix**: hybrid-router + impact-flow + code-ast/code-type-infer/code-call-graph/code-impact handler 沒關 LSP bridge → 全部加 `finally { closeAllLspBridges() }` (2026-06-06)
+- [x] 29/29 tests pass (2026-06-06)
 
 ### F.4 競爭定位檢查清單
 

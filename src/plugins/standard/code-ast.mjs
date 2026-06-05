@@ -2,7 +2,7 @@
 // 給定檔案和可選符號，回傳 AST 結構定義位置。
 // 使用 LSP documentSymbol 實現，後續換 Tree-sitter。
 
-import { getLspBridge } from '../../lib/lsp-bridge.mjs';
+import { getLspBridge, closeAllLspBridges } from '../../lib/lsp-bridge.mjs';
 
 /** Format a single symbol node as text */
 function formatSymbol(sym, indent = '') {
@@ -49,42 +49,46 @@ Phase 10: LSP-based code intelligence tool.`,
     required: ['file'],
   },
   handler: async (args) => {
-    const root = args.root || process.cwd();
-    const bridge = getLspBridge(root);
+    try {
+      const root = args.root || process.cwd();
+      const bridge = getLspBridge(root);
 
-    const result = await bridge.getSymbols(args.file);
-    if (result.error) return result.error;
+      const result = await bridge.getSymbols(args.file);
+      if (result.error) return result.error;
 
-    let symbols = result.symbols;
-    if (args.symbol) {
-      symbols = symbols.filter(s => s.name === args.symbol || s.signature?.includes(args.symbol));
+      let symbols = result.symbols;
+      if (args.symbol) {
+        symbols = symbols.filter(s => s.name === args.symbol || s.signature?.includes(args.symbol));
+      }
+      if (args.kind) {
+        symbols = symbols.filter(s => s.kind === args.kind);
+      }
+      if (!args.recursive && args.recursive !== undefined) {
+        symbols = symbols.map(s => ({ ...s, children: undefined }));
+      }
+
+      const output = { file: args.file, symbols };
+
+      if (args.format === 'json') {
+        return JSON.stringify(output, null, 2);
+      }
+
+      // Text format
+      if (symbols.length === 0) {
+        return `No symbols found in ${args.file}` + (args.symbol ? ` matching "${args.symbol}"` : '');
+      }
+
+      let text = `📄 ${args.file} — ${symbols.length} symbol(s)`;
+      if (args.symbol) text += ` matching "${args.symbol}"`;
+      text += '\n' + '─'.repeat(50) + '\n';
+
+      for (const sym of symbols) {
+        text += formatSymbol(sym) + '\n';
+      }
+
+      return text;
+    } finally {
+      await closeAllLspBridges();
     }
-    if (args.kind) {
-      symbols = symbols.filter(s => s.kind === args.kind);
-    }
-    if (!args.recursive && args.recursive !== undefined) {
-      symbols = symbols.map(s => ({ ...s, children: undefined }));
-    }
-
-    const output = { file: args.file, symbols };
-
-    if (args.format === 'json') {
-      return JSON.stringify(output, null, 2);
-    }
-
-    // Text format
-    if (symbols.length === 0) {
-      return `No symbols found in ${args.file}` + (args.symbol ? ` matching "${args.symbol}"` : '');
-    }
-
-    let text = `📄 ${args.file} — ${symbols.length} symbol(s)`;
-    if (args.symbol) text += ` matching "${args.symbol}"`;
-    text += '\n' + '─'.repeat(50) + '\n';
-
-    for (const sym of symbols) {
-      text += formatSymbol(sym) + '\n';
-    }
-
-    return text;
   },
 };
