@@ -208,13 +208,15 @@ src/
 | **錯誤診斷** | LLM 推理 | **Memory-based + pattern KB + auto-store** | 🟢 Smart |
 | **影響分析** | 無結構化 | **Change-Impact Pipeline (diff → CKG → test predict)** | 🟢 Smart |
 | **工具組合** | 線性 sequence | **Compose Engine (seq/par/cond)** | 🟢 Smart |
-| **模型能力** | Opus 4.6 (80.8% SWE-bench) | 依賴 host 模型 | 🔴 Claude |
+| **模型能力** | Opus 4.7 (87.6% SWE-Bench), Opus 4.8 (browser SoTA) | 依賴 host 模型 | 🔴 Claude |
 | **Context 視窗** | 1M tokens | 依賴 host | 🔴 Claude |
-| **生態系** | Skills + Hooks + Plugins + Marketplace | 無 | 🔴 Claude |
-| **產品面** | 終端 + IDE + Desktop + Web + Slack | 僅 opencode 內 | 🔴 Claude |
+| **多代理/平行** | Multi-Agent Orchestration, Agent Teams, 平行 session, Git worktree 隔離 | compose-engine par mode + workflow dispatch | 🟡 部分 |
+| **生態系** | Skills + Hooks + Plugins + Marketplace + 遠端遙控 | 無（smart-agent 未發布） | 🔴 Claude |
+| **排程/自動化** | 雲端 cron, PR auto-fix/auto-merge, /loop, 排程 tasks | 無 | 🔴 Claude |
+| **記憶系統** | CLAUDE.md + /memory + Dreaming (跨 session 自我學習) | Vector search + Pattern abstraction + Cross-session merge | 🟢 Smart |
+| **產品面** | 終端 + IDE + Desktop + Web + Slack + Channels (TG/Discord/iMessage) + 行動遙控 | 僅 opencode 內 (stdio MCP) | 🔴 Claude |
 | **企業功能** | SSO, HIPAA, Audit, SCIM | 無 | 🔴 Claude |
 | **社群採用** | 46% "most loved", 18% adoption, $2.5B+ ARR | 單人專案 | 🔴 Claude |
-| **子代理系統** | Subagents + Agent Teams + SDK | 依賴 opencode | 🔴 Claude |
 
 ### B.2 Smart MCP 的 5 個架構級 Moats
 
@@ -278,16 +280,19 @@ Smart MCP:   seq + par + cond 三種組合原語
 - 條件分支：根據前一步結果自動決定下一步
 - Pipeline 組合：workflow + compose 多層編排
 
-### B.3 缺口分析
+### B.3 缺口分析 (2026-06-05 更新)
 
 | 缺口 | 嚴重性 | 影響 | 對應策略 |
 |------|--------|------|---------|
-| 無 Multi-Model Orchestration | 🔴 高 | 所有 query 走 LLM，成本高、速度慢 | Phase 14 (P0) |
-| CKG 多語言擴充中 | 🟡 中 | 已支援 TS/JS/Rust/Python/Swift，缺 Go | Phase A |
-| 無子代理系統 | 🟠 中 | 無法平行獨立任務 | 依賴 opencode |
-| 無 Tool Marketplace | 🟡 低 | 第三方無法貢獻工具 | Phase B |
-| 無互動式 CLI | 🟡 低 | 開發者體驗不如 Claude Code | Phase B |
-| 語言助手僅 Python/TS | 🟢 低 | 已擴充 Rust (rs-helper)，尚缺 Go | Phase A |
+| CKG moat 未極大化 | 🔴 高 | CKG 是最強差異化，但 build 速度未驗證、使用模式未歸納、無測試地圖 | C.1/C.2/C.3 |
+| 記憶未自動化 | 🟠 中 | 已有 vector+pattern+merge，但非預設行為（僅 error-diagnose 整合） | Memory 強化 |
+| 無 npm package | 🟠 中 | smart-agent 程式碼完成但未發布，無法形成生態 | Phase H |
+| Change-Impact 未驗收 | 🟡 中 | pipeline 已建置但驗收標準未過（AST 正確率、傳播延遲） | Phase 13 |
+| 無 Fast Apply 工具 | 🟠 中 | LLM 修改程式碼只能逐字編輯，無統一 diff/SEARCH-REPLACE apply | Phase F |
+| 無 Plugin Registry | 🟡 低 | 第三方無法貢獻工具 | Phase B |
+| 缺 Go 語言支援 | 🟢 低 | 依賴 gopls 安裝，使用者少 | Phase A |
+| 無排程/自動化 | 🟢 低 | Claude Code 有雲端 cron + PR auto-fix | 未來 |
+| 子代理/平行 | 🟢 低 | 需 opencode 支援，短期效益有限 | 依賴 host |
 
 ### B.4 戰略定位
 
@@ -322,7 +327,90 @@ Smart MCP:   seq + par + cond 三種組合原語
                    │  Mem ── 經驗記憶 │
                    │  Wf  ── 工作流   │
                    │  CI  ── 影響分析 │
-                   └─────────────────┘
+                    └─────────────────┘
+```
+
+### B.5 2026 競爭更新：Claude Code 新能力 vs Smart MCP 回應
+
+> 基於 2026 年 6 月 Claude Code v2.1.x 生態調查。Smart MCP 不應直接競爭 Claude Code 擅長的領域（模型能力、產品面），而應最大化架構 moats。
+
+#### Claude Code 2026 關鍵進展
+
+| 類別 | Claude Code 新能力 | 威脅 | Smart MCP 對應策略 |
+|------|-------------------|------|-------------------|
+| **模型** | Opus 4.7 (87.6% SWE-Bench), Opus 4.8 | 🔴 無法競爭 | 不投入，靠 host 模型 |
+| **多代理** | Multi-Agent Orchestration, Agent Teams, 平行 session | 🟡 部分可補 | compose-engine par 已存在，高層編排需 opencode |
+| **記憶** | Dreaming: 跨 session 自我改進記憶 | 🟡 已有對應 | 將現有 vector+pattern 產品化為預設行為 |
+| **排程** | 雲端 cron 任務, PR auto-fix/auto-merge | 🟢 非核心 | 可透過 workflow + cron 實現 |
+| **生態** | Plugin marketplace, Skills 成熟化, 遠端遙控, Channels | 🟡 可追趕 | npm publish smart-agent + Plugin Registry |
+| **產品** | Desktop app redesign, 平行 session sidebar, 語音, 行動遙控 | 🟢 非 MCP 範疇 | 不投入 |
+
+#### Smart MCP 仍持有的 3 個架構優勢
+
+1. **CKG 持久化程式碼圖譜** — Claude Code 每次 session 從零理解程式碼，無結構記憶
+2. **Hybrid Router 確定性路由** — 結構化問題 $0 解決，Claude Code 全部走 LLM
+3. **Change-Impact + Test Prediction** — 無結構化影響分析工具
+
+#### 需追趕的 2 個差距
+
+1. **記憶自動化** — Dreaming 做到「自動學習」，Smart MCP 記憶仍需手動呼叫
+2. **生態開放** — Skills/Plugins Marketplace，Smart MCP 的 smart-agent 未發布
+
+### B.6 戰略優先級三層框架（對應強化路線）
+
+```
+高 ROI ──────────────────────────────────────────►
+
+  Tier 1: 加深架構 Moats（Claude Code 做不到）
+  ┌─────────────────────────────────────────────┐
+  │  CKG 品質工具      記憶自動化              │
+  │  (測試地圖/健康      (auto-store/          │
+  │   儀表板/循環依賴)     pre-check)            │
+  │  Change-Impact 驗收                         │
+  └─────────────────────────────────────────────┘
+
+  Tier 2: 補齊生態差距（中等 effort）
+  ┌─────────────────────────────────────────────┐
+  │  npm publish smart-agent                    │
+  │  Plugin Registry (manifest + auto-scan)     │
+  │  CKG build speed benchmark                  │
+  └─────────────────────────────────────────────┘
+
+  Tier 3: 新功能躍進（雙向差異化）
+  ┌─────────────────────────────────────────────┐
+  │  CKG 視覺化 (smart_diagram 整合)            │
+  │  排程/自動化任務 (workflow + cron)          │
+  └─────────────────────────────────────────────┘
+
+  不做：
+  - 平行 session / Agent Teams（需 opencode 支援）
+  - Desktop app / 語音 / 行動（非 MCP server 範疇）
+  - 模型品質競爭（非 smart-mcp 職責）
+```
+
+#### 具體執行優先級
+
+```
+🔴 P0 (本週):
+  1. CKG build speed benchmark + 優化 (1000 files < 30s)
+  2. 記憶自動化: 所有工具失敗 auto-store，工具前 pre-check
+  3. C.1 使用模式歸納 (queryUsagePatterns → pattern induction)
+
+🟠 P1 (下週):
+  4. Fast Apply 工具: SEARCH/REPLACE block + unified diff apply
+  5. npm publish smart-agent (README + npm publish)
+  6. Change-Impact 驗收標準通過 (AST diff >95%, 傳播 <200ms)
+  7. C.2 CKG 測試覆蓋率地圖 (函式→測試映射)
+
+🟡 P2 (本月):
+  7. Plugin Registry (manifest schema + ~/.smart/plugins/ auto-scan)
+  8. C.3 CKG 健康儀表板 (循環依賴 + 技術債指數 + 未使用 export 趨勢)
+  9. CKG 視覺化 (smart_diagram 整合 CKG)
+
+⚪ 暫緩:
+  - go-helper (依賴 gopls, 使用者少)
+  - 排程/自動化任務 (需雲端基礎設施)
+  - Tree-sitter 替換 LSP (效益不高)
 ```
 
 ---
@@ -1716,19 +1804,20 @@ Smart MCP 是「理解程式碼的儀器」
 4. ✅ 記憶 + 自我學習
 5. ✅ Tool Composition Engine
 
-### 剩餘工作優先級
+### 剩餘工作優先級（2026-06-05 競爭分析更新）
 
-| 優先級 | 區塊 | 任務 | 預估工時 | 價值 |
-|--------|------|------|---------|------|
-| P0 | A.3 | CKG 效能優化 (build <10s, LRU 5000, mem <200MB) | 4h | 核心 moat 體驗提升 |
-| P0 | B.2 | Agent Personality v2 (CKG/cost/memory 感知) | 3h | 使用者感知價值最高 |
-| P1 | B.3 | Workflow 模板擴充 6→12 (5 新模板) | 2h | 快速產出，立即有感 |
-| P1 | C.1 | CKG-based 重構助手 (API 分析 + 遷移計畫) | 6h | 最強差異化功能 |
-| P2 | C.2 | 回歸測試預測強化 (CKG 測試覆蓋率 map) | 4h | 依賴 CKG 成熟度 |
-| P2 | C.3 | 程式碼健康儀表板 (健康報告 + 趨勢圖) | 4h | 依賴 CKG 成熟度 |
-| P2 | Phase 9 | Devtool 品質 (單元測試 + 效能監控) | 3h | 長期品質投資 |
-| P3 | B.1 | Tool Marketplace (manifest + registry + npm) | 8h | 需生態系，短期效益有限 |
-| P3 | Phase H | 文檔 + npm publish | 4h | 發布流程 |
+| 優先級 | 區塊 | 任務 | 預估工時 | 價值 | 戰略依據 |
+|--------|------|------|---------|------|---------|
+| **P0** | CKG | CKG build speed benchmark + 優化 (1000檔<30s, LRU 5000) | 4h | 🔴 CKG moat 體驗 | Claude Code 無法複製 |
+| **P0** | Memory | 記憶自動化: auto-store (所有工具失敗), pre-check (工具前) | 3h | 🔴 追趕 Dreaming | Claude Code Dreaming 剛出 |
+| **P0** | C.1 | CKG 使用模式歸納 (queryUsagePatterns → pattern induction) | 4h | 🔴 最強差異化 | Claude Code 做不到 |
+| **P1** | Phase H | npm publish smart-agent (README + npm publish) | 4h | 🟠 解鎖生態系 | 追趕 Skills/Plugins |
+| **P1** | Phase 13 | Change-Impact 驗收 (AST diff >95%, 傳播 <200ms) | 3h | 🟠 完成 moat | 已建立 pipeline |
+| **P1** | C.2 | CKG 測試覆蓋率地圖 (函式→測試映射 + 增量執行) | 6h | 🟠 殺手級功能 | Claude Code 只能猜 |
+| **P2** | C.3 | CKG 健康儀表板 (循環依賴 + 技術債指數 + 未使用 export) | 4h | 🟡 開發者日常工具 | CKG 變現 |
+| **P2** | Plugin | Plugin Registry (manifest + ~/.smart/plugins/ auto-scan) | 4h | 🟡 生態系補強 | 追趕 Marketplace |
+| **P2** | CKG | CKG 視覺化 (smart_diagram 整合 CKG graph) | 3h | 🟡 差異化 | Claude Code 無法畫圖 |
+| **P3** | Go | go-helper (gopls 分析) | 4h | 🟢 語言覆蓋 | 使用者少 |
 
 ### Sprint 計畫
 
@@ -1753,16 +1842,22 @@ Smart MCP 是「理解程式碼的儀器」
 | 記憶感知 | 工具錯誤時自動檢查 memory store | ✅ memory-aware error prevention |
 | Phase 9 | 補缺失測試 + smart/stats 端點擴充 (p50/p95/p99) | ✅ compose(9) + ckg(8) + lsp(7) + impact(10) = 34 tests |
 
-#### Sprint 3：殺手功能（進行中）
+#### Sprint 3：CKG Moat 加深（進行中）
 
-目標：打造 Claude Code 做不到的功能。
+目標：將 CKG 從基礎設施升級為開發者日常工具。
 
-| 任務 | 詳細 | 狀態 |
-|------|------|------|
-| C.1 重構助手 | API 使用分析 + 遷移計畫生成 + 安全閘門 | ⏳ queryUsagePatterns + refactor-planner + MCP tool done, CKG calls edge integration pending |
-| C.2 測試預測 | CKG 記錄函式→測試映射 + 增量執行 | ⏳ 待啟動 |
-| C.3 健康儀表板 | CKG 統計 + 技術債指數 + 循環依賴可視化 | ⏳ 待啟動 |
-| Phase H | 文檔補完 + npm publish smart-agent | 🔜 待啟動 |
+| 任務 | 詳細 | 優先級 | 狀態 |
+|------|------|--------|------|
+| CKG build speed benchmark | 建立大專案 (1000+ 檔) 效能測試 + LRU 快取擴充至 5000 筆 | P0 | 🔜 待啟動 |
+| 記憶自動化 | auto-store: 所有工具失敗自動寫入記憶; pre-check: 工具前自動查詢 | P0 | 🔜 待啟動 |
+| C.1 使用模式歸納 | queryUsagePatterns 輸出擴充: event-listener/factory/strategy 模式分類 | P0 | 🔜 待啟動 |
+| npm publish smart-agent | README.md + ARCHITECTURE.md + npm publish --access public | P1 | 🔜 待啟動 |
+| Fast Apply 工具 | SEARCH/REPLACE block + unified diff apply + 4 層模糊匹配 | P1 | 🔜 待啟動 |
+| Change-Impact 驗收 | AST diff 正確率 >95% benchmark + 傳播延遲 <200ms 驗證 | P1 | 🔜 待啟動 |
+| C.2 測試覆蓋率地圖 | CKG 記錄函式→測試映射 + 信心標記 + 增量執行 | P1 | 🔜 待啟動 |
+| C.3 健康儀表板 | 循環依賴檢測 + 技術債指數 + 未使用 export 趨勢 | P2 | 🔜 待啟動 |
+| CKG 視覺化 | smart_diagram 整合 CKG graph: module dependency / call graph / circular detection | P2 | 🔜 待啟動 |
+| Plugin Registry | manifest schema + ~/.smart/plugins/ auto-scan + smart_docker 參考實作 | P2 | 🔜 待啟動 |
 
 ### 不做（暫緩）
 

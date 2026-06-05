@@ -469,9 +469,9 @@
   - [x] `tests/lsp-bridge.test.mjs` — 7/7 測試通過（singleton/symbols/hover/error handling）
   - [x] `tests/impact-engine.test.mjs` — 10/10 測試通過（parseDiff/symbols/predict/analyze）
   - [x] 總計 34 測試，全部通過 (2026-06-05)
-- [ ] CI 整合：`smart_test` 可執行自身測試
+- [ ] CI 整合：`smart_test` 可執行自身測試（P2，本月）
 
-### 9.2 效能監控
+### 9.2 效能監控（P2，本月）
 
 - [ ] smart/stats 端點擴充
   - [ ] per-tool p50/p95/p99 延遲
@@ -717,10 +717,10 @@
   - [x] step 4: `smart_cross_file_edit` → 安全編輯
   - [x] step 5: `smart_test` → 驗證
 
-### 驗收標準
+### 驗收標準（P1 — 下週完成）
 
-- [ ] AST diff 正確識別變更符號 > 95%
-- [ ] Impact 傳播在 1000 檔案專案 < 200ms
+- [ ] AST diff 正確識別變更符號 > 95%（建立 benchmark）
+- [ ] Impact 傳播在 1000 檔案專案 < 200ms（大專案驗證）
 - [ ] 重構 workflow 能主動警示「此修改影響 X 個下游模組」
 
 ---
@@ -817,41 +817,150 @@
 
 ---
 
-## 🟡 Phase C: 競爭回應 — 殺手級獨特功能 (P2 中期)
+## 🔴 Phase C: 競爭回應 — CKG Moat 加深 (P0-P2)
 
-**對應 plan.md 五-Phase C**
-**目標**：將架構 moats 產品化，做 Claude Code 做不到的事
+**對應 plan.md 五-Phase C + B.6**
+**目標**：將 CKG 從基礎設施升級為開發者日常工具，做 Claude Code 做不到的事
+**戰略依據**: CKG 是 Smart MCP 最強架構 moat，Claude Code 每次 session 從零理解程式碼
 
-### C.1 CKG-based 重構助手（P2）⏳
+### C.0 CKG 基礎品質（P0 — 本週）
 
-- [x] API 使用分析：CKG 追蹤 API 所有使用位置
-  - [x] `queryUsagePatterns()` — 6 種模式分類 (direct/call/event-handler/class-method/module-init/factory/property-access)
-  - [ ] 使用模式歸納（事件監聽/工廠/策略）
-- [x] 遷移計畫生成（結構化步驟）
-  - [x] `refactor-planner.mjs` — generateMigrationPlan + estimateDifficulty
-  - [x] `smart_refactor_plan` MCP tool
-  - [x] 10/10 planner 單元測試通過
-- [ ] 安全閘門（影響 X 檔案需確認）
-- [ ] CKG 整合：buildReferences 建立 calls edge → queryUsagePatterns 可查
+- [ ] CKG build speed benchmark：建立大專案 (1000+ 檔) 效能測試
+  - [ ] 目標：1000 檔案 < 30 秒全量掃描
+  - [ ] LRU cache 擴充：500 → 5000 筆
+  - [ ] 大專案 (10000+ 檔) 增量更新測試
+  - [ ] 記憶體優化：分頁式節點載入
 
-### C.2 回歸測試預測強化（P2）
+### C.1 CKG 使用模式歸納（P0 — 本週）
+
+- [x] `queryUsagePatterns()` — 6 種模式分類 (direct/call/event-handler/class-method/module-init/factory/property-access)
+- [ ] 升級 pattern induction engine：從 queryUsagePatterns 原始輸出自動歸納
+  - [ ] event-listener 模式：`on('click', handler)` → `handler` 是 listener
+  - [ ] factory 模式：`createX()` → 回傳型別推斷工廠
+  - [ ] strategy 模式：多個實作同一 interface 互換
+- [x] `refactor-planner.mjs` — generateMigrationPlan + estimateDifficulty
+- [x] `smart_refactor_plan` MCP tool
+- [x] 10/10 planner 單元測試通過
+
+### C.2 CKG 測試覆蓋率地圖（P1 — 下週）
 
 - [ ] 測試覆蓋率 map：CKG 記錄函式被哪些測試覆蓋
   - [ ] 精確預測：修改 foo → 只跑相關測試
   - [ ] 信心標記：確定性 vs 推測
   - [ ] 增量執行：只跑受影響測試
 
-### C.3 程式碼健康儀表板（P2）
+### C.3 CKG 程式碼健康儀表板（P2 — 本月）
 
 - [ ] CKG 統計：函式數量、複雜度、依賴深度
-  - [ ] 未使用 exports 趨勢追蹤
+  - [ ] 未使用 exports 趨勢追蹤（跨 session）
   - [ ] 循環依賴檢測 + 可視化
   - [ ] 技術債指數（複合指標）
   - [ ] 跨 session 健康度趨勢圖
 
+### C.4 CKG 視覺化（P2 — 本月）
+
+- [ ] smart_diagram 整合 CKG graph
+  - [ ] module dependency graph（edges kind='imports'）
+  - [ ] call graph（edges kind='calls'）
+  - [ ] circular detection highlight
+
 ---
 
-## ✅ 已完成 (v3.7.1)
+## 🟠 Phase D: 記憶自動化（P0 — 追趕 Dreaming）
+
+**對應 plan.md B.6**
+**目標**：將記憶從被動查詢升級為主動行為，追趕 Claude Code Dreaming
+**現狀**: vector search + pattern abstraction + cross-session merge 已實作，但非預設行為
+
+### D.1 Auto-Store（P0）
+
+- [ ] 所有工具失敗時自動寫入記憶庫
+  - [ ] 攔截 `invokeTool` 回傳結果，失敗自動 `memory.store()`
+  - [ ] 自動分類（runtime/refactor/security/test/optimization）
+  - [ ] 自動建構 resolution 描述（含 error message + tool + resolution）
+
+### D.2 Pre-Check（P0）
+
+- [ ] 工具執行前自動查詢記憶庫
+  - [ ] `error-diagnose` 前自動 memory search（已實作 ✅）
+  - [ ] 擴充到所有工具：`debug`、`test`、`cross-file-edit` 前都查
+  - [ ] 高信心命中（≥0.8）直接回傳已知方案，跳過工具執行
+
+### D.3 記憶可視化（P1）
+
+- [ ] `smart_memory_store stats` 顯示命中率/覆蓋率/趨勢
+- [ ] `smart_memory_store dashboard` 顯示 top resolutions
+
+---
+
+## 🟠 Phase E: 生態系建立（P1 — 追趕 Marketplace）
+
+**對應 plan.md B.6**
+**目標**: npm publish smart-agent + Plugin Registry 基礎
+
+### E.1 npm publish smart-agent（P1 — 下週）
+
+- [ ] 撰寫 README.md（安裝指引 + 快速開始 + 模組說明 + API 參考 + FAQ）
+- [ ] 撰寫 ARCHITECTURE.md（系統架構 + 模組職責 + 與 smart-mcp 互動）
+- [ ] `npm publish --access public`
+- [ ] 驗證：`npm install smart-agent` 成功 + 直接可用
+
+### E.2 Plugin Registry 基礎（P2 — 本月）
+
+- [ ] Manifest 規範：name/version/tools/description/requires
+- [ ] Plugin Registry：`~/.smart/plugins/` 目錄掃描
+- [ ] 自動發現：server 啟動時掃描 plugins
+- [ ] 參考實作：`smart_docker` plugin
+- [ ] `smart_integrate list` 顯示已安裝 plugins
+
+---
+
+## 🔴 Phase F: Fast Apply 工具 (P1 — 加速 LLM 程式碼修改)
+
+**對應 plan.md B.3 + B.6 + Sprint 3**
+**目標**：讓 LLM 能快速準確 apply 程式碼修改，支援 SEARCH/REPLACE block + unified diff + fuzzy matching
+**現狀**: 只有 line-based cross_file_edit，無通用 diff apply 能力
+**戰略依據**: 直接影響 LLM 修改程式碼效率，Aider/Cursor/Morph 皆有專用 apply 層
+
+### F.1 apply-engine core（P1 — 下週）
+
+- [ ] `src/lib/apply-engine.mjs` — 核心引擎
+  - [ ] `parseSearchReplace(blocks)` — 解析 SEARCH/REPLACE block（Aider 相容格式）
+  - [ ] `parseUnifiedDiff(diff)` — 解析 unified diff 字串（git diff 格式）
+  - [ ] `fuzzyMatch(content, search)` — 4 層模糊匹配:
+    - L1: 精確行數匹配 (exact line match)
+    - L2: 精確字串搜尋 (exact string search)
+    - L3: 獨特內容行識別 (unique content line)
+    - L4: 逐行匹配 + 空白容忍 (whitespace-tolerant)
+  - [ ] `applySearchReplace(filePath, search, replace)` — 套用 SEARCH/REPLACE
+  - [ ] `applyUnifiedDiff(filePath, hunks)` — 套用 unified diff hunks
+  - [ ] `validateSyntax(filePath, content)` — LSP 語法驗證
+  - [ ] `applyAtomic(changes)` — 多檔案原子套用（all-or-nothing）
+  - [ ] `createUndoSnapshot(files)` — git-based undo
+  - [ ] `detectConflict(original, search)` — 衝突偵測 + 報告
+
+### F.2 MCP tool + CLI（P1 — 下週）
+
+- [ ] `src/plugins/standard/fast-apply.mjs` → `smart_fast_apply` MCP tool
+  - [ ] Input: `{ format, blocks?, diff?, whole?, fuzzy, validate, undo, atomic, files }`
+  - [ ] Output: `{ results: [{ file, status, diff, backup }], summary }`
+  - [ ] 支援三種輸入格式: search-replace / unified-diff / whole-file
+  - [ ] 安全機制: dry-run 預設, 確認後 apply
+  - [ ] smart-mcp.md agent def 加入描述
+- [ ] `src/cli/fast-apply.mjs` — CLI wrapper
+  - [ ] `--block` / `--diff` / `--whole` 三種輸入模式
+  - [ ] `--fuzzy` / `--validate` / `--undo` 行為控制
+  - [ ] `--dry-run` / `--apply` 安全閘門
+
+### F.3 Integration（P2 — 後續）
+
+- [ ] 與 `smart_patch_gen` 整合: patch_gen 輸出可直接餵給 fast_apply
+- [ ] 與 `smart_cross_file_edit` 整合: import graph 感知的跨檔案 apply
+- [ ] 與 CKG 整合: apply 後自動更新 affected nodes
+- [ ] 與 `smart_debug` 整合: debug 輸出→patch_gen→fast_apply 閉環
+- [ ] 與 `smart_test` 整合: apply 後自動執行受影響測試
+
+---
 
 ### Phase 8: 程式碼生成輔助 (2026-06-05)
 - [x] `src/plugins/standard/patch-gen.mjs` → `smart_patch_gen` (handler-based, ~270 行)
