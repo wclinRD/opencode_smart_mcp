@@ -1214,6 +1214,98 @@
 - [x] `~/.config/opencode/agents/smart-mcp.md` 同步更新
 - [x] `opencode.json` 修正專案路徑：Windows 路徑 → `/Users/wclin/opencode/dev/smart/src/server/index.mjs`
 
+## 🔴 Phase S: 安全修復 + 基礎品質 (P0 — 立即)
+
+**對應 plan.md 十一-優先修復清單**
+**目標**：修復 Command Injection、test script 損壞、LSP bridge 洩漏。
+
+### S.1 Command Injection 修復 (P0)
+
+- [ ] `src/cli/git-commit.mjs:44` — `execSync(\`git ${args.join(' ')}\`)` → `execSync('git', [...args], { shell: false })`
+- [ ] `src/cli/git-context.mjs:37` — 同上 pattern
+- [ ] `src/cli/git-pr.mjs:44` — `execSync(\`git -C "${root}" ${args.join(' ')}\`)` → array args + shell:false
+- [ ] `src/cli/git-pr.mjs:546` — `execSync(\`gh ${ghArgs.join(' ')}\`)` → array args + shell:false
+- [ ] `src/cli/git-review.mjs:47` — `execSync(\`git -C "${root}" ${args.join(' ')}\`)` → array args + shell:false
+- [ ] `src/cli/git-review.mjs:194/199` — `execSync(\`gh pr view ${prMatch[1]} ...\`)` → array args + shell:false
+- [ ] `src/cli/tool-integrate.mjs:33` — `execSync(\`git ${args.join(' ')}\`)` → array args + shell:false
+- [ ] `src/lib/lsp-bridge.mjs:338` — `execSync(\`which ${cfg.name}\`)` → `which` 無 inject risk，但改 array 統一風格
+- [ ] `src/cli/py-helper.mjs:218` — `execSync(\`mypy ... "${root}"\`)` → array args + shell:false
+- [x] 驗收：`rg 'execSync\(` 檢查無殘留 string interpolation
+
+### S.2 package.json test script 修復 (P0)
+
+- [ ] `package.json` line 16 — 將 `"test": "node --test tests/"` 改為 `"test": "node --test tests/*.test.mjs"`
+- [ ] 驗收：`npm test` 通過全部 428 測試
+
+### S.3 LSP Bridge 洩漏防護 (P1)
+
+- [ ] `tests/hybrid-engine.test.mjs` — 確認 `after()` hook 已呼叫 `closeAllLspBridges()`
+- [ ] `tests/impact-engine.test.mjs` — 確認 `after()` hook 已呼叫 `closeAllLspBridges()`
+- [ ] `tests/lsp-bridge.test.mjs` — 確認每個 test 後 cleanup
+- [ ] 在所有使用 LSP bridge 的 plugin 中加 `finally()` 關閉
+- [ ] 驗收：連續跑 3 次 hybrid-engine + impact-engine 測試，無 process 殘留 (`ps aux | grep typescript-language-server`)
+
+---
+
+## 🟠 Phase CI: CI/CD + 品質基礎 (P1 — 下週)
+
+### CI.1 GitHub Actions (P1)
+
+- [ ] 建立 `.github/workflows/test.yml`
+  - [ ] trigger: push + pull_request on main
+  - [ ] matrix: Node 26
+  - [ ] steps: checkout → node setup → npm install → npm test
+- [ ] 驗收：push 後 GitHub Actions 自動跑完 428 測試
+
+### CI.2 清理殘留目錄 (P1)
+
+- [ ] `rm -rf .test-impact-* .test-memory-*`
+- [ ] 確認 `.gitignore` 已包含所有 `.test-*` pattern（`git check-ignore .test-impact-*`）
+- [ ] `git add .gitignore` + commit
+
+### CI.3 Module 系統統一 (P2)
+
+- [ ] 找出 6 處 CJS `require()` 使用
+- [ ] 全部改為 ESM `import`
+- [ ] 驗收：`rg 'require\(' src/ --include '*.mjs'` 結果為 0
+
+---
+
+## 🟡 Phase Q: 程式碼品質改善 (P2 — 本月)
+
+### Q.1 結構化日誌 (P2)
+
+- [ ] 評估導入 `debug` npm package 或自製輕量 logger
+- [ ] 取代 `console.log` / `console.error` 為結構化 logging
+- [ ] 支援 `DEBUG=smart:grep` 過濾特定工具
+
+### Q.2 TypeScript 型別定義 (P2)
+
+- [ ] 為 `src/lib/` 核心引擎建立 `.d.ts`:
+  - [ ] `ckg-engine.d.ts`
+  - [ ] `apply-engine.d.ts`
+  - [ ] `hybrid-engine.d.ts`
+  - [ ] `impact-engine.d.ts`
+  - [ ] `lsp-bridge.d.ts`
+  - [ ] `model-router.d.ts`
+  - [ ] `context-manager.d.ts`
+
+### Q.3 CLI exit(1) 改為 throw (P2)
+
+- [ ] 搜尋 `process.exit(1)` 在 CLI 工具中
+- [ ] 每個 CLI 檔的 `main()` 統一用 try/catch 包裝
+- [ ] 內部錯誤 paths 改 throw Error
+
+---
+
+## ⚪ Phase L: 長期追蹤 (P3)
+
+- [ ] 速率限制機制評估
+- [ ] per-tool 效能基準 (benchmark script)
+- [ ] Docker 部署配置
+
+---
+
 ### Bug Fixes
 - [x] invokeTool() — 修復 async handler 回傳 `[object Promise]`
   - 原因：4 個 Phase 10 LSP 工具（code-ast/code-call-graph/code-type-infer/code-impact）使用 `async handler`，但 `invokeTool()` 未 await Promise
@@ -1360,6 +1452,60 @@
   - [ ] 驗證 `npm install smart-agent` 成功
 
 ---
+
+## ⚡ Phase P: 效能與穩定性優化 (2026-06-05)
+
+### P0 — 優先修復
+
+- [ ] **respond() fire-and-forget** — Promise-chain 阻塞全局吞吐
+  - 現狀：`_respondChain` 串接所有回應，TOON 優化耗時阻塞後續回應
+  - 解法：先 `writeMsg`，async 後台優化，不經 chain 排隊
+  - 文件：`src/server/index.mjs:725`
+  - 驗收：連續 10 次快速請求，95th percentile 延遲 ↓ 40%
+- [ ] **LSP bridge 重複 didOpen 快取**
+  - 現狀：每次 `getSymbols/getReferences/getHover` 都重新 didOpen 同檔案 (500-2000ms)
+  - 解法：加入 `openedFiles` Set，已開檔案不再重複 didOpen
+  - 文件：`src/lib/lsp-bridge.mjs:179-182`
+  - 驗收：快取命中時延遲 ↓ 80%
+
+### P1 — 短期
+
+- [ ] **Hybrid engine question cache**
+  - 解法：classifyQuestion + planPath 結果依 question hash 快取，TTL 30min
+  - 文件：`src/lib/hybrid-engine.mjs`
+- [ ] **CKG propagateImpact BFS 併發**
+  - 解法：graph traversal 改 BFS + 併發 query，深度 3 時快 3x
+  - 文件：`src/lib/ckg-engine.mjs`
+- [ ] **Server 啟動預熱**
+  - 解法：啟動後 lazy-init TypeScript LSP (warmUp)，首個工具不卡 3-5s
+  - 文件：`src/server/index.mjs`
+
+### P2 — 中期
+
+- [ ] **CLI → Handler 遷移 (常用工具)**
+  - 目標：grep / learn / thinking / test / security 全改 in-process handler
+  - 效益：消除 spawn overhead，延遲 ↓ 60%
+  - 驗收：`smart_smart_grep` 無 `child_process` spawn
+- [ ] **LSP 多 worker 支援**
+  - 解法：依 CPU 核數 spawn 多個 LSP worker，round-robin 路由
+  - 文件：`src/lib/lsp-bridge.mjs`
+- [ ] **記憶系統 preload 常駐**
+  - 解法：`preCheckMemory` 改為記憶體常駐 + file watcher，不再每次 spawn CLI
+  - 文件：`src/server/index.mjs`
+- [ ] **Compose engine pipeline 並行化**
+  - 解法：`seq` pipeline stage 無依賴時自動轉 `par`
+  - 文件：`src/lib/compose-engine.mjs`
+
+### 量化目標
+
+| 指標 | 現狀 | 目標 |
+|------|------|------|
+| 95th percentile 回應延遲 | ~3-5s (TOON chain 阻塞) | < 2s |
+| LSP query 延遲 (已開檔案) | 500-2000ms | < 100ms |
+| CKG 深度 3 影響分析 | ~6s | < 2s |
+| 首次工具呼叫延遲 | 3-5s (LSP 冷啟動) | < 1s |
+| CLI 工具 spawn overhead | ~200ms/tool | 0 (handler) |
+| 記憶查詢延遲 | ~100ms (CLI) | < 5ms (常駐) |
 
 ## ✅ 已完成 (v3.7.1)
 

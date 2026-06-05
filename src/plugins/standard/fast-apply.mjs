@@ -41,13 +41,14 @@ export default {
   category: 'edit',
   cli: 'fast-apply.mjs',
   description: `Use when: need to apply LLM-suggested code edits faster and more accurately.
-Supports 5 input formats:
-  - search-replace: SEARCH/REPLACE blocks (Aider-compatible)
-  - lazy: lazy marker blocks with // ... existing code ... markers (80-98% token savings)
-  - partial: abbreviated SEARCH context (fewer lines, L5 matching)
-  - unified-diff: git diff format
-  - whole-file: full file replacement
-Features: 5-level fuzzy matching (incl. partial/L5), atomic multi-file apply, undo snapshots, binary/access checks.
+Supports 5 input formats (ordered by token efficiency):
+  - unified-diff: git diff format — MOST token-efficient (40-60% savings). Use +/- lines only, no unchanged lines needed.
+  - lazy: SEARCH/REPLACE with // ... existing code ... markers (80-98% savings for large files)
+  - partial: abbreviated SEARCH context (fewer lines, L5 fuzzy matching)
+  - search-replace: standard SEARCH/REPLACE blocks (Aider-compatible)
+  - whole-file: full file replacement (most tokens)
+💡 Tip: prefer unified-diff for small edits (only changed +/- lines), lazy for large files with few changes.
+Features: 5-level fuzzy matching, atomic multi-file apply, undo snapshots, binary/access checks.
 Dry-run by default — safe to use without side effects.`,
 
   inputSchema: {
@@ -56,7 +57,7 @@ Dry-run by default — safe to use without side effects.`,
       format: {
         type: 'string',
         enum: ['search-replace', 'lazy', 'partial', 'unified-diff', 'whole-file'],
-        description: 'Input format (default: search-replace). Use lazy for // ... markers, partial for abbreviated SEARCH.',
+        description: 'Input format (default: search-replace). Token efficiency: unified-diff (best, +/- only) > lazy > partial > search-replace > whole-file.',
       },
       blocks: {
         type: 'array',
@@ -77,7 +78,7 @@ Dry-run by default — safe to use without side effects.`,
       },
       diff: {
         type: 'string',
-        description: 'Unified diff string (for format=unified-diff or auto-detect)',
+        description: 'Unified diff string (format=unified-diff). Token-efficient: only +/- lines needed, omit unchanged context.',
       },
       whole: {
         type: 'object',

@@ -637,12 +637,23 @@ export class ImpactEngine {
       return 'No downstream impact detected. Safe to modify.';
     }
 
-    let text = `Impact Analysis (depth=${impact.stats.depth}, source=${impact.stats.source}, confidence=${impact.stats.confidence})\n`;
+    const hasTransitive = impact.stats.totalTransitiveSymbols > 0;
+    let text = '';
+
+    // ⚠️ WARNING banner — visible signal for refactoring risk
+    text += `${'═'.repeat(56)}\n`;
+    text += `  ⚠️  IMPACT WARNING: ${impact.stats.totalImpactedFiles} downstream module(s) affected\n`;
+    if (hasTransitive) {
+      text += `  ⚠️  Includes ${impact.stats.totalTransitiveSymbols} transitive call(s) — cascading changes may apply\n`;
+    }
+    text += `${'═'.repeat(56)}\n`;
+
+    text += `\nImpact Analysis (depth=${impact.stats.depth}, source=${impact.stats.source}, confidence=${impact.stats.confidence})\n`;
     text += `${'─'.repeat(50)}\n`;
 
     text += `\nChanges: ${changes.length} file(s), ${symbols.length} symbol(s) modified\n`;
 
-    // List changed symbols
+    // List changed symbols with their downstream callers
     for (const sym of symbols) {
       text += `  • ${sym.symbol} (${sym.kind}) @ ${sym.file}:${sym.line}\n`;
       const affected = impact.direct.find(d => d.symbol === sym.symbol);

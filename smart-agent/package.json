@@ -35,5 +35,12 @@
     "ai",
     "coding-agent"
   ],
+  "files": [
+    "src/",
+    "tests/",
+    "package.json",
+    "README.md",
+    "LICENSE"
+  ],
   "license": "MIT"
 }

@@ -1,6 +1,6 @@
 # Smart MCP — 開發工具集
 
-MCP server 提供 26 個開發工具，可在 opencode 中直接呼叫。
+MCP server 提供 33+ 個開發工具，可在 opencode 中直接呼叫。
 
 ---
 

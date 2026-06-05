@@ -2061,6 +2061,86 @@ Smart MCP 是「理解程式碼的儀器」
 | CKG 視覺化 | smart_diagram 整合 CKG graph: module dependency / call graph / circular detection | P2 | 🔜 待啟動 |
 | Plugin Registry | manifest schema + ~/.smart/plugins/ auto-scan + smart_docker 參考實作 | P2 | 🔜 待啟動 |
 
+---
+
+## 十一、優先修復清單（基於 2026-06-05 專案分析）
+
+> 本節基於完整原始碼分析得出（33k 行 / 103 檔 / 428 測試 / 安全掃描 / 依賴圖）。
+> 與既有路線圖（Phase 0-14 / A-D / F）互補：既有路線圖定義「新功能」，本節定義「需修復的問題」。
+
+### 🔴 P0 — 立即修復（安全性 + 基本可用性）
+
+| 優先級 | 問題 | 衝擊 | 位置 | 修復方式 |
+|--------|------|------|------|----------|
+| **P0** | Command Injection | 🔴 高 — 使用者輸入 args 可注入 shell | `git-commit.mjs:44`, `git-context.mjs:37`, `git-pr.mjs:44/546`, `git-review.mjs:47/194/199`, `tool-integrate.mjs:33`, `lsp-bridge.mjs:338`, `py-helper.mjs:218` | 改用 `execSync` + array args + `{ shell: false }` |
+| **P0** | `package.json` test 腳本壞掉 | 🔴 中 — `npm test` 永久失敗 | `package.json` line 16 | 改為 `"node --test 'tests/*.test.mjs'"` |
+| **P0** | `node:sqlite` 相容性 | 🔴 中 — 僅 Node 26 可用，無法降級 | `ckg-engine.mjs` ~L315 | 文件標示 Node >= 26 + 降級策略 |
+| **P0** | respond() Promise-chain 阻塞全局吞吐 | 🔴 高 — TOON 優化耗時阻塞所有後續回應 | `src/server/index.mjs:725` | 改為 fire-and-forget：先 respond，async 後台優化 |
+| **P0** | LSP bridge 重複 didOpen 浪費 | 🔴 高 — 每次 query 都重新 didOpen 同檔案，500-2000ms | `src/lib/lsp-bridge.mjs:179-182` | 加入 `openedFiles` Set，已開檔案不再重複 didOpen |
+
+### 🟠 P1 — 短期修復（品質 + 維運 + 性能）
+
+| 優先級 | 問題 | 衝擊 | 修復方式 |
+|--------|------|------|----------|
+| **P1** | 無 CI/CD | 🟠 中 — 無法自動驗證 PR 是否破測試 | 建立 GitHub Actions: `npm test` on push + PR |
+| **P1** | execSync 無 shell 安全強化 | 🟠 中 — 6 處 git 操作可 inject | 全部 `execSync` 強制 `{ shell: false }`，args 一律 array |
+| **P1** | LSP bridge 程序洩漏 | 🟠 中 — process hang 殘留 | `hybrid-engine` / `impact-engine` 加 `after()` / `finally()` 關閉 |
+| **P1** | Temp 目錄汙染 | 🟢 低 — 13 個 `.test-*` 殘留目錄 | `.gitignore` 已有 pattern，清理既存目錄 |
+| **P1** | `@xenova/transformers` 過重 | 🟢 低 — 80MB+ 僅 memory embedding 用 | 標示為 optional dep，TF-IDF 為預設 |
+| **P1** | Hybrid engine 重複運算 | 🟠 中 — `classifyQuestion+planPath` 對同一問題重複計算 | question hash → cache result，TTL 30min |
+| **P1** | CKG propagateImpact 依序阻塞 | 🟠 中 — graph traversal 依序 query CKG，鏈路長時累積 | BFS + 併發 query |
+
+### 🟡 P2 — 中期改善（程式碼品質 + 架構）
+
+| 優先級 | 問題 | 衝擊 | 修復方式 |
+|--------|------|------|----------|
+| **P2** | 混合模組系統 (ESM + CJS) | 🟢 低 — 6 處 CJS require | 全部轉 ESM |
+| **P2** | Plugin/CLI 重複程式碼 | 🟢 低 — 多數 plugin re-export CLI | 共用手柄 factory |
+| **P2** | 無結構化日誌 | 🟢 低 — 全 `console.log/error` | 導入 `debug` 套件 |
+| **P2** | CLI 錯誤路徑 `exit(1)` | 🟢 低 — Server 模式無法 catch | 改 throw Error，`main()` 統一 catch |
+| **P2** | 無 TypeScript 型別 | 🟡 中 — 33k 行純 JS | 為 lib/ 核心引擎補 `.d.ts` |
+| **P2** | 文件不足 | 🟢 低 — 僅 plan/todo | 補 API docs + README |
+| **P2** | CLI → Handler 遷移 | 🟡 中 — 30+ 工具仍 spawn CLI 進程 | 常用工具（grep/learn/thinking）全改 in-process |
+| **P2** | LSP 多執行序支援 | 🟢 低 — 單一 bridge 單一 process | 依 CPU 核數 spawn 多個 LSP worker |
+| **P2** | 記憶系統 preload | 🟠 中 — `preCheckMemory` 每次 call memory_store CLI | memory 常駐記憶體 + file watcher |
+| **P2** | Compose 引擎 pipeline 並行化 | 🟢 低 — `seq` 模式嚴格依序 | pipeline stage 可並行時自動轉 `par` |
+
+### ⚪ P3 — 長期追蹤
+
+| 優先級 | 問題 | 說明 |
+|--------|------|------|
+| **P3** | 無速率限制 | MCP server 無 throttle，大量請求可 OOM |
+| **P3** | 無 per-tool benchmark | CKG / apply-engine / impact 無效能基準 |
+| **P3** | 無 Docker 部署 | 無 containerization 配置 |
+
+### 修復路線圖
+
+```
+本週 (P0):
+  ├── 🛡️ 修 Command Injection (7 處: git tools + LSP + py-helper)
+  ├── 🩹 修 package.json test script
+  ├── 📝 文件標示 node:sqlite Node 26 要求
+  ├── 🚀 respond() 改 fire-and-forget 解除全局阻塞
+  └── 📂 LSP bridge 加入 openedFiles 快取
+
+下週 (P1):
+  ├── 🤖 建立 GitHub Actions CI
+  ├── 🔒 所有 execSync 強制 { shell: false }
+  ├── 🧹 清理 .test-* 殘留目錄
+  ├── 🛠️ LSP bridge 洩漏全面防護
+  ├── 🧠 Hybrid engine question cache (TTL 30min)
+  └── 🕸️ CKG propagateImpact BFS 併發化
+
+本月 (P2):
+  ├── 📦 Mark @xenova/transformers 為 optional
+  ├── 🔄 統一模組系統 (ESM only)
+  ├── 📋 補完文件 + 型別定義
+  ├── 🏃 CLI → Handler 遷移 (常用工具 in-process 化)
+  ├── 🧵 LSP 多執行序支援
+  ├── 💾 記憶系統 preload 常駐記憶體
+  └── 🔄 Compose engine pipeline 並行化
+```
+
 ### 不做（暫緩）
 
 | 項目 | 原因 |
