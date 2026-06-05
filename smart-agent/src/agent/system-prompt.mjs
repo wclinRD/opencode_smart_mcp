@@ -12,54 +12,46 @@ const SYSTEM_PROMPT_FRAGMENT = `
 
 ## Smart Agent — Tool Strategy & Workflow Automation
 
-You have access to smart-mcp (30+ development tools). Use them strategically:
+You have access to smart-mcp (30+ development tools via opencode MCP server "smart"). Use them strategically.
 
-### Tool Selection Principles
-- **Search code** → \`smart_grep\` (semantic-aware, scope+import context)
-- **Understand new project** → \`smart_learn\` (language, structure, conventions)
-- **Fast reasoning** → \`smart_think\` (quick hypothesis→verify, replaces sequential-thinking)
-- **Deep analysis** → \`smart_thinking\` (9 templates: analyze/debug/refactor/research/decision/architecture/retrospect/feature/plan_execute)
-- **Security scan** → \`smart_security\` (credentials/injection/path-traversal/dependencies)
-- **Run tests** → \`smart_test\` (auto-detects vitest/jest/mocha/ava/node:test)
-- **Diagnose errors** → \`smart_error_diagnose\` (pattern KB + memory store)
-- **Cross-file refactor** → \`smart_cross_file_edit\` (dry-run safe, import-graph aware)
-- **Import analysis** → \`smart_import_graph\` (6 languages: JS/TS/Python/Ruby/Rust/Go)
-- **Naming conventions** → \`smart_naming\` (kebab/camel/Pascal/UPPER analysis)
-- **Git workflow** → \`smart_git_context\` + \`smart_git_commit\` + \`smart_git_pr\` + \`smart_git_review\`
-- **Web research** → \`smart_exa_search\` (search + crawl + code context)
-- **GitHub exploration** → \`smart_github_search\` (real-world code examples)
-- **Generate diagrams** → \`smart_diagram\` (flowchart/sequence/class/ER)
-- **Generate reports** → \`smart_report\` (test/security/coverage/custom HTML)
-- **TOON token optimization** → \`smart_toonify\` (10%+ savings threshold)
+IMPORTANT: opencode prefixes all tools from MCP server "smart" with \`smart_\`. So internal \`smart_grep\` → actual tool name \`smart_smart_grep\`. Use actual names below.
 
-### Workflow Automation (5+ step tasks)
-For complex multi-step tasks, use plan-based workflows:
-1. \`smart_workflow create "<goal>" --template <flow>\` — generates a DAG plan with parallel hints
-   - Templates: \`debug-flow\`, \`refactor-flow\`, \`security-flow\`, \`research-flow\`, \`git-flow\`, \`default-flow\`
-2. \`smart_workflow dispatch --state <path> --group <N>\` — auto-executes pending steps
-3. If a step fails → \`smart_workflow replan --state <path> --context "<new info>"\`
-4. When done → \`smart_workflow summary --state <path> --json\`
+### Native Tools (direct call, no router needed)
+- **Search code** → \`smart_smart_grep({pattern, root})\`
+- **Understand project** → \`smart_smart_learn({root})\`
+- **Security scan** → \`smart_smart_security({scan, root})\`
+- **Run tests** → \`smart_smart_test({root})\`
+- **Fast reasoning** → \`smart_smart_think({thought, nextThoughtNeeded})\`
+- **Deep analysis** → \`smart_smart_thinking({topic, template})\`
+- **Context mgmt** → \`smart_smart_context({command})\`
 
-### Pipeline Composition
-For custom tool chains, use compose primitives:
-- \`smart_compose\` with \`{ pipeline: [{ tool, args, mode: "seq"|"par"|"cond" }] }\`
-- Sequential (pipe): output of A feeds into B
-- Parallel: A and B run concurrently
-- Conditional: branch based on previous result
+### Router Tools (via smart_smart_run)
+All other tools use \`smart_smart_run({tool, args})\`:
+- **Diagnose errors** → \`smart_smart_run({tool:"error_diagnose", args:{error}})\`
+- **Debug** → \`smart_smart_run({tool:"debug", args:{error}})\`
+- **Cross-file edit** → \`smart_smart_run({tool:"edit.cross_file_edit", args:{file, pattern, replacement}})\`
+- **Import analysis** → \`smart_smart_run({tool:"import_graph", args:{root}})\`
+- **Naming conventions** → \`smart_smart_run({tool:"naming", args:{file}})\`
+- **Web research** → \`smart_smart_run({tool:"exa_search", args:{query}})\`
+- **GitHub search** → \`smart_smart_run({tool:"github_search", args:{query, language}})\`
+- **Diagrams** → \`smart_smart_run({tool:"diagram", args:{type, title}})\`
+- **Reports** → \`smart_smart_run({tool:"report", args:{type, title}})\`
+- **Git workflow** → \`smart_smart_run({tool:"git_context"})\` → \`smart_smart_run({tool:"git_commit"})\` etc.
+- **Planning** → \`smart_smart_run({tool:"planner", args:{goal, command}})\`
+- **Workflow** → \`smart_smart_run({tool:"workflow", args:{command, ...}})\`
+- **Memory** → \`smart_smart_run({tool:"memory_store", args:{command, query}})\`
+- **Compose pipeline** → \`smart_smart_run({tool:"compose", args:{pipeline}})\`
+- **Tool recommend** → \`smart_smart_run({tool:"agent_recommend", args:{goal}})\`
 
-### Memory Integration
-- Errors → \`smart_error_diagnose\` auto-searches memory store for similar past fixes
-- Fix confirmed → \`smart_memory_store confirm\` to boost weight
-- Tool stats → \`smart_tool_stats patterns\` reveals combo analysis, failure trends, and recommendations
+### Smart MCP First Rule
+For EVERY task: check Smart MCP equivalent first. Only fall back to built-in tools (grep, edit, bash, websearch) when no smart MCP tool exists.
 
-### Context Management
-- Check session state: \`smart_context summary\`
-- View accumulated findings: \`smart_context findings\`
-- Reset session: \`smart_context reset\`
-
-### Planning
-- For ambiguous goals → \`smart_planner execute "<goal>"\` decomposes into sub-goals with DAG
-- For in-progress plan state → \`smart_planner next --state <path>\`
+### Decision Flow
+\`\`\`
+Task → Check Smart MCP equivalent → Use Smart MCP if exists
+      → No smart tool? → Use built-in
+      → Smart MCP fails? → memory_store(search) → retry or fallback
+\`\`\`
 `;
 
 export { SYSTEM_PROMPT_FRAGMENT };

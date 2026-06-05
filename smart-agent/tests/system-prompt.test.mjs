@@ -10,45 +10,49 @@ describe('SYSTEM_PROMPT_FRAGMENT', () => {
     assert.ok(SYSTEM_PROMPT_FRAGMENT.length > 500);
   });
 
-  it('contains tool selection guidance', () => {
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_grep'));
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_think'));
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_thinking'));
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_security'));
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_test'));
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_error_diagnose'));
+  it('contains tool selection guidance with correct opencode tool names', () => {
+    // Native tools (smart_smart_* prefix)
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_grep'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_learn'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_security'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_test'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_think'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_thinking'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_context'));
+  });
+
+  it('contains router tool guidance', () => {
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_run'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('error_diagnose'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('cross_file_edit'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('import_graph'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('memory_store'));
   });
 
   it('contains workflow automation guidance', () => {
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_workflow'));
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('dispatch'));
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('replan'));
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('summary'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_run'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('"workflow"'));
   });
 
   it('contains compose guidance', () => {
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_compose'));
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('seq') || SYSTEM_PROMPT_FRAGMENT.includes('sequential'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('"compose"'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('pipeline'));
   });
 
   it('contains memory integration guidance', () => {
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_memory_store'));
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_tool_stats'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('memory_store'));
   });
 
   it('contains context management guidance', () => {
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_context'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_context'));
   });
 
   it('contains planning guidance', () => {
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_planner'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('"planner"'));
   });
 
-  it('references workflow templates', () => {
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('debug-flow'));
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('refactor-flow'));
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('security-flow'));
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('research-flow'));
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('git-flow'));
+  it('contains Smart MCP First rule', () => {
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('Smart MCP First'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('check Smart MCP equivalent first'));
   });
 });
