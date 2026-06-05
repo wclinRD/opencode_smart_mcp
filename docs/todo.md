@@ -1522,6 +1522,57 @@
 | CLI 工具 spawn overhead | ~200ms/tool | 0 (handler) |
 | 記憶查詢延遲 | ~100ms (CLI) | < 5ms (常駐) |
 
+---
+
+## 🔴 Phase LLM: 簡化 LLM 處理 — P0（2026-06-05 起）
+
+**對應 plan.md 四-B**
+**目標**：讓 Smart MCP 成為 LLM 的認知捷徑，減少 token 消耗、決策步數、hallucination。
+
+### P0.1 Architecture Overview（架構總覽）
+
+讓 LLM 一次 query 就能拿到專案的完整架構圖，不用讀 20 個檔案。
+
+- [ ] **新增 `arch_overview` tool（或 `smart_smart_run({tool:"arch_overview"})`）**
+  - [ ] 查詢 CKG `getStats()` 取得節點/邊統計
+  - [ ] 查詢 import graph 取得元件間依賴關係
+  - [ ] 依目錄結構分層（controller / service / repository / util 等）
+  - [ ] 標記各層的關鍵函式（高扇入/高複雜度/無測試）
+  - [ ] 輸出結構化 JSON（layers, components, dependencies, violations, criticalFunctions）
+- [ ] **輸出格式設計**
+  - [ ] `{ summary, layers: [{ name, glob, deps, files }], violations: [{ from, to, rule }], criticalFunctions: [{ name, file, tested, complexity }] }`
+  - [ ] Token 最佳化：總輸出 < 2000 tokens（自動摘要）
+- [ ] **測試**
+  - [ ] 在 smart 專案自身測試：輸出包含 `server/`, `plugins/`, `lib/` 等層
+  - [ ] 驗證各欄位資料正確性
+
+### P0.2 nextCommand 輸出協定
+
+讓 LLM 不用分析工具輸出內容來決定下一步，工具直接告訴 LLM「下一步做什麼」。
+
+- [ ] **定義 nextCommand 輸出格式**
+  - [ ] 所有工具回傳 `{ result, nextCommand?: { tool: string, args: object, description: string } }`
+  - [ ] 當工具偵測到常見情境時，自動填入 nextCommand
+  - [ ] 範例：error_diagnose → nextCommand: `{ tool: "cross_file_edit", args: {...}, description: "修復 root cause" }`
+- [ ] **改造第一批工具（高頻工具優先）**
+  - [ ] `error_diagnose` — 診斷後建議修復方式
+  - [ ] `debug` — 分析後建議 fix 或 test
+  - [ ] `test` — 失敗後建議 debug 或 fix
+  - [ ] `cross_file_edit` — dry-run 後建議 apply
+  - [ ] `test_suggest` — 建議後可一鍵產生測試
+- [ ] **測試**
+  - [ ] 每個改造的工具至少 1 個測試驗證 nextCommand 格式正確
+  - [ ] 驗證 LLM 可以直接 dispatch nextCommand 成功
+
+### 驗收標準
+
+- [ ] `smart_smart_run({tool:"arch_overview"})` 回傳 LLM-ready JSON map
+- [ ] 架構總覽涵蓋 layers / components / dependencies / violations / criticalFunctions
+- [ ] 第一批 5 個高頻工具回傳含 nextCommand
+- [ ] LLM 可完全不經分析直接 dispatch nextCommand
+
+---
+
 ## ✅ 已完成 (v3.7.1)
 
 **Phase 0-14 全部完成**：

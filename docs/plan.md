@@ -2,12 +2,19 @@
 
 > 本文件是 smart MCP 的戰略規劃文件，涵蓋架構、能力矩陣、缺口分析、以及後續強化方向。
 > 與 todo.md 互為補充：plan.md 定義「要做什麼、為什麼」，todo.md 定義「具體步驟」。
+> 
+> **2026-06-05 重大更新**：確立「LLM 為最終使用者」的設計哲學。
+> Smart MCP 不是給人用的工具組，而是 LLM 的「認知捷徑」——讓 LLM 用最少 token、最少步數、最少 hallucination 完成任務。
+> 詳見 **四-B. 設計哲學：簡化 LLM 處理**。
 
 ---
 
 ## 一、現狀摘要
 
-Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 46 個開發工具 + 專屬 agent personality。當前版本 3.8.0（Plugin Loader + Router 架構 + 動態多輪推理 + Context 管理 + Workflow 引擎 + Compose 引擎 + LSP 程式碼語義分析 + CKG 程式碼知識圖譜 + Hybrid Reasoning Engine + Change-Impact Pipeline + Patch Generation + Agent Personality v2 + 全面非阻塞 CLI + auto-toonify 輸出攔截器 + 多語言支援 (Rust/Swift) + Phase 9 核心元件測試 34/34 通過 + C.1 refactoring assistant 基礎層完成 + Phase D 記憶自動化 (auto-store + pre-check)）。
+Smart MCP 是一個 **LLM 認知捷徑伺服器**，透過 MCP 協定為 LLM agent 提供確定性程式碼理解與任務拆解能力。當前版本 3.8.0（Plugin Loader + Router 架構 + CKG 程式碼知識圖譜 + LSP 語義分析 + Hybrid Reasoning + Change-Impact Pipeline + Workflow/Compose Engine + 跨 session 記憶 + 46 工具 + auto-toonify 輸出優化 + 多語言支援 (Rust/Swift) + 428 tests passing）。
+
+> **2026-06-05 設計哲學翻新**：Smart MCP 的最終使用者不是人，是 LLM。
+> 所有工具的設計目標：讓 LLM 用最少 token、最少步數、最少 hallucination 完成任務。
 
 ### 核心數據
 - **工具總數**：46（6 原生 + 40 經 router — 含 1 Phase 8 patch-gen + 4 Phase 10 程式碼語義工具 + 1 Phase 11 CKG 查詢工具 + 1 Phase 12 Hybrid Router + 1 Phase 13 Impact Flow + 3 Phase D agent 輔助工具 + 1 Phase A rs-helper + 1 Phase D memory_store）
@@ -402,29 +409,29 @@ Smart MCP:   seq + par + cond 三種組合原語
   - 模型品質競爭（非 smart-mcp 職責）
 ```
 
-#### 具體執行優先級
+#### 具體執行優先級（2026-06-05 更新 → 詳見四-B.5 新戰略優先級）
+
+> 基於「LLM 為最終使用者」的新設計哲學，優先級已重新定義。
+> 所有新功能開發請參照 **四-B.5 具體優先級**。
 
 ```
 🔴 P0 (本週):
-  1. CKG build speed benchmark + 優化 (1000 files < 30s)
-  2. 記憶自動化: 所有工具失敗 auto-store，工具前 pre-check
-  3. C.1 使用模式歸納 (queryUsagePatterns → pattern induction)
+  1. Architecture Overview — CKG 結構化 JSON map（四-B.5-P0.1）
+  2. nextCommand 輸出協定 — 工具輸出含下一步建議（四-B.5-P0.2）
 
 🟠 P1 (下週):
-  4. Fast Apply 工具: SEARCH/REPLACE block + unified diff apply
-  5. npm publish smart-agent (README + npm publish)
-  6. Change-Impact 驗收標準通過 (AST diff >95%, 傳播 <200ms)
-  7. C.2 CKG 測試覆蓋率地圖 (函式→測試映射)
+  3. LLM-Enhanced Planner — CKG 輔助步驟規劃（四-B.5-P1.3）
+  4. 記憶自動化強化 — auto-store + auto-inject（四-B.5-P1.4）
 
 🟡 P2 (本月):
-  7. Plugin Registry (manifest schema + ~/.smart/plugins/ auto-scan)
-  8. C.3 CKG 健康儀表板 (循環依賴 + 技術債指數 + 未使用 export 趨勢)
-  9. CKG 視覺化 (smart_diagram 整合 CKG)
+  5. C.3 CKG 健康儀表板（循環依賴 + 技術債指數）
+  6. CKG 視覺化 (smart_diagram 整合 CKG)
+  7. npm publish smart-agent
 
 ⚪ 暫緩:
-  - go-helper (依賴 gopls, 使用者少)
-  - 排程/自動化任務 (需雲端基礎設施)
-  - Tree-sitter 替換 LSP (效益不高)
+  - Plugin Registry（待生態成形）
+  - go-helper（依賴 gopls, 使用者少）
+  - Tree-sitter 替換 LSP（效益不高）
 ```
 
 ---
@@ -504,6 +511,95 @@ Smart MCP:   seq + par + cond 三種組合原語
   → smart_think / smart_thinking 已 handler 化
   → 其餘 24 standard tools 已從 spawnSync 改為 spawn + Promise + AbortController
   → 新工具原則上用 handler，CLI 作為 fallback
+```
+
+---
+
+## 四-B. 設計哲學：簡化 LLM 處理（2026-06-05 更新）
+
+> **核心命題**：Smart MCP 的最終使用者不是人類開發者，而是 LLM（大型語言模型）。
+> 所有工具的設計目標只有一個：**讓 LLM 能用最少 token、最少步數、最少 hallucination 完成任務。**
+
+### B.1 LLM 的 6 個核心痛點
+
+| # | 痛點 | 後果 | Token 浪費估算 |
+|---|------|------|--------------|
+| 1 | **讀程式碼很貴** — 讀一個 500 行檔案 = 數千 token | LLM 花大量 context 在理解原始碼結構而非邏輯 | ~80% 的程式碼閱讀 token 可省 |
+| 2 | **不確定時 hallucinate** — LLM 會猜函式名稱、參數、回傳值 | 產生錯誤的程式碼分析與修改建議 | 每次 hallucination 浪費 5-15 步修正 |
+| 3 | **複雜任務規劃困難** — 5+ 步驟的任務 LLM 容易遺漏或順序錯誤 | 任務中途偏離方向，需要 human 介入修正 | 每次偏離浪費 10-20+ 步驟 |
+| 4 | **每步輸出都要讀** — LLM 讀工具輸出 → 理解 → 決定下一步 | 每步額外消耗 context 在閱讀而非執行 | ~30% 的推理 token 浪費在 parse 輸出 |
+| 5 | **同樣錯誤重複發生** — 每次 session 從零 debug | 團隊中每個人各自 debug 同樣問題 | 每次浪費 5-15 步推理 |
+| 6 | **跨 session 從零開始** — 沒有知識累積 | 每次開新 session 都要重新了解專案 | 每次浪費 10-30 步背景理解 |
+
+### B.2 4 種簡化手段
+
+對應上述 6 個痛點，Smart MCP 提供 4 種「認知捷徑」：
+
+| 手段 | 做法 | 解決痛點 | LLM 節省 |
+|------|------|---------|---------|
+| **❶ CKG 取代讀檔** | 程式碼結構化存入 SQLite，LLM 直接查詢不用讀原始碼 | ① 讀檔貴 | 80-90% 閱讀 token |
+| **❷ 確定性工具** | 結構性問題（callers/callees/deps）不走 LLM，走 CKG/LSP 工具 | ② hallucinate | 100% 相關 hallucination 消除 |
+| **❸ Workflow 模板** | 預先定義的最佳實踐流程，LLM 只需選擇不用規劃 | ③ 規劃困難 ④ 每步決策 | N 步決策 → 1 次選擇 |
+| **❹ 跨 session 記憶** | 自動儲存修復經驗，vector search 秒回 | ⑤ 重複錯誤 ⑥ 從零開始 | 每次 5-15 步重複推理 |
+
+### B.3 實例：傳統 LLM 路徑 vs Smart MCP 簡化路徑
+
+以「debug 一個 TypeError」為例：
+
+```
+傳統 LLM 路徑（~25 步，~15000 tokens）：
+  read error → read file → grep callers → read more files → 
+  reason about cause → try fix → test → fail → 
+  read more → reason again → try another fix → ... → 成功
+
+Smart MCP 簡化路徑（~5 步，~3000 tokens）：
+  error_diagnose → (自動記憶比對) → 拿到 root cause + 修復建議
+  → cross_file_edit (dry-run) → 確認 → test → done
+                    ↑
+              節省 80% 步驟 + 80% token
+```
+
+### B.4 產品定位更新
+
+```
+舊定位：
+  "Smart MCP 是理解程式碼的儀器"（給人用）
+
+新定位：
+  "Smart MCP 是 LLM 的認知捷徑"（給 LLM 用）
+  
+  人不需要直接使用 Smart MCP。
+  LLM 需要 Smart MCP 來：
+  1. 不讀檔就理解程式碼 → CKG
+  2. 不推理就知道答案 → 確定性工具
+  3. 不規劃就知道步驟 → Workflow 模板
+  4. 不忘記過往經驗 → 跨 session 記憶
+```
+
+### B.5 具體優先級
+
+```
+🔴 P0 (本週) — 最省 token + 最省決策：
+
+  1. Architecture Overview — CKG 數據一次包成結構化 JSON map
+     LLM 不用讀 20 個檔案就能理解專案架構
+     解決痛點：① 讀檔貴
+     節省：讀 20 個檔案 → 1 次 query
+
+  2. nextCommand 輸出協定 — 每個工具回傳含下一步建議
+     LLM 直接執行不用分析輸出
+     解決痛點：④ 每步決策
+     節省：每步 1 次「理解→決定」→ 0 次
+
+🟠 P1 (下週) — 省規劃 + 越用越強：
+
+  3. LLM-Enhanced Planner — CKG 輔助產生依賴順序正確的步驟
+     解決痛點：③ 規劃困難
+     節省：N 步規劃 → 1 次確認
+
+  4. 記憶自動化強化 — auto-store + auto-inject + 開局知識注入
+     解決痛點：⑤ 重複錯誤 ⑥ 從零開始
+     節省：每次 5-15 步重複推理
 ```
 
 ---
