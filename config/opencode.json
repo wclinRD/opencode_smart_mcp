@@ -3,7 +3,7 @@
   "mcp": {
     "smart": {
       "type": "local",
-      "command": ["node", "/Users/wclin/opencode/dev/smart/src/server/index.mjs"],
+      "command": ["node", "C:\\Users\\dennis.lin\\opencode\\smart\\src\\server\\index.mjs"],
       "enabled": true
     },
     "sequential-thinking": {
