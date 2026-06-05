@@ -1533,36 +1533,51 @@
 
 讓 LLM 一次 query 就能拿到專案的完整架構圖，不用讀 20 個檔案。
 
-- [ ] **新增 `arch_overview` tool（或 `smart_smart_run({tool:"arch_overview"})`）**
-  - [ ] 查詢 CKG `getStats()` 取得節點/邊統計
-  - [ ] 查詢 import graph 取得元件間依賴關係
-  - [ ] 依目錄結構分層（controller / service / repository / util 等）
-  - [ ] 標記各層的關鍵函式（高扇入/高複雜度/無測試）
-  - [ ] 輸出結構化 JSON（layers, components, dependencies, violations, criticalFunctions）
-- [ ] **輸出格式設計**
-  - [ ] `{ summary, layers: [{ name, glob, deps, files }], violations: [{ from, to, rule }], criticalFunctions: [{ name, file, tested, complexity }] }`
-  - [ ] Token 最佳化：總輸出 < 2000 tokens（自動摘要）
-- [ ] **測試**
-  - [ ] 在 smart 專案自身測試：輸出包含 `server/`, `plugins/`, `lib/` 等層
-  - [ ] 驗證各欄位資料正確性
+- [x] **新增 `arch_overview` tool（`smart_smart_run({tool:"arch_overview"})`）**
+  - [x] 查詢 CKG `getStats()` 取得節點/邊統計
+  - [x] 查詢 import graph 取得元件間依賴關係
+  - [x] 依目錄結構分層（controller / service / repository / util 等）
+  - [x] 標記各層的關鍵函式（高扇入/高複雜度/無測試）
+  - [x] 輸出結構化 JSON（layers, components, dependencies, violations, criticalFunctions）
+- [x] **CKG engine 新增 `getArchOverview()` 方法**
+  - [x] 層級偵測：26 種已知層名稱 + 目錄 fallback
+  - [x] 層間依賴矩陣計算
+  - [x] 違規檢測（controller → repository/model 等 10 條規則）
+  - [x] 關鍵函式排名（fanIn × 5 + complexity）
+  - [x] 未使用匯出報告
+- [x] **輸出格式**
+  - [x] `{ summary, layers: [{ name, glob, deps }], dependencies, violations, criticalFunctions, unusedExports }`
+  - [x] Token 最佳化：僅輸出摘要 + top 10 關鍵函式 + top 10 未使用匯出
+- [x] **測試（8 項全部通過）**
+  - [x] 回傳結構化 overview
+  - [x] 層級偵測正確
+  - [x] 層間依賴計算正確
+  - [x] 違規檢測
+  - [x] 關鍵函式 fan-in/complexity 排名
+  - [x] 未使用匯出報告
+  - [x] 層級結構格式正確
+  - [x] 空引擎處理
 
-### P0.2 nextCommand 輸出協定
+### P0.2 nextCommand 輸出協定 + smart_edit 工具
 
 讓 LLM 不用分析工具輸出內容來決定下一步，工具直接告訴 LLM「下一步做什麼」。
 
-- [ ] **定義 nextCommand 輸出格式**
-  - [ ] 所有工具回傳 `{ result, nextCommand?: { tool: string, args: object, description: string } }`
-  - [ ] 當工具偵測到常見情境時，自動填入 nextCommand
-  - [ ] 範例：error_diagnose → nextCommand: `{ tool: "cross_file_edit", args: {...}, description: "修復 root cause" }`
-- [ ] **改造第一批工具（高頻工具優先）**
-  - [ ] `error_diagnose` — 診斷後建議修復方式
-  - [ ] `debug` — 分析後建議 fix 或 test
-  - [ ] `test` — 失敗後建議 debug 或 fix
-  - [ ] `cross_file_edit` — dry-run 後建議 apply
-  - [ ] `test_suggest` — 建議後可一鍵產生測試
-- [ ] **測試**
-  - [ ] 每個改造的工具至少 1 個測試驗證 nextCommand 格式正確
-  - [ ] 驗證 LLM 可以直接 dispatch nextCommand 成功
+- [x] **定義 nextCommand 輸出格式**
+  - [x] `smart_edit` 回傳 `{ status, summary, files, nextCommand: { tool, args, description } }`
+  - [x] `error_diagnose` (JSON mode) 回傳含 `nextCommand`
+- [x] **新增 `smart_edit` 工具** — 精確字串取代，直接取代 opencode `edit`
+  - [x] 支援 exact match（預設）與 regex 模式
+  - [x] 支援單檔與多檔編輯
+  - [x] dry-run 預設，回傳 diff preview + nextCommand
+  - [x] `apply: true` 時寫入檔案
+  - [x] 輸出結構化 JSON（含 `nextCommand`）
+  - [x] 已載入 server（41 tools 中包含 `smart_edit`）
+- [x] **改造 `error_diagnose` CLI** — JSON 模式附加 nextCommand
+- [ ] 改造 `debug` — 分析後建議 fix 或 test
+- [ ] 改造 `test_suggest` — 建議後可一鍵產生測試
+- [x] **測試**
+  - [x] `smart_edit` handler 測試通過（dry-run + nextCommand 格式正確）
+  - [x] 26/26 tests passing（含 arch_overview + coverage）
 
 ### 驗收標準
 

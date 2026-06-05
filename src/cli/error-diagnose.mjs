@@ -433,6 +433,21 @@ function main() {
         source: memoryResult ? 'memory' : 'knowledge-base',
         stored: doStore,
       };
+
+      // Add nextCommand if there's a fix to apply
+      if (results.length > 0 && results[0].fix && results[0].fix !== 'Unknown') {
+        jsonResult.nextCommand = {
+          tool: 'smart_edit',
+          args: {
+            oldString: results[0].fix.match(/'([^']+)'/)?.[1] || results[0].fix,
+            newString: '',
+            file: '',
+            format: 'json',
+          },
+          description: `Apply fix: ${results[0].fix.substring(0, 100)}`,
+        };
+      }
+
       output = JSON.stringify(jsonResult, null, 2);
       break;
     }

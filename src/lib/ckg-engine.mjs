@@ -2120,6 +2120,205 @@ export class CkgEngine {
     };
   }
 
+  /**
+   * Get architecture overview — structured JSON map of the project architecture.
+   * Optimized for LLM consumption: one query gives the full picture.
+   * @param {object} [opts]
+   * @param {boolean} [opts.includeDetails=false] - Include per-file details
+   * @returns {object} Architecture overview
+   */
+  getArchOverview(opts = {}) {
+    const db = this._getDb();
+    const proj = db.prepare('SELECT * FROM projects WHERE id = ?').get(this._projectId);
+    if (!proj) return { status: 'not_built' };
+
+    const stats = this.getStats();
+
+    // All file nodes
+    const fileNodes = db.prepare(
+      `SELECT id, name, file FROM nodes WHERE project_id = ? AND kind = 'file' AND stale = 0 ORDER BY file`
+    ).all(this._projectId);
+
+    // Function/class/method nodes with line ranges
+    const funcNodes = db.prepare(
+      `SELECT id, name, file, kind, range_start_line, range_end_line, exported
+       FROM nodes WHERE project_id = ? AND kind IN ('function', 'class', 'method') AND stale = 0
+       ORDER BY file, range_start_line`
+    ).all(this._projectId);
+
+    // Import edges between files
+    const importEdges = db.prepare(
+      `SELECT fn.file as from_file, tn.file as to_file
+       FROM edges e
+       JOIN nodes fn ON e.from_node_id = fn.id AND fn.kind = 'file' AND fn.stale = 0
+       JOIN nodes tn ON e.to_node_id = tn.id AND tn.kind = 'file' AND tn.stale = 0
+       WHERE e.kind = 'imports' AND e.stale = 0 AND fn.project_id = ? AND tn.project_id = ?`
+    ).all(this._projectId, this._projectId);
+
+    // Call edges per function (fan-in)
+    const fanInRows = db.prepare(
+      `SELECT to_node_id, COUNT(*) as cnt FROM edges
+       WHERE kind = 'calls' AND stale = 0 AND project_id = ?
+       GROUP BY to_node_id ORDER BY cnt DESC`
+    ).all(this._projectId);
+    const fanInMap = new Map();
+    for (const r of fanInRows) fanInMap.set(r.to_node_id, r.cnt);
+
+    // Test coverage edges
+    const testedRows = db.prepare(
+      `SELECT DISTINCT e.from_node_id FROM edges e
+       JOIN nodes n ON e.from_node_id = n.id
+       WHERE e.kind = 'tested_by' AND e.stale = 0 AND n.project_id = ?`
+    ).all(this._projectId);
+    const testedSet = new Set(testedRows.map(r => r.from_node_id));
+
+    // -----------------------------------------------------------------------
+    // Helper: detect layer from file path
+    // -----------------------------------------------------------------------
+    const layerPatterns = [
+      'controllers', 'controller', 'routes', 'route', 'api', 'endpoints', 'endpoint',
+      'services', 'service', 'repositories', 'repository', 'repos', 'repo', 'daos', 'dao', 'stores', 'store',
+      'models', 'model', 'entities', 'entity', 'schemas', 'schema',
+      'middleware', 'middlewares',
+      'utils', 'util', 'helpers', 'helper', 'lib', 'libs',
+      'config', 'configuration',
+      'views', 'view', 'components', 'component', 'pages', 'page', 'layouts', 'layout',
+      'hooks', 'hook',
+      'tests', 'test', 'specs', 'spec',
+      'types', 'type', 'interfaces', 'interface',
+      'providers', 'provider', 'plugins', 'plugin',
+      'adapters', 'adapter', 'ports', 'port',
+      'decorators', 'decorator', 'guards', 'guard',
+      'pipes', 'pipe', 'filters', 'filter',
+      'interceptors', 'interceptor',
+      'resolvers', 'resolver',
+    ];
+
+    function detectLayer(filePath) {
+      const normalized = filePath.replace(/\\/g, '/');
+      const parts = normalized.split('/');
+      for (const part of parts) {
+        const lower = part.toLowerCase();
+        if (layerPatterns.includes(lower)) return lower;
+      }
+      // Fallback: parent directory
+      return parts.length > 1 ? parts[parts.length - 2] : 'root';
+    }
+
+    // -----------------------------------------------------------------------
+    // Group files into layers
+    // -----------------------------------------------------------------------
+    const layerFiles = new Map(); // layerName → file nodes
+    const fileToLayer = new Map(); // filePath → layerName
+
+    for (const f of fileNodes) {
+      const layer = detectLayer(f.file);
+      fileToLayer.set(f.file, layer);
+      if (!layerFiles.has(layer)) layerFiles.set(layer, []);
+      layerFiles.get(layer).push(f);
+    }
+
+    // -----------------------------------------------------------------------
+    // Build layer dependency matrix
+    // -----------------------------------------------------------------------
+    const layerEdgeCount = new Map(); // "from→to" → count
+    for (const edge of importEdges) {
+      const fromLayer = fileToLayer.get(edge.from_file) || 'unknown';
+      const toLayer = fileToLayer.get(edge.to_file) || 'unknown';
+      if (fromLayer !== toLayer) {
+        const key = `${fromLayer}→${toLayer}`;
+        layerEdgeCount.set(key, (layerEdgeCount.get(key) || 0) + 1);
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Build layers array
+    // -----------------------------------------------------------------------
+    const layers = [];
+    for (const [name, files] of layerFiles) {
+      const dirs = [...new Set(files.map(f => {
+        const p = f.file.replace(/\\/g, '/');
+        return p.includes('/') ? p.substring(0, p.lastIndexOf('/')) : '.';
+      }))];
+      const funcCount = funcNodes.filter(f => files.some(fn => fn.file === f.file)).length;
+      const deps = [...layerEdgeCount.entries()]
+        .filter(([k]) => k.startsWith(name + '→'))
+        .map(([k, cnt]) => ({ layer: k.split('→')[1], edges: cnt }))
+        .sort((a, b) => b.edges - a.edges);
+
+      layers.push({ name, glob: dirs.join(', '), files: files.length, functions: funcCount, deps: deps.map(d => d.layer) });
+    }
+
+    // -----------------------------------------------------------------------
+    // Dependency list (for visualization)
+    // -----------------------------------------------------------------------
+    const dependencies = [...layerEdgeCount.entries()]
+      .map(([k, cnt]) => { const [from, to] = k.split('→'); return { from, to, edgeCount: cnt }; })
+      .sort((a, b) => b.edgeCount - a.edgeCount);
+
+    // -----------------------------------------------------------------------
+    // Violation detection (default layered architecture rules)
+    // -----------------------------------------------------------------------
+    const violationRules = [
+      { from: 'controllers', to: 'repositories', rule: 'controllers should not depend directly on repositories' },
+      { from: 'controllers', to: 'repository',  rule: 'controllers should not depend directly on repositories' },
+      { from: 'controller',  to: 'repositories', rule: 'controllers should not depend directly on repositories' },
+      { from: 'controller',  to: 'repository',   rule: 'controllers should not depend directly on repositories' },
+      { from: 'controllers', to: 'models',       rule: 'controllers should not depend directly on data models' },
+      { from: 'controllers', to: 'model',        rule: 'controllers should not depend directly on data models' },
+      { from: 'views',       to: 'repositories', rule: 'views should not depend directly on repositories' },
+      { from: 'views',       to: 'repository',   rule: 'views should not depend directly on repositories' },
+      { from: 'view',        to: 'repositories', rule: 'views should not depend directly on repositories' },
+      { from: 'view',        to: 'repository',   rule: 'views should not depend directly on repositories' },
+    ];
+    const violations = [];
+    for (const dep of dependencies) {
+      for (const rule of violationRules) {
+        if (dep.from === rule.from && dep.to === rule.to) {
+          violations.push({ from: dep.from, to: dep.to, edgeCount: dep.edgeCount, rule: rule.rule });
+        }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Critical functions (top 10 by weighted score)
+    // -----------------------------------------------------------------------
+    const criticalFunctions = [];
+    for (const f of funcNodes) {
+      const fanIn = fanInMap.get(f.id) || 0;
+      const lineCount = (f.range_end_line && f.range_start_line) ? (f.range_end_line - f.range_start_line + 1) : 0;
+      const tested = testedSet.has(f.id);
+      if (fanIn >= 2 || lineCount > 50 || (fanIn >= 1 && !tested)) {
+        criticalFunctions.push({
+          name: f.name, file: f.file, kind: f.kind,
+          complexity: lineCount, fanIn, tested, exported: !!f.exported,
+        });
+      }
+    }
+    criticalFunctions.sort((a, b) => (b.fanIn * 5 + b.complexity) - (a.fanIn * 5 + a.complexity));
+    const topCritical = criticalFunctions.slice(0, 10);
+
+    // -----------------------------------------------------------------------
+    // Unused exports (top 10)
+    // -----------------------------------------------------------------------
+    let unusedExports = [];
+    try { unusedExports = this.queryUnusedExports().slice(0, 10); } catch { /* best-effort */ }
+
+    return {
+      summary: {
+        project: stats.project, root: stats.root, builtAt: stats.builtAt,
+        files: stats.files, functions: funcNodes.length,
+        layers: layers.length, dependencies: dependencies.length,
+        violations: violations.length, unusedExports: unusedExports.length,
+      },
+      layers,
+      dependencies,
+      violations,
+      criticalFunctions: topCritical,
+      unusedExports: unusedExports.map(u => ({ name: u.name, file: u.file, kind: u.kind })),
+    };
+  }
+
   // -----------------------------------------------------------------------
   // Close / Cleanup
   // -----------------------------------------------------------------------
