@@ -1,17 +1,18 @@
-// lsp-bridge.mjs — LSP 統一接入層
+// lsp-bridge.mjs — LSP 統一接入層 (v2, 多語言)
 //
-// 封裝 typescript-language-server / pylsp 等 LSP 的 JSON-RPC 2.0 over stdio 通訊。
+// 封裝 typescript-language-server / rust-analyzer / sourcekit-lsp 等 LSP 的 JSON-RPC 2.0 over stdio 通訊。
 // 提供統一的 symbol / references / hover / definition 介面。
+// 支援多語言：TypeScript、Rust、Python、Swift。
 //
 // 設計原則：
 // - lazy-init：首次工具呼叫才啟動 LSP process，不佔用開機資源
 // - auto-reconnect：LSP process crash 時自動重啟
 // - cache：使用 LRU 快取避免重複 query
-// - 先支援 TypeScript，後續擴展 Python/Rust
+// - 多語言支援：依檔案副檔名自動選擇對應 LSP server
 
 import { spawn, execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -52,37 +53,112 @@ class LRUCache {
 }
 
 // ---------------------------------------------------------------------------
-// LSP Bridge class
+// LSP 語言設定
+// ---------------------------------------------------------------------------
+
+const LSP_CONFIGS = {
+  typescript: {
+    name: 'typescript-language-server',
+    args: ['--stdio'],
+    fileExts: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'],
+    languageId: 'typescript',
+    findCandidates: [
+      '/opt/homebrew/bin/typescript-language-server',
+      '/usr/local/bin/typescript-language-server',
+    ],
+    env: {},
+  },
+  python: {
+    name: 'pylsp',
+    args: [],
+    fileExts: ['.py', '.pyw'],
+    languageId: 'python',
+    findCandidates: [
+      '/Users/wclin/Library/Python/3.9/bin/pylsp',
+      '/usr/local/bin/pylsp',
+      '/opt/homebrew/bin/pylsp',
+    ],
+    env: {},
+  },
+  rust: {
+    name: 'rust-analyzer',
+    args: [],
+    fileExts: ['.rs'],
+    languageId: 'rust',
+    findCandidates: [
+      '/Users/wclin/.cargo/bin/rust-analyzer',
+      '/usr/local/bin/rust-analyzer',
+      '/opt/homebrew/bin/rust-analyzer',
+    ],
+    env: {},
+  },
+  swift: {
+    name: 'sourcekit-lsp',
+    args: [],
+    fileExts: ['.swift'],
+    languageId: 'swift',
+    findCandidates: [
+      '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/sourcekit-lsp',
+      '/usr/bin/sourcekit-lsp',
+      '/usr/local/bin/sourcekit-lsp',
+    ],
+    env: {},
+  },
+};
+
+/**
+ * Get LSP config for a file extension.
+ * @param {string} ext - File extension (e.g. '.ts', '.rs')
+ * @returns {object|null} LSP config or null if unsupported
+ */
+function getLspConfigForFile(ext) {
+  for (const [lang, cfg] of Object.entries(LSP_CONFIGS)) {
+    if (cfg.fileExts.includes(ext)) return { lang, ...cfg };
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// LSP Bridge class (v2 - 多語言支援)
 // ---------------------------------------------------------------------------
 export class LspBridge {
   constructor(rootDir) {
     this.rootDir = resolve(rootDir || '.');
-    this._process = null;
-    this._requestId = 0;
-    this._pending = new Map();    // id -> { resolve, reject, timer }
-    this._ready = false;
+    this._processes = new Map();   // lang -> { process, requestId, pending, buffer, ready }
     this._closing = false;
-    this._buffer = '';            // accumulated stdout data
     this._cache = new LRUCache(200, 30_000);
-    this._serverCapabilities = null;
-
-    // Determine which LSP server to use based on project files
-    this._lspCommand = this._detectLanguage();
+    this._serverCapabilities = new Map();
   }
 
   // -----------------------------------------------------------------------
   // Public API
   // -----------------------------------------------------------------------
 
-  get isReady() { return this._ready; }
+  get isReady() { return this._processes.size > 0; }
 
-  /** Ensure LSP process is running (lazy-init) */
-  async ensureOpen() {
-    if (this._ready && this._process) return;
-    if (this._process) {
-      try { this._process.kill(); } catch { /* ignore */ }
+  /**
+   * Detect language for a given file path.
+   * @param {string} filePath
+   * @returns {string} Language name
+   */
+  _langForFile(filePath) {
+    const ext = extname(filePath).toLowerCase();
+    for (const [lang, cfg] of Object.entries(LSP_CONFIGS)) {
+      if (cfg.fileExts.includes(ext)) return lang;
     }
-    await this._start();
+    return 'typescript'; // default
+  }
+
+  /**
+   * Get or lazily initialize LSP process for a given language.
+   * @param {string} lang - Language name (typescript, rust)
+   */
+  async ensureOpen(lang) {
+    if (!lang) lang = 'typescript';
+    const existing = this._processes.get(lang);
+    if (existing && existing.ready) return;
+
+    await this._start(lang);
   }
 
   /** 取得檔案中的符號列表 */
@@ -96,14 +172,18 @@ export class LspBridge {
     const cached = this._cache.get(cacheKey);
     if (cached) return cached;
 
-    await this.ensureOpen();
+    const lang = this._langForFile(filePath);
+    const cfg = LSP_CONFIGS[lang];
+    const languageId = cfg ? cfg.languageId : 'typescript';
+
+    await this.ensureOpen(lang);
     await this._sendNotification('textDocument/didOpen', {
-      textDocument: { uri: this._toUri(absPath), languageId: 'typescript', version: 1 }
-    });
+      textDocument: { uri: this._toUri(absPath), languageId, version: 1 }
+    }, lang);
 
     const result = await this._sendRequest('textDocument/documentSymbol', {
       textDocument: { uri: this._toUri(absPath) }
-    });
+    }, lang);
 
     const symbols = this._normalizeSymbols(result);
     const output = { file: filePath, symbols };
@@ -122,16 +202,20 @@ export class LspBridge {
     const cached = this._cache.get(cacheKey);
     if (cached) return cached;
 
-    await this.ensureOpen();
+    const lang = this._langForFile(filePath);
+    const cfg = LSP_CONFIGS[lang];
+    const languageId = cfg ? cfg.languageId : 'typescript';
+
+    await this.ensureOpen(lang);
     await this._sendNotification('textDocument/didOpen', {
-      textDocument: { uri: this._toUri(absPath), languageId: 'typescript', version: 1 }
-    });
+      textDocument: { uri: this._toUri(absPath), languageId, version: 1 }
+    }, lang);
 
     const result = await this._sendRequest('textDocument/references', {
       textDocument: { uri: this._toUri(absPath) },
       position: { line: line - 1, character: col || 0 },
       context: { includeDeclaration: true }
-    });
+    }, lang);
 
     const refs = (result || []).map(r => ({
       file: this._fromUri(r.uri),
@@ -154,15 +238,19 @@ export class LspBridge {
     const cached = this._cache.get(cacheKey);
     if (cached) return cached;
 
-    await this.ensureOpen();
+    const lang = this._langForFile(filePath);
+    const cfg = LSP_CONFIGS[lang];
+    const languageId = cfg ? cfg.languageId : 'typescript';
+
+    await this.ensureOpen(lang);
     await this._sendNotification('textDocument/didOpen', {
-      textDocument: { uri: this._toUri(absPath), languageId: 'typescript', version: 1 }
-    });
+      textDocument: { uri: this._toUri(absPath), languageId, version: 1 }
+    }, lang);
 
     const result = await this._sendRequest('textDocument/hover', {
       textDocument: { uri: this._toUri(absPath) },
       position: { line: line - 1, character: col || 0 }
-    });
+    }, lang);
 
     const output = {
       file: filePath,
@@ -183,15 +271,19 @@ export class LspBridge {
       return { error: `File not found: ${filePath}` };
     }
 
-    await this.ensureOpen();
+    const lang = this._langForFile(filePath);
+    const cfg = LSP_CONFIGS[lang];
+    const languageId = cfg ? cfg.languageId : 'typescript';
+
+    await this.ensureOpen(lang);
     await this._sendNotification('textDocument/didOpen', {
-      textDocument: { uri: this._toUri(absPath), languageId: 'typescript', version: 1 }
-    });
+      textDocument: { uri: this._toUri(absPath), languageId, version: 1 }
+    }, lang);
 
     const result = await this._sendRequest('textDocument/definition', {
       textDocument: { uri: this._toUri(absPath) },
       position: { line: line - 1, character: col || 0 }
-    });
+    }, lang);
 
     if (!result || result.length === 0) {
       return { file: filePath, definition: null };
@@ -204,111 +296,102 @@ export class LspBridge {
     };
   }
 
-  /** 優雅關閉 LSP */
+  /** 優雅關閉所有 LSP process */
   async close() {
     this._closing = true;
-    if (this._process) {
+    for (const [lang, state] of this._processes) {
       try {
-        await this._sendRequest('shutdown');
-        await this._sendNotification('exit');
+        await this._sendRequest('shutdown', {}, lang);
+        await this._sendNotification('exit', {}, lang);
       } catch { /* ignore */ }
-      try { this._process.kill(); } catch { /* ignore */ }
-      this._process = null;
+      try { state.process.kill(); } catch { /* ignore */ }
     }
-    this._ready = false;
+    this._processes.clear();
     this._cache.clear();
-    // Reject pending requests
-    for (const [id, p] of this._pending) {
-      clearTimeout(p.timer);
-      p.reject(new Error('LSP bridge closed'));
-      this._pending.delete(id);
-    }
   }
 
   // -----------------------------------------------------------------------
   // Internal
   // -----------------------------------------------------------------------
 
-  _detectLanguage() {
-    // For now, always use TypeScript. Later detect based on files in rootDir.
-    const tsServer = this._findTsserver();
-    if (!tsServer) {
-      console.warn('[lsp-bridge] typescript-language-server not found. Install with: npm i -g typescript-language-server');
-      return null;
-    }
-    return { cmd: tsServer, args: ['--stdio'] };
-  }
+  _findLspServer(lang) {
+    const cfg = LSP_CONFIGS[lang];
+    if (!cfg) return null;
 
-  _findTsserver() {
-    // Try common locations first (fast path, no spawn)
-    const candidates = [
-      // Global npm (Homebrew)
-      '/opt/homebrew/bin/typescript-language-server',
-      '/usr/local/bin/typescript-language-server',
-      // Local node_modules
-      resolve(__dirname, '../../node_modules/.bin/typescript-language-server'),
-      // User's global npm
-      ...(process.env.HOME ? [
-        resolve(process.env.HOME, '.npm-global/bin/typescript-language-server'),
-        resolve(process.env.HOME, 'npm/bin/typescript-language-server'),
-      ] : []),
-    ];
-
-    for (const c of candidates) {
+    // Try candidates from config first
+    for (const c of cfg.findCandidates) {
       if (existsSync(c)) return c;
     }
 
-    // Fallback: try resolving via PATH using which (sync)
+    // Try local node_modules
+    const local = resolve(__dirname, '../../node_modules/.bin', cfg.name);
+    if (existsSync(local)) return local;
+
+    // Try user's npm global
+    if (process.env.HOME) {
+      const homeDir = resolve(process.env.HOME, 'npm/bin', cfg.name);
+      if (existsSync(homeDir)) return homeDir;
+    }
+
+    // Fallback: resolve via PATH
     try {
-      const which = execSync('which typescript-language-server', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
+      const which = execSync(`which ${cfg.name}`, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }).trim();
       if (which) return which;
     } catch { /* not in PATH */ }
 
     return null;
   }
 
-  async _start() {
-    if (!this._lspCommand) {
-      throw new Error('No LSP server found. Install typescript-language-server: npm i -g typescript-language-server');
+  async _start(lang) {
+    const cfg = LSP_CONFIGS[lang];
+    if (!cfg) {
+      throw new Error(`Unsupported language: ${lang}`);
+    }
+
+    const serverPath = this._findLspServer(lang);
+    if (!serverPath) {
+      throw new Error(`${cfg.name} not found. Install with your package manager.`);
     }
 
     return new Promise((resolve, reject) => {
-      const { cmd, args } = this._lspCommand;
-      const child = spawn(cmd, args, {
+      const child = spawn(serverPath, cfg.args, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env },
+        env: { ...process.env, ...cfg.env },
       });
 
-      this._process = child;
-      this._buffer = '';
-      this._requestId = 0;
+      const state = {
+        process: child,
+        requestId: 0,
+        pending: new Map(),
+        buffer: '',
+        ready: false,
+      };
+      this._processes.set(lang, state);
 
       child.stdout.on('data', (data) => {
-        this._buffer += data.toString();
-        this._processBuffer();
+        state.buffer += data.toString();
+        this._processBuffer(lang);
       });
 
       child.stderr.on('data', (data) => {
-        // LSP servers often log diagnostics to stderr - suppress in production
         if (process.env.DEBUG?.includes('lsp')) {
-          console.error('[lsp-bridge:stderr]', data.toString().trim());
+          console.error(`[lsp-bridge:${lang}:stderr]`, data.toString().trim());
         }
       });
 
       child.on('error', (err) => {
-        console.error('[lsp-bridge] Process error:', err.message);
-        this._ready = false;
+        console.error(`[lsp-bridge:${lang}] Process error:`, err.message);
+        state.ready = false;
+        this._processes.delete(lang);
         reject(err);
       });
 
       child.on('exit', (code) => {
         if (this._closing) return;
-        console.warn(`[lsp-bridge] Process exited with code ${code}, restarting...`);
-        this._ready = false;
-        this._process = null;
-        // Auto-reconnect after 1s
+        console.warn(`[lsp-bridge:${lang}] Exited with code ${code}, restarting...`);
+        this._processes.delete(lang);
         setTimeout(() => {
-          if (!this._closing) this._start().catch(() => {});
+          if (!this._closing) this._start(lang).catch(() => {});
         }, 1000);
       });
 
@@ -324,82 +407,92 @@ export class LspBridge {
             definition: {},
           }
         }
-      }).then((cap) => {
-        this._serverCapabilities = cap;
-        this._ready = true;
-        // Send initialized notification
-        this._sendNotification('initialized', {});
+      }, lang).then((cap) => {
+        this._serverCapabilities.set(lang, cap);
+        state.ready = true;
+        this._sendNotification('initialized', {}, lang);
         resolve();
       }).catch(reject);
     });
   }
 
-  _sendRequest(method, params = {}) {
-    const id = ++this._requestId;
+  _sendRequest(method, params = {}, lang = 'typescript') {
+    const state = this._processes.get(lang);
+    if (!state) {
+      return Promise.reject(new Error(`LSP not started for language: ${lang}`));
+    }
+
+    const id = ++state.requestId;
     return new Promise((resolve, reject) => {
       const msg = JSON.stringify({
         jsonrpc: '2.0', id, method,
         params: Object.keys(params).length ? params : undefined
       });
 
-      // Timeout: 30s for LSP operations
       const timer = setTimeout(() => {
-        this._pending.delete(id);
-        reject(new Error(`LSP request ${method} timed out after 30s`));
+        state.pending.delete(id);
+        reject(new Error(`LSP request ${method} timed out after 30s (${lang})`));
       }, 30_000);
 
-      this._pending.set(id, { resolve, reject, timer });
+      state.pending.set(id, { resolve, reject, timer });
 
-      // Content-Length header + message
       const header = `Content-Length: ${Buffer.byteLength(msg, 'utf8')}\r\n\r\n`;
-      this._process?.stdin?.write(header + msg);
+      state.process.stdin.write(header + msg);
     });
   }
 
-  _sendNotification(method, params = {}) {
+  _sendNotification(method, params = {}, lang = 'typescript') {
+    const state = this._processes.get(lang);
+    if (!state) return;
+
     const msg = JSON.stringify({
       jsonrpc: '2.0', method,
       params: Object.keys(params).length ? params : undefined
     });
     const header = `Content-Length: ${Buffer.byteLength(msg, 'utf8')}\r\n\r\n`;
-    if (this._process?.stdin?.writable) {
-      this._process.stdin.write(header + msg);
+    if (state.process.stdin.writable) {
+      state.process.stdin.write(header + msg);
     }
   }
 
-  _processBuffer() {
-    // Parse Content-Length headers and JSON-RPC messages
+  _processBuffer(lang) {
+    const state = this._processes.get(lang);
+    if (!state) return;
+
     while (true) {
-      const headerMatch = this._buffer.match(/^Content-Length: (\d+)\r\n/m);
+      const headerMatch = state.buffer.match(/^Content-Length: (\d+)\r\n/m);
       if (!headerMatch) break;
 
       const contentLen = parseInt(headerMatch[1], 10);
-      const headerEnd = this._buffer.indexOf('\r\n\r\n') + 4;
+      const headerEnd = state.buffer.indexOf('\r\n\r\n') + 4;
       if (headerEnd < 4) break;
 
       const bodyStart = headerEnd;
       const bodyEnd = bodyStart + contentLen;
-      if (this._buffer.length < bodyEnd) break;
+      if (state.buffer.length < bodyEnd) break;
 
-      const body = this._buffer.slice(bodyStart, bodyEnd);
-      this._buffer = this._buffer.slice(bodyEnd);
+      const body = state.buffer.slice(bodyStart, bodyEnd);
+      state.buffer = state.buffer.slice(bodyEnd);
 
       try {
         const msg = JSON.parse(body);
-        this._handleMessage(msg);
+        this._handleMessage(msg, lang);
       } catch (err) {
         if (process.env.DEBUG?.includes('lsp')) {
-          console.error('[lsp-bridge] Parse error:', err.message, body.slice(0, 200));
+          console.error(`[lsp-bridge:${lang}] Parse error:`, err.message, body.slice(0, 200));
         }
       }
     }
   }
 
-  _handleMessage(msg) {
-    if (msg.id != null && this._pending.has(msg.id)) {
-      const { resolve, reject, timer } = this._pending.get(msg.id);
+  _handleMessage(msg, lang) {
+    const state = this._processes.get(lang);
+    if (!state) return;
+
+    if (msg.id != null && state.pending.has(msg.id)) {
+      const { resolve, reject, timer } = state.pending.get(msg.id);
       clearTimeout(timer);
-      this._pending.delete(msg.id);
+      state.pending.delete(msg.id);
 
       if (msg.error) {
         reject(new Error(msg.error.message || 'LSP error'));
@@ -407,7 +500,6 @@ export class LspBridge {
         resolve(msg.result);
       }
     }
-    // Ignore notifications (method field present, no id)
   }
 
   _toUri(absPath) {
@@ -421,7 +513,6 @@ export class LspBridge {
 
   _normalizeSymbols(result) {
     if (!result) return [];
-    // LSP documentSymbol returns array of SymbolInformation or DocumentSymbol
     const symbols = [];
     const walk = (items, depth = 0) => {
       if (!items) return;

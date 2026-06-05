@@ -216,6 +216,9 @@ const ERROR_FIXES = {
   ts_helper: {
     missing:   'command is required (typecheck/lint/test). Usage: smart_run(tool:"ts_helper", args:{command:"typecheck", file:"src/foo.ts"})',
   },
+  rs_helper: {
+    missing:   'command is required (check/clippy/analyze/fmt). Usage: smart_run(tool:"rs_helper", args:{command:"check", root:"crates/foo"})',
+  },
   integrate: {
     missing:   'command is required (list/suggest-commit/generate-pr/diagnose/mcp). Usage: smart_run(tool:"integrate", args:{command:"list"})',
   },

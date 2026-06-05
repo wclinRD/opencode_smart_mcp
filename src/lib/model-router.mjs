@@ -179,7 +179,7 @@ export function suggestTierForTool(toolName) {
 
   // Tier 2: local small model tasks
   const t2Tools = [
-    'py_helper', 'ts_helper', 'test_suggest',
+    'py_helper', 'ts_helper', 'rs_helper', 'test_suggest',
   ];
   if (t2Tools.some(t => name.includes(t) || name === t)) return 2;
 

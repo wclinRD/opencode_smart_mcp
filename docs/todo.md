@@ -748,32 +748,31 @@
 
 ---
 
-## 🔴 Phase A: 競爭回應 — 產品基礎補強 (P0 立即)
+## ✅ Phase A: 競爭回應 — 產品基礎補強 (P0 立即)
 
 **對應 plan.md 五-Phase A**
 **目標**：補足競爭劣勢（CKG 多語言、語言助手擴充、效能優化）
 
-### A.1 語言助手擴充（原 Phase 9，提升至 P1）
+### ✅ A.1 語言助手擴充（原 Phase 9）
 
-Phase 9 已提升至 🟠 P1，確認以下項目：
+- [x] `rs-helper.mjs` Rust 分析（cargo check + clippy + analyze + fmt）
+- [x] 已註冊：workflow.mjs + compose-engine.mjs + planner.mjs + server/index.mjs + model-router
+- [ ] `go-helper.mjs` Go 分析（gopls 未安裝，跳過）
+- [ ] 自動語言偵測 dispatcher（未來）
 
-- [ ] `rs-helper.mjs` Rust 分析（cargo check + clippy）
-- [ ] `go-helper.mjs` Go 分析（go vet + golangci-lint）
-- [ ] 自動語言偵測 dispatcher
-- [ ] 測試：Rust/Go 專案偵測 + 工具呼叫正確
+### ✅ A.2 CKG 多語言支援（P0）
 
-### A.2 CKG 多語言支援（P0）
+- [x] LSP bridge 多語言：Rust (rust-analyzer) + Python (pylsp) + Swift (sourcekit-lsp)
+  - [x] LSP_CONFIGS: 4 語言 (TypeScript/Python/Rust/Swift)
+  - [x] per-language 自動偵測（_langForFile）+ per-language process 管理
+- [x] CKG Engine 多語言 import 解析：
+  - [x] Rust: SUPPORTED_EXTS + parseRustImports (use/mod) + mod.rs 路徑解析
+  - [x] Python: SUPPORTED_EXTS + parsePythonImports (from...import) + dots→path 解析
+  - [x] Swift: SUPPORTED_EXTS + parseSwiftImports (import/@_exported) + .swift 路徑解析
+- [ ] CKG watch mode 多語言強化（未來）
+- [ ] Go 支援（需 goplis 安裝）
 
-- [ ] LSP bridge 擴充至 Rust（rust-analyzer）
-  - [ ] CKG 節點類型：struct → 用於 Go/Rust 結構體
-  - [ ] CKG 邊類型：methodOf, implements（Go interface）
-- [ ] LSP bridge 擴充至 Go（gopls）
-  - [ ] CKG 節點類型：package, struct
-- [ ] CKG watch mode 多語言強化
-  - [ ] 跨語言 import 邊
-- [ ] 測試：Rust + Go 專案 CKG build
-
-### A.3 CKG 效能優化（P1）
+### ⏳ A.3 CKG 效能優化（P1）
 
 - [ ] CKG build 優化：1000 檔 < 10 秒
   - [ ] LRU cache 擴充至 5000 筆
@@ -1015,3 +1014,17 @@ Phase 9 已提升至 🟠 P1，確認以下項目：
   - 原因：TOON format 對中型資料（50-200 tokens）可省 10-29%，但 default 30% 門檻太高導致永遠回傳 "Not optimized"
   - 修復：傳遞自訂 config `{ minSavingsThreshold: 10, minTokensThreshold: 20 }` 給 `TokenOptimizer`
   - 效果：5 users JSON 從 67→47 tokens（29.9%），200 users JSON 從 5,012→2,888 tokens（42.4%）
+
+### 🔄 Phase A: 語言助手擴充 + CKG 多語言 (2026-06-05)
+- [x] `src/plugins/standard/rs-helper.mjs` → `smart_rs_helper` (CLI-based, 4 commands: check/clippy/analyze/fmt)
+- [x] `src/cli/rs-helper.mjs` — CLI 實作完備：
+  - cargo check (compile errors parser)
+  - cargo clippy (lint warnings parser)
+  - Cargo.toml 分析 (name/version/deps/features/targets)
+  - cargo fmt --check (formatting diff)
+  - text/json/markdown 三種輸出格式
+- [x] 工具註冊：compose-engine.mjs + workflow.mjs + planner.mjs + server/index.mjs + model-router
+- [x] LSP Bridge 多語言擴充：Swift (sourcekit-lsp) + 既有 TS/Python/Rust
+- [x] CKG Engine 多語言：.swift SUPPORTED_EXTS + parseSwiftImports() + resolveImportSource()
+- [x] rustup default stable 設定 (未設定工具鏈問題修復)
+- [x] 14 tests pass, 0 regression

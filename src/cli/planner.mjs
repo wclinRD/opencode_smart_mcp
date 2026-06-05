@@ -74,6 +74,7 @@ const AVAILABLE_TOOLS = {
   // Language helpers
   smart_py_helper:         { task: 'lang',      description: 'Python project analysis' },
   smart_ts_helper:         { task: 'lang',      description: 'TypeScript project analysis' },
+  smart_rs_helper:         { task: 'lang',      description: 'Rust project analysis (cargo check/clippy/analyze/fmt)' },
 
   // Meta
   smart_tool_stats:        { task: 'meta',      description: 'Tool usage statistics & patterns' },

@@ -48,7 +48,7 @@ const EDGE_KINDS = new Set([
   'calls', 'imports', 'extends', 'implements', 'defines', 'parameterOf',
   'returnTypeOf', 'contains',
 ]);
-const SUPPORTED_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
+const SUPPORTED_EXTS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.rs', '.py', '.pyw', '.swift']);
 const STALE_DAYS = 30; // keep stale nodes for 30 days before hard deletion
 const DEFAULT_DEPTH = 2;
 
@@ -78,8 +78,87 @@ function shouldSkipDir(name) {
     '.smart', '.opencode', '.agents', '__pycache__', '.cache'].includes(name);
 }
 
+/** Parse Rust use/mod declarations */
+function parseRustImports(content) {
+  const imports = [];
+  // use statements: use crate::module::Item;  or  use std::collections::HashMap;
+  const useRe = /^use\s+([^;]+);/gm;
+  let m;
+  while ((m = useRe.exec(content)) !== null) {
+    const path = m[1].trim();
+    // Extract the crate-relative path, convert dots to slashes later
+    imports.push({ source: path, type: 'use', raw: m[0].trim() });
+  }
+
+  // mod declarations (local modules): mod foo;
+  const modRe = /^mod\s+(\w+)\s*;/gm;
+  while ((m = modRe.exec(content)) !== null) {
+    imports.push({ source: `./${m[1].trim()}`, type: 'mod', raw: m[0].trim() });
+  }
+
+  // mod with block: mod foo { ... } — skip these, they're inline
+  return imports;
+}
+
+/** Parse Python import statements */
+function parsePythonImports(content) {
+  const imports = [];
+  // import X, import X.Y.Z
+  const importRe = /^import\s+([\w\s,]+)/gm;
+  let m;
+  while ((m = importRe.exec(content)) !== null) {
+    const names = m[1].split(',').map(s => s.trim()).filter(Boolean);
+    for (const name of names) {
+      // Only keep relative-style imports (starts with lowercase or dot)
+      const parts = name.split('.');
+      if (parts[0] && !parts[0].startsWith('_') && parts[0] === parts[0].toLowerCase()) {
+        // Could be stdlib or third-party — skip non-local
+        continue;
+      }
+      // Dot-based relative import
+      if (name.startsWith('.')) {
+        imports.push({ source: name, type: 'import', raw: m[0].trim() });
+      }
+    }
+  }
+
+  // from X import Y (including relative)
+  const fromRe = /^from\s+([.\w]+)\s+import\s+(.+)/gm;
+  while ((m = fromRe.exec(content)) !== null) {
+    const modulePath = m[1].trim();
+    // Only track local imports (starting with .) or project-relative
+    if (modulePath.startsWith('.')) {
+      imports.push({ source: modulePath, type: 'from-import', raw: m[0].trim() });
+    }
+    // For non-relative imports, skip (stdlib or third-party)
+  }
+
+  return imports;
+}
+
+/** Parse Swift import statements */
+function parseSwiftImports(content) {
+  const imports = [];
+  // import statements: import Foundation, import struct Foo.Bar, import class MyClass
+  // Use [^\S\n] to stay on same line (no newline crossing)
+  const importRe = /^import[^\S\n]+(?:(\w+)[^\S\n]+)?(\w+(?:\.\w+)*)/gm;
+  let m;
+  while ((m = importRe.exec(content)) !== null) {
+    const modulePath = m[2];
+    imports.push({ source: modulePath, type: 'import', raw: m[0].trim() });
+  }
+
+  // @_exported import (re-export)
+  const exportRe = /@_exported[^\S\n]+import[^\S\n]+(?:(\w+)[^\S\n]+)?(\w+(?:\.\w+)*)/gm;
+  while ((m = exportRe.exec(content)) !== null) {
+    imports.push({ source: m[2], type: 'reexport', raw: m[0].trim() });
+  }
+
+  return imports;
+}
+
 /** Parse import statements from file content (JS/TS) */
-function parseImports(content, filePath) {
+function parseJsImports(content) {
   const imports = [];
 
   // ES module imports: import ... from '...'
@@ -110,25 +189,58 @@ function parseImports(content, filePath) {
   return imports;
 }
 
+/** Parse imports based on file extension */
+function parseImports(content, filePath) {
+  const ext = extname(filePath).toLowerCase();
+  if (ext === '.rs') return parseRustImports(content);
+  if (ext === '.py' || ext === '.pyw') return parsePythonImports(content);
+  if (ext === '.swift') return parseSwiftImports(content);
+  return parseJsImports(content);
+}
+
 /** Resolve import source to an actual file path */
 function resolveImportSource(source, importerFile, projectRoot) {
   if (!source.startsWith('.') && !source.startsWith('/')) {
-    return null; // bare specifier (npm package) — skip
+    return null; // bare specifier (npm/crate/module) — skip
   }
   const dir = dirname(resolve(projectRoot, importerFile));
-  // Try exact, then with extensions, then index files
-  const candidates = [
-    resolve(dir, source),
-    resolve(dir, source + '.ts'),
-    resolve(dir, source + '.tsx'),
-    resolve(dir, source + '.js'),
-    resolve(dir, source + '.mjs'),
-    resolve(dir, source + '.cjs'),
-    resolve(dir, source, 'index.ts'),
-    resolve(dir, source, 'index.tsx'),
-    resolve(dir, source, 'index.js'),
-    resolve(dir, source, 'index.mjs'),
-  ];
+  const ext = extname(importerFile).toLowerCase();
+
+  // Try exact, then extension candidates based on language
+  const candidates = [resolve(dir, source)];
+
+  if (ext === '.rs') {
+    // Rust: .rs extension + mod.rs pattern
+    candidates.push(
+      resolve(dir, source + '.rs'),
+      resolve(dir, source, 'mod.rs'),
+    );
+  } else if (ext === '.swift') {
+    // Swift: .swift extension only
+    candidates.push(
+      resolve(dir, source + '.swift'),
+    );
+  } else if (ext === '.py' || ext === '.pyw') {
+    // Python: .py extension + __init__.py pattern (dots → path)
+    const pySource = source.replace(/\./g, '/');
+    candidates.push(
+      resolve(dir, pySource + '.py'),
+      resolve(dir, pySource, '__init__.py'),
+    );
+  } else {
+    // JS/TS: try extensions + index files
+    candidates.push(
+      resolve(dir, source + '.ts'),
+      resolve(dir, source + '.tsx'),
+      resolve(dir, source + '.js'),
+      resolve(dir, source + '.mjs'),
+      resolve(dir, source + '.cjs'),
+      resolve(dir, source, 'index.ts'),
+      resolve(dir, source, 'index.tsx'),
+      resolve(dir, source, 'index.js'),
+      resolve(dir, source, 'index.mjs'),
+    );
+  }
   for (const c of candidates) {
     if (existsSync(c) && isSupportedFile(c)) {
       return relative(projectRoot, c);

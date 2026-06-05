@@ -7,10 +7,10 @@
 
 ## 一、現狀摘要
 
-Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 42 個開發工具 + 專屬 agent personality。當前版本 3.7.1（Plugin Loader + Router 架構 + 動態多輪推理 + Context 管理 + Workflow 引擎 + Compose 引擎 + LSP 程式碼語義分析 + CKG 程式碼知識圖譜 + Hybrid Reasoning Engine + Change-Impact Pipeline + Patch Generation + Agent 人格定義 + 全面非阻塞 CLI + auto-toonify 輸出攔截器）。
+Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode agent 提供 44 個開發工具 + 專屬 agent personality。當前版本 3.7.1（Plugin Loader + Router 架構 + 動態多輪推理 + Context 管理 + Workflow 引擎 + Compose 引擎 + LSP 程式碼語義分析 + CKG 程式碼知識圖譜 + Hybrid Reasoning Engine + Change-Impact Pipeline + Patch Generation + Agent 人格定義 + 全面非阻塞 CLI + auto-toonify 輸出攔截器 + 多語言支援 (Rust/Swift)）。
 
 ### 核心數據
-- **工具總數**：42（6 原生 + 36 經 router — 含 1 Phase 8 patch-gen + 4 Phase 10 程式碼語義工具 + 1 Phase 11 CKG 查詢工具 + 1 Phase 12 Hybrid Router + 1 Phase 13 Impact Flow + 3 Phase D agent 輔助工具）
+- **工具總數**：44（6 原生 + 38 經 router — 含 1 Phase 8 patch-gen + 4 Phase 10 程式碼語義工具 + 1 Phase 11 CKG 查詢工具 + 1 Phase 12 Hybrid Router + 1 Phase 13 Impact Flow + 3 Phase D agent 輔助工具 + 1 Phase A rs-helper）
 - **架構**：Plugin Loader → src/plugins/core/（6 原生 handler）/ src/plugins/standard/（24 router CLI — 全部非阻塞 async spawn）
 - **Workflow 引擎**：Phase 4-6 完成 — dispatch 實際執行 + 5 模板 + compose/pipe/parallel 三種原語 + replan + summary
 - **語言**：JavaScript (ESM) — 6 核心 handler + 24 CLI 全數非阻塞化 (Phase 6)
@@ -70,6 +70,7 @@ src/
 │   ├── py_helper.mjs         → smart_py_helper
 │   ├── rename_safety.mjs     → smart_rename_safety
 │   ├── report.mjs            → smart_report
+│   ├── rs-helper.mjs         → smart_rs_helper       ← Phase A 🆕
 │   ├── test_suggest.mjs      → smart_test_suggest
 │   ├── tool_stats.mjs        → smart_tool_stats
 │   ├── toonify.mjs           → smart_toonify
@@ -81,7 +82,7 @@ src/
 │   ├── coverage-check.mjs
 │   ├── thinking.mjs          (also used as lib by plugins)
 │   ├── workflow.mjs          ✨新
-│   └── ... (26 CLI files)
+│   └── ... (28 CLI files — 含 rs-helper.mjs)
 
 ├── lib/
 │   ├── utils.mjs        (shared utilities)
@@ -121,7 +122,7 @@ src/
 | **除錯** | 2 | 🟡 中等 | debug-assist + error-diagnose (依賴預設 pattern KB) |
 | **重構** | 2 | ✅ 成熟 | cross-file-edit + rename-safety (皆有 dry-run) |
 | **Git** | 1 | ✅ 成熟 | git-context (diff/commit/impact) |
-| **語言助手** | 2 | 🟡 中等 | py-helper + ts-helper (僅 Python/TS) |
+| **語言助手** | 3 | 🟡 中等 | py-helper + ts-helper + rs-helper (Python/TS/Rust) |
 | **搜尋** | 3 | ✅ 成熟 | exa-search + github-search + grep |
 | **可視化** | 2 | ✅ 成熟 | diagram (Mermaid) + report (HTML) |
 | **後設** | 3 | ✅ 成熟 | integrate + tool-stats + toonify（含 auto-interceptor 自動優化輸出） |
@@ -165,7 +166,7 @@ src/
 | **🟠 Memory 僅 resolution** | 中 | 無 vector search / pattern abstraction / 跨 session context 合併 | Phase 7 ✅ | **已解決** |
 | **🟡 無程式生成** | 中 | 純分析工具，不能寫 code / 產生 patch | Phase 8 ✅ | **已解決** |
 | **🟡 Planner 無 LLM-based 分解** | 中 | 模板僅關鍵字比對，複雜目標（如「修復 memory leak」）match 不到 | Phase 2 | 部分完成 |
-| **🟢 語言覆蓋不足** | 低 | 只有 Python/TS 助手，缺 Rust/Go/Java | Phase 9 | ❌ 未完成 |
+| **🟢 語言覆蓋不足** | 低 | 只有 Python/TS 助手，缺 Rust/Go/Java | Phase 9 | ✅ 部分完成 (rs-helper + Swift) |
 
 #### 3.5 新缺口（Phase 10-11 完成後更新）
 
@@ -282,11 +283,11 @@ Smart MCP:   seq + par + cond 三種組合原語
 | 缺口 | 嚴重性 | 影響 | 對應策略 |
 |------|--------|------|---------|
 | 無 Multi-Model Orchestration | 🔴 高 | 所有 query 走 LLM，成本高、速度慢 | Phase 14 (P0) |
-| CKG 僅 TypeScript | 🟠 中 | 多語言專案無法使用 | Phase A |
+| CKG 多語言擴充中 | 🟡 中 | 已支援 TS/JS/Rust/Python/Swift，缺 Go | Phase A |
 | 無子代理系統 | 🟠 中 | 無法平行獨立任務 | 依賴 opencode |
 | 無 Tool Marketplace | 🟡 低 | 第三方無法貢獻工具 | Phase B |
 | 無互動式 CLI | 🟡 低 | 開發者體驗不如 Claude Code | Phase B |
-| 語言助手僅 Python/TS | ⚪ 低 | 缺 Rust/Go 覆蓋 | Phase A |
+| 語言助手僅 Python/TS | 🟢 低 | 已擴充 Rust (rs-helper)，尚缺 Go | Phase A |
 
 ### B.4 戰略定位
 
@@ -1337,45 +1338,45 @@ src/server/index.mjs
 
 將 Phase 9 從 ⚪ P3 提升至 🟠 P1，優先實作 Rust 與 Go 支援：
 
-- `src/plugins/standard/rs-helper.mjs` — Rust 分析
-  - cargo check wrapper
-  - clippy 整合
-  - 依賴分析（Cargo.toml parsing）
-  - 結果格式化：透過 CKG 節點儲存函式/模組層級分析
-- `src/plugins/standard/go-helper.mjs` — Go 分析
-  - go vet wrapper
-  - golangci-lint 整合
-  - 模組分析（go.mod parsing）
-- 自動語言偵測 dispatcher
+- ✅ `src/plugins/standard/rs-helper.mjs` — Rust 分析
+  - ✅ cargo check wrapper
+  - ✅ clippy 整合
+  - ✅ 依賴分析（Cargo.toml parsing）
+  - ✅ 結果格式化（text/json/markdown）
+  - ✅ 格式化檢查（cargo fmt --check）
+  - ⏳ 自動語言偵測 dispatcher（未來）
+- ❌ `src/plugins/standard/go-helper.mjs` — Go 分析（gopls 未安裝，跳過）
+- ⏳ 自動語言偵測 dispatcher
   - 根據專案根目錄自動選擇對應語言助手
   - 多語言專案支援（monorepo）
 
 **驗收標準**：
-- [ ] `smart_rs_helper` 能執行 cargo check 並回報錯誤
-- [ ] `smart_go_helper` 能執行 go vet 並回報問題
+- [x] `smart_rs_helper` 能執行 cargo check 並回報錯誤
+- [ ] `smart_go_helper` 能執行 go vet 並回報問題（gopls 未安裝）
 - [ ] 自動偵測專案語言，正確 dispatch
 
 #### A.2 CKG 多語言支援（P0 — 競爭關鍵）
 
 CKG 目前僅支援 TypeScript/JavaScript。為讓 moat 覆蓋更多專案，須擴充：
 
-- **LSP bridge 多語言**：
-  - Rust: rust-analyzer（LSP standard）
-  - Go: gopls（LSP standard）
-  - Python: pylsp（既有，但未與 CKG 整合）
-  - PHP: intelephense（既有）
-- **CKG 節點擴充**：
-  - 新增語言專屬節點類型（struct→Go, trait→Rust, package→Go）
-  - 語言專屬邊類型（methodOf, implements→Go interface）
+- **LSP bridge 多語言**（✅ 已完成）：
+  - ✅ Rust: rust-analyzer（LSP standard）
+  - ✅ Swift: sourcekit-lsp（Xcode 內建）
+  - ✅ Python: pylsp（既有）
+  - ❌ Go: gopls（未安裝，跳過）
+- **CKG 多語言解析**（✅ 已完成）：
+  - ✅ Rust: `.rs` SUPPORTED_EXTS + `parseRustImports()` + mod.rs 路徑解析
+  - ✅ Python: `.py/.pyw` SUPPORTED_EXTS + `parsePythonImports()` + dots→path 解析
+  - ✅ Swift: `.swift` SUPPORTED_EXTS + `parseSwiftImports()` + .swift 路徑解析
+  - ✅ `resolveImportSource()` 依語言正確分流
 - **CKG watch mode 強化**：
-  - 多語言 fs.watch + debounce
-  - 跨語言 import 邊（e.g. TypeScript calling Go via FFI）
+  - ⏳ 多語言 fs.watch + debounce
 
 **驗收標準**：
-- [ ] Rust 專案 CKG build < 30 秒（1000 檔案）
-- [ ] Go 專案 CKG 增量更新 < 100ms
-- [ ] 跨語言呼叫鏈查詢
-- [ ] 所有語言共用同一 SQLite 資料庫
+- [x] Rust 專案 CKG import 解析（use/mod 語法支援）
+- [x] Swift 專案 CKG import 解析（import/exported 語法支援）
+- [x] 所有語言共用同一 SQLite 資料庫（同一 CKG engine）
+- [ ] Go 專案 CKG（需安裝 gopls）
 
 #### A.3 CKG 效能優化（P1）
 
@@ -1672,6 +1673,7 @@ src/server/index.mjs
 | `smart_tool_stats` | standard/tool_stats.mjs | tool-stats.mjs | 工具使用統計 |
 | `smart_toonify` | standard/toonify.mjs | toonify.mjs | TOON token 優化 (閾值 10%, 原 30%) — 另有 server 端 auto-interceptor 自動優化所有 JSON 輸出 |
 | `smart_ts_helper` | standard/ts_helper.mjs | ts-helper.mjs | TypeScript 分析 |
+| `smart_rs_helper` | standard/rs-helper.mjs | rs-helper.mjs | Rust 專案分析 (cargo check/clippy/analyze/fmt) — Phase A 🆕 |
 | `smart_compose` | standard/compose.mjs | compose.mjs | 工具組合原語 (seq/par/cond pipeline) — Phase 6 |
 | `smart_git_commit` | standard/git_commit.mjs | git-commit.mjs | Git commit 輔助 (message/dry-run/template) |
 | `smart_git_pr` | standard/git_pr.mjs | git-pr.mjs | PR 生成 (noPublish/draft/title/body) |
