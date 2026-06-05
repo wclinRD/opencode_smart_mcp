@@ -200,3 +200,9 @@ describe('math', () => {
   });
 
 });
+
+import { after } from 'node:test';
+after(async () => {
+  const { closeAllLspBridges } = await import('../src/lib/lsp-bridge.mjs');
+  try { await closeAllLspBridges(); } catch { /* ok */ }
+});

@@ -1010,8 +1010,13 @@
 - [x] `format=search-replace` MCP 端到端 ✅
 - [x] `format=lazy` apply 端到端 ✅（使用 `applySearchReplaceWithLazy`）
 - [x] `format=partial` MCP 端到端 ✅
-- [x] 78 tests pass (14 suites)
+- [x] 78 tests pass (14 suites) → 已達 22 suites / 22 pass
 - [x] **Bug fix**: lazy format dry-run preview 未展開 lazy markers → fast-apply.mjs 新增 `expandLazyMarkers` import + 預覽前展開
+- [x] **Bug fix**: lazy marker real segment 前方空白行導致 fuzzyMatch line 偏移 → strip leading \n before match, effectiveLen 排除 leadingNewlines
+- [x] **Bug fix**: applyUnifiedDiff 遺漏 context 行（` ` line）→ 加入 addLines 保留
+- [x] **Bug fix**: smart_context response 被 TOON 優化破壞 JSON.parse → respond() 加 `{optimize: false}` 參數
+- [x] **Bug fix**: hybrid-engine + impact-engine tests 用完 LSP bridge 未關閉 → after() hook closeAllLspBridges
+- [x] 22/22 tests pass (2026-06-05)
 
 ### F.4 競爭定位檢查清單
 
@@ -1355,5 +1360,11 @@
 - Phase 14: Multi-Model Orchestration ✅
 - Phase D: Agent Personality (smart-mcp.md + 3 agent tools) ✅
 - Phase A.1: rs-helper + A.2: CKG 多語言 (Rust/Swift/Python) ✅
-- Auto-Toonify interceptor ✅
+- Auto-Toonify interceptor ✅（含 respond() optimize flag 控制）
 - smart_git tools (commit/pr/review) ✅
+- Bug fixes batch (2026-06-05):
+  - expandLazyMarkers blank line offset ✅
+  - applyUnifiedDiff context line loss ✅
+  - smart_context TOON JSON.parse ✅
+  - hybrid/impact-engine LSP bridge hanging ✅
+  - 22/22 tests all green ✅

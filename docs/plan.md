@@ -15,7 +15,8 @@ Devtool MCP 是一個本地開發工具伺服器，透過 MCP 協定為 opencode
 - **Workflow 引擎**：Phase 4-6 完成 — dispatch 實際執行 + 5 模板 + compose/pipe/parallel 三種原語 + replan + summary
 - **語言**：JavaScript (ESM) — 6 核心 handler + 24 CLI 全數非阻塞化 (Phase 6)
 - **輸出保護**：512KB buffer / 200K chars soft limit
-- **Auto-Toonify 攔截器**：`respond()` 自動對 ≥500 chars 的 JSON-like 輸出執行 TOON 優化（lazy-init TokenOptimizer, best-effort, Promise-chain 保證順序）
+- **Auto-Toonify 攔截器**：`respond()` 自動對 ≥500 chars 的 JSON-like 輸出執行 TOON 優化（lazy-init TokenOptimizer, best-effort, Promise-chain 保證順序），可透過 `respond(id, result, {optimize: false})` 跳過
+- **測試狀態**: 22 suites / 22 test files / 0 failures（含 smart-agent 測試）
 - **Health Endpoint**：`smart/health`（含 context 資訊）
 - **Context 管理**：`smart_context` MCP tool + `smart/context` 端點 + 自動注入/捕獲/持久化
 - **動態推理**：thinking v3.1 — state persistence, branching, multi-round, context accumulation

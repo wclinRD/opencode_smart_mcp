@@ -613,8 +613,8 @@ export function applyUnifiedDiff(filePath, hunks, opts = {}) {
     const addLines = [];
 
     for (const l of hunk.lines) {
-      if (l.startsWith('+')) addLines.push(l.substring(1));
-      // '-' lines are removed, ' ' lines are context (kept)
+      if (l.startsWith('+') || l.startsWith(' ')) addLines.push(l.substring(1));
+      // '-' lines are removed
     }
 
     // Remove old lines and insert new
@@ -984,17 +984,30 @@ export function expandLazyMarkers(fileContent, block) {
   let searchFromLine = 1; // 1-indexed
   for (const seg of searchReal) {
     const segText = seg.texts.join('\n');
+    // Strip leading \n from segText for matching.
+    // When a SEARCH real segment starts with an empty line (e.g. blank line
+    // between lazy marker and real code), segText starts with \n. This causes
+    // matchL2 to return the line BEFORE the \n, making the gap boundary
+    // exclude the preceding file content. Stripping \n fixes the off-by-one.
+    const leadingMatch = segText.match(/^\n+/);
+    const leadingNewlines = leadingMatch ? leadingMatch[0].length : 0;
+    const adjustedSegText = leadingNewlines > 0 ? segText.slice(leadingNewlines) : segText;
+
     // fuzzyMatch against file content starting from searchFromLine
     const subContent = contentLines.slice(searchFromLine - 1).join('\n');
-    const match = fuzzyMatch(subContent, segText);
+    const match = fuzzyMatch(subContent, adjustedSegText);
     if (!match) {
       throw new Error(
         `Cannot find SEARCH content in file (near "${seg.texts[0]?.substring(0, 60).trim()}")`
       );
     }
+    // Leading blank lines in segText are separators between markers and real
+    // content. The match lands on the real content already — no adjustment needed.
     const absoluteLine = searchFromLine + match.line - 1;
-    matches.push({ line: absoluteLine, level: match.level, len: seg.texts.length });
-    searchFromLine = absoluteLine + seg.texts.length;
+    // Effective len excludes leading blank lines (they are separators, not content)
+    const effectiveLen = seg.texts.length - leadingNewlines;
+    matches.push({ line: absoluteLine, level: match.level, len: effectiveLen });
+    searchFromLine = absoluteLine + effectiveLen;
   }
 
   // ---- Step 3: Build expanded SEARCH ----

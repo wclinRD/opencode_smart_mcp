@@ -531,8 +531,13 @@ describe('Phase 12: Hybrid Reasoning Engine', () => {
 
 // Clean up test directory after all tests
 import { after } from 'node:test';
-after(() => {
+after(async () => {
   try {
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
+  } catch { /* ok */ }
+  // Close LSP bridges to allow clean exit
+  try {
+    const { closeAllLspBridges } = await import('../src/lib/lsp-bridge.mjs');
+    await closeAllLspBridges();
   } catch { /* ok */ }
 });

@@ -571,10 +571,10 @@ async function tryOptimizeOutput(text) {
   return text;
 }
 
-function respond(id, result) {
+function respond(id, result, opts = {}) {
   _respondChain = _respondChain
     .then(async () => {
-      if (result?.content?.[0]?.type === 'text' && typeof result.content[0].text === 'string') {
+      if (opts.optimize !== false && result?.content?.[0]?.type === 'text' && typeof result.content[0].text === 'string') {
         result.content[0].text = await tryOptimizeOutput(result.content[0].text);
       }
       writeMsg({ jsonrpc: '2.0', id, result });
@@ -610,7 +610,7 @@ function handleSmartContext(id, args) {
     switch (cmd) {
       case 'get': {
         const ctx = contextManager.get();
-        if (!ctx) { respond(id, { content: [{ type: 'text', text: 'No active session.' }] }); return; }
+        if (!ctx) { respond(id, { content: [{ type: 'text', text: 'No active session.' }] }, { optimize: false }); return; }
         // Return a cleaned version (omit large history for readability)
         const { toolHistory, accumulatedFindings, ...rest } = ctx;
         result = JSON.stringify({
@@ -705,7 +705,7 @@ function handleSmartContext(id, args) {
         result = `Unknown command: ${cmd}. Available: get, summary, history, findings, reset, sessions, delete, inject, workflow-stats, merge`;
     }
 
-    respond(id, { content: [{ type: 'text', text: result }] });
+    respond(id, { content: [{ type: 'text', text: result }] }, { optimize: false });
   } catch (err) {
     const fix = getErrorFix('smart_context', 'generic', err.message);
     respondError(id, -32603, `smart_context error: ${err.message}`, {

@@ -1,55 +1,30 @@
 {
-  "$schema": "https://opencode.ai/config.json",
-  "language": "javascript",
-  "framework": "node",
-  "structure": {
-    "src": "src/",
-    "tests": "tests/",
-    "config": "src/config/"
-  },
-  "naming": {
-    "files": "kebab-case",
-    "classes": "PascalCase",
-    "functions": "camelCase",
-    "constants": "UPPER_CASE"
-  },
-  "testing": {
-    "framework": "node:test",
-    "pattern": "**/*.test.mjs",
-    "coverage": false
-  },
-  "codeStyle": {
-    "indentation": "spaces",
-    "indentSize": 2,
-    "quotes": "single",
-    "semicolons": true,
-    "trailingComma": true
-  },
   "conventions": {
     "naming": {
       "file": {
-        "kebabCase": 63,
-        "camelCase": 30,
-        "other": 20,
+        "kebabCase": 61,
+        "camelCase": 28,
+        "other": 21,
         "snake_case": 15
       },
       "variable": {
-        "camelCase": 3513,
-        "UPPER_CASE": 126,
-        "other": 22,
-        "PascalCase": 8
+        "camelCase": 3895,
+        "UPPER_CASE": 129,
+        "other": 26,
+        "PascalCase": 10
       },
       "function": {
-        "camelCase": 643
+        "camelCase": 697,
+        "PascalCase": 3
       },
       "class": {
-        "camelCase": 5,
-        "PascalCase": 13
+        "camelCase": 12,
+        "PascalCase": 14
       }
     },
     "imports": {
       "commonjs": 6,
-      "esm": 99,
+      "esm": 96,
       "mixed": true
     },
     "testing": {
@@ -67,10 +42,10 @@
       "javascript"
     ],
     "exports": {
-      "default": 47,
-      "named": 89
+      "default": 49,
+      "named": 98
     }
   },
   "preferences": {},
-  "lastAnalyzed": "2026-06-05T01:00:49.685Z"
+  "lastAnalyzed": "2026-06-05T03:45:49.842Z"
 }
