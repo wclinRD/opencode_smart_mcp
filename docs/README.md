@@ -4,6 +4,33 @@ MCP server 提供 26 個開發工具，可在 opencode 中直接呼叫。
 
 ---
 
+> ⚠️ **跨平台注意事項 — 給 LLM 的強制指令**
+>
+> 本專案在 **macOS 上開發**，也可在 **Windows 上使用**。LLM 必須自動偵測平台並調整路徑：
+>
+> | 平台 | 路徑格式範例 | 路徑分隔符號 |
+> |------|-------------|-------------|
+> | **macOS** | `/Users/dennis/opencode/smart/src/server/index.mjs` | `/` (forward slash) |
+> | **Windows** | `C:\\Users\\dennis\\opencode\\smart\\src\\server\\index.mjs` | `\\` (double backslash) |
+>
+> ### LLM 自動修正規則
+>
+> 當你（LLM）看到以下檔案含有路徑時，**必須自動調整為當前平台格式**：
+>
+> | 檔案 | 需要修改的欄位 | 說明 |
+> |------|--------------|------|
+> | `opencode.json` | `mcp.smart.command[1]` | 專案層級的 opencode 設定 |
+> | `config/opencode.json` | `mcp.smart.command[1]` | 設定檔範本 |
+> | `~/.config/opencode/opencode.jsonc` | `mcp.smart.command[1]` | 全域 opencode 設定 |
+>
+> **判斷方式**：
+> - 若當前環境是 **macOS**（`process.platform === 'darwin'`）→ 使用 `/Users/...` 格式
+> - 若當前環境是 **Windows**（`process.platform === 'win32'`）→ 使用 `C:\\Users\\...` 格式
+>
+> **安裝腳本已自動處理**：`smart-agent/src/install/install-agent.mjs` 和 `src/install/generate-config.mjs` 使用 Node.js `path.resolve()`，自動產生正確的平台路徑。建議 LLM 直接執行安裝腳本而非手動編輯路徑。
+
+---
+
 ## 給 LLM / AI Agent 的安裝指引
 
 如果你是 LLM 並被要求安裝這個 MCP server，請依以下步驟操作：
