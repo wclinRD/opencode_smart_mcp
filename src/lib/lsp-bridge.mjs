@@ -520,12 +520,15 @@ export class LspBridge {
         if (typeof item !== 'object') continue;
         const name = item.name || '';
         const kind = this._symbolKindToString(item.kind);
-        const range = item.selectionRange || item.range || {};
+        const selRange = item.selectionRange || item.range || {};
+        const fullRange = item.range || {};
         const symbol = {
           name,
           kind,
-          line: range.start?.line != null ? range.start.line + 1 : 0,
-          col: range.start?.character || 0,
+          line: selRange.start?.line != null ? selRange.start.line + 1 : 0,
+          col: selRange.start?.character || 0,
+          end_line: fullRange.end?.line != null ? fullRange.end.line + 1 : undefined,
+          end_col: fullRange.end?.character,
           signature: name,
         };
         if (item.children && depth < 5) {

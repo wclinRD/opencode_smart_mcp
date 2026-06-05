@@ -3,14 +3,15 @@
 // 包裝 ckg-engine.mjs 的查詢功能為 MCP tool。
 //
 // 查詢類型：
-//   build          — 全量掃描建立 CKG
-//   update         — 增量更新單一檔案
-//   callers        — 誰呼叫了某函式
-//   callees        — 某函式呼叫了誰
-//   dependencies   — 檔案依賴結構
-//   unused-exports — 未使用的導出
-//   symbol         — 查詢符號定義
-//   stats          — CKG 統計資訊
+//   build            — 全量掃描建立 CKG
+//   update           — 增量更新單一檔案
+//   callers          — 誰呼叫了某函式
+//   callees          — 某函式呼叫了誰
+//   usage-patterns   — API 使用模式分析（CKG-based refactoring assistant）
+//   dependencies     — 檔案依賴結構
+//   unused-exports   — 未使用的導出
+//   symbol           — 查詢符號定義
+//   stats            — CKG 統計資訊
 
 import { getCkgEngine } from '../../lib/ckg-engine.mjs';
 import { existsSync } from 'node:fs';
@@ -68,6 +69,42 @@ function formatCallees(result) {
     }
   };
   walk(callees);
+  return text;
+}
+
+function formatUsagePatterns(result) {
+  if (result.totalUsages === 0) {
+    return `No usages found for ${result.symbol} in ${result.file}.\nThe API may not be indexed or has no callers.`;
+  }
+
+  let text = `Usage patterns for ${result.symbol} in ${result.file}\n`;
+  text += '─'.repeat(55) + '\n';
+  text += `${result.totalUsages} total usage(s)\n\n`;
+
+  // Pattern summary
+  text += 'Pattern breakdown:\n';
+  for (const p of result.patterns) {
+    const bar = '█'.repeat(Math.max(1, Math.round(p.count / result.totalUsages * 20)));
+    text += `  ${p.type.padEnd(17)} ${String(p.count).padStart(3)} ${bar}  ${p.description}\n`;
+  }
+
+  text += '\nAll usages:\n';
+  const fileGroups = {};
+  for (const u of result.usages) {
+    if (!fileGroups[u.caller.file]) fileGroups[u.caller.file] = [];
+    fileGroups[u.caller.file].push(u);
+  }
+
+  for (const [f, usages] of Object.entries(fileGroups)) {
+    text += `\n  ${f}:\n`;
+    for (const u of usages) {
+      const ctx = u.caller.container
+        ? ` (in ${u.caller.container.name}:${u.caller.container.kind})`
+        : '';
+      text += `    L${String(u.caller.line).padStart(4)}  [${u.pattern.padEnd(15)}] ${u.caller.name}${ctx}\n`;
+    }
+  }
+
   return text;
 }
 
@@ -213,7 +250,7 @@ Examples:
     properties: {
       query: {
         type: 'string',
-        enum: ['build', 'update', 'callers', 'callees', 'dependencies', 'unused-exports', 'symbol', 'stats'],
+        enum: ['build', 'update', 'callers', 'callees', 'usage-patterns', 'dependencies', 'unused-exports', 'symbol', 'stats'],
         description: 'Query type',
       },
       symbol: { type: 'string', description: 'Symbol name (for callers/callees/symbol queries)' },
@@ -282,6 +319,18 @@ Examples:
           });
           if (format === 'json') return JSON.stringify(result, null, 2);
           return formatCallees(result);
+        }
+
+        // -- Usage patterns --
+        case 'usage-patterns': {
+          if (!args.symbol || !args.file) {
+            return 'symbol and file are required for usage-patterns query.';
+          }
+          result = engine.queryUsagePatterns(args.symbol, args.file, {
+            includeStale: args.includeStale,
+          });
+          if (format === 'json') return JSON.stringify(result, null, 2);
+          return formatUsagePatterns(result);
         }
 
         // -- Dependencies --

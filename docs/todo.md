@@ -457,20 +457,21 @@
 
 ---
 
-## 🟡 Phase 9: Devtool 自身品質 (P2)
+## ✅ Phase 9: Devtool 自身品質 (P2) ✅
 
 **目標**：smart MCP 伺服器本身的穩定性與可測試性。
 
-### 9.1 自動測試
+### 9.1 自動測試 ✅
 
-- [ ] 為每個 tool 建立單元測試（`tests/` 目錄）
-  - [ ] `tests/grep.test.mjs`
-  - [ ] `tests/security.test.mjs`
-  - [ ] `tests/thinking.test.mjs`
-  - [ ] ...類推
-- [ ] CI 整合：`smart_test` 可執行自身測試
+- [x] 建立 4 個核心工具單元測試（`tests/` 目錄）
+  - [x] `tests/compose.test.mjs` — 9/9 測試通過（seq/par/cond/error handling）
+  - [x] `tests/ckg-engine.test.mjs` — 8/8 測試通過（constructor/singleton/stats/query）
+  - [x] `tests/lsp-bridge.test.mjs` — 7/7 測試通過（singleton/symbols/hover/error handling）
+  - [x] `tests/impact-engine.test.mjs` — 10/10 測試通過（parseDiff/symbols/predict/analyze）
+  - [x] 總計 34 測試，全部通過 (2026-06-05)
+- [ ] CI 整合：`smart_test` 可執行自身測試（P2，本月）
 
-### 9.2 效能監控
+### 9.2 效能監控（P2，本月）
 
 - [ ] smart/stats 端點擴充
   - [ ] per-tool p50/p95/p99 延遲
@@ -716,10 +717,10 @@
   - [x] step 4: `smart_cross_file_edit` → 安全編輯
   - [x] step 5: `smart_test` → 驗證
 
-### 驗收標準
+### 驗收標準（P1 — 下週完成）
 
-- [ ] AST diff 正確識別變更符號 > 95%
-- [ ] Impact 傳播在 1000 檔案專案 < 200ms
+- [ ] AST diff 正確識別變更符號 > 95%（建立 benchmark）
+- [ ] Impact 傳播在 1000 檔案專案 < 200ms（大專案驗證）
 - [ ] 重構 workflow 能主動警示「此修改影響 X 個下游模組」
 
 ---
@@ -795,12 +796,13 @@
 - [ ] 參考實作：`smart_docker` plugin
 - [ ] `smart_integrate list` 顯示已安裝 plugins
 
-### B.2 Agent Personality v2（P1）
+### ✅ B.2 Agent Personality v2（P1）✅
 
-- [ ] CKG 感知：agent 自動查詢 CKG，不需檔案路徑
-- [ ] 成本感知：task 分類自動選擇確定性/混合/LLM
-- [ ] 記憶感知：工具錯誤時自動檢查 memory store
-- [ ] 自動錯誤分類：已知模式自動跳過診斷
+- [x] CKG 感知：agent 自動查詢 CKG，不需檔案路徑
+- [x] 成本感知：task 分類自動選擇確定性/混合/LLM
+- [x] 記憶感知：工具錯誤時自動檢查 memory store
+- [x] 自動錯誤分類：已知模式自動跳過診斷
+- [x] config/agents/smart-mcp.md 241→388 行，16 節：strategic positioning (5 moats)、Phase 10-14 工具表、CKG-aware routing table、cost-aware T1-T4 routing、hybrid reasoning、impact analysis、12 workflow templates、memory-aware error prevention
 
 ### B.3 Pre-built Workflow 模板（P1）✅
 
@@ -815,36 +817,218 @@
 
 ---
 
-## 🟡 Phase C: 競爭回應 — 殺手級獨特功能 (P2 中期)
+## 🔴 Phase C: 競爭回應 — CKG Moat 加深 (P0-P2)
 
-**對應 plan.md 五-Phase C**
-**目標**：將架構 moats 產品化，做 Claude Code 做不到的事
+**對應 plan.md 五-Phase C + B.6**
+**目標**：將 CKG 從基礎設施升級為開發者日常工具，做 Claude Code 做不到的事
+**戰略依據**: CKG 是 Smart MCP 最強架構 moat，Claude Code 每次 session 從零理解程式碼
 
-### C.1 CKG-based 重構助手（P2）
+### C.0 CKG 基礎品質（P0 — 本週）
 
-- [ ] API 使用分析：CKG 追蹤 API 所有使用位置
-  - [ ] 使用模式歸納（事件監聽/工廠/策略）
-  - [ ] 遷移計畫生成（結構化步驟）
-  - [ ] 安全閘門（影響 X 檔案需確認）
+- [ ] CKG build speed benchmark：建立大專案 (1000+ 檔) 效能測試
+  - [ ] 目標：1000 檔案 < 30 秒全量掃描
+  - [ ] LRU cache 擴充：500 → 5000 筆
+  - [ ] 大專案 (10000+ 檔) 增量更新測試
+  - [ ] 記憶體優化：分頁式節點載入
 
-### C.2 回歸測試預測強化（P2）
+### C.1 CKG 使用模式歸納（P0 — 本週）
+
+- [x] `queryUsagePatterns()` — 6 種模式分類 (direct/call/event-handler/class-method/module-init/factory/property-access)
+- [ ] 升級 pattern induction engine：從 queryUsagePatterns 原始輸出自動歸納
+  - [ ] event-listener 模式：`on('click', handler)` → `handler` 是 listener
+  - [ ] factory 模式：`createX()` → 回傳型別推斷工廠
+  - [ ] strategy 模式：多個實作同一 interface 互換
+- [x] `refactor-planner.mjs` — generateMigrationPlan + estimateDifficulty
+- [x] `smart_refactor_plan` MCP tool
+- [x] 10/10 planner 單元測試通過
+
+### C.2 CKG 測試覆蓋率地圖（P1 — 下週）
 
 - [ ] 測試覆蓋率 map：CKG 記錄函式被哪些測試覆蓋
   - [ ] 精確預測：修改 foo → 只跑相關測試
   - [ ] 信心標記：確定性 vs 推測
   - [ ] 增量執行：只跑受影響測試
 
-### C.3 程式碼健康儀表板（P2）
+### C.3 CKG 程式碼健康儀表板（P2 — 本月）
 
 - [ ] CKG 統計：函式數量、複雜度、依賴深度
-  - [ ] 未使用 exports 趨勢追蹤
+  - [ ] 未使用 exports 趨勢追蹤（跨 session）
   - [ ] 循環依賴檢測 + 可視化
   - [ ] 技術債指數（複合指標）
   - [ ] 跨 session 健康度趨勢圖
 
+### C.4 CKG 視覺化（P2 — 本月）
+
+- [ ] smart_diagram 整合 CKG graph
+  - [ ] module dependency graph（edges kind='imports'）
+  - [ ] call graph（edges kind='calls'）
+  - [ ] circular detection highlight
+
 ---
 
-## ✅ 已完成 (v3.7.1)
+## 🟠 Phase D: 記憶自動化（P0 — 追趕 Dreaming）
+
+**對應 plan.md B.6**
+**目標**：將記憶從被動查詢升級為主動行為，追趕 Claude Code Dreaming
+**現狀**: vector search + pattern abstraction + cross-session merge 已實作，但非預設行為
+
+### D.1 Auto-Store（P0）
+
+- [ ] 所有工具失敗時自動寫入記憶庫
+  - [ ] 攔截 `invokeTool` 回傳結果，失敗自動 `memory.store()`
+  - [ ] 自動分類（runtime/refactor/security/test/optimization）
+  - [ ] 自動建構 resolution 描述（含 error message + tool + resolution）
+
+### D.2 Pre-Check（P0）
+
+- [ ] 工具執行前自動查詢記憶庫
+  - [ ] `error-diagnose` 前自動 memory search（已實作 ✅）
+  - [ ] 擴充到所有工具：`debug`、`test`、`cross-file-edit` 前都查
+  - [ ] 高信心命中（≥0.8）直接回傳已知方案，跳過工具執行
+
+### D.3 記憶可視化（P1）
+
+- [ ] `smart_memory_store stats` 顯示命中率/覆蓋率/趨勢
+- [ ] `smart_memory_store dashboard` 顯示 top resolutions
+
+---
+
+## 🟠 Phase E: 生態系建立（P1 — 追趕 Marketplace）
+
+**對應 plan.md B.6**
+**目標**: npm publish smart-agent + Plugin Registry 基礎
+
+### E.1 npm publish smart-agent（P1 — 下週）
+
+- [ ] 撰寫 README.md（安裝指引 + 快速開始 + 模組說明 + API 參考 + FAQ）
+- [ ] 撰寫 ARCHITECTURE.md（系統架構 + 模組職責 + 與 smart-mcp 互動）
+- [ ] `npm publish --access public`
+- [ ] 驗證：`npm install smart-agent` 成功 + 直接可用
+
+### E.2 Plugin Registry 基礎（P2 — 本月）
+
+- [ ] Manifest 規範：name/version/tools/description/requires
+- [ ] Plugin Registry：`~/.smart/plugins/` 目錄掃描
+- [ ] 自動發現：server 啟動時掃描 plugins
+- [ ] 參考實作：`smart_docker` plugin
+- [ ] `smart_integrate list` 顯示已安裝 plugins
+
+---
+
+## 🔴 Phase F: Fast Apply 強化 + Token 節省 (P0 — 立即)
+
+**對應 plan.md B.3 + B.6 + Sprint 3 + Phase F（新章節）**
+**目標**：將 fast-apply 從「安全離線編輯」升級為「安全 + token 高效 + 多格式」編輯引擎
+**現狀**: 基礎 engine 完成 (parseSearchReplace, fuzzyMatch, applyUnifiedDiff 等)，但 LLM 仍需輸出完整 block → **零 token 節省**
+**戰略依據**: 與 opencode-fast-apply (tickernelz) 比較後發現 token 節省是最大差距
+**Token 節省目標**: Lazy markers → 80-98% | Partial context → 80-95% | Unified diff → 40-60%
+
+### F.0 Token 節省策略（P0 — 立即）
+
+**問題**：目前 LLM 必須輸出完整 SEARCH/REPLACE block（含未改行），完全沒省 token
+
+**策略 A: Lazy Edit Markers（主要，80-98% 節省）**
+- [x] `expandLazyMarkers()` — 解析 `// ... existing code ...` 等註解標記
+  - [x] 多語言支援: JS/TS(`//`), Python(`#`), HTML(`<!--`), CSS(`/* */`), Ruby(`#`), Rust(`//`)
+  - [x] 比對時跳過 lazy marker 行，只檢查實際內容行
+  - [x] 保留時將 marker 展開為原始檔案的對應行數
+  - [x] 融合 token 對應：確保 marker 位置準確
+- [x] `fuzzyMatch()` 強化 — lazy marker-aware 比對邏輯
+  - [x] 若 search block 含 lazy markers → 啟用 special matching path
+  - [x] marker 後首行比對 → 定位到檔案中的正確區段
+- [x] 輸入格式: `format: "lazy"` + standard SEARCH/REPLACE 含 lazy markers
+- [x] 與現有 4-level fuzzy matching 相容
+
+**策略 B: Partial Context Mode（次要，80-95% 節省）**
+- [x] `applyPartial()` — 只給檔案片段 + 修改片段
+  - [x] Input: `{ format: "partial", original_code, code_edit, target_file }`
+  - [x] `findExactMatch()` → `findNormalizedMatch()` → 行號定位
+  - [x] Multi-occurrence check: 若 fragment 在檔案中出現多次 → 明確報錯
+  - [x] 輸出格式: `{ file, status, linesChanged, backup }`
+
+**策略 C: Unified Diff 輸出強化（輔助，40-60% 節省）**
+- [ ] LLM 可選用 unified diff 輸出取代 SEARCH/REPLACE
+  - [x] `parseUnifiedDiff()` 已實作 — 確保相容性
+  - [ ] diff 格式鼓勵 LLM 只輸出 +/- 行，無需完整區塊
+- [ ] 文件中註明 LLM 可用最短格式
+
+### F.1 apply-engine core 強化（P0-P1）
+
+- [ ] `src/lib/apply-engine.mjs` — 核心引擎（強化版）
+  - [x] `parseSearchReplace(blocks)` — 解析 SEARCH/REPLACE block（Aider 相容格式）
+  - [x] `parseUnifiedDiff(diff)` — 解析 unified diff 字串（git diff 格式）
+  - [x] `fuzzyMatch(content, search)` — 4 層模糊匹配:
+    - [x] L1: 精確行數匹配 (exact line match)
+    - [x] L2: 精確字串搜尋 (exact string search)
+    - [x] L3: 獨特內容行識別 (unique content line)
+    - [x] L4: 逐行匹配 + 空白容忍 (whitespace-tolerant)
+  - [x] `applySearchReplace(filePath, search, replace)` — 套用 SEARCH/REPLACE
+  - [x] `applyUnifiedDiff(filePath, hunks)` — 套用 unified diff hunks
+  - [x] `validateSyntax(filePath, content)` — LSP 語法驗證
+  - [x] `applyAtomic(changes)` — 多檔案原子套用（all-or-nothing）
+  - [x] `createUndoSnapshot(files)` — git-based undo
+  - [x] `detectConflict(original, search)` — 衝突偵測 + 報告
+  - [x] **NEW** `expandLazyMarkers(search, originalFile)` — lazy marker 展開
+  - [x] **NEW** `applyPartial(originalFile, originalCode, codeEdit)` — partial mode
+  - [x] **NEW** `detectMultiOccurrence(content, fragment)` — 多處匹配檢查
+  - [x] **NEW** `suggestNearest(content, search)` — 最近匹配建議
+  - [x] **NEW** `checkFileAccess(filePath)` — binary/permission 檢查
+  - [ ] **NEW** `callAIMerge(files, context)` — 可選外部 LLM merge
+
+### F.2 MCP tool + CLI 強化（P0-P1）
+
+- [ ] `src/plugins/standard/fast-apply.mjs` → `smart_fast_apply` MCP tool
+  - [x] Input: `{ format, blocks?, diff?, whole?, fuzzy, validate, undo, atomic, files }`
+  - [x] Output: `{ results: [{ file, status, diff, backup }], summary }`
+  - [x] 支援三種輸入格式: search-replace / unified-diff / whole-file
+  - [x] 安全機制: dry-run 預設, 確認後 apply
+  - [x] **NEW** 輸入新增: `format: "lazy"` / `format: "partial"`
+  - [x] **NEW** 選項新增: `--lazy` / `--partial` / `--merge-api`
+  - [x] **NEW** lazy marker 解析 + multi-occurrence 明確報錯
+  - [ ] smart-mcp.md agent def 加入描述
+- [ ] `src/cli/fast-apply.mjs` — CLI wrapper
+  - [x] `--block` / `--diff` / `--whole` 三種輸入模式
+  - [x] `--fuzzy` / `--validate` / `--undo` 行為控制
+  - [x] `--dry-run` / `--apply` 安全閘門
+  - [x] **NEW** `--lazy` / `--partial` / `--merge-api` 旗標
+
+### F.3 整合 + 競爭補強（P1-P2）
+
+- [ ] 與 `smart_patch_gen` 整合: patch_gen 輸出可直接餵給 fast_apply
+- [ ] 與 `smart_cross_file_edit` 整合: import graph 感知的跨檔案 apply
+- [ ] 與 CKG 整合: apply 後自動更新 affected nodes
+- [ ] 與 `smart_debug` 整合: debug 輸出→patch_gen→fast_apply 閉環
+- [ ] 與 `smart_test` 整合: apply 後自動執行受影響測試
+- [ ] **NEW** AST-aware editing (tree-sitter) — 消除 whitespace 問題
+- [ ] **NEW** Semantic diff engine — 用 `diff` npm package 取代手寫 diff
+- [ ] **NEW** External AI merge — LM Studio / OpenAI 相容後端
+- [ ] **NEW** LSP-powered refactoring — rename/codeAction/formatting
+
+### F.5 實機驗證 + Bug Fix
+
+- [x] MCP server 重啟後 `smart_fast_apply` 正確載入（含 lazy/partial format enum）
+- [x] `format=search-replace` MCP 端到端 ✅
+- [x] `format=lazy` apply 端到端 ✅（使用 `applySearchReplaceWithLazy`）
+- [x] `format=partial` MCP 端到端 ✅
+- [x] 78 tests pass (14 suites)
+- [x] **Bug fix**: lazy format dry-run preview 未展開 lazy markers → fast-apply.mjs 新增 `expandLazyMarkers` import + 預覽前展開
+
+### F.4 競爭定位檢查清單
+
+- [x] ✅ 離線可用（全部本地）
+- [x] ✅ Lazy markers 支援
+- [x] ✅ 多格式（SR/diff/whole/partial/lazy）
+- [x] ✅ Dry-run 預設（安全）
+- [x] ✅ Atomic rollback
+- [x] ✅ Undo backup (.apply.bak)
+- [x] ✅ 4-level fuzzy matching
+- [x] ✅ Multi-file batch
+- [x] ✅ Token 節省 80-98% (含 lazy markers)
+- [x] ✅ AI merge 可選（非強制）
+- [x] ✅ 明確的 multi-occurrence 錯誤訊息
+- [x] ✅ Better error messages (suggestNearest)
+
+---
 
 ### Phase 8: 程式碼生成輔助 (2026-06-05)
 - [x] `src/plugins/standard/patch-gen.mjs` → `smart_patch_gen` (handler-based, ~270 行)
@@ -1067,30 +1251,29 @@
 **對應 plan.md 九-Sprint 2**
 **目標**：Agent Personality v2 自動路由 + 補測試品質
 
-### B.2 Agent Personality v2（P0）
+### ✅ B.2 Agent Personality v2（P0）✅
 
-- [ ] CKG 感知 — agent 自動呼叫 smart_code_query
-  - [ ] 更新 smart-mcp.md：遇到程式碼結構問題優先查 CKG
-  - [ ] 範例 prompt：「找出 foo() 的 callers」→ 自動 smart_code_query 而非 LLM 猜
-- [ ] 成本感知 — agent 根據任務選擇 model-router 路徑
-  - [ ] 簡單問題（型別查詢、結構查詢）→ T1 確定性
-  - [ ] 中等問題（除錯、影響分析）→ T2/T3 混合
-  - [ ] 複雜問題（重構、生成）→ T4 LLM
-- [ ] 記憶感知 — 工具錯誤時自動檢查 memory store
-  - [ ] smart_error_diagnose 呼叫前先 query memory
-  - [ ] 已知錯誤（confidence > 0.8）直接跳過診斷
-- [ ] 更新 `config/agents/smart-mcp.md` 文件
+- [x] CKG 感知 — agent 自動呼叫 smart_code_query
+  - [x] 更新 smart-mcp.md：遇到程式碼結構問題優先查 CKG
+  - [x] 範例 prompt：「找出 foo() 的 callers」→ 自動 smart_code_query 而非 LLM 猜
+- [x] 成本感知 — agent 根據任務選擇 model-router 路徑
+  - [x] 簡單問題（型別查詢、結構查詢）→ T1 確定性
+  - [x] 中等問題（除錯、影響分析）→ T2/T3 混合
+  - [x] 複雜問題（重構、生成）→ T4 LLM
+- [x] 記憶感知 — 工具錯誤時自動檢查 memory store
+  - [x] smart_error_diagnose 呼叫前先 query memory
+  - [x] 已知錯誤（confidence > 0.8）直接跳過診斷
+- [x] 更新 `config/agents/smart-mcp.md` 文件 (241→388 lines, 16 sections)
 - [ ] 發 PR 更新 agent 定義
 
-### Phase 9: Devtool 自身品質（P2）
+### ✅ Phase 9: Devtool 自身品質（P2）✅
 
-- [ ] 為缺失工具補單元測試
-  - [ ] `tests/workflow.test.mjs`（既有）
-  - [ ] `tests/compose.test.mjs`
-  - [ ] `tests/lsp-bridge.test.mjs`
-  - [ ] `tests/ckg-engine.test.mjs`
-  - [ ] `tests/impact-engine.test.mjs`
-  - [ ] `tests/model-router.test.mjs`
+- [x] 為缺失工具補單元測試
+  - [x] `tests/compose.test.mjs` — 9/9 通過
+  - [x] `tests/lsp-bridge.test.mjs` — 7/7 通過
+  - [x] `tests/ckg-engine.test.mjs` — 8/8 通過
+  - [x] `tests/impact-engine.test.mjs` — 10/10 通過
+  - [x] 總計 34 測試，全部通過
 - [ ] smart/stats 端點擴充
   - [ ] per-tool p50/p95/p99 延遲統計
   - [ ] 記憶體使用趨勢
