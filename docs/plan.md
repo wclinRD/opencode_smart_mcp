@@ -1772,6 +1772,16 @@ src/cli/fast-apply.mjs (強化)
 
 **目標**：強化後 smart MCP 成為**唯一同時具備離線安全 + token 效率 + 多格式支援**的 fast-apply 方案。
 
+#### F.6 實機驗證 (2026-06-05)
+
+- [x] MCP server 重啟後 `smart_fast_apply` 正確載入
+- [x] `format` enum: `[search-replace, lazy, partial, unified-diff, whole-file]`
+- [x] format=search-replace MCP 端到端 ✅
+- [x] format=lazy apply MCP 端到端 ✅ (preview bug fixed)
+- [x] format=partial MCP 端到端 ✅
+- [x] 78 tests pass (14 suites)
+- [x] Engine exports 15 functions
+
 #### F.5 執行優先級
 
 ```

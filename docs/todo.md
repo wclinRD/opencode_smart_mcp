@@ -1004,6 +1004,15 @@
 - [ ] **NEW** External AI merge — LM Studio / OpenAI 相容後端
 - [ ] **NEW** LSP-powered refactoring — rename/codeAction/formatting
 
+### F.5 實機驗證 + Bug Fix
+
+- [x] MCP server 重啟後 `smart_fast_apply` 正確載入（含 lazy/partial format enum）
+- [x] `format=search-replace` MCP 端到端 ✅
+- [x] `format=lazy` apply 端到端 ✅（使用 `applySearchReplaceWithLazy`）
+- [x] `format=partial` MCP 端到端 ✅
+- [x] 78 tests pass (14 suites)
+- [x] **Bug fix**: lazy format dry-run preview 未展開 lazy markers → fast-apply.mjs 新增 `expandLazyMarkers` import + 預覽前展開
+
 ### F.4 競爭定位檢查清單
 
 - [x] ✅ 離線可用（全部本地）

@@ -33,6 +33,7 @@ import {
   fuzzyMatch,
   checkBalance,
   checkFileAccess,
+  expandLazyMarkers,
 } from '../../lib/apply-engine.mjs';
 
 export default {
@@ -220,7 +221,11 @@ Dry-run by default — safe to use without side effects.`,
           previewResults.push({ file: ch.file, status: 'error', error: 'File not found' });
           continue;
         }
-        const match = fuzzyMatch(content, ch.search);
+        // Expand lazy markers for preview matching
+        const previewSearch = ch.type === 'lazy'
+          ? (expandLazyMarkers(content, { search: ch.search, replace: ch.replace })?.search || ch.search)
+          : ch.search;
+        const match = fuzzyMatch(content, previewSearch);
         const balance = validate ? checkBalance(content) : null;
 
         previewResults.push({
