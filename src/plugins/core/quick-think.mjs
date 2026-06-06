@@ -2,6 +2,7 @@ import { quickThink } from '../../cli/thinking.mjs';
 
 export default {
   name: 'smart_think',
+  responsePolicy: { maxLevel: 0 }, // Conversational; keep raw
   description: `Advanced conversational reasoning engine — surpasses sequential-thinking.
 
 Supports full hypothesis → verify → repeat cycle with structured output. Use for multi-step reasoning, debugging, decision analysis, and research exploration.

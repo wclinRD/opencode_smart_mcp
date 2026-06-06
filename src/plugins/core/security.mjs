@@ -2,6 +2,7 @@ export default {
   name: 'smart_security',
   category: 'security',
   description: 'Use when: need to scan project for credentials leaks, injection flaws, path traversal, or dependency vulnerabilities. Run before committing or before CI. Avoid when: looking for general code quality issues (use lint instead).',
+  responsePolicy: { maxLevel: 2, critical: ['summary', 'findings', 'severity'], droppable: ['rawMatch', 'contextLines'] }, // Report can be large; full details accessible via format:'full'
   inputSchema: {
     type: 'object',
     properties: {

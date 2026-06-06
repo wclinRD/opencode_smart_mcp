@@ -29,6 +29,8 @@ import { stdin, stdout, stderr, env } from 'node:process';
 import { argv } from 'node:process';
 import { toolMap, nativeTools, routerTools } from './loader.mjs';
 import { ContextManager } from '../lib/context-manager.mjs';
+import { optimizeOutputSync } from '../lib/output-optimizer.mjs';
+import { getDefaultCache } from '../lib/cache-manager.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -122,6 +124,63 @@ function resetStats() { stats.startTime = Date.now(); stats.totalCalls = 0; stat
 // Runtime config
 // ---------------------------------------------------------------------------
 const runtimeConfig = { debug: DEBUG, timeoutMs: TOOL_TIMEOUT, maxOutputSize: MAX_OUTPUT_SIZE, maxOutputChars: MAX_OUTPUT_CHARS };
+
+// ---------------------------------------------------------------------------
+// Output optimization (Phase 1: L0/L1 lossless, L2 deferred to Phase 2)
+// ---------------------------------------------------------------------------
+const _optCache = getDefaultCache();
+
+/**
+ * Apply output optimization to tool response text, guided by responsePolicy.
+ * L0: no optimization (passthrough)
+ * L1: lossless compression (JSON field reordering, whitespace normalization)
+ * L2: lossy summarization — deferred to Phase 2
+ *
+ * @param {string} text - original output text
+ * @param {object} policy - tool's responsePolicy
+ * @param {object} [opts] - additional options
+ * @returns {{ text: string, optimized: boolean, meta: object|null }}
+ */
+function applyOptimization(text, policy, opts = {}) {
+  if (!text || !policy) return { text, optimized: false, meta: null };
+
+  // Phase 1: cap at L1 (L2 deferred to Phase 2)
+  const level = Math.min(policy.maxLevel ?? 0, 1);
+  if (level < 1) return { text, optimized: false, meta: null };
+
+  // Skip if caller explicitly disables optimization
+  if (opts.optimize === false) return { text, optimized: false, meta: null };
+
+  try {
+    const result = optimizeOutputSync(text, {
+      maxLevel: level,
+      format: 'auto',
+    });
+
+    if (result.optimized) {
+      const savingsPct = result.originalSize > 0
+        ? ((1 - result.compressedSize / result.originalSize) * 100).toFixed(1)
+        : '0.0';
+      const savingsStr = `${((result.originalSize - result.compressedSize) / 1024).toFixed(1)}KB (${savingsPct}%)`;
+      const meta = {
+        _optimized: {
+          level,
+          originalSize: result.originalSize,
+          optimizedSize: result.compressedSize,
+          savings: savingsStr,
+          cacheKey: result.meta?.cacheKey || null,
+          tooltip: parseFloat(savingsPct) > 20
+            ? `Output compressed ${savingsPct}% — use format:'full' if you need complete data.`
+            : `Minor compression applied (${savingsPct}%).`,
+        },
+      };
+      return { text: result.text, optimized: true, meta };
+    }
+  } catch {
+    // Best-effort: never fail the response due to optimization error
+  }
+  return { text, optimized: false, meta: null };
+}
 
 // ---------------------------------------------------------------------------
 // Harness Engineering: Mechanical Enforcement — error fix suggestions
@@ -542,8 +601,9 @@ function handleDevtoolRun(id, params, signal, callerArgs) {
 /**
  * Capture context result and record stats, then return.
  * Shared helper to avoid repeating the capture/record pattern in every return path.
+ * Attaches responsePolicy to the result so respond() can apply output optimization.
  */
-function captureAndReturn(toolName, args, result, elapsedMs) {
+function captureAndReturn(toolName, args, result, elapsedMs, def) {
   const success = result.ok === true;
   recordStats(toolName, elapsedMs, success);
   ensureContext();
@@ -551,6 +611,10 @@ function captureAndReturn(toolName, args, result, elapsedMs) {
   // D.1 Auto-Store: non-blocking write failed tool results to memory
   if (!success && toolName !== 'smart_memory_store') {
     autoStoreToMemory(toolName, args, result);
+  }
+  // Attach responsePolicy for output optimization downstream
+  if (def?.responsePolicy) {
+    result._responsePolicy = def.responsePolicy;
   }
   return result;
 }
@@ -572,7 +636,7 @@ function invokeTool(def, args, timeoutOverride, signal) {
     const precheck = preCheckMemory(def.name, args);
     if (precheck) {
       const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
-      return captureAndReturn(def.name, args, { ok: true, output: precheck.output }, elapsedMs);
+      return captureAndReturn(def.name, args, { ok: true, output: precheck.output }, elapsedMs, def);
     }
   }
 
@@ -593,6 +657,7 @@ function invokeTool(def, args, timeoutOverride, signal) {
           origArgs: args,
           contextArgs,
           startTime,
+          _responsePolicy: def.responsePolicy,
         };
       }
       // Handler returns null to signal "fall back to CLI" (e.g. interactive mode)
@@ -602,19 +667,19 @@ function invokeTool(def, args, timeoutOverride, signal) {
         const output = String(handlerOutput ?? '');
         const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
         if (signal?.aborted) {
-          return captureAndReturn(def.name, args, { ok: false, error: `Tool ${def.name} was cancelled` }, elapsedMs);
+          return captureAndReturn(def.name, args, { ok: false, error: `Tool ${def.name} was cancelled` }, elapsedMs, def);
         }
-        return captureAndReturn(def.name, args, { ok: true, output }, elapsedMs);
+        return captureAndReturn(def.name, args, { ok: true, output }, elapsedMs, def);
       }
     } catch (err) {
       const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
       const fix = getErrorFix(def.name, 'generic', err.message);
-      return captureAndReturn(def.name, args, { ok: false, error: `Handler error in ${def.name}: ${err.message}\nFix: ${fix}` }, elapsedMs);
+      return captureAndReturn(def.name, args, { ok: false, error: `Handler error in ${def.name}: ${err.message}\nFix: ${fix}` }, elapsedMs, def);
     }
   }
 
   const cliPath = def._cliPath;
-  if (!cliPath) return captureAndReturn(def.name, args, { ok: false, error: `No CLI path or handler for ${def.name}` }, 0);
+  if (!cliPath) return captureAndReturn(def.name, args, { ok: false, error: `No CLI path or handler for ${def.name}` }, 0, def);
 
   const cliArgs = def.mapArgs(args);
   const allArgs = [cliPath, ...cliArgs];
@@ -644,7 +709,7 @@ function invokeTool(def, args, timeoutOverride, signal) {
   // Check abort
   if (signal?.aborted) {
     debugLog('Cancelled:', def.name);
-    return captureAndReturn(def.name, args, { ok: false, error: `Tool ${def.name} was cancelled` }, elapsedMs);
+    return captureAndReturn(def.name, args, { ok: false, error: `Tool ${def.name} was cancelled` }, elapsedMs, def);
   }
 
   if (result.error) {
@@ -654,7 +719,7 @@ function invokeTool(def, args, timeoutOverride, signal) {
     else { errMsg = `Failed to spawn ${def.name}: ${result.error.message}`; errorType = 'generic'; }
     const fix = getErrorFix(def.name.replace('smart_', ''), errorType, errMsg);
     debugLog('Error:', errMsg);
-    return captureAndReturn(def.name, args, { ok: false, error: `${errMsg}\nFix: ${fix}` }, elapsedMs);
+    return captureAndReturn(def.name, args, { ok: false, error: `${errMsg}\nFix: ${fix}` }, elapsedMs, def);
   }
 
   const capturedStderr = (result.stderr || '').trim();
@@ -671,11 +736,11 @@ function invokeTool(def, args, timeoutOverride, signal) {
     const errMsg = `Tool ${def.name} failed: exit ${result.status}${capturedStderr ? ': ' + capturedStderr : ''}`;
     const fix = getErrorFix(def.name.replace('smart_', ''), 'exit', errMsg);
     debugLog('Error:', errMsg);
-    return captureAndReturn(def.name, args, { ok: false, error: `${errMsg}\nFix: ${fix}` }, elapsedMs);
+    return captureAndReturn(def.name, args, { ok: false, error: `${errMsg}\nFix: ${fix}` }, elapsedMs, def);
   }
 
   if (elapsedMs > 5000) output = output.trimEnd() + `\n\n[Completed in ${(elapsedMs / 1000).toFixed(1)}s]`;
-  return captureAndReturn(def.name, args, { ok: true, output }, elapsedMs);
+  return captureAndReturn(def.name, args, { ok: true, output }, elapsedMs, def);
 }
 
 // ---------------------------------------------------------------------------
@@ -723,9 +788,19 @@ async function tryOptimizeOutput(text) {
 }
 
 function respond(id, result, opts = {}) {
-  // Fire-and-forget: write immediately, optimize in background
-  // TOON optimization can take up to 20s per response; awaiting it here
-  // would block ALL subsequent responses through the _respondChain.
+  // Phase 1: Apply output optimization BEFORE writing
+  // Checks result._responsePolicy (set by captureAndReturn via invokeTool)
+  const policy = result._responsePolicy;
+  delete result._responsePolicy; // strip before sending over wire
+  if (policy && opts.optimize !== false && result?.content?.[0]?.type === 'text' && typeof result.content[0].text === 'string') {
+    const opt = applyOptimization(result.content[0].text, policy, opts);
+    if (opt.meta) {
+      result.content[0].text = opt.text + '\n\n---\n' + JSON.stringify(opt.meta, null, 2) + '\n---';
+      debugLog(`Output opt: ${opt.meta._optimized.savings} saved (L${opt.meta._optimized.level})`);
+    }
+  }
+
+  // Legacy Toonify background optimization (fire-and-forget, kept for compat)
   if (opts.optimize !== false && result?.content?.[0]?.type === 'text' && typeof result.content[0].text === 'string') {
     const originalText = result.content[0].text;
     tryOptimizeOutput(originalText).then(optimized => {
@@ -958,7 +1033,7 @@ function handleRequest(req) {
 
           // Async handler — resolve Promise and respond
           if (result && result.__async) {
-            const { promise, toolName: tName, origArgs, startTime: st } = result;
+            const { promise, toolName: tName, origArgs, startTime: st, _responsePolicy } = result;
             promise
               .then(resolvedOutput => {
                 const elapsedMs = Number(process.hrtime.bigint() - st) / 1_000_000;
@@ -969,7 +1044,10 @@ function handleRequest(req) {
                 }
                 const output = String(resolvedOutput ?? '');
                 const cr = captureAndReturn(tName, origArgs, { ok: true, output }, elapsedMs);
-                respond(id, { content: [{ type: 'text', text: cr.output }] });
+                const resp1 = { content: [{ type: 'text', text: cr.output }] };
+                const rp = cr._responsePolicy || _responsePolicy;
+                if (rp) resp1._responsePolicy = rp;
+                respond(id, resp1);
               })
               .catch(err => {
                 const elapsedMs = Number(process.hrtime.bigint() - st) / 1_000_000;
@@ -982,7 +1060,9 @@ function handleRequest(req) {
                 });
               });
           } else if (result.ok) {
-            respond(id, { content: [{ type: 'text', text: result.output }] });
+            const resp2 = { content: [{ type: 'text', text: result.output }] };
+            if (result._responsePolicy) resp2._responsePolicy = result._responsePolicy;
+            respond(id, resp2);
           } else {
             // Extract fix from result.error (already has Fix: appended by handleDevtoolRun)
             const errLines = result.error.split('\n');
@@ -1017,7 +1097,7 @@ function handleRequest(req) {
 
         // Async handler — resolve Promise and respond
         if (result && result.__async) {
-          const { promise, toolName: tName, origArgs, startTime: st } = result;
+          const { promise, toolName: tName, origArgs, startTime: st, _responsePolicy } = result;
           promise
             .then(resolvedOutput => {
               const elapsedMs = Number(process.hrtime.bigint() - st) / 1_000_000;
@@ -1028,7 +1108,10 @@ function handleRequest(req) {
               }
               const output = String(resolvedOutput ?? '');
               const cr = captureAndReturn(tName, origArgs, { ok: true, output }, elapsedMs);
-              respond(id, { content: [{ type: 'text', text: cr.output }] });
+              const resp3 = { content: [{ type: 'text', text: cr.output }] };
+              const rp = cr._responsePolicy || _responsePolicy;
+              if (rp) resp3._responsePolicy = rp;
+              respond(id, resp3);
             })
             .catch(err => {
               const elapsedMs = Number(process.hrtime.bigint() - st) / 1_000_000;
@@ -1043,7 +1126,9 @@ function handleRequest(req) {
         }
 
         if (result.ok) {
-          respond(id, { content: [{ type: 'text', text: result.output }] });
+          const resp4 = { content: [{ type: 'text', text: result.output }] };
+          if (result._responsePolicy) resp4._responsePolicy = result._responsePolicy;
+          respond(id, resp4);
         } else {
           const isTimeout = result.error.includes('timed out');
           const isCancelled = result.error.includes('cancelled');

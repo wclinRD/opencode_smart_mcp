@@ -72,6 +72,33 @@ Standard 工具（30+ 個）→ smart_smart_run({tool, args})：
 
 > `ssr` = `smart_smart_run`
 
+## 🎯 Token 優化行為規則
+
+Smart MCP 會自動壓縮大型工具輸出。你必須學會和壓縮後的 `_optimized` 回應互動：
+
+```
+壓縮層級：
+  L0 (lossless)：不壓縮，原樣輸出（grep / learn / test / think / context）
+  L1 (lossless)：空白壓縮、JSON key 重排（大多數工具）
+  L2 (lossy)：丟棄 droppable field、摘要 compressible field
+     ➡ 目前僅 security（Phase 2 開放其他工具）
+
+遇到 _optimized metadata 時：
+  1. 檢查 level 值：
+     - level 0 / 1 → 資料完整，直接使用
+     - level >= 2 → 資料可能被壓縮，評估是否影響任務
+  2. 如果壓縮可能遺失關鍵資訊，呼叫 format:'full' 重新取得：
+     smart_run({tool:"exa_crawl", args:{urls, format:'full'}})
+  3. 一般查詢問題 → 直接用 L1 壓縮結果即可，不需要 format:'full'
+
+格式:full 使用決策樹：
+  是否需要精確逐行比對？      → format:'full'
+  是否在找特定數據/數字？      → format:'full'（如果 L1 結果不夠精確）
+  只是問摘要/概念/方向？       → 用壓縮結果即可
+  任務包含「列出所有...」？    → format:'full'
+  任務包含「檢查是否有...」？  → 用 L1 結果（壓縮不會丟失存在性檢查）
+```
+
 ## 🎯 任務分類器
 
 收到任務後，立即分類並載入對應 skill：

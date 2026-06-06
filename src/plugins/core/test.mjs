@@ -2,6 +2,7 @@ export default {
   name: 'smart_test',
   category: 'test',
   description: 'Use when: need to discover or run project tests. Auto-detects vitest/jest/mocha/ava/node:test. Supports watch mode for iterative development. Avoid when: checking test coverage (use coverage instead).',
+  responsePolicy: { maxLevel: 0 }, // Keep raw for CI integration
   inputSchema: {
     type: 'object',
     properties: {

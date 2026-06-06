@@ -59,6 +59,9 @@ for (const cat of CATEGORY_DIRS) {
       def.description = def.description || '';
       def.inputSchema = def.inputSchema || { type: 'object', properties: {} };
       def.mapArgs = def.mapArgs || defaultMapArgs;
+      // responsePolicy: default is L0 (lossless, no optimization)
+      // Plugins opt into lossy compression by declaring maxLevel > 1
+      def.responsePolicy = def.responsePolicy || { maxLevel: 0 };
 
       // Resolve CLI path
       if (def.cli) {

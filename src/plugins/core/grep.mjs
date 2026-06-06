@@ -2,6 +2,7 @@ export default {
   name: 'smart_grep',
   category: 'search',
   description: 'Use when: need to search codebase by regex. Returns function/class scope context + import graph for matched code. Avoid when: matching exact filename (use glob instead).',
+  responsePolicy: { maxLevel: 0 }, // Small output, keep raw
   inputSchema: {
     type: 'object',
     properties: {

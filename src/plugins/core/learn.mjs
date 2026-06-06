@@ -2,6 +2,7 @@ export default {
   name: 'smart_learn',
   category: 'analyze',
   description: 'Use when: need to understand project structure, tech stack, deps, coding style. Runs full analysis pipeline including AST parsing. Start here when entering a new codebase. Avoid when: just searching for code (use grep instead).',
+  responsePolicy: { maxLevel: 0 }, // Large but critical; keep raw
   inputSchema: {
     type: 'object',
     properties: {
