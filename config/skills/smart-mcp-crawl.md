@@ -98,3 +98,10 @@ smart_smart_run({tool:"pw_browser", args:{command:"navigate", url:"https://www.i
 // → 攔截到: cinema=1&id=KEY&a=1&usersign=1&region=GL.&device=1&isMasterSupport=1
 // → 比手動猜節省 2 小時 + 40 次 API 呼叫
 ```
+
+## Token 優化提示
+
+- `exa_crawl` / `research` 輸出超過 50KB 時會自動 L2 摘要（保留標題/結構/關鍵資料）
+- 若看到 `_optimized.level >= 2` metadata 表示內容已被摘要
+- 需要完整資料時加上 `format:'full'` 重新呼叫
+- `pw_browser` 輸出會 L1 lossless 壓縮（無資訊損失）

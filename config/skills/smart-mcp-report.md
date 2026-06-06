@@ -47,3 +47,9 @@ Token 優化（大量資料時）:
 
 - `diagram` 輸出 Mermaid 格式，可貼入 Markdown
 - `report` 輸出 HTML 檔案
+
+## Token 優化提示
+
+- `diagram` / `report` 輸出通常很小（<10KB），不使用壓縮
+- 大 JSON 資料輸出前先用 `toonify` 壓縮可省 30-65% token
+- 若看到 `_optimized` metadata，資料完整可直接使用

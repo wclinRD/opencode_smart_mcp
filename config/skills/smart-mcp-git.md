@@ -55,3 +55,9 @@ Code Review:
 
 - commit 前務必先用 `git_context` 確認只 stage 了 intended 檔案
 - `git_pr` 的 `noPublish:true` 只預覽不建立
+
+## Token 優化提示
+
+- `git_context` / diff 輸出會 L1 lossless 壓縮（無資訊損失）
+- LLM 需要完整 diff 做判斷，因此不進行摘要
+- 若看到 `_optimized.level === 1`，資料完整可直接使用

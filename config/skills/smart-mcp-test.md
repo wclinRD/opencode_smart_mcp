@@ -43,3 +43,9 @@ Watch 模式（開發中）:
 - `smart_test` 是 Core 工具，**直接呼叫**
 - 自動偵測 vitest/jest/mocha/ava/node:test
 - `coverage` 需要專案已有覆蓋率設定
+
+## Token 優化提示
+
+- `smart_test` 輸出通常很小（<20KB），不使用壓縮
+- `coverage` 輸出超過 10KB 時會 L1 空白壓縮（無損失）
+- 若看到 `_optimized` metadata，資料完整可直接使用

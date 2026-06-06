@@ -72,21 +72,26 @@
 
 ---
 
-## Phase 2：Smart Output Pipeline（Phase 1 完成後）
+## Phase 2：Smart Output Pipeline ✅
 
 ### Pipeline Layer
 
-- [ ] `src/lib/output-pipeline.mjs` — Pipeline 框架
-- [ ] addStage(format|compress|truncate|cache|summarize)
-- [ ] Semantic truncator（保留標題/結構/關鍵數據）
-- [ ] Plugin 可選宣告 responsePipeline 覆寫預設
+- [x] `src/lib/output-pipeline.mjs` — Pipeline 框架（5 built-in stages, registerStage API）
+- [x] Built-in stages: format, compress, summarize, truncate, cache
+- [x] Semantic truncator（Markdown/JSON/HTML/CSV/Code/PlainText）
+- [x] Plugin 可選宣告 responsePipeline 覆寫預設（security.mjs 已整合）
 
 ### Cache 統一
 
-- [ ] 合併 exa_crawl cache + 新 cache
-- [ ] 統一的 cache manager API
+- [x] 合併 exa_crawl cache + 新 cache → `~/.smart/cache/unified.db`
+- [x] SQLite backend + LRU eviction（2000 cap）+ memory fallback
 
 ### Agent Skills 整合
 
-- [ ] 8 個 skill 文件加入 token 優化提示
-- [ ] 告知 LLM 大輸出自動壓縮機制
+- [x] 8 個 skill 文件加入 token 優化提示
+- [x] 告知 LLM 大輸出自動壓縮機制（config/agents/smart-mcp.md）
+
+### Tests
+
+- [x] 22 pipeline tests（pipeline creation, stages, truncation, cache, empty/null input）
+- [x] 全量回歸：**531 tests, 0 fail**

@@ -31,6 +31,7 @@ import { toolMap, nativeTools, routerTools } from './loader.mjs';
 import { ContextManager } from '../lib/context-manager.mjs';
 import { optimizeOutputSync } from '../lib/output-optimizer.mjs';
 import { getDefaultCache } from '../lib/cache-manager.mjs';
+import { createPipeline, optimizeOutput as pipelineOptimize } from '../lib/output-pipeline.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -126,55 +127,46 @@ function resetStats() { stats.startTime = Date.now(); stats.totalCalls = 0; stat
 const runtimeConfig = { debug: DEBUG, timeoutMs: TOOL_TIMEOUT, maxOutputSize: MAX_OUTPUT_SIZE, maxOutputChars: MAX_OUTPUT_CHARS };
 
 // ---------------------------------------------------------------------------
-// Output optimization (Phase 1: L0/L1 lossless, L2 deferred to Phase 2)
+// Output optimization (Phase 2: pipeline-based L0/L1/L2 + semantic truncation)
 // ---------------------------------------------------------------------------
 const _optCache = getDefaultCache();
 
 /**
  * Apply output optimization to tool response text, guided by responsePolicy.
+ * Uses the output-pipeline framework with stage-based processing.
  * L0: no optimization (passthrough)
  * L1: lossless compression (JSON field reordering, whitespace normalization)
- * L2: lossy summarization — deferred to Phase 2
+ * L2: lossy summarization (smart summary keeping critical sections)
  *
  * @param {string} text - original output text
- * @param {object} policy - tool's responsePolicy
+ * @param {object} policy - tool's responsePolicy (or null)
  * @param {object} [opts] - additional options
+ *   opts.chain - custom pipeline chain from plugin's responsePipeline
+ *   opts.optimize - set false to disable
  * @returns {{ text: string, optimized: boolean, meta: object|null }}
  */
 function applyOptimization(text, policy, opts = {}) {
   if (!text || !policy) return { text, optimized: false, meta: null };
 
-  // Phase 1: cap at L1 (L2 deferred to Phase 2)
-  const level = Math.min(policy.maxLevel ?? 0, 1);
-  if (level < 1) return { text, optimized: false, meta: null };
+  const maxLevel = policy.maxLevel ?? 0;
+  if (maxLevel < 1) return { text, optimized: false, meta: null };
 
   // Skip if caller explicitly disables optimization
   if (opts.optimize === false) return { text, optimized: false, meta: null };
 
   try {
-    const result = optimizeOutputSync(text, {
-      maxLevel: level,
-      format: 'auto',
+    // Build pipeline with custom chain from plugin's responsePipeline if provided
+    const chain = policy.responsePipeline || null;
+    const pipe = createPipeline({
+      maxLevel,
+      maxChars: 50000,
+      chain,
     });
 
-    if (result.optimized) {
-      const savingsPct = result.originalSize > 0
-        ? ((1 - result.compressedSize / result.originalSize) * 100).toFixed(1)
-        : '0.0';
-      const savingsStr = `${((result.originalSize - result.compressedSize) / 1024).toFixed(1)}KB (${savingsPct}%)`;
-      const meta = {
-        _optimized: {
-          level,
-          originalSize: result.originalSize,
-          optimizedSize: result.compressedSize,
-          savings: savingsStr,
-          cacheKey: result.meta?.cacheKey || null,
-          tooltip: parseFloat(savingsPct) > 20
-            ? `Output compressed ${savingsPct}% — use format:'full' if you need complete data.`
-            : `Minor compression applied (${savingsPct}%).`,
-        },
-      };
-      return { text: result.text, optimized: true, meta };
+    const result = pipe.run(text);
+
+    if (result.meta._optimized.level > 0) {
+      return { text: result.text, optimized: true, meta: result.meta };
     }
   } catch {
     // Best-effort: never fail the response due to optimization error
@@ -612,9 +604,13 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
   if (!success && toolName !== 'smart_memory_store') {
     autoStoreToMemory(toolName, args, result);
   }
-  // Attach responsePolicy for output optimization downstream
+  // Attach responsePolicy + responsePipeline for output optimization downstream
   if (def?.responsePolicy) {
     result._responsePolicy = def.responsePolicy;
+    // Include responsePipeline if plugin declared custom pipeline stages
+    if (def.responsePipeline) {
+      result._responsePipeline = def.responsePipeline;
+    }
   }
   return result;
 }
@@ -788,12 +784,14 @@ async function tryOptimizeOutput(text) {
 }
 
 function respond(id, result, opts = {}) {
-  // Phase 1: Apply output optimization BEFORE writing
-  // Checks result._responsePolicy (set by captureAndReturn via invokeTool)
+  // Phase 2: Apply output optimization BEFORE writing via pipeline
+  // Checks result._responsePolicy + result._responsePipeline (set by captureAndReturn via invokeTool)
   const policy = result._responsePolicy;
+  const pipeline = result._responsePipeline;
   delete result._responsePolicy; // strip before sending over wire
+  delete result._responsePipeline;
   if (policy && opts.optimize !== false && result?.content?.[0]?.type === 'text' && typeof result.content[0].text === 'string') {
-    const opt = applyOptimization(result.content[0].text, policy, opts);
+    const opt = applyOptimization(result.content[0].text, policy, { ...opts, chain: pipeline });
     if (opt.meta) {
       result.content[0].text = opt.text + '\n\n---\n' + JSON.stringify(opt.meta, null, 2) + '\n---';
       debugLog(`Output opt: ${opt.meta._optimized.savings} saved (L${opt.meta._optimized.level})`);

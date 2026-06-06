@@ -38,3 +38,8 @@ Rust:
   smart_smart_run({tool:"rs_helper", args:{command:"analyze"}})
   smart_smart_run({tool:"rs_helper", args:{command:"fmt"}})
 ```
+
+## Token 優化提示
+
+- 語言工具輸出通常很小（<10KB），不使用壓縮
+- 若看到 `_optimized` metadata，僅為空白壓縮，無資訊損失

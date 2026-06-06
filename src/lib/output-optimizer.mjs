@@ -559,7 +559,7 @@ export async function optimizeOutput(text, options = {}) {
 // ---------------------------------------------------------------------------
 
 export function optimizeOutputSync(text, options = {}) {
-  const { maxLevel = 1, format: formatHint = 'auto' } = options;
+  const { maxLevel = 1, format: formatHint = 'auto', securityScan = false } = options;
 
   const result = {
     text,
@@ -580,14 +580,39 @@ export function optimizeOutputSync(text, options = {}) {
   if (maxLevel < 1 || size < L1_MIN_SIZE) return { ...result, format };
 
   let optimizedText;
+  let level = 0;
 
+  // Level 1: lossless compression (always safe)
   if (maxLevel >= 1) {
     const compressor = L1_COMPRESSORS[format];
     if (compressor) {
       optimizedText = compressor(text);
-      if (!optimizedText || optimizedText.length >= text.length) {
+      if (optimizedText && optimizedText.length < text.length) {
+        level = 1;
+      } else {
         optimizedText = text;
       }
+    }
+  }
+
+  // Level 2: smart summary (only for large output)
+  if (maxLevel >= 2 && size >= L2_MIN_SIZE) {
+    const currentText = optimizedText || text;
+    let summary;
+
+    if (securityScan && isSecurityScan(text)) {
+      summary = summarizeSecurityScan(currentText);
+    } else {
+      const summarizer = L2_SUMMARIZERS[format];
+      if (summarizer) {
+        summary = summarizer(currentText);
+      }
+    }
+
+    if (summary && summary.length < currentText.length * L2_MAX_SUMMARY_RATIO && summary.length > 100) {
+      optimizedText = summary;
+      level = 2;
+      result.meta.summaryType = securityScan ? 'security-scan' : 'structural';
     }
   }
 
@@ -595,7 +620,7 @@ export function optimizeOutputSync(text, options = {}) {
 
   result.text = optimizedText;
   result.optimized = true;
-  result.level = 1;
+  result.level = level;
   result.compressedSize = optimizedText.length;
   result.meta.cacheKey = createHash('sha256').update(text).digest('hex').substring(0, 16);
 

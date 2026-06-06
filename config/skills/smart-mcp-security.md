@@ -56,3 +56,10 @@ CI 前阻斷檢查:
 - `failOn` 可設 high/medium/low 阻斷閾值
 - `fast_apply` 預設 dryRun:true，安全無副作用
 - 注意誤報（如測試資料中的 fake key）
+
+## Token 優化提示
+
+- `smart_security` 掃描結果超過 10KB 時會自動 L2 摘要（保留高/中風險，摘要低風險）
+- 若看到 `_optimized.level >= 2` metadata 表示低風險項目已被隱藏
+- 需要完整報告時加上 `format:'full'` 重新呼叫
+- level 0/1 的資料完整可直接使用

@@ -116,3 +116,9 @@ ssr({tool:"code_call_graph", args:{file:"src/module.ts", symbol:"myFunction", di
 
 ❌ `smart_edit` — 不存在，工具名是 `edit`
 ❌ `smart_fast_apply` — 不存在，工具名是 `fast_apply`
+
+## Token 優化提示
+
+- `import_graph` / `code_impact` / `code_call_graph` 輸出會 L1 壓縮（JSON key 縮短，無損失）
+- `fast_apply` 的 unified-diff 格式最省 token（比 search-replace 省 40-60%）
+- 若看到 `_optimized` metadata，資料完整可直接使用

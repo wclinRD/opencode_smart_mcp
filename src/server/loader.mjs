@@ -62,6 +62,14 @@ for (const cat of CATEGORY_DIRS) {
       // responsePolicy: default is L0 (lossless, no optimization)
       // Plugins opt into lossy compression by declaring maxLevel > 1
       def.responsePolicy = def.responsePolicy || { maxLevel: 0 };
+      // responsePipeline (Phase 2): optional custom pipeline stages
+      // Plugin can declare responsePipeline to override default pipeline:
+      //   responsePipeline: [
+      //     { stage: 'format' },
+      //     { stage: 'compress' },
+      //     { stage: 'summarize', options: { securityScan: true } },
+      //   ],
+      // When not declared, the default pipeline runs based on responsePolicy.maxLevel
 
       // Resolve CLI path
       if (def.cli) {

@@ -72,3 +72,9 @@ ssr({tool:"code_type_infer", args:{file:"src/app.ts", symbol:"variableName"}})
 - `memory_store` 的 `store` 指令在修復成功後務必執行
 - `fast_apply` 預設 dryRun:true，安全無副作用
 - `edit` 工具名是 `edit`，**不是** `smart_edit`
+
+## Token 優化提示
+
+- `error_diagnose` / `debug` 輸出通常很小（<15KB），不使用壓縮
+- 若看到 `_optimized` metadata，僅為空白壓縮，無資訊損失
+- `fast_apply` 的 unified-diff 格式最省 token（比 search-replace 省 40-60%）
