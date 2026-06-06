@@ -25,6 +25,7 @@ Standard 工具：smart_smart_run({tool:"工具名", args:{...}})
 | `pw_browser` | `smart_smart_run({tool:"pw_browser", args:{command, url, code}})` | 瀏覽器自動化 + JS 攔截 |
 | `research` | `smart_smart_run({tool:"research", args:{url, depth}})` | 深度研究 URL 內容 |
 | `exa_search` | `smart_smart_run({tool:"exa_search", args:{command:"search", query}})` | 搜尋網路資料 |
+| `github_search` | `smart_smart_run({tool:"github_search", args:{query, language}})` | 搜尋 GitHub 真實程式碼範例 |
 
 ## SPA API 逆向流程（修正版）
 
@@ -64,6 +65,13 @@ Step 5: 用 research 深入研究 chunk
     tool:"research",
     args:{url:"https://example.com/main.js", depth:"quick"}
   })
+
+進階：用 github_search 找類似 API 的實作範例
+  smart_smart_run({
+    tool:"github_search",
+    args:{query:"axios.create md5 sign", language:"javascript"}
+  })
+  → 參考其他專案如何實作簽名
 ```
 
 ## 爬蟲錯誤降級

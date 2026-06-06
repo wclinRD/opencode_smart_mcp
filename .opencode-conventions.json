@@ -2,29 +2,29 @@
   "conventions": {
     "naming": {
       "file": {
-        "kebabCase": 70,
+        "kebabCase": 72,
         "camelCase": 37,
-        "other": 28,
+        "other": 30,
         "snake_case": 17
       },
       "variable": {
-        "camelCase": 4674,
-        "UPPER_CASE": 159,
-        "other": 34,
+        "camelCase": 4894,
+        "UPPER_CASE": 166,
+        "other": 36,
         "PascalCase": 13
       },
       "function": {
-        "camelCase": 821,
+        "camelCase": 846,
         "PascalCase": 3
       },
       "class": {
         "camelCase": 11,
-        "PascalCase": 15
+        "PascalCase": 16
       }
     },
     "imports": {
       "commonjs": 6,
-      "esm": 122,
+      "esm": 126,
       "mixed": true
     },
     "testing": {
@@ -43,9 +43,9 @@
     ],
     "exports": {
       "default": 57,
-      "named": 129
+      "named": 134
     }
   },
   "preferences": {},
-  "lastAnalyzed": "2026-06-06T02:48:46.771Z"
+  "lastAnalyzed": "2026-06-06T03:43:24.215Z"
 }

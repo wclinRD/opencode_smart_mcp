@@ -12,6 +12,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Thinking session state (transient per-session)
+.thinking-*.json
+
 # Auto-generated reports (can regenerate)
 reports/*.html
 

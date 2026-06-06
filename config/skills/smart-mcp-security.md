@@ -17,7 +17,10 @@ Core 工具：直接呼叫 smart_security(), smart_grep(), smart_test()
 | `smart_security` | **直接** `smart_security({scan:"all"})` | 完整安全掃描 |
 | `smart_grep` | **直接** `smart_grep({pattern, include})` | 精準定位問題 |
 | `smart_test` | **直接** `smart_test({root})` | 驗證修復無副作用 |
-| `edit` | `smart_smart_run({tool:"edit", args:{...}})` | 修復問題 |
+| `fast_apply` | `ssr({tool:"fast_apply", args:{format, text}})` | 🥇 批次修復漏洞（支援 unified-diff） |
+| `edit` | `ssr({tool:"edit", args:{...}})` | 🥈 單點修復 |
+
+> `ssr` = `smart_smart_run`
 
 ## 標準流程
 
@@ -32,7 +35,10 @@ Core 工具：直接呼叫 smart_security(), smart_grep(), smart_test()
   // 2. 精準定位
   smart_grep({pattern:"password|secret|key|token", include:"*.{js,ts,py}"})
   
-  // 3. 修復（移到 .env）
+  // 3. 🥇 批次修復（多檔案一致修改）
+  ssr({tool:"fast_apply", args:{format:"search-replace", text:"<<SEARCH/REPLACE blocks>>", dryRun:true}})
+  // 確認後：ssr({tool:"fast_apply", args:{format:"search-replace", text:"...", apply:true}})
+  
   // 4. 複掃確認無殘留
   smart_security({scan:"credentials"})
   
@@ -48,4 +54,5 @@ CI 前阻斷檢查:
 
 - `smart_security` 是 Core 工具，**直接呼叫**（不需 smart_smart_run）
 - `failOn` 可設 high/medium/low 阻斷閾值
+- `fast_apply` 預設 dryRun:true，安全無副作用
 - 注意誤報（如測試資料中的 fake key）
