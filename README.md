@@ -1,6 +1,6 @@
 # Smart MCP — 開發工具集
 
-MCP server 提供 **35+ 開發工具** + **專屬 agent personality**，可在 opencode 中直接呼叫。
+MCP server 提供 **50+ 開發工具** + **專屬 agent personality**，可在 opencode 中直接呼叫。
 
 ---
 
@@ -69,6 +69,7 @@ MCP server 提供 **35+ 開發工具** + **專屬 agent personality**，可在 o
 | `turndown` | ✅ **必裝** | HTML → Markdown 轉換（markdown 模式） | ~80 KB |
 | `playwright` | ⬜ **選裝** | JS 網站渲染（`--render` 模式），需另外 `npx playwright install chromium` | ~300 MB |
 | `crawlee` | ⬜ **選裝** | 自適應爬蟲（自動判斷靜態/JS 網站，自動降級 Cheerio/Playwright） | ~50 MB |
+| `impers` | ⬜ **選裝** | TLS 指紋模擬繞過 Cloudflare（`--stealth` 模式），自動下載 libcurl-impersonate | ~500 KB |
 
 > 💡 **全部必裝套件安裝完成不到 1 MB**。選裝套件（playwright、crawlee）體積較大，請依需求安裝。
 >
@@ -96,6 +97,14 @@ npx playwright install chromium   # 下載 Chromium 瀏覽器（~300MB）
 ```bash
 # F.3 功能：自動判斷網站靜態/JS，選用 Cheerio 或 Playwright 引擎
 npm install crawlee
+```
+
+### 選裝：impers（Cloudflare 繞過 — TLS 指紋模擬）
+
+```bash
+# F.Stealth 功能：TLS 指紋偽裝繞過 Cloudflare/Akamai 等 bot 防護
+# 使用前無需額外設定，首次執行自動下載 libcurl-impersonate 二進位
+npm install impers
 ```
 
 ---
@@ -252,7 +261,7 @@ node smart-agent/src/install/install-agent.mjs
 
 ## 🧠 Smart MCP Agent Personality
 
-安裝後，opencode 預設使用 **smart-mcp agent**，它擁有 35+ 開發工具：
+安裝後，opencode 預設使用 **smart-mcp agent**，它擁有 50+ 開發工具：
 
 ### 工具選擇原則
 
@@ -270,7 +279,7 @@ node smart-agent/src/install/install-agent.mjs
 | 跨檔案編輯 | `smart_cross_file_edit`（dry-run 安全） |
 | Git 流程 | `smart_git_context` + `smart_git_commit` + `smart_git_pr` + `smart_git_review` |
 | 網路搜尋 | `smart_exa_search`（search + code） |
-| 網頁爬取 | `smart_exa_crawl`（crawl + clean + markdown + chunk） |
+| 網頁爬取 | `smart_exa_crawl`（crawl + clean + markdown + chunk + crawlee + stealth） |
 | 全端研究 | `smart_research`（一條龍：選 depth 即可，內部自動 pipeline） |
 | 瀏覽器操作 | `smart_pw_browser`（導航、點擊、填表、截圖、執行程式碼） |
 | GitHub 探索 | `smart_github_search` |
@@ -317,6 +326,8 @@ opencode_smart_mcp/
 │       ├── utils.mjs          # 共用工具函式
 │       ├── chunker.mjs        # 內容分塊引擎（heading-based split）
 │       ├── quality.mjs        # 內容品質分析 + LLM-facing 使用建議
+│       ├── stealth.mjs        # 反爬蟲引擎（TLS impersonation + stealth Playwright）
+│       ├── crawler.mjs        # Crawlee 自適應爬蟲（Cheerio → Playwright 降級）
 │       ├── cache.mjs          # SQLite 快取層
 │       └── compose-engine.mjs # 工具組合引擎
 ├── config/
@@ -397,7 +408,7 @@ smart_run(tool: "tool_name", args: {...})
 | Tool name | 功能 |
 |-----------|------|
 | `exa_search` | 搜尋網頁或程式碼（search + code） |
-| `exa_crawl` | 爬取網頁內容，支援 clean / markdown / chunk |
+| `exa_crawl` | 爬取網頁內容，支援 clean / markdown / chunk / crawlee / **stealth** |
 | `github_search` | 搜尋 public GitHub code，filter by repo/path/language |
 
 ### 研究工具
