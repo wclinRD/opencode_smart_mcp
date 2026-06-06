@@ -1,6 +1,8 @@
 # Smart MCP — 開發工具集
 
-MCP server 提供 **50+ 開發工具** + **專屬 agent personality**，可在 opencode 中直接呼叫。
+MCP server 提供 **50+ 開發工具** + **洋蔥架構 agent（8 個 task skill 按需載入）**，可在 opencode 中直接呼叫。
+
+> 🧅 **洋蔥架構**：smart-mcp agent 採用核心極簡設計（106 行），收到「爬蟲」「重構」「除錯」等任務時自動載入對應 skill，不再把所有知識塞進 system prompt。
 
 ---
 
@@ -152,7 +154,9 @@ npm install @mozilla/readability@0.6.0 linkedom@0.18.12 turndown@7.2.4
 
 > ⚠️ `command[1]` 必須使用**絕對路徑**指向 clone 下來的 `src/server/index.mjs`。不可使用相對路徑！
 
-#### 步驟 4：安裝 Agent Personality（讓 agent 懂得用 33 個工具）
+> 💡 **安裝後 agent 會自動載入 skills**：你的 `smart-mcp agent` 使用洋蔥架構，收到任務時會自動分類並載入對應 skill（如「爬蟲」→ `smart-mcp-crawl`）。不需額外設定。
+
+#### 步驟 4：安裝 Agent Personality（讓 agent 懂得用 50+ 工具 + 8 個 task skills）
 
 ```bash
 node smart-agent/src/install/install-agent.mjs
@@ -160,8 +164,9 @@ node smart-agent/src/install/install-agent.mjs
 
 這會自動：
 1. 複製 `config/agents/smart-mcp.md` → `~/.config/opencode/agents/smart-mcp.md`
-2. 設定 `default_agent = "smart-mcp"`
-3. 建立記憶目錄 `~/.smart/memory/`
+2. 複製 `config/skills/smart-mcp-*.md` → `~/.config/opencode/skills/`（8 個 domain skill）
+3. 設定 `default_agent = "smart-mcp"`
+4. 建立記憶目錄 `~/.smart/memory/`
 
 #### 步驟 5：重啟 opencode 並驗證
 
@@ -206,8 +211,10 @@ node smart-agent/src/install/install-agent.mjs --dry-run
 |---------|------|---------|
 | MCP server 連線 | `opencode mcp list` | smart → connected |
 | Agent 定義存在 | `ls ~/.config/opencode/agents/smart-mcp.md` | 檔案存在 |
+| Skills 安裝 | `ls ~/.config/opencode/skills/smart-mcp-*.md` | 8 個 skill 檔案 |
 | 預設 agent | `cat ~/.config/opencode/opencode.jsonc \| grep default_agent` | `"smart-mcp"` |
-| 工具可用 | 在 opencode 中呼叫 `smart_grep`、`smart_think` 等 | 正常回應 |
+| 工具可用 | 在 opencode 中呼叫 `smart_grep` 等 | 正常回應 |
+| Skill 載入 | 說「幫我爬一個網站」應自動載入 crawl skill | 看到 skill 載入訊息 |
 
 ---
 
@@ -259,6 +266,44 @@ node smart-agent/src/install/install-agent.mjs
 
 ---
 
+## 🧅 洋蔥架構（Onion Architecture）
+
+Smart MCP agent 採用**洋蔥架構**：核心極簡 + domain skill 按需載入，而非把所有知識塞進 system prompt。
+
+```
+你給任務 → smart-mcp agent (106 行 system prompt)
+               │
+               ├── 行為閘：檢查該用 MCP 工具還是寫 script？
+               ├── Reflex Core：8 個最常用工具（不需 skill）
+               │
+               └── 任務分類器：比對關鍵字 → 自動載入 skill
+                      │
+                      ├── 「爬取 iyf.tv」  → skill("smart-mcp-crawl")
+                      ├── 「重構這個函式」 → skill("smart-mcp-refactor")
+                      ├── 「除錯」         → skill("smart-mcp-debug")
+                      ├── 「Git commit」   → skill("smart-mcp-git")
+                      ├── 「掃描漏洞」     → skill("smart-mcp-security")
+                      ├── 「跑測試」       → skill("smart-mcp-test")
+                      ├── 「產報告」       → skill("smart-mcp-report")
+                      └── 「Python 檢查」   → skill("smart-mcp-lang")
+```
+
+**關鍵概念**：
+- `config/agents/smart-mcp.md` — **主 agent**（106 行），僅含行為閘 + 核心工具 + 任務分類器
+- `config/skills/smart-mcp-*.md` — **8 個 domain skill**（各 40-92 行），按需載入
+- skill 不執行工具，skill 是「知識」— 載入後告訴 agent 正確的流程和工具選擇
+- 任務分類器比對使用者請求，自動 `skill("smart-mcp-xxx")` 載入對應知識
+- 不確定時 → `agent_recommend(goal)` 請求推薦
+
+**與傳統架構對比**：
+
+| | 傳統（改造前） | 洋蔥架構（改造後） |
+|--|--------------|-----------------|
+| system prompt 大小 | 667 行 / 89KB | **106 行 / 3KB** |
+| 記憶負擔 | 40+ 工具平鋪，選擇性遺忘 | 只記 8 個核心 + 分類器 |
+| 領域知識 | 全部混在 agent 裡 | 分 8 個 skill，按需載入 |
+| 遺漏工具 | 容易遺漏不熟的（如 pw_browser） | skill 內有完整 workflow 提示 |
+
 ## 🧠 Smart MCP Agent Personality
 
 安裝後，opencode 預設使用 **smart-mcp agent**，它擁有 50+ 開發工具：
@@ -275,37 +320,37 @@ node smart-agent/src/install/install-agent.mjs
 | 深層分析 | `smart_thinking`（9 模板） |
 | 安全掃描 | `smart_security`（credentials/injection/path-traversal/dependencies） |
 | 執行測試 | `smart_test`（自動偵測框架） |
-| 診斷錯誤 | `smart_error_diagnose`（pattern KB + 記憶庫） |
-| 跨檔案編輯 | `smart_cross_file_edit`（dry-run 安全） |
-| Git 流程 | `smart_git_context` + `smart_git_commit` + `smart_git_pr` + `smart_git_review` |
-| 網路搜尋 | `smart_exa_search`（search + code） |
-| 網頁爬取 | `smart_exa_crawl`（crawl + clean + markdown + chunk + crawlee + stealth） |
-| 全端研究 | `smart_research`（一條龍：選 depth 即可，內部自動 pipeline） |
-| 瀏覽器操作 | `smart_pw_browser`（導航、點擊、填表、截圖、執行程式碼） |
-| GitHub 探索 | `smart_github_search` |
-| 產生圖表 | `smart_diagram` |
-| 產生報告 | `smart_report` |
+| 診斷錯誤 | `error_diagnose`（pattern KB + 記憶庫，via `smart_smart_run`） |
+| 跨檔案編輯 | `cross_file_edit`（dry-run 安全，via `smart_smart_run`） |
+| Git 流程 | `git_context` + `git_commit` + `git_pr` + `git_review`（via `smart_smart_run`） |
+| 網路搜尋 | `exa_search`（via `smart_smart_run`） |
+| 網頁爬取 | `exa_crawl`（clean/markdown/chunk/crawlee，via `smart_smart_run`） |
+| 全端研究 | `research`（選 depth 即可，via `smart_smart_run`） |
+| 瀏覽器操作 | `pw_browser`（導航、點擊、填表、JS 執行，via `smart_smart_run`） |
+| GitHub 探索 | `github_search`（via `smart_smart_run`） |
+| 產生圖表 | `diagram`（via `smart_smart_run`） |
+| 產生報告 | `report`（via `smart_smart_run`） |
 
 ### Workflow 自動化
 
 5+ 步驟的複雜任務自動使用 workflow 引擎：
 
-```bash
-smart_workflow create "<目標>" --template <flow> --state wf.json
+```
+smart_smart_run({tool:"workflow", args:{command:"create", goal:"<目標>", template:"<flow>"}})
 ```
 
-可用模板：`debug-flow`、`refactor-flow`、`security-flow`、`research-flow`、`deep-research-flow`、`git-flow`
+可用模板：`debug-flow`、`refactor-flow`、`security-flow`、`research-flow`、`git-flow`
 
 ### Pipeline 組合
 
 自訂工具鏈，支援 seq/par/cond 三種模式：
 
-```bash
-smart_compose({ pipeline: [
+```
+smart_smart_run({tool:"compose", args:{pipeline: [
   { tool: "smart_grep", args: {...}, mode: "seq" },
-  { tool: "smart_debug", args: {...}, mode: "seq" },
+  { tool: "debug", args: {...}, mode: "seq" },
   { tool: "smart_security", args: {...}, mode: "par" },
-]})
+]}})
 ```
 
 ---
@@ -332,7 +377,16 @@ opencode_smart_mcp/
 │       └── compose-engine.mjs # 工具組合引擎
 ├── config/
 │   ├── agents/
-│   │   └── smart-mcp.md       # 🤖 Agent personality 定義檔（給 LLM 用）
+│   │   └── smart-mcp.md       # 🤖 Agent personality（洋蔥核心：行為閘 + 分類器）
+│   ├── skills/                # 🧅 Domain skills (按需載入)
+│   │   ├── smart-mcp-crawl.md    # 爬蟲/SPA 逆向
+│   │   ├── smart-mcp-refactor.md # 重構
+│   │   ├── smart-mcp-debug.md    # 除錯
+│   │   ├── smart-mcp-git.md      # Git 操作
+│   │   ├── smart-mcp-security.md # 安全掃描
+│   │   ├── smart-mcp-test.md     # 測試
+│   │   ├── smart-mcp-report.md   # 報告/圖表
+│   │   └── smart-mcp-lang.md     # 語言專案分析
 │   ├── opencode.json          # opencode 整合設定範例
 │   └── .opencode-conventions.json
 ├── smart-agent/               # 📦 npm publish 套件
@@ -367,12 +421,14 @@ opencode_smart_mcp/
 | `smart_test` | 自動偵測並執行測試（vitest/jest/mocha/ava/node:test） |
 | `smart_thinking` | 結構化推理，9 種 template + 動態多輪推理 |
 
-## 🛠 Standard Tools（30+ 個，透過 smart_run router 呼叫）
+## 🛠 Standard Tools（30+ 個，透過 smart_smart_run 路由呼叫）
 
 使用方式：
 ```
-smart_run(tool: "tool_name", args: {...})
+smart_smart_run({tool: "tool_name", args: {...}})
 ```
+
+> 注意：`smart_run` 是 MCP server 內部路由，LLM 呼叫請用 `smart_smart_run({tool, args})`。
 
 ### 分析工具
 
@@ -461,8 +517,9 @@ smart_run(tool: "tool_name", args: {...})
 如果你想在自己的 opencode 專案中使用 smart-mcp agent personality，不需要整個 clone：
 
 1. 複製 `config/agents/smart-mcp.md` 到 `~/.config/opencode/agents/`
-2. 在 opencode.jsonc 中設定 `"default_agent": "smart-mcp"`
-3. 確認 MCP server 設定指向你的 smart-mcp 安裝路徑
+2. 複製 `config/skills/smart-mcp-*.md` 到 `~/.config/opencode/skills/`（8 個 domain skill）
+3. 在 opencode.jsonc 中設定 `"default_agent": "smart-mcp"`
+4. 確認 MCP server 設定指向你的 smart-mcp 安裝路徑
 
 ---
 

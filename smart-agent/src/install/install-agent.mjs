@@ -9,7 +9,7 @@
 //   import { installAgent } from 'smart-agent/install/install-agent';
 //   await installAgent({ smartMcpPath: '/path/to/opencode_smart_mcp' });
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync, copyFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 const AGENTS_DIR = resolve(homedir(), '.config', 'opencode', 'agents');
 const AGENT_FILE = resolve(AGENTS_DIR, 'smart-mcp.md');
+const SKILLS_DIR = resolve(homedir(), '.config', 'opencode', 'skills');
 const CONFIG_DIR = resolve(homedir(), '.config', 'opencode');
 const CONFIG_PATH = resolve(CONFIG_DIR, 'opencode.jsonc');
 const MEMORY_DIR = resolve(homedir(), '.smart', 'memory');
@@ -39,7 +40,7 @@ export async function installAgent(options = {}) {
   const smartMcpPath = options.smartMcpPath || resolveSmartMcpPath();
   const dryRun = options.dryRun || false;
 
-  const result = { agentInstalled: false, configUpdated: false, memoryReady: false };
+  const result = { agentInstalled: false, configUpdated: false, memoryReady: false, skillsInstalled: false };
 
   // -----------------------------------------------------------------------
   // Step 1: Copy agent definition file
@@ -88,7 +89,38 @@ export async function installAgent(options = {}) {
   result.configUpdated = true;
 
   // -----------------------------------------------------------------------
-  // Step 3: Ensure memory directory
+  // Step 3: Install skill files
+  // -----------------------------------------------------------------------
+  const sourceSkillsDir = resolve(smartMcpPath, 'config', 'skills');
+  if (!existsSync(sourceSkillsDir)) {
+    if (dryRun) {
+      console.log(`📋 Would create skills dir: ${SKILLS_DIR}`);
+    } else {
+      if (!existsSync(SKILLS_DIR)) {
+        mkdirSync(SKILLS_DIR, { recursive: true });
+      }
+    }
+  }
+
+  if (existsSync(sourceSkillsDir)) {
+    const skillFiles = readdirSync(sourceSkillsDir).filter(f => f.endsWith('.md'));
+    for (const f of skillFiles) {
+      const src = resolve(sourceSkillsDir, f);
+      const dest = resolve(SKILLS_DIR, f);
+      if (dryRun) {
+        console.log(`📋 Would copy skill: ${f} → ${dest}`);
+      } else {
+        copyFileSync(src, dest);
+        console.log(`  ✅ Skill installed: ${f}`);
+      }
+    }
+    result.skillsInstalled = true;
+  } else {
+    console.warn(`⚠️  Skills directory not found: ${sourceSkillsDir}`);
+  }
+
+  // -----------------------------------------------------------------------
+  // Step 4: Ensure memory directory
   // -----------------------------------------------------------------------
   if (dryRun) {
     console.log(`📋 Would create: ${MEMORY_DIR}`);
@@ -118,17 +150,20 @@ async function main() {
 
   const result = await installAgent({ dryRun: process.argv.includes('--dry-run') });
 
-  if (result.agentInstalled && result.configUpdated && result.memoryReady) {
+  const allOk = result.agentInstalled && result.configUpdated && result.memoryReady;
+  if (allOk) {
     console.log(`
 🎉 Smart MCP agent is ready!
 
 Summary:
   ✅ Agent definition: ~/.config/opencode/agents/smart-mcp.md
-  ✅ Default agent : smart-mcp
-  ✅ Memory dir    : ~/.smart/memory/
+  ✅ Task skills     : ${result.skillsInstalled ? '~/.config/opencode/skills/smart-mcp-*.md (8 skills)' : '⚠️  Not installed'}
+  ✅ Default agent   : smart-mcp
+  ✅ Memory dir      : ~/.smart/memory/
 
 Next step:
   ▶ Restart opencode to start using the smart-mcp agent personality.
+  ▶ Agent will auto-load task skills based on your request (crawl/refactor/debug/git/...).
 `);
   }
 }
