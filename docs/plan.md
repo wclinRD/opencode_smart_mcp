@@ -3,6 +3,20 @@
 > 本文件定義 token 優化策略的架構設計與實作路線。
 > 與 todo.md 互為補充：plan.md 定義「為什麼做、架構長怎樣」，todo.md 定義「具體步驟」。
 
+## ONFI SPEC RESEARCH — 已完成 (2026-06-06)
+
+**目標**: 建立一份 Verilog-實作-ready 的 ONFI NAND Flash 介面規格參考文件 (ONFI_SPEC_SUMMARY.md)。
+
+**成果**: 經過 3 輪研究迭代，最終評分 **10/10**（15 維度全滿分）。
+
+**Round 1**: 1309 行基礎架構（版本演進、SCA 協議、命令集、Feature Register、控制器架構、Behavioral Flow FSM、PHY 設計、時序模式表、SI 技術）
+
+**Round 2**: 擴充至 1685 行（完整參數頁面 byte map、狀態暫存器、多平面命令序列、時序圖文本說明、電氣規格表、BGA pin map、DFE/FFE/per-bit deskew 實作細節、商用 IP 參考）
+
+**Round 3**: 擴充至 2073 行（SCA CA 封包 2-bit 序列化格式、DLL/PLL 頻率對照表、DCC/Read DQ/Write DQ 訓練 FSM 完整流程、ZQ Calibration 時序參數 tZQCL=1µs/tZQCS=0.4µs、Warmup Cycle Verilog 實作、章節編號全面校正）
+
+**學習**: 嚴格自我評分→迭代補缺口是有效的策略。每輪發現約 5-7 個缺口，透過 PDF 提取 + web 搜尋 + 專利文件分析閉合。
+
 ---
 
 ## 一、核心問題

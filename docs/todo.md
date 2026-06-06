@@ -5,6 +5,15 @@
 
 ---
 
+## ONFI SPEC RESEARCH ✅ (2026-06-06)
+
+- [x] Round 1: 基礎架構（1309 行，~47 KB）
+- [x] Round 2: 參數頁面/電氣規格/BGA pinmap/DFE-FFE-desks（1685 行，~62 KB）
+- [x] Round 3: SCA 封包格式/DLL-PLL 頻率表/訓練 FSM/ZQ timing/Warmup/章節修正（2073 行）
+- [x] 最終評分: **15/15 維度全 10/10**
+
+---
+
 ## Phase 1：核心架構（目標 2-3 天）
 
 ### 1. 新增 `src/lib/output-optimizer.mjs` ✅
