@@ -2408,6 +2408,49 @@ metadata 結構：
 
 ---
 
+### Phase W+: Anti-Bot Stealth Mode（2026-06-06 追加）
+
+Cloudflare/Akamai 等 bot 防護在 **TLS 握手層**就判斷爬蟲，比瀏覽器 JS 執行更早。我們的解法是**兩層降級架構**：
+
+```
+Layer 1: TLS impersonation (impers/curl-impersonate + BoringSSL)
+  ├── 偽造 JA3/JA4 TLS 指紋 + HTTP/2 SETTINGS 順序
+  ├── 支援 Chrome 99-142 / Safari / Firefox / Edge
+  ├── npm install impers（~500KB，自動下載 libcurl-impersonate 二進位）
+  └── 繞過基於 TLS 層的 bot 檢測（Cloudflare 第一道防線）
+
+Layer 2: Stealth Playwright render (browser-stealth)
+  ├── 注入 8 個 stealth JS patch（webdriver/plugins/languages/chrome/WebGL 等）
+  ├── 使用 `--disable-blink-features=AutomationControlled` 旗標
+  ├── 偽造 viewport 1920x1080、locale zh-TW、Chromium Chrome 142 UA
+  └── 處理需要完整 JS 執行的 SPA（iyf.tv 這類 100% JS 渲染站）
+
+自動降級:
+  1. TLS impersonation 嘗試 Chrome 142 → 136 → 133a (最多 3 次)
+  2. hasMeaningfulContent() 過濾 script/style → 檢測是否 SPA 空殼
+  3. SPA 空殼 → 自動降級 stealth Playwright
+```
+
+**實測結果（iyf.tv — Cloudflare 保護的影片串流站）**：
+
+| 嘗試 | 方式 | 結果 |
+|------|------|------|
+| 原生 fetch | Node.js fetch | ❌ 被 Cloudflare 擋 |
+| `--crawlee` | CheerioCrawler | ❌ 只拿到 JS 殼 |
+| `--render` (改前) | Playwright + networkidle | ❌ 30s timeout (串流不停) |
+| `--render` (改後) | Playwright + domcontentloaded | ❌ 被 Cloudflare 擋 |
+| **`--stealth`** | **TLS impersonation** | **✅ 519ms, 20163 chars HTML** |
+| **`--stealth` (降級)** | **Stealth Playwright** | **✅ 4993 chars 真實影片內容** |
+
+**檔案**:
+- `src/cli/lib/stealth.mjs` — 兩層 stealth fetch 引擎 (~200 行)
+- `src/cli/exa-search.mjs` — 新增 `--stealth` CLI 選項
+
+**相依套件**: `impers`（選裝，`npm install impers`，~500KB）
+**作者**: 此功能基於 `curl-impersonate` + `impers`（lexiforest/impers, MIT 授權）
+
+---
+
 ## 六、架構演進
 
 ### 當前 v3.8.0（Phase 0-13 + Agent Phase D + Compose Engine + CKG + Hybrid Engine + Impact Pipeline + Auto-Toonify + Context Merge + Phase F 完成）

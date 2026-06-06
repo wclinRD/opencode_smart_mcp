@@ -32,6 +32,9 @@ import { chunkContent, validateChunks, analyzeContent } from './lib/chunker.mjs'
 // Adaptive crawler (optional, dynamic import — Crawlee needed for --crawlee mode)
 import { smartFetch } from './lib/crawler.mjs';
 
+// Stealth fetch (TLS impersonation + browser stealth — optional dep: impers)
+import { stealthFetch } from './lib/stealth.mjs';
+
 const API_BASE = 'https://api.exa.ai';
 // Include ?tools= to enable non-default tools (get_code_context_exa, etc.)
 const MCP_TOOLS_PARAM = 'web_search_exa,get_code_context_exa,web_fetch_exa';
@@ -237,10 +240,11 @@ async function renderWithPlaywright(url) {
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
-    // Set a reasonable timeout for page load
-    await page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
-    // Wait a bit more for any lazy-loaded content
-    await page.waitForTimeout(1000);
+    // Use 'domcontentloaded' (not 'networkidle') — works for streaming/SPA sites
+    // that keep making requests (ads, analytics, video). Then wait for JS to settle.
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    // Give JS-rendered content time to appear
+    await page.waitForTimeout(3000);
     // Extract all visible text
     const text = await page.evaluate(() => document.body.innerText);
     return text;
@@ -685,6 +689,141 @@ async function cmdCrawlFetch(urls, opts) {
 }
 
 /**
+ * Crawl URLs with stealth anti-bot evasion mode.
+ *
+ * Uses two-layer stealth system (stealth.mjs):
+ *   Layer 1: TLS impersonation via impers (curl-impersonate + BoringSSL)
+ *   Layer 2: Stealth Playwright render (stealth JS injected)
+ *
+ * Supports the same --clean / --markdown / --chunk pipeline as cmdCrawlFetch.
+ */
+async function cmdCrawlStealth(urls, opts) {
+  const results = [];
+
+  for (const url of urls) {
+    try {
+      if (!isFetchableUrl(url)) {
+        throw new Error(`Skipped: binary file (${url.match(/\.\w+$/)?.[0] || 'unknown'})`);
+      }
+
+      // Stealth fetch (TLS impersonation first, stealth Playwright fallback)
+      const fetchResult = await stealthFetch(url, { stealth: true, timeout: opts.maxChars > 8000 ? 60000 : 30000 });
+
+      if (!fetchResult) {
+        throw new Error('Stealth fetch failed (install npm install impers for TLS impersonation)');
+      }
+
+      const rawHtml = fetchResult.html;
+      const isHtml = true;
+      const rEngine = fetchResult.engine;
+
+      // Process through cleanup pipeline (--clean, --markdown, or basic stripping)
+      const text = await processContent(rawHtml, isHtml, { ...opts, url });
+
+      // Chunk (pipeline last step: clean → markdown → chunk)
+      let chunks = null;
+      let chunkMeta = null;
+      if (opts.chunk && text) {
+        chunks = chunkContent(text, { maxChunkSize: opts.maxChunkSize || 2000 });
+        const validation = validateChunks(chunks);
+        chunkMeta = { count: chunks.length, valid: validation.valid, totalChars: validation.totalChars };
+      }
+
+      results.push({ url, text, cached: false, chunks, chunkMeta, crawleeEngine: rEngine });
+    } catch (err) {
+      results.push({ url, error: err.message });
+    }
+  }
+
+  // --- JSON output ---
+  if (opts.format === 'json') {
+    const output = { mode: 'stealth', results };
+    if (opts.chunk) {
+      output._meta = results.filter(r => !r.error).map(r => ({
+        url: r.url,
+        chunks: r.chunkMeta?.count || 0,
+        chars: r.text?.length || 0,
+        clean: !!opts.clean,
+        markdown: !!opts.markdown,
+        chunked: true,
+        engine: r.crawleeEngine,
+      }));
+    } else {
+      for (const r of results) {
+        if (!r.error && r.text) {
+          r._meta = analyzeContent(r.text, {
+            engine: r.crawleeEngine || 'stealth',
+            clean: !!opts.clean,
+            markdown: !!opts.markdown,
+            maxChars: opts.maxChars,
+          });
+        }
+      }
+    }
+    return JSON.stringify(output, null, 2);
+  }
+
+  // --- Text output ---
+  const lines = [];
+  for (const r of results) {
+    if (r.error) {
+      lines.push(`URL: ${r.url}`);
+      lines.push('-'.repeat(60));
+      lines.push(`(Stealth fetch failed: ${r.error})`);
+    } else {
+      const modeTag = opts.clean
+        ? (opts.markdown ? ', cleaned + markdown' : ', cleaned')
+        : (opts.markdown ? ', markdown' : '');
+      const chunkTag = opts.chunk ? `, ${r.chunkMeta?.count || 0} chunks` : '';
+      const engineTag = r.crawleeEngine ? `, ${r.crawleeEngine}` : '';
+      lines.push(`URL: ${r.url} (stealth${modeTag}${chunkTag}${engineTag})`);
+      lines.push('-'.repeat(60));
+
+      if (opts.chunk && r.chunks && r.chunks.length > 0) {
+        for (let i = 0; i < r.chunks.length; i++) {
+          const c = r.chunks[i];
+          const heading = c.heading ? `: ${c.heading}` : '';
+          lines.push(`--- Chunk ${i + 1}/${r.chunks.length}${heading} (${c.size} chars) ---`);
+          lines.push(c.content);
+          lines.push('');
+        }
+        if (r.chunkMeta) {
+          const meta = analyzeContent(r.text, {
+            engine: 'stealth',
+            clean: !!opts.clean,
+            markdown: !!opts.markdown,
+            chunked: r.chunkMeta.count,
+          });
+          if (meta._tip) lines.push(meta._tip);
+        }
+      } else {
+        lines.push(r.text);
+        if (isContentTruncated(r.text)) {
+          lines.push('');
+          lines.push('(Content may be truncated; use --extended for more)');
+        }
+        if (!opts.chunk && r.text) {
+          const meta = analyzeContent(r.text, {
+            engine: 'stealth',
+            clean: !!opts.clean,
+            markdown: !!opts.markdown,
+            maxChars: opts.maxChars,
+          });
+          if (meta._tip) {
+            lines.push('');
+            lines.push(meta._tip);
+          }
+        }
+      }
+    }
+    lines.push('');
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
+/**
  * Crawl / read URLs
  */
 async function cmdCrawl(urls, opts) {
@@ -891,6 +1030,7 @@ function parseArgs() {
     markdown: false,
     chunk: false,
     maxChunkSize: 2000,
+    stealth: false,
   };
 
   let i = 1;
@@ -927,6 +1067,9 @@ function parseArgs() {
         break;
       case '--crawlee':
         opts.crawlee = true;
+        break;
+      case '--stealth':
+        opts.stealth = true;
         break;
       case '--max-chunk-size':
         opts.maxChunkSize = parseInt(args[++i], 10);
@@ -970,6 +1113,8 @@ Options:
   --extended            Extended mode — up to 30,000 chars per result
   --render              Render JS-heavy pages with Playwright (crawl only)
   --crawlee             Adaptive crawl via Crawlee (auto-detect static/JS, crawl only)
+  --stealth             Anti-bot stealth mode: TLS impersonation + stealth browser
+                        (bypasses Cloudflare/Akamai, optional dep: npm install impers)
   --fetch-only          Force native fetch (skip Exa, no API key, crawl only)
   --clean               Extract article body via Readability (crawl, removes nav/ads/footer)
   --markdown            Convert HTML to Markdown (crawl, LLM-friendly format)
@@ -1018,6 +1163,13 @@ async function main() {
     // --- Render mode for crawl (works in both REST API and MCP mode) ---
     if (command === 'crawl' && opts.render) {
       output = await cmdCrawlRendered(cmdArgs, opts);
+      console.log(output);
+      return;
+    }
+
+    // --- Stealth mode: TLS impersonation + stealth browser (bypasses Cloudflare) ---
+    if (command === 'crawl' && opts.stealth) {
+      output = await cmdCrawlStealth(cmdArgs, opts);
       console.log(output);
       return;
     }

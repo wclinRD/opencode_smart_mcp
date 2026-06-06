@@ -25,12 +25,16 @@ import { isDeepStrictEqual } from 'node:util';
 /**
  * Check if fetched HTML has meaningful content (vs empty SPA shell).
  * SPAs often return: <div id="root"></div> with no visible text.
- * Checks text-only content (stripped of HTML tags) for a minimum length.
+ * Strips script/style blocks first so JS-heavy shells aren't counted as content.
  */
 function hasMeaningfulContent(html) {
   if (!html || html.length < 500) return false;
-  // Strip tags for text content check
-  const textOnly = html.replace(/<[^>]+>/g, '').replace(/\\s+/g, ' ').trim();
+  // Strip script, style, comments first
+  const cleaned = html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '');
+  const textOnly = cleaned.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
   // Must have at least 500 chars of visible text after stripping markup
   return textOnly.length >= 500;
 }
