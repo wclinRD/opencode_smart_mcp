@@ -1,6 +1,6 @@
 # Smart MCP — 開發工具集
 
-MCP server 提供 **33 個開發工具** + **專屬 agent personality**，可在 opencode 中直接呼叫。
+MCP server 提供 **35+ 開發工具** + **專屬 agent personality**，可在 opencode 中直接呼叫。
 
 ---
 
@@ -57,6 +57,49 @@ MCP server 提供 **33 個開發工具** + **專屬 agent personality**，可在
 
 ---
 
+## 📦 相依套件一覽
+
+本專案採用**動態 import**（非強制依賴未安裝時拋清晰提示）。以下列出各功能所需的 npm 套件：
+
+| 套件 | 是否必裝 | 功能 | 安裝大小 |
+|------|---------|------|---------|
+| `@opencode-ai/plugin` | ✅ **必裝** | MCP server framework（`.opencode/package.json`） | ~2 MB |
+| `@mozilla/readability` | ✅ **必裝** | 文章萃取（clean 模式），移除 nav/ads/footer | ~100 KB |
+| `linkedom` | ✅ **必裝** | 快速 HTML parser（Readability 底層） | ~200 KB |
+| `turndown` | ✅ **必裝** | HTML → Markdown 轉換（markdown 模式） | ~80 KB |
+| `playwright` | ⬜ **選裝** | JS 網站渲染（`--render` 模式），需另外 `npx playwright install chromium` | ~300 MB |
+| `crawlee` | ⬜ **選裝** | 自適應爬蟲（自動判斷靜態/JS 網站，自動降級 Cheerio/Playwright） | ~50 MB |
+
+> 💡 **全部必裝套件安裝完成不到 1 MB**。選裝套件（playwright、crawlee）體積較大，請依需求安裝。
+>
+> 💡 **本專案所有功能都不需要 API key** — 搜尋使用原生 HTTP fetch，crawl 使用 Readability + Turndown，全部離線可用。
+
+### 一鍵安裝所有必裝套件
+
+```bash
+# 安裝 MCP server 框架
+cd .opencode && npm install && cd ..
+
+# 安裝文章萃取、Markdown 轉換（Readability + Turndown）
+npm install @mozilla/readability@0.6.0 linkedom@0.18.12 turndown@7.2.4
+```
+
+### 選裝：Playwright（JS 網站渲染）
+
+```bash
+npm install playwright
+npx playwright install chromium   # 下載 Chromium 瀏覽器（~300MB）
+```
+
+### 選裝：Crawlee（自適應爬蟲）
+
+```bash
+# F.3 功能：自動判斷網站靜態/JS，選用 Cheerio 或 Playwright 引擎
+npm install crawlee
+```
+
+---
+
 ## 給 LLM / AI Agent 的安裝指引
 
 你是一個 LLM 或 AI Coding Agent，以下是如何安裝並設定 Smart MCP 的完整步驟。
@@ -73,7 +116,11 @@ cd opencode_smart_mcp
 #### 步驟 2：安裝相依套件
 
 ```bash
+# 安裝 MCP server 框架
 cd .opencode && npm install && cd ..
+
+# 安裝文章萃取 + Markdown 轉換（必要）
+npm install @mozilla/readability@0.6.0 linkedom@0.18.12 turndown@7.2.4
 ```
 
 #### 步驟 3：設定 MCP Server（opencode.jsonc）
@@ -205,7 +252,7 @@ node smart-agent/src/install/install-agent.mjs
 
 ## 🧠 Smart MCP Agent Personality
 
-安裝後，opencode 預設使用 **smart-mcp agent**，它擁有以下能力：
+安裝後，opencode 預設使用 **smart-mcp agent**，它擁有 35+ 開發工具：
 
 ### 工具選擇原則
 
@@ -222,7 +269,10 @@ node smart-agent/src/install/install-agent.mjs
 | 診斷錯誤 | `smart_error_diagnose`（pattern KB + 記憶庫） |
 | 跨檔案編輯 | `smart_cross_file_edit`（dry-run 安全） |
 | Git 流程 | `smart_git_context` + `smart_git_commit` + `smart_git_pr` + `smart_git_review` |
-| 網路研究 | `smart_exa_search` |
+| 網路搜尋 | `smart_exa_search`（search + code） |
+| 網頁爬取 | `smart_exa_crawl`（crawl + clean + markdown + chunk） |
+| 全端研究 | `smart_research`（一條龍：選 depth 即可，內部自動 pipeline） |
+| 瀏覽器操作 | `smart_pw_browser`（導航、點擊、填表、截圖、執行程式碼） |
 | GitHub 探索 | `smart_github_search` |
 | 產生圖表 | `smart_diagram` |
 | 產生報告 | `smart_report` |
@@ -235,7 +285,7 @@ node smart-agent/src/install/install-agent.mjs
 smart_workflow create "<目標>" --template <flow> --state wf.json
 ```
 
-可用模板：`debug-flow`、`refactor-flow`、`security-flow`、`research-flow`、`git-flow`
+可用模板：`debug-flow`、`refactor-flow`、`security-flow`、`research-flow`、`deep-research-flow`、`git-flow`
 
 ### Pipeline 組合
 
@@ -265,6 +315,9 @@ opencode_smart_mcp/
 │   ├── cli/                   # 各 tool 的 CLI 實作
 │   └── lib/
 │       ├── utils.mjs          # 共用工具函式
+│       ├── chunker.mjs        # 內容分塊引擎（heading-based split）
+│       ├── quality.mjs        # 內容品質分析 + LLM-facing 使用建議
+│       ├── cache.mjs          # SQLite 快取層
 │       └── compose-engine.mjs # 工具組合引擎
 ├── config/
 │   ├── agents/
@@ -303,7 +356,7 @@ opencode_smart_mcp/
 | `smart_test` | 自動偵測並執行測試（vitest/jest/mocha/ava/node:test） |
 | `smart_thinking` | 結構化推理，9 種 template + 動態多輪推理 |
 
-## 🛠 Standard Tools（27 個，透過 smart_run router 呼叫）
+## 🛠 Standard Tools（30+ 個，透過 smart_run router 呼叫）
 
 使用方式：
 ```
@@ -343,8 +396,22 @@ smart_run(tool: "tool_name", args: {...})
 
 | Tool name | 功能 |
 |-----------|------|
-| `exa_search` | Exa AI search：搜尋網頁、crawl URL、找 code/documentation |
+| `exa_search` | 搜尋網頁或程式碼（search + code） |
+| `exa_crawl` | 爬取網頁內容，支援 clean / markdown / chunk |
 | `github_search` | 搜尋 public GitHub code，filter by repo/path/language |
+
+### 研究工具
+
+| Tool name | 功能 |
+|-----------|------|
+| `research` | Pipeline meta-tool：一條龍研究 URL，只選 depth（quick/deep/exhaustive） |
+| `quality` | Output 品質分析：批次分析結果、產生 LLM-facing 使用建議 |
+
+### 瀏覽器工具
+
+| Tool name | 功能 |
+|-----------|------|
+| `pw_browser` | 操作瀏覽器：導航、點擊、填寫表單、截圖、執行程式碼 |
 
 ### 視覺化工具
 

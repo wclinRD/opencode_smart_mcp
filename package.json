@@ -38,6 +38,8 @@
   },
   "dependencies": {
     "@mozilla/readability": "0.6.0",
+    "@playwright/mcp": "0.0.75",
+    "crawlee": "3.17.0",
     "linkedom": "0.18.12",
     "turndown": "7.2.4"
   }

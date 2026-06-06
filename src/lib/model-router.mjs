@@ -186,14 +186,14 @@ export function suggestTierForTool(toolName) {
   // Tier 3: medium complexity
   const t3Tools = [
     'error_diagnose', 'debug', 'diagram', 'report',
-    'exa_search', 'github_search', 'toonify',
+    'exa_search', 'exa_crawl', 'github_search', 'toonify',
   ];
   if (t3Tools.some(t => name.includes(t) || name === t)) return 3;
 
   // Tier 4: complex reasoning
   const t4Tools = [
     'think', 'thinking', 'learn', 'cross_file_edit',
-    'compose', 'workflow', 'planner', 'hybrid_router',
+    'compose', 'workflow', 'planner', 'hybrid_router', 'research',
   ];
   if (t4Tools.some(t => name.includes(t) || name === t)) return 4;
 

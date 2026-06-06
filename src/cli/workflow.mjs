@@ -82,6 +82,14 @@ const WORKFLOW_TEMPLATES = {
       { tool: 'smart_report',         args: { type: 'custom', title: '$goal' }, description: 'Generate structured research report', dependsOn: [1], onFailure: 'skip' },
     ],
   },
+  'deep-research-flow': {
+    description: 'Deep research: crawl a URL at exhaustive depth, analyze quality, synthesize findings',
+    steps: [
+      { tool: 'smart_research',       args: { url: '$goal', depth: 'exhaustive' }, description: 'Crawl URL with exhaustive depth (clean + markdown + chunk)', dependsOn: [], onFailure: 'abort' },
+      { tool: 'smart_thinking',       args: { template: 'research', topic: '$goal' }, description: 'Synthesize research findings', dependsOn: [0], onFailure: 'warn' },
+      { tool: 'smart_report',         args: { type: 'custom', title: '$goal' }, description: 'Generate research report', dependsOn: [1], onFailure: 'skip' },
+    ],
+  },
   'default-flow': {
     description: 'Generic: plan with smart_planner, execute, verify with tests',
     steps: [
@@ -175,6 +183,8 @@ const TOOL_CLI_MAP = {
   smart_naming: 'naming-convention.mjs',
   smart_rename_safety: 'rename-safety.mjs',
   smart_exa_search: 'exa-search.mjs',
+  smart_exa_crawl: 'exa-search.mjs',
+  smart_research: 'research.mjs',
   smart_report: 'report.mjs',
   smart_planner: 'planner.mjs',
 
@@ -664,6 +674,12 @@ const TOOL_ARGS_CONVERTERS = {
 
   // exa_search: positional command + query
   smart_exa_search: (a) => { const c = []; if (a.command) c.push(String(a.command)); if (a.command === 'crawl') { if (a.urls) { const urls = String(a.urls).split(',').map(u => u.trim()).filter(Boolean); c.push(...urls); } } else if (a.query) c.push(String(a.query)); if (a.numResults) c.push('--num-results', String(a.numResults)); if (a.maxChars) c.push('--max-chars', String(a.maxChars)); if (a.format) c.push('--format', String(a.format)); c.push('--no-color'); return c; },
+
+  // exa_crawl: dedicated crawl (no command arg)
+  smart_exa_crawl: (a) => { const c = ['crawl']; if (a.urls) { const urls = String(a.urls).split(',').map(u => u.trim()).filter(Boolean); c.push(...urls); } if (a.clean) c.push('--clean'); if (a.markdown) c.push('--markdown'); if (a.chunk) c.push('--chunk'); if (a.maxChunkSize) c.push('--max-chunk-size', String(a.maxChunkSize)); if (a.crawlee) c.push('--crawlee'); if (a.render) c.push('--render'); if (a.extended) c.push('--extended'); if (a.maxChars) c.push('--max-chars', String(a.maxChars)); if (a.format) c.push('--format', String(a.format)); c.push('--no-color'); return c; },
+
+  // research: pipeline meta-tool (url positional, --depth)
+  smart_research: (a) => { const c = []; if (a.url) c.push(String(a.url)); if (a.depth) c.push('--depth', String(a.depth)); c.push('--json'); return c; },
 
   // thinking: positional topic
   smart_thinking: (a) => { const c = []; if (a.topic) c.push(String(a.topic)); if (a.template) c.push('--template', String(a.template)); if (a.steps) c.push('--steps', String(a.steps)); if (a.format) c.push('--format', String(a.format)); if (a.plan) c.push('--plan', String(a.plan)); if (a.planStep) c.push('--plan-step', String(a.planStep)); if (a.state) c.push('--state', String(a.state)); if (a.record) c.push('--record', String(a.record)); if (a.branch) c.push('--branch', String(a.branch)); if (a.restore) c.push('--restore', String(a.restore)); if (a.iterative) c.push('--iterative'); if (a.dynamic) c.push('--dynamic'); if (a.advance) c.push('--advance'); if (a.finish) c.push('--finish'); if (a.status) c.push('--status'); if (a.cancel) c.push('--cancel'); c.push('--no-color'); return c; },

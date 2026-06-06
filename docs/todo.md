@@ -1680,13 +1680,125 @@
 
 ---
 
-## 🟢 Phase W+: 搜尋/爬蟲強化 (Tier 1-2, 待實作)
+## 🟢 Phase W+: 搜尋/爬蟲強化 (五層設計實作)
 
-**對應 plan.md**：五-Phase W+
-**目標**：離線爬蟲品質再升級 — Crawlee 自適應爬蟲、Playwright MCP bridge、Semantic chunking
-**狀態**：待實作 (2026-06-05)
+**對應 plan.md**：§五-Phase W+
+**目標**：依五層架構實作 F.7 → F.8 → F.10 → F.9 → F.3 → F.4
+**狀態**：進行中 (2026-06-06)
 
-### F.3 Crawlee 整合 — 取代/強化 Playwright `--render`（P1 — 近期，3-5 天）
+---
+
+### 第一波：無相依性，快速見效
+
+---
+
+### F.7 Semantic chunking 內容分塊（層 4+5: Pipeline + Output）
+
+**相依性**：無（純程式碼） | API key: ❌ 不需要
+**目標**：將長內容按 heading 分塊，產出附帶品質 metadata 的 chunk 陣列
+
+- [ ] `src/cli/lib/chunker.mjs` — 內容分塊引擎
+  - [ ] `chunkContent(text, options)` — 主入口
+    - [ ] `maxChunkSize: 2000` (default)
+    - [ ] `chunkOverlap: 200`
+    - [ ] boundaries: heading-based (h1/h2/h3) regex scan
+    - [ ] fallback: paragraph-based splitting (每 ~maxChunkSize chars)
+  - [ ] `validateChunks(chunks)` — 檢查 chunk 邊界完整性（無遺漏內容）
+  - [ ] 輸出格式：`[{ heading, content, startLine, endLine, size }]`
+  - [ ] `analyzeContent(text, opts)` — 產出品質 metadata (chars, truncated, clean, markdown, chunks, quality)
+- [ ] `exa-search.mjs` 整合
+  - [ ] `--chunk` 選項使用 chunker
+  - [ ] 與 `--clean` / `--markdown` 組合相容（先 clean/md 再 chunk）
+  - [ ] JSON 格式輸出 chunks 陣列 + `_meta` 品質資訊
+  - [ ] Text 格式輸出分隔段落 (---) + `_meta` 品質資訊
+  - [ ] `--max-chunk-size <n>` 自訂 chunk 大小
+- [ ] Plugin 更新
+  - [ ] `src/plugins/standard/exa_search.mjs` — inputSchema 新增 `chunk` 欄位 (boolean)
+- [ ] 測試
+  - [ ] heading-boundary 分塊正確
+  - [ ] `--chunk` 選項在 crawl 模式可用
+  - [ ] 分塊結果可指定 maxChunkSize
+  - [ ] 與 `--clean` + `--markdown` 組合無異常
+  - [ ] `_meta` 品質資訊正確附帶在輸出中
+
+---
+
+### F.8 Plugin 拆分 + Description 重寫（層 2+3）
+
+**相依性**：無（修改現有 plugin 檔案） | API key: ❌ 不需要
+**目標**：smart_exa_search 拆成 smart_exa_search + smart_exa_crawl，description 改決策樹格式
+
+- [ ] 新增 `src/plugins/standard/exa_crawl.mjs`
+  - [ ] name: `smart_exa_crawl`
+  - [ ] 只處理 crawl 指令（command: crawl）
+  - [ ] 加入新 boolean 選項：clean, markdown, chunk, render
+  - [ ] 決策樹式 description
+- [ ] 修改 `src/plugins/standard/exa_search.mjs`
+  - [ ] 移除 crawl 指令（只留 search + code）
+  - [ ] 簡化 inputSchema（不需要 render/extended 等）
+  - [ ] 決策樹式 description（「何時用這個工具」）
+- [ ] 重寫 plugin description 格式
+  - [ ] smart_exa_search: 搜尋專用，含使用場景範例
+  - [ ] smart_exa_crawl: 爬蟲專用，含選項建議
+  - [ ] 每個選項的 description 寫「何時用」而非「做什麼」
+    - `clean: "文章/新聞用(移除廣告sidebar)。預設開啟。"`
+    - `markdown: "餵 LLM 用(結構化格式，省 token)。"`
+    - `chunk: "長文章 >5 章節用(按標題分塊)。"`
+    - `render: "JS 網站無內容時用(Playwright 渲染)。"`
+- [ ] Hybrid Router 更新
+  - [ ] SEARCH 分類 tools 陣列加入 `smart_exa_crawl`
+  - [ ] 新增 CRAWL 分類（若需要）
+- [ ] 測試
+  - [ ] `smart_exa_crawl` 可在 MCP tools/list 中看到
+  - [ ] 現有 workflow 使用 `smart_exa_search` 不受影響
+  - [ ] Hybrid Router 可以正確路由 crawl 問題
+
+---
+
+### F.10 Output 品質回饋提示（層 5: Output Feedback）
+
+**相依性**：無（純程式碼） | API key: ❌ 不需要
+**目標**：crawl 結果自動附帶品質 metadata + 使用建議
+
+- [ ] `src/cli/lib/quality.mjs` — 內容品質分析
+  - [ ] `analyzeContent(text, opts)` 主入口
+  - [ ] 偵測：chars, truncated, clean, markdown, chunks
+  - [ ] 品質評級：high / medium / low
+  - [ ] 使用建議生成（內容 >5000 → 建議 --chunk；含 HTML tag 殘留 → 建議 --markdown）
+- [ ] `exa-search.mjs` 整合
+  - [ ] crawl 回傳結果時附加 `_meta` 區塊
+  - [ ] JSON 格式：`{ content: "...", _meta: { ... } }`
+  - [ ] Text 格式：內容下方附加品質摘要
+- [ ] 測試
+  - [ ] 短內容 (<1000 chars): quality: high, 無 tip
+  - [ ] 長內容 (>5000 chars): _tip 建議 --chunk
+  - [ ] 純文字含 HTML tag 殘留: _tip 建議 --markdown
+  - [ ] 截斷內容: truncated: true, _tip 建議 --extended
+
+---
+
+### F.9 Pipeline meta-tool: smart_research（層 4: Pipeline）
+
+**相依性**：chunker.mjs + quality.mjs 要先完成 | API key: ❌ 不需要
+**目標**：LLM 說「幫我研究這個網址」，一次到位
+
+- [ ] `src/plugins/standard/research.mjs` — handler-based
+  - [ ] `depth: "quick"` → crawl only
+  - [ ] `depth: "deep"` → crawl + clean + markdown
+  - [ ] `depth: "exhaustive"` → Crawlee + clean + markdown + chunk
+- [ ] decision-tree description
+  - [ ] `"quick: 簡單頁面用。deep: 大部分情況用。exhaustive: 長文章研究用。"`
+- [ ] 測試
+  - [ ] 三個 depth 正確對應不同 pipeline
+  - [ ] 輸出格式一致（內容 + _meta）
+
+---
+
+### 第二波：需 npm install，較大
+
+---
+
+### F.3 Crawlee 整合 — 自適應爬蟲（層 1: Smart Defaults）
 
 **相依性**：`npm install crawlee` | API key: ❌ 不需要
 
@@ -1703,14 +1815,18 @@
   - [ ] 無 `--render` 且無 `--crawlee` 時維持現有行為
   - [ ] 與 `--clean` / `--markdown` / `--fetch-only` 組合相容
 - [ ] Plugin 更新
-  - [ ] `src/plugins/standard/exa_search.mjs` — inputSchema 新增 `crawlee` 欄位 (boolean)
+  - [ ] `src/plugins/standard/exa_crawl.mjs` — inputSchema 新增 `crawlee` 欄位 (boolean)
+- [ ] Output 回饋
+  - [ ] `_meta.engine`: "cheerio" | "playwright"（LLM 知道用了什麼引擎）
 - [ ] 測試
   - [ ] Adaptive: 靜態站走 Cheerio (< 1s)
   - [ ] Adaptive: SPA 自動升級 Playwright (~3s)
   - [ ] Anti-bot SessionPool 正常運作
   - [ ] 現有 `--render` 完全向下相容
 
-### F.4 Playwright MCP bridge（P1 — 近期，3-5 天）
+---
+
+### F.4 smart_pw_browser Playwright MCP（層 2: Plugin 拆分）
 
 **相依性**：`npm install @playwright/mcp` | API key: ❌ 不需要
 
@@ -1729,33 +1845,10 @@
   - [ ] Hybrid Router 可路由至 playwright_mcp
   - [ ] Compose engine / workflow 支援
   - [ ] 保留 `--render` 作為向下相容捷徑
+- [ ] Description
+  - [ ] decision-tree 格式（「操作瀏覽器用。爬取內容請用 smart_exa_crawl。」）
 - [ ] 測試
   - [ ] MCP 工具可操作瀏覽器（導航/點擊/填表）
   - [ ] accessibility tree 回傳結構化內容
   - [ ] 與現有 `--render` 命令相容
   - [ ] Playwright 未安裝時拋清晰錯誤訊息
-
-### F.7 Semantic chunking 內容分塊（P2 — 視需求，2 天）
-
-**相依性**：無（純程式碼） | API key: ❌ 不需要
-
-- [ ] `src/cli/lib/chunker.mjs` — 內容分塊引擎
-  - [ ] `chunkContent(text, options)` — 主入口
-    - [ ] `maxChunkSize: 2000` (default)
-    - [ ] `chunkOverlap: 200`
-    - [ ] boundaries: heading-based (h1/h2/h3)
-    - [ ] fallback: paragraph-based splitting
-  - [ ] `validateChunks(chunks)` — 檢查 chunk 邊界完整性
-  - [ ] 輸出格式：`[{ heading, content, startLine, endLine, size }]`
-- [ ] `exa-search.mjs` 整合
-  - [ ] `--chunk` 選項使用 chunker
-  - [ ] 與 `--clean` / `--markdown` 組合相容（先 clean/md 再 chunk）
-  - [ ] JSON 格式輸出 chunks 陣列
-  - [ ] Text 格式輸出分隔段落 (---)
-- [ ] Plugin 更新
-  - [ ] `src/plugins/standard/exa_search.mjs` — inputSchema 新增 `chunk` 欄位 (boolean)
-- [ ] 測試
-  - [ ] heading-boundary 分塊正確
-  - [ ] `--chunk` 選項在 crawl 模式可用
-  - [ ] 分塊結果可指定 maxChunkSize
-  - [ ] 與 `--clean` + `--markdown` 組合無異常

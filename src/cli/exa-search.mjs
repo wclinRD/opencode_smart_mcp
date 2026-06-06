@@ -26,6 +26,12 @@ const hasApiKey = !!EXA_API_KEY;
 // Caching layer (zero-dependency, node:sqlite)
 import { get as cacheGet, set as cacheSet, makeKey as cacheKey } from './lib/cache.mjs';
 
+// Semantic chunking (zero-dependency, pure code)
+import { chunkContent, validateChunks, analyzeContent } from './lib/chunker.mjs';
+
+// Adaptive crawler (optional, dynamic import — Crawlee needed for --crawlee mode)
+import { smartFetch } from './lib/crawler.mjs';
+
 const API_BASE = 'https://api.exa.ai';
 // Include ?tools= to enable non-default tools (get_code_context_exa, etc.)
 const MCP_TOOLS_PARAM = 'web_search_exa,get_code_context_exa,web_fetch_exa';
@@ -372,6 +378,19 @@ async function htmlToMarkdown(html) {
  * @returns {Promise<string>} - fetched text content
  */
 async function fetchCrawl(url, opts = {}) {
+  // --crawlee mode: use Crawlee AdaptivePlaywrightCrawler
+  if (opts.crawlee) {
+    const result = await smartFetch(url, { crawlee: true, timeout: opts.maxChars ? 60000 : 30000 });
+    if (result) {
+      const contentType = result.html.includes('<html') || result.html.includes('<div') || result.html.includes('<body')
+        ? 'text/html' : 'text/plain';
+      const isHtml = contentType.includes('text/html') || contentType.includes('application/xhtml');
+      const maxChars = opts.maxChars || 8000;
+      return { text: result.html.substring(0, maxChars), isHtml, engine: result.engine };
+    }
+    // Fall through to native fetch
+  }
+
   const resp = await fetch(url, {
     signal: AbortSignal.timeout(15000),
     headers: {
@@ -546,17 +565,26 @@ async function cmdCrawlFetch(urls, opts) {
       }
 
       // Fetch raw HTML
-      const { text: rawHtml, isHtml } = await fetchCrawl(url, opts);
+      const { text: rawHtml, isHtml, engine: rEngine } = await fetchCrawl(url, opts);
 
       // Process through cleanup pipeline (--clean, --markdown, or basic stripping)
       const text = await processContent(rawHtml, isHtml, { ...opts, url });
+
+      // --- Step 3: Chunk (pipeline last step: clean → markdown → chunk) ---
+      let chunks = null;
+      let chunkMeta = null;
+      if (opts.chunk && text) {
+        chunks = chunkContent(text, { maxChunkSize: opts.maxChunkSize || 2000 });
+        const validation = validateChunks(chunks);
+        chunkMeta = { count: chunks.length, valid: validation.valid, totalChars: validation.totalChars };
+      }
 
       // --- Store in cache ---
       if (!opts.noCache) {
         cacheSet(cKey, text, 300);
       }
 
-      results.push({ url, text, cached: false });
+      results.push({ url, text, cached: false, chunks, chunkMeta, ...(rEngine ? { crawleeEngine: rEngine } : {}) });
     } catch (err) {
       results.push({ url, error: err.message });
     }
@@ -564,7 +592,32 @@ async function cmdCrawlFetch(urls, opts) {
 
   // --- JSON output ---
   if (opts.format === 'json') {
-    return JSON.stringify({ mode: 'fetch', results }, null, 2);
+    const output = { mode: 'fetch', results };
+      // Attach quality metadata for each result
+      if (opts.chunk) {
+        output._meta = results.filter(r => !r.error).map(r => ({
+          url: r.url,
+          chunks: r.chunkMeta?.count || 0,
+          chars: r.text?.length || 0,
+          clean: !!opts.clean,
+          markdown: !!opts.markdown,
+          chunked: true,
+          ...(r.crawleeEngine ? { crawleeEngine: r.crawleeEngine } : {}),
+        }));
+      } else {
+        // Generate _meta for non-chunked results (F.10 quality feedback)
+        for (const r of results) {
+          if (!r.error && r.text) {
+            r._meta = analyzeContent(r.text, {
+              engine: r.crawleeEngine || 'fetch',
+              clean: !!opts.clean,
+              markdown: !!opts.markdown,
+              maxChars: opts.maxChars,
+            });
+          }
+        }
+      }
+    return JSON.stringify(output, null, 2);
   }
 
   // --- Text output ---
@@ -578,12 +631,50 @@ async function cmdCrawlFetch(urls, opts) {
       const modeTag = opts.clean
         ? (opts.markdown ? ', cleaned + markdown' : ', cleaned')
         : (opts.markdown ? ', markdown' : '');
-      lines.push(`URL: ${r.url}${r.cached ? ' (cached, fetch)' : ` (fetch${modeTag})`}`);
+      const chunkTag = opts.chunk ? `, ${r.chunkMeta?.count || 0} chunks` : '';
+      const engineTag = r.crawleeEngine ? `, ${r.crawleeEngine}` : '';
+      lines.push(`URL: ${r.url}${r.cached ? ' (cached)' : ` (fetch${modeTag}${chunkTag}${engineTag})`}`);
       lines.push('-'.repeat(60));
-      lines.push(r.text);
-      if (isContentTruncated(r.text)) {
-        lines.push('');
-        lines.push('(Content may be truncated; use --extended for more)');
+
+      if (opts.chunk && r.chunks && r.chunks.length > 0) {
+        // Chunked output
+        for (let i = 0; i < r.chunks.length; i++) {
+          const c = r.chunks[i];
+          const heading = c.heading ? `: ${c.heading}` : '';
+          lines.push(`--- Chunk ${i + 1}/${r.chunks.length}${heading} (${c.size} chars) ---`);
+          lines.push(c.content);
+          lines.push('');
+        }
+        // Quality tip
+        if (r.chunkMeta) {
+          const meta = analyzeContent(r.text, {
+            engine: 'fetch',
+            clean: !!opts.clean,
+            markdown: !!opts.markdown,
+            chunked: r.chunkMeta.count,
+          });
+          if (meta._tip) lines.push(meta._tip);
+        }
+      } else {
+        // Normal output
+        lines.push(r.text);
+        if (isContentTruncated(r.text)) {
+          lines.push('');
+          lines.push('(Content may be truncated; use --extended for more)');
+        }
+        // Quality tip for non-chunked content (F.10)
+        if (!opts.chunk && r.text) {
+          const meta = analyzeContent(r.text, {
+            engine: 'fetch',
+            clean: !!opts.clean,
+            markdown: !!opts.markdown,
+            maxChars: opts.maxChars,
+          });
+          if (meta._tip) {
+            lines.push('');
+            lines.push(meta._tip);
+          }
+        }
       }
     }
     lines.push('');
@@ -631,21 +722,69 @@ async function cmdCrawl(urls, opts) {
   };
 
   const data = await exaFetch('/contents', body);
-  const results = data.results || [];
+  const rawResults = data.results || [];
+
+  // Process results (with optional chunking)
+  const results = rawResults.map(r => {
+    const entry = { url: r.url };
+    if (r.text) {
+      entry.text = r.text;
+      // Chunk if requested (pipeline: Exa crawl → chunk)
+      if (opts.chunk) {
+        entry.chunks = chunkContent(r.text, { maxChunkSize: opts.maxChunkSize || 2000 });
+        const validation = validateChunks(entry.chunks);
+        entry.chunkMeta = { count: entry.chunks.length, valid: validation.valid, totalChars: validation.totalChars };
+      }
+    } else {
+      entry.text = '(No content retrieved)';
+    }
+    return entry;
+  });
 
   if (opts.format === 'json') {
-    return JSON.stringify({ urls, results }, null, 2);
+    const output = { urls, results };
+    // Quality metadata
+    if (!opts.chunk) {
+      for (const r of results) {
+        if (r.text) {
+          r._meta = analyzeContent(r.text, {
+            engine: 'exa',
+            clean: false,
+            markdown: false,
+            maxChars: opts.maxChars,
+          });
+        }
+      }
+    }
+    return JSON.stringify(output, null, 2);
   }
 
   const lines = [];
   for (const r of results) {
     lines.push(`URL: ${r.url}`);
     lines.push('-'.repeat(60));
-    if (r.text) {
+    if (opts.chunk && r.chunks && r.chunks.length > 0) {
+      for (let i = 0; i < r.chunks.length; i++) {
+        const c = r.chunks[i];
+        const heading = c.heading ? `: ${c.heading}` : '';
+        lines.push(`--- Chunk ${i + 1}/${r.chunks.length}${heading} (${c.size} chars) ---`);
+        lines.push(c.content);
+        lines.push('');
+      }
+      // Quality tip
+      const meta = analyzeContent(r.text, { engine: 'exa', chunked: r.chunkMeta?.count });
+      if (meta._tip) lines.push(meta._tip);
+    } else if (r.text) {
       lines.push(r.text);
       if (isContentTruncated(r.text)) {
         lines.push('');
         lines.push('(Content may be truncated; use --extended for full content)');
+      }
+      // Quality tip
+      const meta = analyzeContent(r.text, { engine: 'exa', maxChars: opts.maxChars });
+      if (meta._tip) {
+        lines.push('');
+        lines.push(meta._tip);
       }
     } else {
       lines.push('(No content retrieved)');
@@ -750,6 +889,8 @@ function parseArgs() {
     noCache: false,
     clean: false,
     markdown: false,
+    chunk: false,
+    maxChunkSize: 2000,
   };
 
   let i = 1;
@@ -780,6 +921,15 @@ function parseArgs() {
         break;
       case '--markdown':
         opts.markdown = true;
+        break;
+      case '--chunk':
+        opts.chunk = true;
+        break;
+      case '--crawlee':
+        opts.crawlee = true;
+        break;
+      case '--max-chunk-size':
+        opts.maxChunkSize = parseInt(args[++i], 10);
         break;
       case '--format':
         opts.format = args[++i];
@@ -819,9 +969,12 @@ Options:
                         (crawl default: 8000, search/code: 3000)
   --extended            Extended mode — up to 30,000 chars per result
   --render              Render JS-heavy pages with Playwright (crawl only)
+  --crawlee             Adaptive crawl via Crawlee (auto-detect static/JS, crawl only)
   --fetch-only          Force native fetch (skip Exa, no API key, crawl only)
   --clean               Extract article body via Readability (crawl, removes nav/ads/footer)
   --markdown            Convert HTML to Markdown (crawl, LLM-friendly format)
+  --chunk               Split long content by heading (crawl, saves LLM tokens)
+  --max-chunk-size <n>  Max chars per chunk (default: 2000, with --chunk)
   --no-cache            Bypass cache
   --format <fmt>        Output: text, json (default: text)
   --no-color            Disable color output
@@ -830,6 +983,8 @@ Options:
 Combinations:
   --clean --markdown    Best combo: Readability article → Markdown output
   --fetch-only --clean --markdown  Full offline: fetch + clean + MD (no API key)
+  --clean --markdown --chunk  Full pipeline: article → Markdown → chunks
+  --crawlee --clean --markdown  Adaptive crawl + article + MD (auto JS/static detection)
 
 Examples:
   node exa-search.mjs search "React Server Components"
@@ -841,6 +996,8 @@ Examples:
   node exa-search.mjs crawl https://example.com --fetch-only
   node exa-search.mjs crawl https://example.com --clean --markdown
   node exa-search.mjs crawl https://example.com --fetch-only --clean --markdown
+  node exa-search.mjs crawl https://example.com --clean --markdown --chunk
+  node exa-search.mjs crawl https://long-article.example.com --chunk --max-chunk-size 1000
 `);
 }
 

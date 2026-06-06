@@ -110,7 +110,7 @@ const CLASSIFIER_PATTERNS = [
     ],
     category: CATEGORIES.SEARCH,
     confidence: 0.85,
-    tools: ['smart_grep', 'smart_code_query', 'smart_github_search', 'smart_exa_search'],
+    tools: ['smart_grep', 'smart_code_query', 'smart_github_search', 'smart_exa_search', 'smart_exa_crawl', 'smart_research'],
     description: 'Code search + web search — uses grep, CKG, GitHub, and Exa web search for comprehensive searching',
   },
 

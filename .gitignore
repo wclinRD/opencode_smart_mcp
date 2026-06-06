@@ -28,3 +28,4 @@ reports/*.html
 .opencode/memory-core/
 .opencode/memory-working/
 .opencode/stats/
+storage/

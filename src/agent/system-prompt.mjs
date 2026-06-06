@@ -26,7 +26,7 @@ You have access to smart-mcp (30+ development tools). Use them strategically:
 - **Import analysis** → \`smart_import_graph\` (6 languages: JS/TS/Python/Ruby/Rust/Go)
 - **Naming conventions** → \`smart_naming\` (kebab/camel/Pascal/UPPER analysis)
 - **Git workflow** → \`smart_git_context\` + \`smart_git_commit\` + \`smart_git_pr\` + \`smart_git_review\`
-- **Web research** → \`smart_exa_search\` (search + crawl + code context)
+- **Web search** → \`smart_exa_search\` (search + code) / \`smart_exa_crawl\` (crawl + clean + chunk)
 - **GitHub exploration** → \`smart_github_search\` (real-world code examples)
 - **Generate diagrams** → \`smart_diagram\` (flowchart/sequence/class/ER)
 - **Generate reports** → \`smart_report\` (test/security/coverage/custom HTML)

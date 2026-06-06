@@ -2095,248 +2095,314 @@ npm package: turndown (7K stars, ~15KB) 或 node-html-markdown
   - [ ] 與 `--clean` 可組合使用（clean 優先，再轉 markdown）
 ```
 
-##### F.3 Crawlee 整合 — 取代/強化 Playwright `--render`（P1 — 近期，3-5 天）
+---
+
+#### 🔄 F.3-F.10 設計通盤更新（2026-06-06）
+
+**核心發現**：LLM 無法有效管理 6+ boolean 參數的排列組合。
+`--clean --markdown --chunk --crawlee --render --fetch-only` → LLM 只會用預設值。
+
+**五層解決方案**（每層解決 LLM 的一個認知缺口）：
+
+| 層 | 名稱 | 解決的問題 | 實作|
+|----|------|-----------|------|
+| 1 | **Smart Defaults** | LLM 不需要知道網站的技術棧 | Crawlee 自適應、fetch 自動降級 |
+| 2 | **Plugin 拆分** | LLM 選工具比選參數容易 | 1 plugin → search + crawl 兩個 |
+| 3 | **Description 引導** | LLM 不知道何時用什麼 | 決策樹式 description + 範例 |
+| 4 | **Pipeline meta-tool** | LLM 不會一次設好全部參數 | `smart_research` 一次到位 |
+| 5 | **Output 回饋提示** | LLM 不知道結果品質 | 結果附帶 metadata + 使用建議 |
+
+---
+
+##### F.3 Crawlee 自適應爬蟲（層 1: Smart Defaults）
 
 ```
-npm package: crawlee (Apify, 20K+ GitHub stars, Node.js 原生)
-成本: $0（自管 infra，無 API 費用） | API key: ❌ 不需要
+npm package: crawlee (Apify, 20K+ GitHub stars)
+成本: $0 | API key: ❌ 不需要 | 工時: 3-5 天
 
 做什麼：
-  Crawlee 是 2026 年最成熟的 Node.js 爬蟲框架，提供：
-  
-  AdaptiveCrawler:
-    靜態 HTML → Cheerio（5x-10x 更快，~15MB RAM）
-    SPA/JS 網站 → 自動升級 Playwright（~200MB RAM）
-  
-  內建功能：
-    - Anti-bot fingerprinting（SessionPool 管理 cookies/fingerprints）
-    - 自動重試 (retry with exponential backoff)
-    - Rate limiting（避免被封鎖）
-    - 請求佇列 (RequestQueue) + 結果儲存 (Dataset)
+  AdaptiveCrawler — LLM 說「爬這個網址」，工具自己決定用什麼引擎：
+    靜態 HTML → CheerioCrawler (<1s, ~15MB RAM)
+    SPA/JS 網站 → 自動升級 Playwright (~3s, ~200MB RAM)
+    Anti-bot → SessionPool 管理 cookies/fingerprints
 
-為什麼重要：
-  目前 --render 是固定 Playwright（每次 ~200MB RAM，所有網站都跑瀏覽器）
-  實際上 >70% 的網站是靜態 HTML，用 Cheerio 只需 ~15MB RAM + < 1s
+為什麼是 Smart Defaults：
+  - LLM 無法判斷目標網站是靜態還是 SPA（這是不可能從 URL 猜到的事）
+  - 目前需要 LLM 記得加 --render，但多數網站根本不需 Playwright
+  - Crawlee 自動決定，LLM 零認知負擔
 
 實作方式：
-  建立 src/cli/lib/crawler.mjs:
-    1. try CheerioCrawler (fast HTTP)
-    2. 若 response 含 SPA 特徵（<div id="root">、文字量 < 100 chars）
-       → 自動升級 PlaywrightCrawler
-    3. SessionPool 管理 cookies/fingerprints
+  src/cli/lib/crawler.mjs:
+    1. fetch HTML + 分析 response
+    2. SPA 特徵？(<div id="root">、文字量 < 100 chars)
+       → PlaywrightCrawler
+       否則 → CheerioCrawler
+    3. 結果餵進 Readability + Turndown pipeline
+
+整合：
+  預設行為（無參數）: fetch → Readability → Clean Text
+  選用 --crawlee:   Crawlee 自適應 → Readability → Clean Text
+  向下相容 --render: 強制 Playwright（舊行為）
+
+output 回饋：
+  (rendered via Cheerio, 142KB, 2.1s)
+  (rendered via Playwright, 1.2MB, 3.8s)
+  LLM 看到就知道用了哪種引擎
+```
+
+##### F.4 smart_pw_browser — 獨立瀏覽器 MCP 工具（層 2: Plugin 拆分）
+
+```
+npm package: @playwright/mcp (Microsoft, 27K+ GitHub stars)
+成本: $0 | API key: ❌ 不需要 | 工時: 3-5 天
+
+定位：不是 crawl 的參數，是獨立的 MCP 工具組。
+LLM 需要「操作瀏覽器」時才叫它，與爬蟲完全分離。
+
+為什麼跟爬蟲分開：
+  爬蟲（smart_exa_crawl）: AI agent「讀取」網頁內容
+  瀏覽器（smart_pw_browser）: AI agent「操作」瀏覽器（登入、表單、點擊）
+  這兩個是不同心智模型，不應該在同一個工具裡
+
+工具列表 (prefix: smart_pw_*):
+  browser_navigate   → 導航到 URL
+  browser_snapshot   → accessibility tree（結構化內容，token-efficient）
+  browser_click      → 點擊元素 (by accessibility ref)
+  browser_fill       → 填寫表單
+  browser_screenshot → 截圖
+  browser_run_code   → 執行自訂 JS
+
+實作方式：
+  src/plugins/standard/playwright_mcp.mjs — 完整的 MCP plugin
+  動態 import('@playwright/mcp') — 非強制依賴
+  Handler-based（in-process，不 spawn 子行程）
+  Hybrid Router 可路由瀏覽器操作問題至此
+
+向下相容：
+  exa-search.mjs 保留 --render 作為輕量快捷方式
+  （簡單讀取 JS 網站文字時使用）
+```
+
+##### F.5 MCP Fetch 替代爬蟲（P0 — 1 天，層 1: Smart Defaults）✅ 已實作
+
+```
+成本: $0 | 相依性: Node.js 原生 fetch | API key: ❌ 不需要
+
+做什麼：
+  無 EXA_API_KEY 時 crawl 自動降級到原生 HTTP fetch + Readability + Turndown。
+  LLM 完全不需要知道「目前有沒有 API key」——工具自己決定。
 
 使用範例：
-  node exa-search.mjs crawl <url>            ← auto-detect (default)
-  node exa-search.mjs crawl <url> --render   ← force Playwright (legacy)
-
-驗收標準：
-  - [ ] Adaptive: 靜態站走 Cheerio (< 1s)，SPA 自動升級 Playwright (~3s)
-  - [ ] Anti-bot SessionPool 正常運作
-  - [ ] 現有 --render 完全向下相容
-  - [ ] 不需任何 API key 或外部服務
+  node exa-search.mjs crawl <url>  ← 有 key 走 Exa，無 key 走 fetch（透明！）
+  node exa-search.mjs crawl <url> --fetch-only  ← 強制 fetch
 ```
 
-##### F.4 Playwright MCP bridge（P1 — 近期，3-5 天）
+##### F.6 Caching 快取層（P0 — 1 天，層 1: Smart Defaults）✅ 已實作
 
 ```
-npm package: @playwright/mcp (Microsoft 官方, 27K+ GitHub stars)
-成本: $0（Playwright 已安裝在專案中） | API key: ❌ 不需要
+成本: $0 | 相依性: node:sqlite | API key: ❌ 不需要
 
 做什麼：
-  將 Playwright 包裝成 MCP Server，讓 AI agent 可以透過
-  自然語言操作瀏覽器（點擊、填表、截圖、讀取 DOM）。
-
-核心工具：
-  - browser_snapshot — 回傳 accessibility tree（token-efficient 結構化內容）
-  - browser_navigate — 導航到 URL
-  - browser_click — 點擊元素 (by accessibility ref)
-  - browser_fill — 填寫表單
-  - browser_screenshot — 截圖
-  - browser_run_code — 執行自訂 JS
-
-為什麼重要：
-  目前 --render 是自行實作的 Playwright 渲染（page.evaluate innerText），功能有限。
-  @playwright/mcp 提供：
-  - accessibility tree 擷取（比 innerText 更結構化，保留 aria labels）
-  - 支援 Firefox/WebKit 跨瀏覽器渲染
-  - 可處理需要登入/互動的網站（點擊 "Load More"、填寫搜尋表單）
-  - 與現有 MCP 架構無縫整合
-
-實作方式：
-  1. 建立 plugin: src/plugins/standard/playwright_mcp.mjs
-  2. 包裝核心工具為 smart-mcp 格式
-  3. 保留 --render 作為向下相容捷徑
-  4. Hybrid Router 可路由至 playwright_mcp
-
-驗收標準：
-  - [ ] MCP 工具可操作瀏覽器（導航/點擊/填表）
-  - [ ] accessibility tree 回傳結構化內容
-  - [ ] 與現有 --render 命令相容
-  - [ ] Playwright 已安裝，無需額外下載
-```
-
-##### F.5 MCP Fetch 替代爬蟲（P0 — 立即，1 天）
-
-```
-成本: $0 | 相依性: Node.js 原生 fetch（無 npm） | API key: ❌ 不需要
-
-做什麼：
-  當 Exa API 不可用或 quota 用盡時，使用純 HTTP fetch 做為 crawl 的 fallback。
-  可與 Readability + turndown 組合，達到接近 Exa crawl 的品質。
-
-為什麼重要：
-  - 完全不需要 API key（零成本備援方案）
-  - 延遲更低（直接 fetch vs Exa API round-trip）
-  - 靜態網站效果不輸 Exa crawl（加上 Readability 後更好清理）
-  - 可做為「先試 fetch 不行再 Playwright」的策略
-
-實作方式：
-  在 exa-search.mjs cmdCrawl 中加入：
-  1. 若無 EXA_API_KEY 且 command 為 crawl，自動降級到 fetch
-  2. 新增 --fetch-only 選項強制使用 fetch（跳過 Exa）
-  3. + --clean 時：fetch → Readability → 乾淨文字
-  4. + --markdown 時：fetch → Readability → turndown → Markdown
-  5. Error handling: 4xx/5xx/network error → 清楚錯誤訊息
+  SQLite 快取層：對 LLM 完全透明。
+  相同的 URL + 選項組合自動回傳快取結果（<1ms vs ~2s）。
+  LLM 不知道快取存在——它只是「第二次回應更快」。
 
 使用範例：
-  node exa-search.mjs crawl https://example.com           ← auto (Exa 有 key 就走 Exa，無 key 走 fetch)
-  node exa-search.mjs crawl https://example.com --fetch-only  ← 強制 fetch
-  node exa-search.mjs crawl https://example.com --fetch-only --clean --markdown  ← 最強組合
-
-驗收標準：
-  - [ ] 無 EXA_API_KEY 時 crawl 自動降級到 fetch
-  - [ ] `--fetch-only` 強制使用 fetch（跳過 Exa）
-  - [ ] fetch + Readability + turndown 產出品質接近 Exa crawl
-  - [ ] 4xx/5xx 錯誤訊息清楚
+  node exa-search.mjs crawl <url>  ← 第一次 ~2s
+  node exa-search.mjs crawl <url>  ← 第二次 <1ms (cached!)
+  node exa-search.mjs crawl <url> --no-cache  ← 跳過快取
 ```
 
-##### F.6 Caching 快取層（P0 — 立即，1 天）
-
-```
-成本: $0 | 相依性: better-sqlite3（smart-mcp 已有） | API key: ❌ 不需要
-
-做什麼：
-  對搜尋/爬取結果進行 SQLite-based 快取：
-  - key = URL + opts JSON hash
-  - TTL = 5 分鐘（可設定）
-  - LRU eviction（最多 1000 條）
-  - 自動過期清理
-
-為什麼重要：
-  - 減少重複呼叫 Exa API（省 quota）
-  - 開發迭代時同一 URL 不會重複 fetch（秒回）
-  - 可作為離線模式的基礎
-  - 有快取時: <1ms（SQLite 本地查詢）
-
-實作方式：
-  src/cli/lib/cache.mjs:
-    get(key)    → cached value | null
-    set(key, value, ttl=300) → void
-    clear()     → 清除全部
-    stats()     → { hits, misses, size, oldest }
-
-使用範例：
-  // 全自動：第一次 crawl 存快取，第二次秒回
-  node exa-search.mjs crawl https://example.com  ← 第一次 ~2s
-  node exa-search.mjs crawl https://example.com  ← 第二次 <1ms (cached!)
-  node exa-search.mjs crawl https://example.com --no-cache  ← 跳過快取
-
-驗收標準：
-  - [ ] 相同 URL+crawl 在 TTL 內回傳快取結果
-  - [ ] TTL 過期後自動重新 fetch
-  - [ ] cache stats 可查詢命中率
-  - [ ] `--no-cache` 選項跳過快取
-```
-
-##### F.7 Semantic chunking 內容分塊（P2 — 視需求，2 天）
+##### F.7 Semantic chunking 內容分塊（P2 — 1 天，層 4+5: Pipeline + Output）
 
 ```
 成本: $0（純程式碼） | 相依性: 無 | API key: ❌ 不需要
 
 做什麼：
-  將爬取回的長內容，以 heading (h1/h2/h3) 為邊界進行分塊，
-  每塊 500-2000 chars，保留 heading metadata，適合餵入 LLM 或向量資料庫。
+  將長內容以 heading (h1/h2/h3) 為邊界進行分塊，
+  放在 pipeline 最末端：fetch → clean → markdown → chunk
 
-為什麼重要：
-  - 一整篇文章 >8000 chars 直接丟進 LLM context 浪費 token
-  - 按標題分塊讓 LLM 可以「只看相關章節」
-  - 保留 heading metadata 可減少 hallucination
+Pipeline 位置（LLM 只需要說 --chunk，順序由工具保證）:
+  fetch → Readability (--clean) → Turndown (--markdown) → chunk (--chunk)
+  ↑ 先萃取乾淨         ↑ 轉為 MD（保留 headings）   ↑ 最後分塊
 
-實作方式：
-  chunkContent(text, options):
-    maxChunkSize: 2000 (default)
-    chunkOverlap: 200
-    boundaries: heading-based (h1/h2/h3)
-    fallback: paragraph-based splitting
+Output 附帶品質 metadata:
+  {
+    chunks: 7,
+    totalChars: 15420,
+    avgChunkSize: 2202,
+    truncated: false,
+    clean: true
+  }
 
 使用範例：
-  node exa-search.mjs crawl https://example.com/long-article --chunk
-
-驗收標準：
-  - [ ] heading-boundary 分塊正確
-  - [ ] `--chunk` 選項在 crawl 模式可用
-  - [ ] 分塊結果可指定 maxChunkSize
+  node exa-search.mjs crawl <url> --chunk
+  node exa-search.mjs crawl <url> --clean --markdown --chunk  ← 最強組合
+  node exa-search.mjs crawl <url> --chunk --max-chunk-size 1000
 ```
 
 ---
 
-#### 實作狀態
-
-| 項目 | 狀態 | 檔案 | 說明 |
-|------|------|------|------|
-| F.6 Caching 快取層 | ✅ **已實作** | `src/cli/lib/cache.mjs` | `node:sqlite`, 零相依性, TTL+LRU |
-| F.5 Fetch fallback | ✅ **已實作** | `src/cli/exa-search.mjs` | `--fetch-only`, 自動降級, JSON 輸出 |
-| F.1 Readability 萃取 | ✅ **已實作** | `src/cli/exa-search.mjs` | `--clean`, 動態載入 linkedom + readability |
-| F.2 Turndown Markdown | ✅ **已實作** | `src/cli/exa-search.mjs` | `--markdown`, 動態載入 turndown |
-| F.7 Semantic chunking | ⬜ **待實作** | — | 純程式碼，無相依性 → `todo.md` §F.7 |
-| F.3 Crawlee 整合 | ⬜ **待實作** | — | 需要 `npm install crawlee` → `todo.md` §F.3 |
-| F.4 Playwright MCP bridge | ⬜ **待實作** | — | 需要 `npm install @playwright/mcp` → `todo.md` §F.4 |
-
-#### 綜合路線圖
+##### F.8 Plugin 拆分 + Description 重寫（層 2+3: Plugin 拆分 + Description 引導）
 
 ```
- Tier 0 ✅ 已完成 (2026-06-05) — 純 npm、不需要 API key
- ┌──────────────────────────────────────────────────────────────┐
- │ F.1 Readability 萃取        ✅  --clean 選項                 │
- │ F.2 Turndown Markdown        ✅  --markdown 選項              │
- │ F.5 MCP Fetch fallback       ✅  --fetch-only + 自動降級      │
- │ F.6 Caching 快取層           ✅  node:sqlite, 零相依性        │
- └──────────────────────────────────────────────────────────────┘
+工時: 2 天 | API key: ❌ 不需要
 
- Tier 1 (待實作 — 檢查清單在 `docs/todo.md` §F.3, §F.4) — npm + 較多程式碼、不需要 API key
- ┌──────────────────────────────────────────────────────────────┐
- │ F.3 Crawlee 整合             npm install crawlee, 無 API key  │
- │ F.4 Playwright MCP bridge    npm install @playwright/mcp     │
- └──────────────────────────────────────────────────────────────┘
+做什麼：
+  將現有 smart_exa_search 拆成兩個 plugin，每個只做一件事。
+  重寫 description 為「決策樹」格式，LLM 看一眼就知道何時用。
 
- Tier 2 (視需求 — 檢查清單在 `docs/todo.md` §F.7) — 純程式碼、不需要 API key
- ┌──────────────────────────────────────────────────────────────┐
- │ F.7 Semantic chunking         純程式碼, 無 API key, 無相依性  │
- └──────────────────────────────────────────────────────────────┘
+拆分方案：
+  原來                           → 拆分後
+  ─────────────────────────────  ──────────────────────
+  smart_exa_search               → smart_exa_search（只做 search + code）
+    command: search|crawl|code   → command: search|code
+    + 6 boolean 選項              不需要 crawl 的複雜選項
+                                 
+                                 → smart_exa_crawl（只做 crawl）🆕
+                                   urls, [clean], [markdown],
+                                   [chunk], [render], [crawlee]
+                                   全部 crawl 專用選項
+
+Description 格式（決策樹）:
+  smart_exa_search:
+    "用於一般網路搜尋或程式碼搜尋。
+     需要最新資訊時使用。
+     不需要：爬取特定網站的完整內容（使用 smart_exa_crawl）。
+     不需要：操作瀏覽器（使用 smart_pw_browser）。"
+
+  smart_exa_crawl:
+    "爬取 URL 的內容。
+     預設回傳乾淨文字（自動移除導航列）。
+     - 文章/新聞: 加 clean （移除廣告 sidebar）
+     - 餵 LLM: 加 markdown （結構化格式，省 token）
+     - 長文章 >5 章節: 加 chunk （按標題分塊）
+     - JS 網站無內容: 加 render （Playwright 渲染）
+     不需要：搜尋網路（使用 smart_exa_search）。
+     不需要：操作瀏覽器（使用 smart_pw_browser）。"
+
+  smart_pw_browser:
+    "操作瀏覽器進行互動（登入、表單、點擊）。
+     工具: navigate, click, fill, screenshot。
+     不需要：讀取網頁內容（使用 smart_exa_crawl）。
+     不需要：搜尋網路（使用 smart_exa_search）。"
 ```
 
-#### ✅ 已完成 (2026-06-05)
+##### F.9 Pipeline meta-tool: smart_research（層 4: Pipeline）
 
-**F.1 (Readability) + F.2 (Turndown) + F.5 (Fetch fallback) + F.6 (Caching)** 四項全部實作完成：
-- ✅ **不需要 API key**
-- ✅ **零成本**（`node:sqlite` + `linkedom` + `@mozilla/readability` + `turndown`）
-- ✅ **品質與備援能力大幅提升**
+```
+工時: 2 天 | API key: ❌ 不需要
 
-實作摘要：
-- `--clean` — Mozilla Readability 萃取文章主體，移除 nav/ads/footer，token 節省 40-60%
-- `--markdown` — Turndown 將 HTML 轉為 LLM-friendly Markdown（headings/code blocks/links 保留）
-- `--fetch-only` — 原生 Node.js fetch，無 API key 時 crawl 自動降級，支援 JSON 輸出
-- `--no-cache` — SQLite 快取層，TTL 5 分鐘，LRU 淘汰，支援 cache stats
-- 最佳組合：`--fetch-only --clean --markdown`（完全離線、零 API key、LLM-ready）
+做什麼：
+  LLM 說「幫我研究這個網址」，一次完成全套處理。
+  不需要知道任何內部管線或參數。
 
-#### ⬜ 待實作 — 檢查清單在 `docs/todo.md`
+LLM 的使用模式：
+  smart_research({ url: "...", depth: "quick" })
+    → crawl only（~2s, 適合簡單頁面）
 
-| 項目 | 優先級 | 工時 | 準備好了嗎？ |
-|------|--------|------|-------------|
-| **F.3 Crawlee 整合** | P1 | 3-5 天 | 技術方案確認，`npm install crawlee` 即可開始 |
-| **F.4 Playwright MCP bridge** | P1 | 3-5 天 | 技術方案確認，`npm install @playwright/mcp` 即可開始 |
-| **F.7 Semantic chunking** | P2 | 2 天 | 純程式碼，無相依性，隨時可開始 |
-- 最佳組合：`--fetch-only --clean --markdown`（完全離線、零 API key、LLM-ready）
+  smart_research({ url: "...", depth: "deep" })
+    → crawl + clean + markdown（~3s, 大部分情況）
+  
+  smart_research({ url: "...", depth: "exhaustive" })
+    → Crawlee + clean + markdown + chunk（~5s, 長文章研究）
+
+底層實作：
+  smart_research 是 compose 的包裝：
+  depth=quick:     exa-crawl
+  depth=deep:      exa-crawl → clean → markdown
+  depth=exhaustive: crawlee-crawl → clean → markdown → chunk
+
+Plugin 定義：
+  src/plugins/standard/research.mjs
+  handler-based（不 spawn CLI, 直接組合既有 lib）
+```
+
+##### F.10 Output 品質回饋提示（層 5: Output Feedback）
+
+```
+工時: 1 天 | API key: ❌ 不需要
+
+做什麼：
+  crawl 結果回傳時，自動附帶品質 metadata + 使用建議。
+  LLM 看到 metadata 就知道結果品質如何，以及是否該加參數。
+
+metadata 結構：
+  {
+    content: "...",         // 實際內容
+    _meta: {
+      engine: "fetch|exa|cheerio|playwright",
+      chars: 8420,
+      truncated: false,          // 被截斷？
+      clean: true,               // 已用 Readability？
+      markdown: true,            // 已轉 Markdown？
+      chunks: 7,                 // 分塊數（有 --chunk 時）
+      quality: "high|medium|low",
+      _tip: "💡 這篇文章很長（7 段），考慮加 --chunk 分塊以節省 token"
+    }
+  }
+
+觸發時機：
+  - 內容 > 5000 chars → 建議 --chunk
+  - 內容含常見 nav 特徵 → 建議 --clean  
+  - content truncated → 建議 --extended
+  - 純文字含 HTML tag 殘留 → 建議 --markdown
+
+實作方式：
+  src/cli/lib/quality.mjs — analyzeContent(text, opts) → metadata
+  exa-search.mjs 的 crawl pipeline 最後一步呼叫
+```
+
+---
+
+#### 實作狀態（更新 2026-06-06）
+
+| 項目 | 層級 | 狀態 | 檔案 | 工時 | API Key |
+|------|------|------|------|------|---------|
+| F.5 Fetch fallback | 層1 Smart Defaults | ✅ **已實作** | `src/cli/exa-search.mjs` | 1 天 | ❌ |
+| F.6 Caching 快取層 | 層1 Smart Defaults | ✅ **已實作** | `src/cli/lib/cache.mjs` | 1 天 | ❌ |
+| F.1 Readability 萃取 | 層1 Smart Defaults | ✅ **已實作** | `src/cli/exa-search.mjs` | 1 天 | ❌ |
+| F.2 Turndown Markdown | 層1 Smart Defaults | ✅ **已實作** | `src/cli/exa-search.mjs` | 1 天 | ❌ |
+| **F.7 Semantic chunking** | 層4+5 Pipeline+Output | 🔜 **開始實作** | `src/cli/lib/chunker.mjs` | **1 天** | ❌ |
+| **F.8 Plugin 拆分 + Description** | 層2+3 | ⬜ 待實作 | `src/plugins/standard/*.mjs` | **2 天** | ❌ |
+| **F.10 Output 品質回饋** | 層5 Output Feedback | ⬜ 待實作 | `src/cli/lib/quality.mjs` | **1 天** | ❌ |
+| **F.9 Pipeline meta-tool** | 層4 Pipeline | ⬜ 待實作 | `src/plugins/standard/research.mjs` | **2 天** | ❌ |
+| **F.3 Crawlee 整合** | 層1 Smart Defaults | ⬜ 待實作 | `src/cli/lib/crawler.mjs` | 3-5 天 | ❌ |
+| **F.4 smart_pw_browser** | 層2 Plugin 拆分 | ⬜ 待實作 | `src/plugins/standard/playwright_mcp.mjs` | 3-5 天 | ❌ |
+
+#### 實作順序
+
+```
+第一波（無相依性，快速見效）
+  F.7 Semantic chunking (1天)  → 先讓 LLM 可以拿分塊內容
+  F.8 Plugin 拆分 + Description (2天)  → LLM 選工具不選參數
+  F.10 Output 品質回饋 (1天)  → LLM 知道結果品質
+  F.9 smart_research meta-tool (2天)  → LLM 一次搞定
+
+第二波（需 npm install，較大）
+  F.3 Crawlee 整合 (3-5天)
+  F.4 smart_pw_browser (3-5天)
+```
+
+#### 五層導入後 LLM 使用模式對比
+
+```
+改善前（舊設計）:
+  LLM: smart_exa_search({ command: "crawl", urls: "..." })
+       → 拿到原始 HTML 混 nav/sidebar/footer
+  LLM: 「嗯內容亂亂的，再試一次...」
+       → LLM 不一定會想到加 --clean
+
+改善後（五層設計）:
+  LLM: smart_exa_crawl({ urls: "..." })
+       → 拿到乾淨文字 + (_meta.clean: true, _meta.chars: 8420)
+       → LLM 看到 metadata，知道內容品質
+
+  LLM: 「這篇文章 7 段，只看安裝章節」
+  LLM: smart_research({ url: "...", depth: "exhaustive" })
+       → 一次到位：自適應爬蟲 + 乾淨文章 + Markdown + 分塊
+       → LLM 完全不需要知道管線細節
+```
 
 **不做任何需要 API key 的功能。** 所有整合強化皆以離線可運作為前提。
 
