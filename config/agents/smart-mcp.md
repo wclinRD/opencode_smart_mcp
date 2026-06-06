@@ -101,13 +101,30 @@ Standard 工具（30+ 個）→ smart_smart_run({tool, args})：
 
 ```
 需要搜尋程式碼？       → smart_grep
-需要理解專案結構？     → smart_learn + arch_overview ← 新增
+需要理解專案結構？     → smart_learn + arch_overview
 需要依賴分析？         → import_graph
-需要套用 LLM 的修改？  → fast_apply ← 新增（比 edit 省 40-60% token）
+需要套用 LLM 的修改？  → fast_apply（比 edit 省 40-60% token）
 需要修 bug？           → error_diagnose → debug → fast_apply → test
 需要跨檔案改？         → import_graph → cross_file_edit → test
 需要多步驟任務？       → planner / workflow / compose
 不確定用哪個工具？     → integrate list 或 hybrid_router
+```
+
+### fast_apply vs edit 強制規則
+
+```
+必須用 fast_apply 的情況（不得用 edit 替代）：
+  ✅ 套用任何 unified diff / SEARCH/REPLACE block
+  ✅ 套用 LLM 產生的 patch（含自我修正、review 建議）
+  ✅ 一次改 3 行以上，或跨多個位置的修改
+  ✅ 修改是來自其他工具輸出（如 error_diagnose 的 fix suggestion）
+
+可以用 edit 的情況：
+  ✅ 單一位置、單行/小區塊（1-3 行）的精確修改
+  ✅ 修改內容是我自己當下直接決定的（非從外部 patch 來）
+  ✅ 替換內容是簡單數值/字串/名稱修正
+
+⚠️ 違反此規則 = token 浪費 40-60%，每次違反會記入反省機制
 ```
 
 ## 🎯 Token 優化行為規則
