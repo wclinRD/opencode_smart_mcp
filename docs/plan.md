@@ -317,7 +317,7 @@ Smart MCP 目前只能讀純文字格式（.js, .ts, .py, .md, .txt, .json, .yam
 
 1. **hybrid_router** — 新增 `document` 領域：觸發關鍵字「分析合約」「讀取規格」「看這份報告」「PDF」「DOCX」
 2. **fast_apply** — 若 LLM 需要修改文件內容，可透過 fast_apply 套用變更
-3. **CKG / Wiki** — Phase 4b 擴展：大量文件可分析後自動匯入 CKG 或 wiki-ingest
+3. **Document Registry** (Phase 4b ✅ 2026-06-08) — SQLite 文件索引，ingest 時自動註冊，支援跨 session 搜尋/列舉。取代最初的 CKG/wiki 路線（LLM 可自行組合 ingest + wiki-capture，不需基礎設施支援，但 LLM 無法跨 session 記憶 — registry 解決真實瓶頸）
 
 ### 預期成效
 
@@ -336,6 +336,21 @@ Smart MCP 目前只能讀純文字格式（.js, .ts, .py, .md, .txt, .json, .yam
 | OCR 圖片辨識 | 依賴 tesseract 外部安裝，P2 可選 |
 | 大量批次轉換 | 工具一次處理一份文件，batch 交給 shell script |
 | 自動偵測目錄變化 | Scope creep，watch mode 以後再說 |
+
+---
+
+### Phase 4b 交付摘要 (2026-06-08)
+
+| 元件 | 說明 |
+|------|------|
+| `src/lib/document-registry.mjs` | SQLite 文件索引（Node 26+ node:sqlite），無外部依賴。CRUD + search |
+| `ingest-document.mjs` | 自動 register 每次 ingest，接受 summary 參數存入 registry |
+| `list-documents.mjs` | `smart_list_documents` 工具：query 搜尋 + format 過濾 + limit 控制 |
+| DOMAIN_MAP | `document` 領域新增 `smart_list_documents` 工具 |
+| Agent personality | 兩工具加入 direct-call table + hybrid_router 例子 |
+| Tests | 21 tests（core CRUD + search + singleton + plugin integration） |
+
+**關鍵決策變更**：CKG/wiki 整合太早（LLM 能自行組合 `ingest_document → wiki-capture`），改做 document registry 解決 LLM 無法跨 session 記憶的真實瓶頸。
 
 ---
 
