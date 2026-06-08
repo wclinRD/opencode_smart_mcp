@@ -18,6 +18,7 @@
 import { readdirSync, statSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { wrapHandler } from '../lib/safe-handler.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOOLS_DIR = join(__dirname, '../plugins');
@@ -59,6 +60,10 @@ for (const cat of CATEGORY_DIRS) {
       def.description = def.description || '';
       def.inputSchema = def.inputSchema || { type: 'object', properties: {} };
       def.mapArgs = def.mapArgs || defaultMapArgs;
+      // Auto-wrap handler with try-catch + structured error format (Phase 6: Reliability)
+      if (def.handler) {
+        def.handler = wrapHandler(def.handler, def.name);
+      }
       // responsePolicy: default is L0 (lossless, no optimization)
       // Plugins opt into lossy compression by declaring maxLevel > 1
       def.responsePolicy = def.responsePolicy || { maxLevel: 0 };

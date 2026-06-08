@@ -32,6 +32,7 @@ import { ContextManager } from '../lib/context-manager.mjs';
 import { optimizeOutputSync } from '../lib/output-optimizer.mjs';
 import { getDefaultCache } from '../lib/cache-manager.mjs';
 import { createPipeline, optimizeOutput as pipelineOptimize } from '../lib/output-pipeline.mjs';
+import { isStructuredError } from '../lib/safe-handler.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -665,6 +666,10 @@ function invokeTool(def, args, timeoutOverride, signal) {
         if (signal?.aborted) {
           return captureAndReturn(def.name, args, { ok: false, error: `Tool ${def.name} was cancelled` }, elapsedMs, def);
         }
+        // Structured error from safe-handler wrapper → route through isError path
+        if (isStructuredError(output)) {
+          return captureAndReturn(def.name, args, { ok: false, error: output }, elapsedMs, def);
+        }
         return captureAndReturn(def.name, args, { ok: true, output }, elapsedMs, def);
       }
     } catch (err) {
@@ -940,11 +945,10 @@ function handleSmartContext(id, args) {
 
     respond(id, { content: [{ type: 'text', text: result }] }, { optimize: false });
   } catch (err) {
-    const fix = getErrorFix('smart_context', 'generic', err.message);
-    respondError(id, -32603, `smart_context error: ${err.message}`, {
-      tool: 'smart_context', args: JSON.stringify(args),
-      error: err.message, type: 'execution', suggestion: fix,
-    });
+    respond(id, {
+      content: [{ type: 'text', text: `smart_context error: ${err.message}` }],
+      isError: true,
+    }, { optimize: false });
   }
 }
 
@@ -1041,6 +1045,12 @@ function handleRequest(req) {
                   return;
                 }
                 const output = String(resolvedOutput ?? '');
+                // Structured error from safe-handler wrapper → route through isError path
+                if (isStructuredError(output)) {
+                  const cr = captureAndReturn(tName, origArgs, { ok: false, error: output }, elapsedMs);
+                  respond(id, { content: [{ type: 'text', text: cr.error }], isError: true }, { optimize: false });
+                  return;
+                }
                 const cr = captureAndReturn(tName, origArgs, { ok: true, output }, elapsedMs);
                 const resp1 = { content: [{ type: 'text', text: cr.output }] };
                 const rp = cr._responsePolicy || _responsePolicy;
@@ -1049,28 +1059,21 @@ function handleRequest(req) {
               })
               .catch(err => {
                 const elapsedMs = Number(process.hrtime.bigint() - st) / 1_000_000;
-                const fix = getErrorFix(tName.replace('smart_', ''), 'generic', err.message);
-                const cr = captureAndReturn(tName, origArgs, { ok: false, error: `Handler error in ${tName}: ${err.message}\nFix: ${fix}` }, elapsedMs);
-                respondError(id, -32603, `smart_run error: ${cr.error}`, {
-                  tool: 'smart_run', args: JSON.stringify(origArgs), error: cr.error,
-                  type: 'execution',
-                  suggestion: fix,
-                });
+                const cr = captureAndReturn(tName, origArgs, { ok: false, error: `Handler error in ${tName}: ${err.message}` }, elapsedMs);
+                respond(id, {
+                  content: [{ type: 'text', text: cr.error }],
+                  isError: true,
+                }, { optimize: false });
               });
           } else if (result.ok) {
             const resp2 = { content: [{ type: 'text', text: result.output }] };
             if (result._responsePolicy) resp2._responsePolicy = result._responsePolicy;
             respond(id, resp2);
           } else {
-            // Extract fix from result.error (already has Fix: appended by handleDevtoolRun)
-            const errLines = result.error.split('\n');
-            const suggestion = errLines.find(l => l.startsWith('Fix:'))?.replace('Fix:', '').trim()
-              || 'Check the tool name and args. Use smart_run(tool:"help", args:{}) to list all tools.';
-            respondError(id, -32603, `smart_run error: ${result.error}`, {
-              tool: toolName, args: JSON.stringify(args), error: result.error,
-              type: 'execution',
-              suggestion,
-            });
+            respond(id, {
+              content: [{ type: 'text', text: result.error }],
+              isError: true,
+            }, { optimize: false });
           }
         } finally { if (id != null) pendingCalls.delete(String(id)); }
         break;
@@ -1080,11 +1083,10 @@ function handleRequest(req) {
       const def = toolMap.get(toolName);
       if (!def) {
         const availableTools = Array.from(toolMap.keys()).join(', ');
-        const fix = getErrorFix(toolName, 'notFound', `Unknown tool: ${toolName}`);
-        respondError(id, -32602, `Unknown tool: ${toolName}. Available: ${availableTools}`, {
-          availableTools: Array.from(toolMap.keys()),
-          suggestion: fix,
-        });
+        respond(id, {
+          content: [{ type: 'text', text: `Unknown tool: ${toolName}. Available: ${availableTools}` }],
+          isError: true,
+        }, { optimize: false });
         break;
       }
 
@@ -1105,6 +1107,12 @@ function handleRequest(req) {
                 return;
               }
               const output = String(resolvedOutput ?? '');
+              // Structured error from safe-handler wrapper → route through isError path
+              if (isStructuredError(output)) {
+                const cr = captureAndReturn(tName, origArgs, { ok: false, error: output }, elapsedMs);
+                respond(id, { content: [{ type: 'text', text: cr.error }], isError: true }, { optimize: false });
+                return;
+              }
               const cr = captureAndReturn(tName, origArgs, { ok: true, output }, elapsedMs);
               const resp3 = { content: [{ type: 'text', text: cr.output }] };
               const rp = cr._responsePolicy || _responsePolicy;
@@ -1113,12 +1121,11 @@ function handleRequest(req) {
             })
             .catch(err => {
               const elapsedMs = Number(process.hrtime.bigint() - st) / 1_000_000;
-              const fix = getErrorFix(tName.replace('smart_', ''), 'generic', err.message);
-              const cr = captureAndReturn(tName, origArgs, { ok: false, error: `Handler error in ${tName}: ${err.message}\nFix: ${fix}` }, elapsedMs);
-              respondError(id, -32603, `Tool execution failed: ${tName}`, {
-                tool: tName, args: JSON.stringify(origArgs), error: cr.error,
-                type: 'execution', suggestion: fix,
-              });
+              const cr = captureAndReturn(tName, origArgs, { ok: false, error: `Handler error in ${tName}: ${err.message}` }, elapsedMs);
+              respond(id, {
+                content: [{ type: 'text', text: cr.error }],
+                isError: true,
+              }, { optimize: false });
             });
           return;
         }
@@ -1128,15 +1135,10 @@ function handleRequest(req) {
           if (result._responsePolicy) resp4._responsePolicy = result._responsePolicy;
           respond(id, resp4);
         } else {
-          const isTimeout = result.error.includes('timed out');
-          const isCancelled = result.error.includes('cancelled');
-          const errorType = isTimeout ? 'timeout' : isCancelled ? 'cancel' : 'generic';
-          const fix = getErrorFix(toolName.replace('smart_', ''), errorType, result.error);
-          respondError(id, -32603, isCancelled ? `Tool ${toolName} cancelled` : `Tool execution failed: ${toolName}`, {
-            tool: toolName, args: JSON.stringify(args), error: result.error,
-            type: isTimeout ? 'timeout' : isCancelled ? 'cancelled' : 'execution',
-            suggestion: fix,
-          });
+          respond(id, {
+            content: [{ type: 'text', text: result.error }],
+            isError: true,
+          }, { optimize: false });
         }
       } finally { if (id != null) pendingCalls.delete(String(id)); }
       break;
@@ -1205,7 +1207,10 @@ function handleRequest(req) {
         }
         respond(id, result);
       } catch (err) {
-        respondError(id, -32603, `smart/context error: ${err.message}`);
+        respond(id, {
+          content: [{ type: 'text', text: `smart/context error: ${err.message}` }],
+          isError: true,
+        }, { optimize: false });
       }
       break;
     }
