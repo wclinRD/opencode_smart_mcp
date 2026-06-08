@@ -133,7 +133,7 @@ const CLASSIFIER_PATTERNS = [
     description: 'Semantic query — gathers CKG context + LSP data for LLM synthesis',
   },
 
-  // -- GENERAL: non-code tasks — crawl, refactor, git, security, test, report, lang, search, edit, plan, office, wiki --
+  // -- GENERAL: non-code tasks — crawl, refactor, git, security, test, report, lang, search, edit, plan, office, document, wiki, analyze --
   {
     patterns: [
       // crawl
@@ -181,6 +181,13 @@ const CLASSIFIER_PATTERNS = [
       // office
       /office|word|excel|powerpoint|ppt|pptx|docx|xlsx/i,
       /文件\s+(建立|編輯|修改|轉換)/i,
+      // document
+      /合約|規格|spec|pdf|docx|word|xlsx|xls|pptx|ppt/i,
+      /文件\s+(分析|內容|報告|資料|檔案)/i,
+      /試算表|報表\s+(分析|內容)|簡報\s+(內容|檔案)/i,
+      /讀取\s+(pdf|文件|合約|檔案|報告)/i,
+      /看\s+(文件|檔案|報告|合約|規格)/i,
+      /打開|開啟.*(文件|檔案|excel|word|pdf)/i,
       // wiki
       /wiki|知識庫|obsidian|vault|筆記/i,
       /ingest|攝取|distill|query\s+wiki/i,
@@ -903,6 +910,14 @@ const DOMAIN_MAP = [
     tools: ['officecli (external MCP)'],
     description: 'Office 文件操作（需安裝 officecli）',
     workflow: ['Install: curl -fsSL https://d.officecli.ai/install.sh | bash', 'Use officecli MCP tools via opencode.json MCP config'],
+  },
+  {
+    domain: 'document',
+    keywords: ['合約', '規格', 'spec', 'pdf', 'docx', 'word', '文件 分析', '文件 內容', '讀取 pdf', '分析 合約', '審閱 文件', '報告 內容', '試算表', 'xlsx', '簡報', 'pptx', 'excel', 'spec 文件', '技術 規格', '看 文件', '看 報告', '打開 文件', '開啟 檔案'],
+    skill: null,
+    tools: ['smart_ingest_document'],
+    description: '文件轉換與內容分析（PDF/DOCX/XLSX/PPTX/HTML → Markdown）',
+    workflow: ['Ingest: smart_ingest_document', 'Analyze content with LLM', 'Optionally save to wiki: skill("wiki-update")'],
   },
   {
     domain: 'wiki',

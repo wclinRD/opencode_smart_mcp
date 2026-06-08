@@ -256,6 +256,89 @@ LLM 問「我要做 X」→ hybrid_router 自動分類 → code task？執行工
 
 ---
 
+---
+
+## Phase 4：文件轉換（Document Ingestion）
+
+> 基於生態圈研究結論：Phase 4 聚焦單一高價值缺口，不做功能堆疊。
+
+### 核心問題
+
+Smart MCP 目前只能讀純文字格式（.js, .ts, .py, .md, .txt, .json, .yaml, .csv）。完全無法讀取二進位文件：
+
+| 格式 | 常見場景 | 目前狀態 |
+|------|---------|---------|
+| PDF | 規格書、合約、論文、技術報告 | ❌ 無法讀取 |
+| DOCX/DOC | Word 文件、提案、會議記錄 | ❌ 無法讀取 |
+| PPTX | 簡報、產品介紹 | ❌ 無法讀取 |
+| XLSX | 試算表、數據報表 | ❌ 無法讀取 |
+| HTML | 網頁內容匯出 | ❌ 無法處理（需 fetch） |
+
+**生態佐證**: Microsoft markitdown（119K ⭐）是 MCP 生態圈最受歡迎的專案，證明「文件 → Markdown」是所有 LLM 工具的共同需求。
+
+### 解決方案
+
+新增 `ingest_document` 工具，將二進位文件轉換為 Markdown，讓 LLM 可以直接分析內容。
+
+```
+使用者：「幫我分析這份合約」
+  → LLM 呼叫 ingest_document({path: "contract.pdf"})
+  → 偵測格式 → 轉換 Markdown → 回傳純文字
+  → LLM 分析條款、關鍵日期、風險
+```
+
+### 設計
+
+| 層面 | 作法 |
+|------|------|
+| **轉換引擎** | 雙層架構：Node library（內建無依賴）+ system CLI（強化覆蓋率） |
+| **格式偵測** | 副檔名優先 + magic bytes 驗證（`file-type` npm） |
+| **輸出格式** | 統一 Markdown，追求 lossless 轉換 |
+| **大檔案** | >100 頁自動分段回傳，支援 offset 續讀 |
+| **路由整合** | 新增 `document` 領域到 hybrid-engine DOMAIN_MAP |
+| **錯誤處理** | 無可用 converter → 清楚提示安裝指令 |
+
+### 支援格式路線
+
+| 格式 | 優先級 | 轉換方式 | 依賴 |
+|------|--------|---------|------|
+| PDF | **P0** | `pdf-parse` (Node) + fallback `pdftotext` | 無/可選 |
+| DOCX | **P0** | `mammoth` (Node) + fallback `pandoc` | 無/可選 |
+| HTML | **P0** | `html-to-text` (Node) | 無 |
+| Markdown | P0 | 直接讀取（已有） | 無 |
+| PPTX | **P1** | `pptx2md` CLI / python-pptx | 可選 |
+| XLSX | **P1** | `xlsx` npm → Markdown table | 無 |
+| CSV | P1 | 已有能力強化 | 無 |
+| EPUB | P2 | `pandoc` / `epub2md` | 可選 |
+| RTF | P2 | `textutil` (macOS built-in) | macOS |
+| OCR | P2 | `tesseract`（圖片轉文字） | 可選 |
+
+### 與現有系統整合
+
+1. **hybrid_router** — 新增 `document` 領域：觸發關鍵字「分析合約」「讀取規格」「看這份報告」「PDF」「DOCX」
+2. **fast_apply** — 若 LLM 需要修改文件內容，可透過 fast_apply 套用變更
+3. **CKG / Wiki** — Phase 4b 擴展：大量文件可分析後自動匯入 CKG 或 wiki-ingest
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| 可讀取文件格式 | 7 種（純文字） | 11+ 種（含二進位） |
+| 新 onboarding 情境 | 只看程式碼 | 也可看 PDF 規格、Word 合約 |
+| 生態競爭力 | 無文件支援 | 跟上 markitdown 模式 |
+| 實用場景 | 純開發 | 開發 + 文件分析 + 合約審閱 |
+
+### 不上什麼
+
+| 不做的功能 | 原因 |
+|-----------|------|
+| 文件編輯（寫回 DOCX/PDF） | 需求差異大，LLM 產出結構化 Markdown 即可 |
+| OCR 圖片辨識 | 依賴 tesseract 外部安裝，P2 可選 |
+| 大量批次轉換 | 工具一次處理一份文件，batch 交給 shell script |
+| 自動偵測目錄變化 | Scope creep，watch mode 以後再說 |
+
+---
+
 ## 九、不做什麼
 
 | 項目 | 原因 |
@@ -265,3 +348,8 @@ LLM 問「我要做 X」→ hybrid_router 自動分類 → code task？執行工
 | Context compaction pipeline | 需 opencode client 端支援 |
 | Prompt caching（cache_control） | 需 Anthropic API 支援 |
 | Streaming response chunks | MCP protocol 不支援分塊 |
+| **Auto-execution**（router 自動執行而非推薦） | Router 無對話 context，可能做錯事。當前「推薦→LLM決定」是安全機制不是浪費 |
+| **Session-aware routing** | LLM 呼叫 router 時已帶完整對話歷史，router 不需重複記憶 |
+| **Custom workflow pipeline** | 等同 skill 功能已存在。加強 skill 建立工具即可 |
+| **Observability dashboard** | 單開發者場景價值低，web UI scope 過大 |
+| **External integrations**（Jira/Slack/GitHub Issues） | 產品成熟後再說，現階段 plugin 生態未建立 |

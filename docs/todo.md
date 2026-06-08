@@ -158,4 +158,77 @@
 
 ---
 
-## Phase 4：下一步規劃
+## Phase 4：文件轉換
+
+> 新增 `ingest_document` 工具，將 PDF/DOCX/PPTX/XLSX 等二進位文件轉換為 Markdown。
+> 對應 plan.md Phase 4 章節。
+>
+> 關鍵決策：捨棄 auto-execution / session-aware / custom workflow 等不確定方向，
+> 聚焦單一高價值缺口（119K⭐ markitdown 證明需求）。
+>
+> **2026-06-08 交付**：31 個 Phase 4a 測試、638 全域測試 0 fail
+
+### Phase 4a：核心文件轉換工具 ✅
+
+#### 1. `src/lib/document-ingester.mjs` — 轉換引擎 ✅
+
+- [x] 格式偵測：副檔名 + magic bytes（自實作 magic header check，無需 file-type npm）
+- [x] PDF 轉換：雙層策略 — pdftotext（CLI, 品質優先）→ pdf-parse（Node, 降級）
+- [x] DOCX 轉換：`mammoth` npm（Markdown output mode），保留 heading/list/emphasis
+- [x] HTML 轉換：`html-to-text` npm（保留連結、表格、標題層級）
+- [x] PPTX 轉換：`pptx2md` CLI / python-pptx（可選，有則用，無則提示安裝）
+- [x] XLSX 轉換：`xlsx` npm → Markdown table（多 sheet 分開，row/column 保留）
+- [x] RTF 轉換：macOS `textutil -convert html` + html-to-text（有則用）
+- [x] 大文件分頁：PDF 支援 offset/limit 參數續讀（其他格式不支援頁概念）
+- [x] 錯誤處理：無可用 converter → 回傳清晰安裝指令；無法解析 → 回傳錯誤訊息不 crash
+- [x] 統一輸出格式：`{ format, title, totalPages, content, pages[] }`
+
+#### 2. `src/plugins/standard/ingest-document.mjs` — MCP Plugin ✅
+
+- [x] Plugin 註冊 `smart_ingest_document` 工具
+- [x] 參數：`path`（必填）, `offset`（選填, PDF 續讀起始頁）, `limit`（選填, PDF 回傳頁數上限）
+- [x] 呼叫 document-ingester 進行轉換
+- [x] 回傳 Markdown 內容 + metadata（格式、頁數、字數統計）
+- [x] responsePolicy: 無（內容直接回傳，LLM 需要完整文件）
+
+#### 3. hybrid-engine 整合 ✅
+
+- [x] DOMAIN_MAP 新增 `document` 領域（位於 office 之後、wiki 之前，優先於 analyze）
+- [x] 觸發關鍵字：「合約、規格、PDF、Word、文件分析、讀取 pdf、審閱文件、試算表」
+- [x] 推薦工具：`smart_ingest_document`
+- [x] 推薦 workflow：`Ingest → Analyze → Optionally save to wiki`
+- [x] GENERAL 分類器新增 document regex patterns
+
+#### 4. 測試 ✅
+
+- [x] unit test：格式偵測（10 格式逐一測試 + nonexistent + unknown extension）
+- [x] unit test：PDF 轉換（多頁、pagination metadata、offset/limit）
+- [x] unit test：DOCX 轉換（內容驗證、heading 保留）
+- [x] unit test：HTML 轉換（文字萃取、table 保留）
+- [x] unit test：XLSX 轉換（多 sheet 驗證、cell 資料正確性）
+- [x] unit test：大文件分段機制（PDF offset/limit）
+- [x] unit test：無可用 converter 錯誤路徑（ZIP 格式不明確）
+- [x] integration test：hybrid_router 分類 document 任務（5 種問法）
+- [x] 全量回歸：**638 tests, 0 fail**
+
+### Phase 4b：知識整合（未來、尚待設計）
+
+> 注意：此階段僅為種子想法，**不急著做**，等 Phase 4a 穩定後再討論。
+
+- [ ] 文件內容自動匯入 CKG（可查詢、可 cross-reference）
+- [ ] 文件 + 程式碼聯合分析（如 PDF 規格書 ↔ 實作程式碼比對）
+- [ ] 文件知識自動寫入 Obsidian wiki（wiki-ingest 整合）
+
+---
+
+## 已決定不做的功能（記入反省）
+
+以下是曾經考慮但經評估後捨棄的方向，記錄以避免重複討論：
+
+| 方向 | 捨棄原因 | 評估日期 |
+|------|---------|---------|
+| Auto-execution（router 代執行） | 不安全 — router 無對話 context，可能做錯事 | 2026-06-08 |
+| Session-aware routing | 不必要 — LLM 已提供 context | 2026-06-08 |
+| Custom workflow pipeline | 重複 — 已存在 skill 機制 | 2026-06-08 |
+| Observability dashboard | 低價值 — 單開發者不需 web dashboard | 2026-06-08 |
+| External integrations (Jira/Slack) | 太早 — plugin 生態未建立 | 2026-06-08 |

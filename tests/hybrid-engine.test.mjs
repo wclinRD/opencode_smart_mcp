@@ -757,7 +757,7 @@ describe('11. Phase 3: executeHybrid (general tasks)', () => {
 describe('12. Phase 3: Domain coverage completeness', () => {
   // Ensure all 13 domains are reachable
   const allDomains = ['crawl', 'refactor', 'git', 'security', 'test', 'report',
-    'lang', 'search_web', 'edit', 'plan', 'office', 'wiki', 'analyze'];
+    'lang', 'search_web', 'edit', 'plan', 'office', 'document', 'wiki', 'analyze'];
 
   for (const domain of allDomains) {
     it(`has reachable "${domain}" domain`, () => {
@@ -774,6 +774,7 @@ describe('12. Phase 3: Domain coverage completeness', () => {
         edit: 'patch',
         plan: '規劃',
         office: 'word',
+        document: '合約',
         wiki: 'obsidian',
         analyze: '分析',
       };
