@@ -27,7 +27,7 @@ import { readFileSync } from 'node:fs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Path to the installed toonify-mcp package
-const TOONIFY_PATH = resolve('/Users/wclin/toonify-mcp');
+const TOONIFY_PATH = resolve(process.env.TOONIFY_PATH || process.env.HOME + '/toonify-mcp');
 
 // ---------------------------------------------------------------------------
 // Dynamically import toonify-mcp modules

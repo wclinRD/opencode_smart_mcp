@@ -1,0 +1,64 @@
+{
+  "_comment": "Stock Quant Analyzer — Configuration",
+  "_version": "2.0",
+
+  "markets": {
+    "us": {
+      "label": "美股",
+      "index_ticker": "^GSPC",
+      "index_name": "S&P 500",
+      "valuation_proxy": ["SPY", "IVV", "VOO"],
+      "benchmarks": {
+        "pe_mean": 17.6,
+        "cape_mean": 17.7,
+        "fwd_pe_mean": 23.0
+      }
+    },
+    "tw": {
+      "label": "台股",
+      "index_ticker": "^TWII",
+      "index_name": "台灣加權指數",
+      "valuation_proxy": ["0050.TW"],
+      "benchmarks": {
+        "pe_mean": 15.5,
+        "cape_mean": null,
+        "fwd_pe_mean": 16.0
+      }
+    }
+  },
+
+  "weights": {
+    "valuation": 0.30,
+    "flow": 0.25,
+    "technical": 0.20,
+    "macro": 0.25
+  },
+
+  "risk_levels": [
+    {"min": 80, "max": 100, "level": "🟢 極度安全", "equity_pct": "80-100%", "signal": "全力做多"},
+    {"min": 65, "max": 80,  "level": "🟢 安全",     "equity_pct": "70-85%",  "signal": "偏多配置"},
+    {"min": 50, "max": 65,  "level": "🟡 中性",     "equity_pct": "55-70%",  "signal": "標準配置"},
+    {"min": 35, "max": 50,  "level": "🟠 謹慎",     "equity_pct": "40-55%",  "signal": "降低曝險"},
+    {"min": 20, "max": 35,  "level": "🔴 風險偏高",  "equity_pct": "25-40%",  "signal": "防禦配置"},
+    {"min": 0,  "max": 20,  "level": "🔴🔴 極度危險","equity_pct": "<25%",    "signal": "現金為主"}
+  ],
+
+  "cache": {
+    "ttl_price": 3600,
+    "ttl_medium": 14400,
+    "ttl_slow": 86400
+  },
+
+  "scrapers": {
+    "cape": {"url": "https://www.multpl.com/shiller-pe", "enabled": true},
+    "fedwatch": {"url": "https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html", "enabled": true},
+    "aaii": {"url": "https://www.aaii.com/sentimentsurvey", "enabled": true},
+    "put_call": {"tickers": ["^PCRE", "^CPCE"], "enabled": true}
+  },
+
+  "obsidian": {
+    "vault_config": "~/.obsidian-wiki/config",
+    "report_path": "40-投資/42-總經分析",
+    "filename_template": "{label}量化評估-{date}.md"
+  }
+}

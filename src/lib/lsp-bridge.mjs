@@ -74,7 +74,8 @@ const LSP_CONFIGS = {
     fileExts: ['.py', '.pyw'],
     languageId: 'python',
     findCandidates: [
-      '/Users/wclin/Library/Python/3.9/bin/pylsp',
+      process.env.HOME + '/Library/Python/3.9/bin/pylsp',
+      process.env.HOME + '/.local/bin/pylsp',
       '/usr/local/bin/pylsp',
       '/opt/homebrew/bin/pylsp',
     ],
@@ -86,7 +87,7 @@ const LSP_CONFIGS = {
     fileExts: ['.rs'],
     languageId: 'rust',
     findCandidates: [
-      '/Users/wclin/.cargo/bin/rust-analyzer',
+      process.env.HOME + '/.cargo/bin/rust-analyzer',
       '/usr/local/bin/rust-analyzer',
       '/opt/homebrew/bin/rust-analyzer',
     ],

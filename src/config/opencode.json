@@ -6,7 +6,7 @@
   "mcp": {
     "smart": {
       "type": "local",
-      "command": ["node", "/Users/wclin/opencode/dev/smart/src/server/index.mjs"],
+      "command": ["node", "__SMART_MCP_DIR__/src/server/index.mjs"],
       "enabled": true
     }
   },

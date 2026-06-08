@@ -156,6 +156,32 @@ npm install @mozilla/readability@0.6.0 linkedom@0.18.12 turndown@7.2.4
 
 > 💡 **安裝後 agent 會自動載入 skills**：你的 `smart-mcp agent` 使用洋蔥架構，收到任務時會自動分類並載入對應 skill（如「爬蟲」→ `smart-mcp-crawl`）。不需額外設定。
 
+#### 步驟 3.5：安裝 Companion Skills（選配）
+
+`config/skills/` 目錄下除了 8 個 `smart-mcp-*.md` 核心 skill 外，還有 **15 個 companion skills**（如 LSP 語法檢查、天氣查詢、台股、週報、郵件助理等）。
+
+```bash
+# 安裝所有 companion skills（建立 symlink）
+bash config/skills/install-skills.sh
+
+# 或複製模式（獨立管理）
+bash config/skills/install-skills.sh --copy
+```
+
+#### 步驟 3.6：設定環境變數（選配）
+
+部分工具需要環境變數才能正確運作：
+
+```bash
+# Toonify token 優化工具路徑（預設 $HOME/toonify-mcp）
+export TOONIFY_PATH="/your/path/toonify-mcp"
+
+# 週報用 — 你的公司 Email（用於 Apple Mail 過濾自己的信件）
+export SMI_EMAIL="user@company.com"
+```
+
+各工具會自動偵測上述變數，若未設定則使用合理預設值。
+
 #### 步驟 4：安裝 Agent Personality（讓 agent 懂得用 50+ 工具 + 8 個 task skills）
 
 ```bash

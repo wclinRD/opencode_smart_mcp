@@ -753,7 +753,7 @@ function writeMsg(msg) { stdout.write(JSON.stringify(msg) + '\n'); }
 
 // --- Toonify auto-optimization ---
 const TOONIFY_ENABLED = env.SMART_TOONIFY !== '0' && env.SMART_TOONIFY !== 'false';
-const TOONIFY_PATH = env.TOONIFY_PATH || resolve(env.HOME || '/Users/wclin', 'toonify-mcp');
+const TOONIFY_PATH = env.TOONIFY_PATH || resolve(env.HOME || '~', 'toonify-mcp');
 let _optimizer = null;
 let _respondChain = Promise.resolve();
 

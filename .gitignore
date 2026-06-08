@@ -32,3 +32,12 @@ reports/*.html
 .opencode/memory-working/
 .opencode/stats/
 storage/
+
+# Companion skills: runtime cache & pytest artifacts
+config/skills/**/.cache/
+config/skills/**/.pytest_cache/
+config/skills/**/__pycache__/
+config/skills/**/.scraper_circuit.json
+config/skills/**/*.app/
+config/skills/**/MeetingRecorder
+config/skills/**/RecordingControlPanel
