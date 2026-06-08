@@ -42,10 +42,12 @@ echo ""
 AUTH_DATA=$(python3 << 'PYTHON_EOF'
 import secrets, hashlib, base64, json, os, sys, urllib.parse
 
-# 設定（單一定義點，從環境變數讀取）
-import os
-CLIENT_ID = os.environ.get("AZURE_CLIENT_ID") or "REDACTED"
-TENANT_ID = os.environ.get("AZURE_TENANT_ID") or "REDACTED"
+# 設定（從環境變數讀取，不允許 fallback）
+CLIENT_ID = os.environ.get("AZURE_CLIENT_ID")
+TENANT_ID = os.environ.get("AZURE_TENANT_ID")
+if not CLIENT_ID or not TENANT_ID:
+    print("❌ AZURE_CLIENT_ID and AZURE_TENANT_ID must be set", file=sys.stderr)
+    sys.exit(1)
 REDIRECT_URI = "http://localhost/oauth-callback"
 
 # PKCE
