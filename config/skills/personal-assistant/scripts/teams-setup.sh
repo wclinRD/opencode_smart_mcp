@@ -42,9 +42,10 @@ echo ""
 AUTH_DATA=$(python3 << 'PYTHON_EOF'
 import secrets, hashlib, base64, json, os, sys, urllib.parse
 
-# 設定（單一定義點）
-CLIENT_ID = "REDACTED"
-TENANT_ID = "REDACTED"
+# 設定（單一定義點，從環境變數讀取）
+import os
+CLIENT_ID = os.environ.get("AZURE_CLIENT_ID") or "REDACTED"
+TENANT_ID = os.environ.get("AZURE_TENANT_ID") or "REDACTED"
 REDIRECT_URI = "http://localhost/oauth-callback"
 
 # PKCE

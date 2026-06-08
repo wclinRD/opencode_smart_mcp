@@ -1054,7 +1054,7 @@ def make_chat_link(chat_id):
     return "https://teams.microsoft.com/l/chat/0/0?users=27b4efa1-"+quote(chat_id)+"&tenantId="+quote(tid)
 
 def load_tenant_id():
-    return "REDACTED"
+    return os.environ.get("AZURE_TENANT_ID") or "REDACTED"
 
 def preview(text, max_len=80):
     if not text:
@@ -1087,7 +1087,7 @@ def llm_summarize(chat_name, participants, messages):
         )
         resp = req.post(
             "http://127.0.0.1:20128/v1/chat/completions",
-            headers={"Authorization": "Bearer REDACTED"},
+            headers={"Authorization": "Bearer " + os.environ.get("LLM_API_KEY", "REDACTED")},
             json={
                 "model": "kr/qwen3-coder-next",
                 "messages": [
