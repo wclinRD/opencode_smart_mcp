@@ -92,6 +92,28 @@ permission:
 
 ---
 
+## 📄 文件工具選擇指南
+
+| 工具 | 用在哪 |
+|------|--------|
+| `smart_ingest_document({path})` | **第一次讀文件** — 轉為 LLM 可讀的 Markdown |
+| `smart_list_documents({query})` | **瀏覽看過哪些文件** — 只搜 title/path/summary |
+| `smart_search_docs({query})` | **記得內容但忘了文件名** — 全文搜尋內容片段 |
+| `smart_ingest_document({path, offset, limit})` | **已看過但需要完整內容** — 用分頁重新讀取 |
+
+### 文件分析完整流程
+
+```
+收到一份文件 →
+  1. smart_ingest_document({path})     ← 讀取並自動註冊到索引
+  2. (LLM 分析內容、回答問題)
+隔天想找之前看過的段落 →
+  3. smart_search_docs({query: "關鍵字"})  ← 全文搜尋內容
+  4. smart_ingest_document({path, offset, limit})  ← 回去看完整段落
+```
+
+---
+
 ## ⚡ 常用工作流模式
 
 | 情境 | 步驟 |
