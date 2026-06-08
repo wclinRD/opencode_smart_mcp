@@ -63,10 +63,14 @@ For large PDFs (>100 pages), use offset/limit to read in chunks.
     try {
       const result = await ingestDocument(path, { offset, limit });
 
-      // Auto-register in document registry (cross-session index)
+      // Auto-register in document registry (cross-session index + full-text search)
       try {
         const registry = getRegistry();
-        registry.register(path, result.format, result.title, { summary: summary || '' });
+        const contentExcerpt = result.content.slice(0, 4000);
+        registry.register(path, result.format, result.title, {
+          summary: summary || '',
+          content: contentExcerpt,
+        });
       } catch (regErr) {
         // Registry failure is non-fatal — document content still returned
         console.error('Document registry error:', regErr.message);
@@ -85,7 +89,7 @@ For large PDFs (>100 pages), use offset/limit to read in chunks.
       const charCount = result.content.length;
       const wordCount = result.content.split(/\s+/).filter(Boolean).length;
       output += `\n\n---\n*${charCount} chars, ~${wordCount} words*`;
-      output += `\n*Registered in document index. Use smart_list_documents to find it later.*`;
+      output += `\n*Registered in document index. Use smart_list_documents to find it later or smart_search_docs to search its content.*`;
 
       return output;
     } catch (err) {

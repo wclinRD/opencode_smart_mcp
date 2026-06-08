@@ -354,6 +354,64 @@ Smart MCP 目前只能讀純文字格式（.js, .ts, .py, .md, .txt, .json, .yam
 
 ---
 
+## Phase 5：全文文件檢索（Full-text Document Search）
+
+> 2026-06-08 規劃。Phase 4b 只能搜 metadata（title/path/summary），Phase 5 讓你搜**內容**。
+
+### 動機
+
+Phase 4b 的 document registry 追蹤「看過哪些文件」，但無法回答「在哪份文件的哪個段落提到 X」。使用者需要的是：
+- 「上週看的那份 ONFI spec，提到 timing constraints 的段落在哪？」
+- 「那份合約裡關於賠償條款怎麼寫的？」
+- 「記得 Q&A 表裡有討論 bridge mode issue，細節是什麼？」
+
+這些全是 **全文內容搜尋**，不是 metadata 搜尋。
+
+### 架構
+
+```
+Ingest 流程（修改 ingest-document plugin）：
+  File → ingestDocument() → registry.register(metadata)
+                           → registry.storeContent(path, 前4000chars)
+
+搜尋流程（新工具 smart_search_docs）：
+  query → registry.searchContent(query)
+    → SELECT * FROM documents WHERE content LIKE '%q1%' AND content LIKE '%q2%'
+    → 回傳：檔案路徑 + 格式 + 內容片段（含 match 前後文）
+
+儲存：
+  重用 ~/.smart/cache/documents.db，新增 content TEXT 欄位
+  不引入 FTS5（Node 26 node:sqlite 不支援 extension loading）
+  LIKE '%query%' 對單開發者 local 工具（數百份文件內）效能足夠
+```
+
+### 為何不選其他方向
+
+| 候選方向 | 不選原因 |
+|---------|---------|
+| Code+Doc 交叉比對 | 依賴 CKG 複雜基礎設施，Phase 6 再評估 |
+| 自主工作流引擎 | Phase 3 已拒絕（auto-execution），LLM 已能勝任 |
+| 文件變更追蹤 | 使用頻率太低，不配 Phase 編號 |
+| 文件→Wiki 橋接 | LLM 已能組合 ingest_document → wiki-capture 完成 |
+
+### 不上什麼
+
+- 不引入 FTS5 或 elasticsearch — LIKE 搜尋就夠用
+- 不存全文 — 只存前 4000 chars 做搜尋，完整內容用 smart_ingest_document 讀取
+- 不做 ranking/scoring — 簡單按 updated_at 排序
+- 不做中文分詞 — 單字匹配就夠
+
+### 成效預估
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| 文件搜尋範圍 | 只有 title/path/summary | 文件**內容**也可搜 |
+| 找到目標時間 | 要記得文件名稱或摘要 | 忘記文件名也沒關係，搜內容即可 |
+| 跨 session 可用性 | 知道看過但找不到內容 | 直接跳到相關段落 |
+| 新工具數 | 0 | 1 (`smart_search_docs`) |
+
+---
+
 ## 九、不做什麼
 
 | 項目 | 原因 |

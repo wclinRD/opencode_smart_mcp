@@ -336,4 +336,146 @@ describe('document-registry', () => {
       resetRegistry();
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Phase 5: Full-text content search
+  // ---------------------------------------------------------------------------
+
+  describe('Phase 5: content search', () => {
+    let dbPath;
+
+    before(() => {
+      dbPath = TEST_DB.replace('.db', '-fts.db');
+    });
+
+    it('should store and search content', () => {
+      resetRegistry();
+      const reg = getRegistry({ dbPath });
+      reg.register('/tmp/doc1.pdf', 'pdf', 'ONFI Spec', { content: 'This document describes the ONFI NAND Flash timing constraints and electrical characteristics.' });
+      reg.register('/tmp/doc2.docx', 'docx', 'Q&A Log', { content: 'Q&A session about bridge mode issue. The RE/DQS/DQ rx_odt_en causes unknown PAD state. Wait for m2 update.' });
+      reg.register('/tmp/doc3.txt', 'text', 'Notes', { content: 'Shopping list: milk, eggs, bread. No technical content here.' });
+
+      // Search for single term
+      const r1 = reg.searchContent('timing');
+      assert.equal(r1.length, 1);
+      assert.ok(r1[0].path.includes('doc1'));
+
+      // Search for multi-word (AND)
+      const r2 = reg.searchContent('bridge mode');
+      assert.equal(r2.length, 1);
+      assert.ok(r2[0].path.includes('doc2'));
+
+      // Search across all columns (title match)
+      const r3 = reg.searchContent('ONFI');
+      assert.equal(r3.length, 1);
+      assert.equal(r3[0].title, 'ONFI Spec');
+
+      // No match
+      const r4 = reg.searchContent('nonexistent12345');
+      assert.equal(r4.length, 0);
+
+      reg.close();
+      resetRegistry();
+    });
+
+    it('should support storeContent separate from register', () => {
+      resetRegistry();
+      const reg = getRegistry({ dbPath: dbPath.replace('.db', '-store.db') });
+
+      // Register first without content
+      reg.register('/tmp/report.pdf', 'pdf', 'Annual Report');
+      reg.storeContent('/tmp/report.pdf', 'The annual financial report shows revenue growth of 15% in Q4 2025.');
+
+      const r = reg.searchContent('revenue');
+      assert.equal(r.length, 1);
+      assert.equal(r[0].title, 'Annual Report');
+      assert.ok(r[0].content.includes('revenue'));
+
+      reg.close();
+      resetRegistry();
+    });
+
+    it('should match across content, title, and summary', () => {
+      resetRegistry();
+      const reg = getRegistry({ dbPath: dbPath.replace('.db', '-cross.db') });
+
+      // Content match
+      reg.register('/tmp/a.pdf', 'pdf', 'Doc A', { content: 'lorem ipsum dolor', summary: 'Test doc' });
+      // Title match  
+      reg.register('/tmp/b.pdf', 'pdf', 'Special Report', { content: 'nothing here' });
+      // Summary match
+      reg.register('/tmp/c.pdf', 'pdf', 'Doc C', { content: 'nothing here', summary: 'Contains special analysis' });
+
+      const r = reg.searchContent('special');
+      assert.equal(r.length, 2, 'Should match title AND summary');
+      const titles = r.map(d => d.title);
+      assert.ok(titles.includes('Special Report'));
+      assert.ok(titles.includes('Doc C'));
+
+      reg.close();
+      resetRegistry();
+    });
+
+    it('should return empty array for empty query', () => {
+      resetRegistry();
+      const reg = getRegistry({ dbPath: dbPath.replace('.db', '-emptyq.db') });
+      reg.register('/tmp/a.pdf', 'pdf', 'Doc A', { content: 'test content' });
+
+      const r = reg.searchContent('');
+      assert.equal(r.length, 0);
+
+      reg.close();
+      resetRegistry();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Phase 5: search-docs plugin integration
+  // ---------------------------------------------------------------------------
+
+  describe('Phase 5: search-docs plugin', () => {
+    let dbPath;
+
+    before(() => {
+      dbPath = TEST_DB.replace('.db', '-plugin5.db');
+    });
+
+    it('should search registered documents via plugin', async () => {
+      resetRegistry();
+      const reg = getRegistry({ dbPath });
+      reg.register('/tmp/spec.pdf', 'pdf', 'ONFI 6.0 Spec', { content: 'NV-DDR3 timing parameters include tRCmin=45ns and tRFC=130ns.' });
+      reg.register('/tmp/notes.txt', 'text', 'Scratch', { content: 'Just random notes' });
+
+      const plugin = await import('../src/plugins/standard/search-docs.mjs');
+      const result = await plugin.default.handler({ query: 'timing parameters' });
+
+      assert.ok(result.includes('ONFI'));
+      assert.ok(result.includes('timing'));
+      assert.ok(result.includes('tRCmin'));
+      assert.ok(result.includes('spec.pdf'));
+
+      reg.close();
+      resetRegistry();
+    });
+
+    it('should return no-results message', async () => {
+      resetRegistry();
+      const reg = getRegistry({ dbPath: dbPath.replace('.db', '-noresults.db') });
+      reg.register('/tmp/a.pdf', 'pdf', 'Doc A', { content: 'nothing relevant' });
+
+      const plugin = await import('../src/plugins/standard/search-docs.mjs');
+      const result = await plugin.default.handler({ query: 'ZZZZnotfoundZZZZ' });
+
+      assert.ok(result.includes('No documents found'));
+
+      reg.close();
+      resetRegistry();
+    });
+
+    it('should require query parameter', async () => {
+      const plugin = await import('../src/plugins/standard/search-docs.mjs');
+      const result = await plugin.default.handler({});
+      assert.ok(result.includes('query is required'));
+    });
+  });
 });

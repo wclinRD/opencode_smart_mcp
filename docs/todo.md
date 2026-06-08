@@ -254,6 +254,40 @@
 
 ---
 
+## Phase 5：全文文件檢索（Full-text Document Search）
+
+> **目標**：讓使用者可以搜尋已 ingest 文件的**內容**，而不只是 metadata。
+> 對應 plan.md Phase 5 章節。
+
+### 1. `document-registry.mjs` 擴充 🔨
+
+- [ ] 新增 `content TEXT` 欄位（ALTER TABLE ADD COLUMN migration）
+- [ ] `storeContent(path, content)` — 儲存文件內容片段
+- [ ] `searchContent(query, limit)` — LIKE %query% 全文搜尋（支援多詞 AND）
+- [ ] 內部 migration 機制（schema version tracking）
+
+### 2. Plugin 擴充 🔨
+
+- [ ] `ingest-document.mjs` — ingest 後自動 storeContent（前 4000 chars）
+- [ ] `src/plugins/standard/search-docs.mjs` — `smart_search_docs` 新工具
+- [ ] 支援參數：`query`（必填）、`limit`（可選，預設 10）
+- [ ] 回傳格式：路徑 + 格式 + title + 摘要片段 + updated_at
+
+### 3. 整合 🔨
+
+- [ ] `src/lib/hybrid-engine.mjs` DOMAIN_MAP 加入 `smart_search_docs`
+- [ ] `config/agents/smart-mcp.md` 加入 direct-call table + router 例子
+- [ ] Synced to `~/.config/opencode/agents/smart-mcp.md`
+
+### 4. 測試 🔨
+
+- [ ] storeContent / searchContent unit tests
+- [ ] Migration 測試（舊 schema 無 content 欄位 → 自動加欄位）
+- [ ] Plugin 整合測試（ingest auto-store + search-docs）
+- [ ] 全量 regression
+
+---
+
 ## 已決定不做的功能（記入反省）
 
 以下是曾經考慮但經評估後捨棄的方向，記錄以避免重複討論：

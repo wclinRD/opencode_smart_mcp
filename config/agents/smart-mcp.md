@@ -57,6 +57,7 @@ permission:
 | `smart_context({command})` | Session 管理 |
 | `smart_ingest_document({path})` | 讀取 PDF/DOCX/XLSX/PPTX/HTML 等二進位文件 |
 | `smart_list_documents({query})` | 搜尋/列出之前讀過的文件（跨 session） |
+| `smart_search_docs({query, limit})` | 全文搜尋已 ingest 文件的內容（支援多詞 AND） |
 
 ### 不確定時用 hybrid_router 的例子
 
@@ -71,6 +72,7 @@ permission:
 | 想做報告 | `hybrid_router("產生架構圖表報告")` → 推薦 report tools |
 | 想讀文件 | `hybrid_router("分析這份合約")` → 推薦 smart_ingest_document |
 | 想找文件 | `hybrid_router("找之前讀過的 spec")` → 推薦 smart_list_documents |
+| 想搜文件內容 | `hybrid_router("搜 PDF 裡提到 timing constraints 的段落")` → 推薦 smart_search_docs |
 | 完全不確定 | `hybrid_router("我該用什麼工具做 X")` → 自動分類 + 推薦 |
 
 ---

@@ -42,6 +42,8 @@ class DocumentRegistry {
     this.#db = new DatabaseSync(this.#dbPath);
     this.#db.exec('PRAGMA journal_mode = WAL');
     this.#db.exec('PRAGMA synchronous = NORMAL');
+
+    // Phase 4b schema (version 1)
     this.#db.exec(`
       CREATE TABLE IF NOT EXISTS documents (
         id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,6 +55,22 @@ class DocumentRegistry {
         updated_at  TEXT  NOT NULL DEFAULT (datetime('now'))
       )
     `);
+
+    // Phase 5 migration: add content column for full-text search
+    this.#runMigrations();
+  }
+
+  /** Run schema migrations based on user_version */
+  #runMigrations() {
+    const { user_version: version } = this.#db.prepare('PRAGMA user_version').get();
+    if (version < 2) {
+      try {
+        this.#db.exec(`ALTER TABLE documents ADD COLUMN content TEXT NOT NULL DEFAULT ''`);
+      } catch {
+        // Column may already exist if migration was partially applied
+      }
+      this.#db.exec('PRAGMA user_version = 2');
+    }
   }
 
   /**
@@ -64,26 +82,70 @@ class DocumentRegistry {
    * @param {string} title - Document title (basename if not provided)
    * @param {object} [opts]
    * @param {string} [opts.summary] - Optional content summary
+   * @param {string} [opts.content] - Optional content excerpt (for full-text search)
    * @returns {{ path: string, format: string, title: string }}
    */
   register(filePath, format, title = '', opts = {}) {
     this.#ensureDb();
-    const { summary = '' } = opts;
+    const { summary = '', content = '' } = opts;
     const safePath = String(filePath);
     const safeFormat = String(format);
     const safeTitle = String(title || safePath.split('/').pop() || safePath);
 
     const stmt = this.#db.prepare(`
-      INSERT INTO documents (path, format, title, summary, updated_at)
-      VALUES (?, ?, ?, ?, datetime('now'))
+      INSERT INTO documents (path, format, title, summary, content, updated_at)
+      VALUES (?, ?, ?, ?, ?, datetime('now'))
       ON CONFLICT(path) DO UPDATE SET
         format    = excluded.format,
         title     = excluded.title,
         summary   = CASE WHEN excluded.summary != '' THEN excluded.summary ELSE summary END,
+        content   = CASE WHEN excluded.content != '' THEN excluded.content ELSE content END,
         updated_at = datetime('now')
     `);
-    stmt.run(safePath, safeFormat, safeTitle, summary);
+    stmt.run(safePath, safeFormat, safeTitle, summary, content);
     return { path: safePath, format: safeFormat, title: safeTitle };
+  }
+
+  /**
+   * Store or update a document's content excerpt for full-text search.
+   * @param {string} filePath
+   * @param {string} content - Content text to index (first ~4000 chars recommended)
+   */
+  storeContent(filePath, content) {
+    this.#ensureDb();
+    const stmt = this.#db.prepare(`
+      UPDATE documents SET content = ?, updated_at = datetime('now')
+      WHERE path = ?
+    `);
+    stmt.run(String(content), String(filePath));
+  }
+
+  /**
+   * Full-text search within document content (LIKE-based, multi-word AND).
+   * Searches content, title, and summary columns.
+   *
+   * @param {string} query - Search query (space-separated terms = AND)
+   * @param {number} [limit=20]
+   * @returns {Array<{path: string, format: string, title: string, summary: string, content: string, updated_at: string}>}
+   */
+  searchContent(query, limit = 20) {
+    this.#ensureDb();
+    const terms = String(query).split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return [];
+
+    // Build WHERE clause: each term must appear in content OR title OR summary
+    const conditions = terms.map(() => `(content LIKE ? OR title LIKE ? OR summary LIKE ?)`);
+    const params = terms.flatMap(t => [`%${t}%`, `%${t}%`, `%${t}%`]);
+    params.push(limit);
+
+    const stmt = this.#db.prepare(`
+      SELECT path, format, title, summary, content, updated_at
+      FROM documents
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `);
+    return stmt.all(...params);
   }
 
   /**
