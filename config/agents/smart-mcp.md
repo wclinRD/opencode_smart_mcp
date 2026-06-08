@@ -70,7 +70,7 @@ permission:
 | 編輯 | `edit` | 字串取代編輯 |
 | 編輯 | `cross_file_edit` | 跨檔案編輯 |
 | 編輯 | `rename_safety` | 安全重新命名 |
-| 文件 | `ingest_document` | 讀取 PDF/DOCX/XLSX/PPTX/HTML 等二進位文件 |
+| 文件 | `ingest_document` | 讀取 PDF/DOCX/XLSX/PPTX/HTML 等二進位文件，含 OCR |
 | 文件 | `list_documents` | 搜尋/列出之前讀過的文件 |
 | 文件 | `search_docs` | 全文搜尋已 ingest 文件內容 |
 | Git | `git_context` | 了解 Git 狀態 |
@@ -102,22 +102,31 @@ permission:
 
 ---
 
-## 📄 文件工具選擇指南
+## 📄 文件工具選擇指南（含 OCR）
 
 文件工具是 **Layer 2 sub-tools**，需透過 `ssr` 呼叫。
 
 | Sub-tool | 用在哪 |
 |----------|--------|
-| `ssr({tool:"ingest_document", args:{path:"..."}})` | **第一次讀文件** — 轉為 LLM 可讀的 Markdown |
+| `ssr({tool:"ingest_document", args:{path:"..."}})` | **第一次讀文件** — 轉為 LLM 可讀的 Markdown，含自動 OCR |
+| `ssr({tool:"ingest_document", args:{path:"...", ocr:true}})` | **掃描 PDF** — 強制 OCR 模式 |
+| `ssr({tool:"ingest_document", args:{path:"...", ocr:true, ocrLang:"chi_tra+eng"}})` | **中文掃描 PDF** — 指定 OCR 語言 |
 | `ssr({tool:"list_documents", args:{query:"..."}})` | **瀏覽看過哪些文件** — 只搜 title/path/summary |
 | `ssr({tool:"search_docs", args:{query:"..."}})` | **記得內容但忘了文件名** — 全文搜尋內容片段 |
 | `ssr({tool:"ingest_document", args:{path:"...", offset:0, limit:50}})` | **已看過但需要完整內容** — 用分頁重新讀取 |
+
+### OCR 行為
+
+- **自動偵測**：文字抽取後若內容過少（空白/掃描 PDF），自動觸發 OCR
+- **強制 OCR**：`ocr: true` 跳過文字抽取直接跑 OCR
+- **語言設定**：`ocrLang: "chi_tra+eng"`（需先安裝對應 tesseract 語言包）
+- **依賴工具**：`pdftoppm` + `tesseract`（已安裝 ✅）
 
 ### 文件分析完整流程
 
 ```
 收到一份文件 →
-  1. ssr({tool:"ingest_document", args:{path:"..."}})    ← 讀取並自動註冊到索引
+  1. ssr({tool:"ingest_document", args:{path:"..."}})    ← 讀取並自動註冊到索引（自動 OCR 若需）
   2. (LLM 分析內容、回答問題)
 隔天想找之前看過的段落 →
   3. ssr({tool:"search_docs", args:{query:"關鍵字"}})    ← 全文搜尋內容
@@ -139,6 +148,7 @@ permission:
 | 專案上手 | `smart_learn → ssr(arch_overview) → ssr(import_graph) → smart_test → smart_security` |
 | 安全修復 | `smart_security → smart_grep → ssr(fast_apply) → smart_test → rescan` |
 | 文件分析 | `ssr(ingest_document) → 分析內容 → 摘要/回答問題` |
+| 掃描 PDF | `ssr(ingest_document args:{ocr:true}) → 自動 OCR → 分析內容` |
 
 ---
 

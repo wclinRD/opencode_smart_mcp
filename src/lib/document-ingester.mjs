@@ -6,10 +6,15 @@
 //   P2: RTF, PPTX
 //
 // Design: Node library first (zero external CLI deps), system CLI fallback.
+//
+// OCR: When standard PDF text extraction yields little/no content (scanned PDF),
+//       auto-fallback to pdftoppm + tesseract OCR pipeline.
+//       Force with: forceOcr:true, custom lang with ocrLang:'chi_tra+eng'
 
-import { readFileSync, existsSync } from 'node:fs';
-import { extname, basename } from 'node:path';
+import { readFileSync, existsSync, readdirSync, mkdtempSync } from 'node:fs';
+import { extname, basename, join } from 'node:path';
 import { execSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 
 // ---------------------------------------------------------------------------
 // Format Detection
@@ -101,6 +106,131 @@ function verifyMagic(filePath, format) {
 }
 
 // ---------------------------------------------------------------------------
+// OCR helpers — pdftoppm + tesseract for scanned PDFs
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if extracted text indicates a scanned/image-only PDF.
+ * Returns true when text is empty, too short for page count, or looks like garbage.
+ * @param {string} text - extracted text content
+ * @param {number} [numPages] - number of pages in PDF (if known)
+ * @returns {boolean}
+ */
+function isLikelyScanned(text, numPages) {
+  const cleaned = (text || '').trim();
+  if (!cleaned) return true;
+
+  // Count "meaningful" words (length >= 3 chars)
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  const meaningfulWords = words.filter(w => w.length >= 3).length;
+  const avgWordLen = words.length > 0
+    ? words.reduce((sum, w) => sum + w.length, 0) / words.length
+    : 0;
+
+  // If we know page count, expect at least some content per page
+  if (numPages && numPages > 1) {
+    const wordsPerPage = words.length / numPages;
+    if (wordsPerPage < 3) return true; // <3 words per page → scanned
+  }
+
+  // Heuristic: meaningful words < 5 or avg word length is extreme
+  if (meaningfulWords < 5) return true;
+  if (avgWordLen > 50) return true; // likely binary/garbled text
+  if (avgWordLen < 2 && words.length > 10) return true; // single chars → garbage
+
+  return false;
+}
+
+/**
+ * Check if a CLI tool is available on PATH.
+ * @param {string} tool
+ * @returns {boolean}
+ */
+function isToolAvailable(tool) {
+  try {
+    execSync(`which "${tool}" 2>/dev/null`, { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * OCR a PDF via pdftoppm + tesseract.
+ * Converts each page to PNG at given DPI, runs OCR, returns text.
+ *
+ * @param {string} filePath - path to PDF
+ * @param {object} [opts]
+ * @param {string} [opts.lang='eng'] - tesseract language(s), e.g. 'eng', 'chi_tra+eng'
+ * @param {number} [opts.dpi=300] - render DPI (higher = better OCR but slower)
+ * @param {number} [opts.timeout=300000] - max total OCR time in ms
+ * @returns {{ content: string, pages: string[], numPages: number, ocr: boolean, lang: string }}
+ */
+function ocrPdf(filePath, opts = {}) {
+  const { lang = 'eng', dpi = 300, timeout = 300000 } = opts;
+
+  if (!isToolAvailable('pdftoppm')) {
+    throw new Error(
+      'OCR requires pdftoppm (part of poppler). Install: brew install poppler'
+    );
+  }
+  if (!isToolAvailable('tesseract')) {
+    throw new Error(
+      'OCR requires tesseract. Install: brew install tesseract'
+    );
+  }
+
+  // Create temp directory for page images
+  const tmpDir = mkdtempSync(join(tmpdir(), 'smart-ocr-'));
+  const pagePrefix = join(tmpDir, 'page');
+
+  try {
+    // Step 1: Convert PDF pages to PNG images
+    execSync(
+      `pdftoppm -png -r ${dpi} "${filePath}" "${pagePrefix}" 2>/dev/null`,
+      { encoding: 'utf8', timeout: Math.min(timeout, 120000) }
+    );
+
+    // Step 2: Collect page images sorted by filename
+    const pageFiles = readdirSync(tmpDir)
+      .filter(f => f.startsWith('page') && f.endsWith('.png'))
+      .sort();
+
+    if (pageFiles.length === 0) {
+      throw new Error('pdftoppm produced no page images. Is this a valid PDF?');
+    }
+
+    // Step 3: OCR each page with tesseract
+    const pages = [];
+    for (let i = 0; i < pageFiles.length; i++) {
+      const imagePath = join(tmpDir, pageFiles[i]);
+      try {
+        const text = execSync(
+          `tesseract "${imagePath}" stdout -l ${lang} --psm 6 2>/dev/null`,
+          { encoding: 'utf8', timeout: 60000 }
+        );
+        pages.push(text.trim() || `[Page ${i + 1} — OCR returned no text]`);
+      } catch (pageErr) {
+        pages.push(`[Page ${i + 1} — OCR failed: ${pageErr.message}]`);
+      }
+    }
+
+    return {
+      content: pages.join('\n\n---\n\n'),
+      pages,
+      numPages: pages.length,
+      ocr: true,
+      lang,
+    };
+  } finally {
+    // Cleanup temp files
+    try {
+      execSync(`rm -rf "${tmpDir}"`, { stdio: 'ignore' });
+    } catch { /* best-effort cleanup */ }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Converters
 // ---------------------------------------------------------------------------
 
@@ -109,10 +239,12 @@ function verifyMagic(filePath, format) {
  * @param {object} [opts]
  * @param {number} [opts.offset=0]
  * @param {number} [opts.limit]
- * @returns {Promise<{format: string, title: string, totalPages: number|null, content: string, pages: string[]}>}
+ * @param {boolean} [opts.forceOcr] - Force OCR for PDF (skip text extraction)
+ * @param {string} [opts.ocrLang='eng'] - Tesseract language(s) for OCR
+ * @returns {Promise<{format: string, title: string, totalPages: number|null, content: string, pages: string[], ocr?: boolean}>}
  */
 export async function ingestDocument(filePath, opts = {}) {
-  const { offset = 0, limit = Infinity } = opts;
+  const { offset = 0, limit = Infinity, forceOcr = false, ocrLang = 'eng' } = opts;
   const { format, pages: supportsPages } = detectFormat(filePath);
   const title = basename(filePath);
   const converter = CONVERTERS[format];
@@ -121,7 +253,7 @@ export async function ingestDocument(filePath, opts = {}) {
     throw new Error(`Unsupported format: ${format}. Supported: ${Object.keys(CONVERTERS).join(', ')}`);
   }
 
-  const result = await converter(filePath);
+  const result = await converter(filePath, { forceOcr, ocrLang });
 
   // Apply pagination for page-aware formats
   let content, pages, totalPages;
@@ -139,7 +271,10 @@ export async function ingestDocument(filePath, opts = {}) {
     content = result.content;
   }
 
-  return { format, path: filePath, title, totalPages, content, pages };
+  // Pass through OCR metadata if present
+  const ocr = result.ocr || false;
+  const lang = result.lang || undefined;
+  return { format, path: filePath, title, totalPages, content, pages, ocr, lang };
 }
 
 // -- Format converter registry -----------------------------------------------
@@ -148,15 +283,23 @@ const CONVERTERS = {};
 
 // --- PDF -------------------------------------------------------------------
 
-CONVERTERS.pdf = async function convertPdf(filePath) {
+CONVERTERS.pdf = async function convertPdf(filePath, opts = {}) {
+  const { forceOcr = false, ocrLang = 'eng' } = opts;
   const buf = readFileSync(filePath);
 
-  // Try pdftotext first (better quality, layout preservation)
+  // Force OCR mode — skip text extraction entirely
+  if (forceOcr) {
+    return ocrPdf(filePath, { lang: ocrLang });
+  }
+
+  // ----- Phase 1: Text extraction (pdftotext) -----
   let pdftotextAvailable = false;
   try {
     execSync('which pdftotext', { stdio: 'ignore' });
     pdftotextAvailable = true;
   } catch { /* not available */ }
+
+  let textResult = null;
 
   if (pdftotextAvailable) {
     try {
@@ -181,7 +324,7 @@ CONVERTERS.pdf = async function convertPdf(filePath) {
         stderr = '';
       } catch (execErr) {
         // Read stderr from temp file
-        try { stderr = require_fs().readFileSync(`/tmp/smart-pdf-err.${process.pid}`, 'utf8'); } catch {}
+        try { stderr = readFileSync(`/tmp/smart-pdf-err.${process.pid}`, 'utf8'); } catch {}
         // If password-protected, return clear message
         if (/incorrect password|password/i.test(stderr || execErr.stderr || execErr.message)) {
           return {
@@ -196,49 +339,93 @@ CONVERTERS.pdf = async function convertPdf(filePath) {
       const rawPages = allText.split('\f').filter(p => p.trim());
       const pages = rawPages.length > 0 ? rawPages : [allText];
 
-      return {
+      textResult = {
         content: pages.join('\n\n---\n\n'),
         pages,
         numPages: numPages || pages.length,
       };
+
+      // Check if extracted text looks meaningful
+      if (!isLikelyScanned(textResult.content, textResult.numPages)) {
+        return textResult; // ✅ Good text — return as-is
+      }
+      // Scanned PDF detected — fall through to OCR below
     } catch {
       // pdftotext failed — fall through to pdf-parse
     }
   }
 
-  // pdf-parse fallback (no external CLI dependency)
-  try {
-    const { PDFParse } = await import('pdf-parse');
-    const parser = new PDFParse(new Uint8Array(buf));
-    await parser.load();
-    const numPages = parser.doc?._pdfInfo?.numPages || 0;
-    const info = parser.getInfo();
+  // ----- Phase 2: pdf-parse fallback (only if pdftotext didn't succeed) -----
+  if (!textResult) {
+    try {
+      const { PDFParse } = await import('pdf-parse');
+      const parser = new PDFParse(new Uint8Array(buf));
+      await parser.load();
+      const numPages = parser.doc?._pdfInfo?.numPages || 0;
+      const info = parser.getInfo();
 
-    // Get per-page text
-    const pages = [];
-    for (let i = 1; i <= numPages; i++) {
-      try {
-        const text = parser.getPageText(i);
-        pages.push(text || `[Page ${i} — no extractable text]`);
-      } catch {
-        pages.push(`[Page ${i} — text extraction failed]`);
+      // Get per-page text
+      const pages = [];
+      for (let i = 1; i <= numPages; i++) {
+        try {
+          const text = parser.getPageText(i);
+          pages.push(text || `[Page ${i} — no extractable text]`);
+        } catch {
+          pages.push(`[Page ${i} — text extraction failed]`);
+        }
       }
-    }
 
-    if (pages.length === 0) {
-      // Fallback: get all text
-      const allText = parser.getText();
-      pages.push(allText || '[No text content found in PDF]');
-    }
+      if (pages.length === 0) {
+        const allText = parser.getText();
+        pages.push(allText || '[No text content found in PDF]');
+      }
 
-    return {
-      content: pages.join('\n\n---\n\n'),
-      pages,
-      info: info || {},
-    };
-  } catch (err) {
-    // Both pdftotext and pdf-parse failed — return what we can
-    const message = `[PDF text extraction: ${err.message}]`;
+      textResult = {
+        content: pages.join('\n\n---\n\n'),
+        pages,
+        info: info || {},
+        numPages,
+      };
+
+      // Check if extracted text looks meaningful
+      if (!isLikelyScanned(textResult.content, textResult.numPages)) {
+        return textResult; // ✅ Good text — return as-is
+      }
+      // Scanned PDF — fall through to OCR
+    } catch (err) {
+      // Both text extraction methods failed — proceed to OCR
+      textResult = null;
+    }
+  }
+
+  // ----- Phase 3: OCR fallback (scanned PDF or extraction failed) -----
+  if (textResult && isLikelyScanned(textResult.content, textResult.numPages)) {
+    // Auto-OCR: extracted text is too sparse, likely a scanned document
+    try {
+      const ocrResult = ocrPdf(filePath, { lang: ocrLang });
+      // Prepend note about OCR being used
+      ocrResult.content = `[OCR auto-detected scanned PDF — OCR applied (lang: ${ocrLang})]\n\n${ocrResult.content}`;
+      return ocrResult;
+    } catch (ocrErr) {
+      // OCR failed too — return the original sparse text with explanation
+      return {
+        content: `[Scanned PDF detected but OCR failed: ${ocrErr.message}]\n\n` +
+                 `Falling back to text extraction (may be empty for scanned PDFs).\n` +
+                 `Install tesseract languages or try: forceOcr=true with ocrLang='eng'\n\n` +
+                 textResult.content,
+        pages: textResult.pages,
+        numPages: textResult.numPages,
+      };
+    }
+  }
+
+  // Both pdftotext and pdf-parse failed entirely → try OCR as last resort
+  try {
+    const ocrResult = ocrPdf(filePath, { lang: ocrLang });
+    ocrResult.content = `[OCR fallback — text extraction failed, OCR applied (lang: ${ocrLang})]\n\n${ocrResult.content}`;
+    return ocrResult;
+  } catch (ocrErr) {
+    const message = `[PDF extraction and OCR both failed. Text: ${(textResult?.content || 'no output').slice(0, 200)} | OCR: ${ocrErr.message}]`;
     return { content: `${message}\n\nFile: ${filePath}\nSize: ${buf.length} bytes`, pages: [message] };
   }
 };
