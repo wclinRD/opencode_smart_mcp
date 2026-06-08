@@ -104,3 +104,58 @@
 
 - [x] 22 pipeline tests（pipeline creation, stages, truncation, cache, empty/null input）
 - [x] 全量回歸：**531 tests, 0 fail**
+
+---
+
+## Phase 3：Universal Task Router ✅
+
+> LLM 路由減壓 — single entry point, LLM 只需描述任務
+>
+> 已全部完成，2026-06-08 部署。現有兩條路徑：
+>   code task → CKG/LSP 工具鏈（不變）
+>   general task → 結構化推薦（domain + skill + tools + workflow）
+> agent_recommend 改為 hybrid-engine 薄 wrapper，一致體驗。
+
+### 1. hybrid-engine 新增 GENERAL 類別 ✅
+
+- [x] 新增 `GENERAL` 類別常數（已 export）
+- [x] 加入所有領域 pattern（crawl/refactor/git/security/test/report/lang/search_web/edit/plan/office/wiki/analyze）
+- [x] 每個領域含觸發關鍵字、推薦工具、workflow（DOMAIN_MAP）
+- [x] 保持現有 code routing 完全不受影響
+
+### 2. hybrid-router 支援 general task 路由 ✅
+
+- [x] GENERAL 類別不回傳 CKG/LSP 工具鏈，改回結構化推薦
+- [x] 推薦格式：{ domain, confidence, skill, tools, workflow }
+- [x] handler 改用 executeHybrid 單一入口（取代舊的 classify→plan→execute→merge）
+
+### 3. 簡化 agent personality ✅
+
+- [x] 路由原則改為「hybrid_router 優先，特殊情況直接呼叫」
+- [x] 4 層路由決策樹 → 簡化版 13 行
+- [x] 242 行 → 139 行（~103 行縮減）
+- [x] `~/.config/opencode/agents/smart-mcp.md` 同步更新
+
+### 4. 測試驗證 ✅
+
+- [x] `classifyQuestion` 直接驗證：GENERAL 正確分類
+- [x] 實測：`hybrid_router("幫我爬一個網站")` → crawl 推薦
+- [x] 實測：`hybrid_router("掃描漏洞")` → security 推薦
+- [x] 實測：`hybrid_router("幫我 commit 並發 PR")` → git 推薦
+- [x] 實測：`hybrid_router("who calls hybrid_router")` → code structure 路徑正常
+
+### 5. 修復 ✅
+
+- [x] export CATEGORIES from hybrid-engine.mjs（未 export 導致 hybrid-router 載入失敗）
+
+### 6. agent_recommend 薄 wrapper ✅
+
+- [x] agent-recommend.mjs 改為 import hybrid-engine.mjs，移除 smart-agent 依賴
+- [x] 使用統一分類器（classifyQuestion + getGeneralRecommendation）
+- [x] 保留相同 API（goal/context/format），輸出格式相容
+- [x] 一般任務回傳 domain + skill + tool chain
+- [x] 程式任務回傳分類資訊 + tool chain
+
+---
+
+## Phase 4：下一步規劃

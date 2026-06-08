@@ -185,6 +185,77 @@ Agent personality 中明確定義：
 
 ---
 
+---
+
+## 十、Phase 3：Universal Task Router（LLM 路由減壓）
+
+### 核心問題
+
+目前洋蔥架構將路由決策完全交給 LLM：
+
+```
+LLM 問「我要做 X」→ LLM 自己查 4 層清單 → LLM 決定用哪個工具 → LLM 用正確 syntax 呼叫
+                                                                   ↑ 瓶頸
+```
+
+LLM 必須記住 4 層 × 40+ 工具 × 各自的 calling convention。這違反「用最少 token 做最多事」。
+
+### 解決方案：Universal Task Router
+
+```
+LLM 問「我要做 X」→ hybrid_router 自動分類 → code task？執行工具 → general task？推薦工具/skill
+                                                   ↑ 單一入口，LLM 只需描述任務
+```
+
+### 設計
+
+| 層面 | 作法 |
+|------|------|
+| **分類** | 在 hybrid-engine 新增 `GENERAL` 類別，涵蓋所有 Smart MCP 領域 |
+| **路由** | code task → 現有 CKG/LSP 工具鏈；general task → 回傳工具/skill 推薦 + workflow |
+| **Personality** | 簡化路由決策樹，LLM 只需記得 hybrid_router 一個入口 |
+| **向後相容** | 不改變現有 code routing 行為，GENERAL 類別走新路徑 |
+
+### 分類領域
+
+| 領域 | 觸發關鍵字 | 推薦動作 |
+|------|-----------|---------|
+| crawl | 爬蟲、網站、API、抓取、crawl、scrape | `skill("smart-mcp-crawl")` + exa_crawl/pw_browser |
+| refactor | 重構、rename、restructure、refactor | `skill("smart-mcp-refactor")` + import_graph/code_impact |
+| debug | 錯誤、bug、除錯、例外、crash | `skill("smart-mcp-debug")` + error_diagnose/debug |
+| git | commit、PR、review、branch、合併 | `skill("smart-mcp-git")` + git_commit/git_pr/git_review |
+| security | 安全、漏洞、掃描、credentials、注入 | `skill("smart-mcp-security")` + smart_security |
+| test | 測試、coverage、test case、單元測試 | `skill("smart-mcp-test")` + smart_test/coverage |
+| report | 報告、圖表、diagram、簡報、文件 | `skill("smart-mcp-report")` + diagram/report |
+| lang | Python/TS/Rust 檢查、lint、type | `skill("smart-mcp-lang")` + py_helper/ts_helper/rs_helper |
+| search | 搜尋、研究、查資料、research | exa_search / websearch / research |
+| edit | 編輯、修改、patch、replace | fast_apply / edit / cross_file_edit |
+| plan | 規劃、workflow、流程、任務分解 | planner / workflow / compose |
+| office | Office、文件、Word、Excel、PPT | officecli MCP tools（外部整合） |
+| analyze | 分析、評估、架構、review | arch_overview / smart_learn / smart_thinking |
+| wiki | wiki、知識庫、筆記、obsidian | skill("wiki-xxx") |
+
+### 實作階段
+
+| 步驟 | 內容 | 檔案 |
+|------|------|------|
+| 1 | hybrid-engine 新增 GENERAL 類別 + 各領域 pattern | `src/lib/hybrid-engine.mjs` |
+| 2 | hybrid-router 新增 general task handler | `src/plugins/standard/hybrid-router.mjs` |
+| 3 | 簡化 agent personality 路由決策樹 | `config/agents/smart-mcp.md` |
+| 4 | 將 agent_recommend 改為 hybrid-engine 薄 wrapper ✅ | `src/plugins/standard/agent-recommend.mjs` |
+| 5 | 測試驗證：一般任務回傳推薦而非執行 | `tests/hybrid-engine.test.mjs` (manual) |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| LLM 需記住的 entry point | 4 層 × 40+ 工具 | 1 個 hybrid_router |
+| 路由決策錯誤率 | 中（LLM 猜錯層/工具） | 低（系統自動分類） |
+| 新工具加入成本 | 高（personality + 所有文件都要改） | 低（只加 classifier pattern） |
+| Agent personality 大小 | 242 行 | ~150 行（路由部分簡化） |
+
+---
+
 ## 九、不做什麼
 
 | 項目 | 原因 |

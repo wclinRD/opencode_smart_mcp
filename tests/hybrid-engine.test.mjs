@@ -86,6 +86,8 @@ import {
   executePlan,
   mergeResults,
   executeHybrid,
+  getGeneralRecommendation,
+  CATEGORIES,
 } from '../src/lib/hybrid-engine.mjs';
 
 // ---------------------------------------------------------------------------
@@ -527,6 +529,265 @@ describe('Phase 12: Hybrid Reasoning Engine', () => {
       assert.ok(typeof parsed.answer === 'string');
     });
   });
+});
+
+// -----------------------------------------------------------------------
+// 9. Phase 3: GENERAL Task Classifier (13 domains)
+// -----------------------------------------------------------------------
+describe('9. Phase 3: GENERAL classifier', () => {
+  const generalQueries = [
+    { domain: 'crawl', query: '幫我爬 iyf.tv 的 API' },
+    { domain: 'crawl', query: '網站抓取工具推薦' },
+    { domain: 'crawl', query: 'scrape this website for data' },
+    { domain: 'crawl', query: 'crawl this page and extract links' },
+    { domain: 'refactor', query: '重構這個 auth 模組' },
+    { domain: 'refactor', query: 'rename authenticate to verifyToken' },
+    { domain: 'refactor', query: 'refactor the login flow' },
+    { domain: 'git', query: '幫我 commit 並發 PR' },
+    { domain: 'git', query: 'git push to remote branch' },
+    { domain: 'git', query: 'code review 這個 PR' },
+    { domain: 'security', query: '掃描專案漏洞' },
+    { domain: 'security', query: '檢查 credentials 洩漏' },
+    { domain: 'security', query: 'security vulnerability scan' },
+    { domain: 'test', query: '跑測試並看覆蓋率' },
+    { domain: 'test', query: '幫我寫 unit test' },
+    { domain: 'test', query: 'run jest tests with coverage' },
+    { domain: 'report', query: '產生架構圖表報告' },
+    { domain: 'report', query: '畫一個 mermaid 流程圖' },
+    { domain: 'report', query: 'generate HTML dashboard' },
+    { domain: 'lang', query: 'python 程式碼檢查' },
+    { domain: 'lang', query: 'run pyright type checking' },
+    { domain: 'search_web', query: '搜尋 React Server Components 文件' },
+    { domain: 'search_web', query: 'research best practices for API design' },
+    { domain: 'edit', query: '幫我 patch 這個檔案' },
+    { domain: 'edit', query: 'apply this diff to the codebase' },
+    { domain: 'plan', query: '規劃這個專案的開發流程' },
+    { domain: 'plan', query: '分解任務步驟' },
+    { domain: 'office', query: '建立一個 Word 文件' },
+    { domain: 'office', query: '編輯這個 excel 試算表' },
+    { domain: 'wiki', query: '查詢 obsidian 知識庫關於 React 的資料' },
+    { domain: 'wiki', query: 'ingest this document into wiki' },
+    { domain: 'analyze', query: '分析這個專案的架構' },
+    { domain: 'analyze', query: 'review 程式碼品質' },
+    { domain: 'analyze', query: 'audit the tech stack' },
+  ];
+
+  for (const { domain, query } of generalQueries) {
+    it(`classifies "${domain}" query: "${query.slice(0, 40)}..."`, () => {
+      const result = classifyQuestion(query);
+      assert.equal(result.category, CATEGORIES.GENERAL,
+        `expected GENERAL for "${query}", got "${result.category}"`);
+      assert.ok(result.confidence >= 0.5, `confidence ${result.confidence} should be >= 0.5`);
+    });
+  }
+
+  // Negative tests: code queries should NOT be classified as GENERAL
+  const codeQueries = [
+    'who calls authenticate in auth.ts',
+    'what is the type of getUser',
+    'find all references to loginUser',
+    'debug the login error',
+    'what if I rename validateToken',
+    'explain how the auth module works',
+    'find unused exports in project',
+    'is it safe to delete this function',
+  ];
+
+  for (const query of codeQueries) {
+    it(`does NOT classify code query as GENERAL: "${query.slice(0, 50)}..."`, () => {
+      const result = classifyQuestion(query);
+      assert.notEqual(result.category, CATEGORIES.GENERAL,
+        `code query "${query}" should not be GENERAL, got GENERAL`);
+      assert.ok(result.confidence >= 0.7 || result.category !== 'unknown',
+        `code query "${query}" should match a code category`);
+    });
+  }
+
+  // Edge cases
+  const edgeCases = [
+    { query: '', expected: 'unknown' },
+    { query: '   ', expected: 'unknown' },        // spaces only
+    { query: 'abc123xyz', expected: 'unknown' },   // gibberish
+    { query: '12345', expected: 'unknown' },        // numbers only
+    { query: '今天天氣怎麼樣', expected: 'unknown' }, // unrelated Chinese
+  ];
+
+  for (const { query, expected } of edgeCases) {
+    it(`handles edge case: "${query.slice(0, 30)}" → ${expected}`, () => {
+      const result = classifyQuestion(query);
+      assert.equal(result.category, expected,
+        `expected "${expected}" for "${query}", got "${result.category}"`);
+    });
+  }
+});
+
+// -----------------------------------------------------------------------
+// 10. Phase 3: getGeneralRecommendation
+// -----------------------------------------------------------------------
+describe('10. Phase 3: getGeneralRecommendation', () => {
+  it('returns null for non-GENERAL classification', () => {
+    const classification = { category: 'structure', confidence: 0.9 };
+    const rec = getGeneralRecommendation(classification, 'who calls foo');
+    assert.equal(rec, null);
+  });
+
+  it('returns crawl recommendation', () => {
+    const classification = classifyQuestion('幫我爬一個網站');
+    const rec = getGeneralRecommendation(classification, '幫我爬一個網站');
+    assert.ok(rec, 'should return recommendation');
+    assert.equal(rec.domain, 'crawl');
+    assert.ok(rec.tools.length > 0, 'should list tools');
+    assert.ok(rec.workflow.length > 0, 'should have workflow');
+    assert.ok(rec.skill, 'should recommend a skill');
+    assert.ok(rec.confidence > 0);
+  });
+
+  it('returns security recommendation', () => {
+    const classification = classifyQuestion('掃描專案漏洞');
+    const rec = getGeneralRecommendation(classification, '掃描專案漏洞');
+    assert.ok(rec, 'should return recommendation');
+    assert.equal(rec.domain, 'security');
+    assert.ok(rec.tools.includes('smart_security'));
+  });
+
+  it('returns git recommendation', () => {
+    const classification = classifyQuestion('幫我 commit 並發 PR');
+    const rec = getGeneralRecommendation(classification, '幫我 commit 並發 PR');
+    assert.ok(rec, 'should return recommendation');
+    assert.equal(rec.domain, 'git');
+    assert.ok(rec.tools.includes('git_commit'));
+  });
+
+  it('returns refactor recommendation', () => {
+    const classification = classifyQuestion('重構 auth 模組');
+    const rec = getGeneralRecommendation(classification, '重構 auth 模組');
+    assert.ok(rec, 'should return recommendation');
+    assert.equal(rec.domain, 'refactor');
+    assert.ok(rec.tools.includes('import_graph'));
+  });
+
+  it('returns test recommendation', () => {
+    const classification = classifyQuestion('跑測試並看覆蓋率');
+    const rec = getGeneralRecommendation(classification, '跑測試並看覆蓋率');
+    assert.ok(rec, 'should return recommendation');
+    assert.equal(rec.domain, 'test');
+    assert.ok(rec.tools.includes('smart_test'));
+  });
+
+  it('returns report recommendation', () => {
+    const classification = classifyQuestion('產生架構圖表報告');
+    const rec = getGeneralRecommendation(classification, '產生架構圖表報告');
+    assert.ok(rec, 'should return recommendation');
+    assert.equal(rec.domain, 'report');
+  });
+
+  it('returns wiki recommendation', () => {
+    const classification = classifyQuestion('查詢 obsidian 知識庫');
+    const rec = getGeneralRecommendation(classification, '查詢 obsidian 知識庫');
+    assert.ok(rec, 'should return recommendation');
+    assert.equal(rec.domain, 'wiki');
+  });
+
+  it('recommendation has required fields', () => {
+    const classification = classifyQuestion('幫我爬一個網站');
+    const rec = getGeneralRecommendation(classification, '幫我爬一個網站');
+    assert.ok(rec, 'should return recommendation');
+    assert.ok(typeof rec.domain === 'string', 'domain should be string');
+    assert.ok(typeof rec.description === 'string', 'description should be string');
+    assert.ok(Array.isArray(rec.tools), 'tools should be array');
+    assert.ok(Array.isArray(rec.workflow), 'workflow should be array');
+    assert.ok(typeof rec.confidence === 'number', 'confidence should be number');
+    assert.ok(rec.confidence > 0 && rec.confidence <= 1, 'confidence should be 0-1');
+    if (rec.skill) assert.ok(typeof rec.skill === 'string', 'skill should be string');
+  });
+});
+
+// -----------------------------------------------------------------------
+// 11. Phase 3: executeHybrid — general task returns recommendation
+// -----------------------------------------------------------------------
+describe('11. Phase 3: executeHybrid (general tasks)', () => {
+  const generalTests = [
+    { question: '幫我爬一個網站 iyf.tv', domain: 'crawl' },
+    { question: '掃描這個專案的漏洞', domain: 'security' },
+    { question: '幫我 commit 並發 PR', domain: 'git' },
+    { question: '重構 auth 模組', domain: 'refactor' },
+  ];
+
+  for (const { question, domain } of generalTests) {
+    it(`returns ${domain} recommendation for: "${question.slice(0, 30)}..."`, async () => {
+      const result = await executeHybrid({ question });
+      // Should be a general task result
+      assert.ok(result.metadata?.isGeneralTask,
+        `expected isGeneralTask for "${question}"`);
+      // Should have _raw.recommendation
+      assert.ok(result._raw?.recommendation,
+        `expected _raw.recommendation for "${question}"`);
+      assert.equal(result._raw.recommendation.domain, domain,
+        `expected domain ${domain}, got ${result._raw.recommendation.domain}`);
+      // Answer should contain domain info
+      assert.ok(result.answer.includes(domain) || result.answer.includes('General Task'),
+        `answer should mention domain or General Task`);
+    });
+  }
+
+  it('code tasks still return deterministic results (not general)', async () => {
+    const result = await executeHybrid({
+      question: 'who calls authenticate',
+      root: process.cwd(),
+    });
+    // Code tasks: not general, no recommendation
+    assert.ok(!result.metadata?.isGeneralTask,
+      'code task should not be isGeneralTask');
+    assert.ok(!result._raw?.recommendation,
+      'code task should not have recommendation');
+    assert.ok(result.metadata?.toolsUsed !== undefined,
+      'code task should track tools used');
+  });
+
+  it('edge: empty question goes to error', async () => {
+    const result = await executeHybrid({ question: '' });
+    assert.ok(result.answer.includes('No question'));
+    assert.ok(!result.metadata?.isGeneralTask);
+  });
+});
+
+// -----------------------------------------------------------------------
+// 12. Phase 3: Domain coverage completeness
+// -----------------------------------------------------------------------
+describe('12. Phase 3: Domain coverage completeness', () => {
+  // Ensure all 13 domains are reachable
+  const allDomains = ['crawl', 'refactor', 'git', 'security', 'test', 'report',
+    'lang', 'search_web', 'edit', 'plan', 'office', 'wiki', 'analyze'];
+
+  for (const domain of allDomains) {
+    it(`has reachable "${domain}" domain`, () => {
+      // Use domain-specific trigger phrases
+      const triggerMap = {
+        crawl: '爬蟲',
+        refactor: '重構',
+        git: 'git commit',
+        security: '漏洞',
+        test: '測試',
+        report: '圖表',
+        lang: 'python lint',
+        search_web: '搜尋 資料',
+        edit: 'patch',
+        plan: '規劃',
+        office: 'word',
+        wiki: 'obsidian',
+        analyze: '分析',
+      };
+      const phrase = triggerMap[domain];
+      const classification = classifyQuestion(phrase);
+      assert.equal(classification.category, CATEGORIES.GENERAL,
+        `"${phrase}" should trigger ${domain} (got ${classification.category})`);
+
+      const rec = getGeneralRecommendation(classification, phrase);
+      assert.ok(rec, `"${phrase}" should produce recommendation`);
+      assert.equal(rec.domain, domain,
+        `recommendation domain should be "${domain}"`);
+    });
+  }
 });
 
 // Clean up test directory after all tests

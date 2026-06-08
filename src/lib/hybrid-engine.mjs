@@ -28,12 +28,13 @@ import { execSync } from 'node:child_process';
 // ---------------------------------------------------------------------------
 
 /** Task categories the classifier can output */
-const CATEGORIES = {
+export const CATEGORIES = {
   STRUCTURE: 'structure',
   CHANGE_IMPACT: 'change-impact',
   DEBUG: 'debug',
   SEARCH: 'search',
   SEMANTIC: 'semantic',
+  GENERAL: 'general',
   UNKNOWN: 'unknown',
 };
 
@@ -130,6 +131,68 @@ const CLASSIFIER_PATTERNS = [
     confidence: 0.7,
     tools: ['smart_code_query', 'smart_code_ast', 'smart_thinking', 'smart_diagram'],
     description: 'Semantic query — gathers CKG context + LSP data for LLM synthesis',
+  },
+
+  // -- GENERAL: non-code tasks — crawl, refactor, git, security, test, report, lang, search, edit, plan, office, wiki --
+  {
+    patterns: [
+      // crawl
+      /爬[蟲虫]|爬取|抓取|網站|網頁|crawl|scrape|scraping/i,
+      /spa\s+逆向|api\s+探索|api\s+reverse/i,
+      /iyf\.tv|m3u8|串流|stream\s+url/i,
+      // refactor
+      /重構|refactor(ing)?\s+/i, /rename\s+(function|class|variable|\w+)/i,
+      /restructure|reorganize/i, /extract\s+(method|function|class)/i,
+      // git
+      /git\s+(commit|push|pull|branch|merge|rebase|clone)/i,
+      /pr|pull\s+request/i, /code\s+review/i, /commit\s+(message|changes|code|files|this)/i,
+      /\bpush\b.*branch|\bpull\b.*remote|merge\s+(branch|PR|request)/i,
+      // security
+      /安全|漏洞|掃描|security|vulnerabilit(y|ies)/i,
+      /credential|injection|xss|sql\s+injection|path\s+traversal/i,
+      /密碼|金鑰|token\s+洩漏/i,
+      // test
+      /測試|test(ing)?\s+/i, /coverage|覆蓋率/i,
+      /unit\s+test|integration\s+test|e2e/i,
+      /jest|vitest|mocha|playwright|pytest/i,
+      // report
+      /報告|報表|圖表|簡報|report|diagram|chart/i,
+      /mermaid|flowchart|sequence\s+diagram/i,
+      /html\s+report|dashboard/i,
+      // lang
+      /python/i,
+      /typescript\s+(檢查|strict|esm|cjs)/i,
+      /rust\s+(檢查|analyze|clippy)/i,
+      /pyright|mypy|tsc|sourcekit/i,
+      // search (web)
+      /搜尋(\s+(網路|資料|文件))?|研究|research/i,
+      /search\s+(the\s+)?(web|internet|google)/i,
+      /查詢\s+(api|文檔|文件)/i,
+      /找.*資料|查.*文件|search.*for/i,
+      // edit
+      /編輯|修改|patch|修補|replace|取代/i,
+      /apply\s+\w+\s+(patch|diff|change)|apply\s+(patch|diff|change)/i,
+      /取代\s+文字|修改\s+內容/i,
+      /\bdiff\b/i,
+      // plan
+      /規劃|計畫|workflow|流程|任務\s+分解/i,
+      /plan\s+(a\s+)?(project|task|feature)/i,
+      /分解|步驟|step\s+by\s+step/i,
+      // office
+      /office|word|excel|powerpoint|ppt|pptx|docx|xlsx/i,
+      /文件\s+(建立|編輯|修改|轉換)/i,
+      // wiki
+      /wiki|知識庫|obsidian|vault|筆記/i,
+      /ingest|攝取|distill|query\s+wiki/i,
+      // analyze
+      /分析|評估|review|架構\s+(評估|分析|檢查)/i,
+      /健康\s+(檢查|check)|audit|lint/i,
+      /tech\s+stack|技術\s+棧/i,
+    ],
+    category: CATEGORIES.GENERAL,
+    confidence: 0.85,
+    tools: [],
+    description: 'General task — routes to domain-specific tools/skills instead of code analysis',
   },
 ];
 
@@ -745,12 +808,167 @@ export function mergeResults(classification, execResult, question) {
 }
 
 // ---------------------------------------------------------------------------
+// General Task Recommendation Engine
+// ---------------------------------------------------------------------------
+
+/**
+ * DOMAIN_MAP: question keywords → domain metadata
+ * Used by getGeneralRecommendation() to return structured recommendations.
+ */
+const DOMAIN_MAP = [
+  {
+    domain: 'crawl',
+    keywords: ['爬蟲', '爬虫', '爬取', '抓取', '網站', '網頁', 'crawl', 'scrape', 'scraping', 'spa 逆向', 'api 探索', 'api reverse', 'iyf.tv', 'm3u8', '串流', 'stream url'],
+    skill: 'smart-mcp-crawl',
+    tools: ['exa_crawl', 'pw_browser', 'exa_search'],
+    description: '網頁爬蟲與 API 逆向工程',
+    workflow: ['Load skill: skill("smart-mcp-crawl")', 'Use exa_crawl for static pages', 'Use pw_browser for SPA/JS-rendered sites', 'Use exa_search for API discovery'],
+  },
+  {
+    domain: 'refactor',
+    keywords: ['重構', 'refactor', 'rename', 'restructure', 'reorganize', 'extract'],
+    skill: 'smart-mcp-refactor',
+    tools: ['import_graph', 'code_impact', 'rename_safety', 'cross_file_edit', 'fast_apply'],
+    description: '程式碼重構與安全改名',
+    workflow: ['Load skill: skill("smart-mcp-refactor")', 'Analyze deps: import_graph', 'Check impact: code_impact', 'Apply changes: fast_apply / cross_file_edit', 'Verify: smart_test'],
+  },
+  {
+    domain: 'git',
+    keywords: ['git commit', 'git push', 'git pull', 'git branch', 'git merge', 'git rebase', 'git clone', 'pr', 'pull request', 'code review', 'commit message', 'push branch', 'pull remote', 'merge branch'],
+    skill: 'smart-mcp-git',
+    tools: ['git_context', 'git_commit', 'git_pr', 'git_review'],
+    description: 'Git 操作與程式碼審查',
+    workflow: ['Load skill: skill("smart-mcp-git")', 'Check context: git_context', 'Commit: git_commit', 'Review: git_review', 'PR: git_pr'],
+  },
+  {
+    domain: 'security',
+    keywords: ['安全', '漏洞', '掃描', 'security', 'vulnerability', 'credential', 'injection', 'xss', 'sql injection', 'path traversal', '密碼', '金鑰', 'token 洩漏'],
+    skill: 'smart-mcp-security',
+    tools: ['smart_security', 'fast_apply'],
+    description: '安全掃描與漏洞修復',
+    workflow: ['Load skill: skill("smart-mcp-security")', 'Scan: smart_security', 'Review findings', 'Fix: fast_apply', 'Rescan to verify'],
+  },
+  {
+    domain: 'test',
+    keywords: ['測試', 'test', 'coverage', '覆蓋率', 'unit test', 'integration test', 'e2e', 'jest', 'vitest', 'mocha', 'playwright', 'pytest'],
+    skill: 'smart-mcp-test',
+    tools: ['smart_test', 'coverage', 'test_suggest'],
+    description: '測試執行與覆蓋率分析',
+    workflow: ['Load skill: skill("smart-mcp-test")', 'Run tests: smart_test', 'Check coverage: coverage', 'Get suggestions: test_suggest'],
+  },
+  {
+    domain: 'report',
+    keywords: ['報告', '報表', '圖表', '簡報', 'report', 'diagram', 'chart', 'mermaid', 'flowchart', 'sequence diagram', 'html report', 'dashboard'],
+    skill: 'smart-mcp-report',
+    tools: ['diagram', 'report', 'toonify'],
+    description: '圖表與 HTML 報告產出',
+    workflow: ['Load skill: skill("smart-mcp-report")', 'Create diagram: diagram', 'Generate report: report', 'Optimize: toonify'],
+  },
+  {
+    domain: 'lang',
+    keywords: ['python 檢查', 'python 分析', 'python lint', 'python type', 'python venv', 'typescript 檢查', 'typescript strict', 'typescript esm', 'typescript cjs', 'rust 檢查', 'rust analyze', 'rust clippy', 'pyright', 'mypy', 'tsc', 'sourcekit'],
+    skill: 'smart-mcp-lang',
+    tools: ['py_helper', 'ts_helper', 'rs_helper'],
+    description: '語言專案健康檢查',
+    workflow: ['Load skill: skill("smart-mcp-lang")', 'Python: py_helper', 'TypeScript: ts_helper', 'Rust: rs_helper'],
+  },
+  {
+    domain: 'search_web',
+    keywords: ['搜尋 網路', '搜尋 資料', '搜尋 文件', '研究', 'research', 'search the web', 'search the internet', 'search google', '查詢 api', '查詢 文檔', '查詢 文件'],
+    skill: null,
+    tools: ['exa_search', 'websearch', 'research', 'exa_crawl'],
+    description: '網路搜尋與研究',
+    workflow: ['Quick search: websearch / exa_search', 'Deep research: research', 'Crawl page: exa_crawl'],
+  },
+  {
+    domain: 'edit',
+    keywords: ['編輯', '修改', 'patch', '修補', 'replace', '取代', 'apply patch', 'apply diff', '取代 文字', '修改 內容'],
+    skill: null,
+    tools: ['fast_apply', 'edit', 'cross_file_edit', 'patch_gen'],
+    description: '程式碼編輯與 patch 套用',
+    workflow: ['Apply LLM patch: fast_apply', 'Small edits: edit', 'Cross-file: cross_file_edit', 'Generate patch: patch_gen'],
+  },
+  {
+    domain: 'plan',
+    keywords: ['規劃', '計畫', 'workflow', '流程', '任務 分解', 'plan', 'project plan', 'task plan', 'feature plan', '分解', '步驟', 'step by step'],
+    skill: null,
+    tools: ['planner', 'workflow', 'compose', 'agent_execute', 'agent_plan'],
+    description: '任務規劃與工作流編排',
+    workflow: ['Plan: planner', 'Orchestrate: workflow / compose', 'Auto-execute: agent_execute'],
+  },
+  {
+    domain: 'office',
+    keywords: ['office', 'word', 'excel', 'powerpoint', 'ppt', 'pptx', 'docx', 'xlsx', '文件 建立', '文件 編輯', '文件 修改', '文件 轉換'],
+    skill: null,
+    tools: ['officecli (external MCP)'],
+    description: 'Office 文件操作（需安裝 officecli）',
+    workflow: ['Install: curl -fsSL https://d.officecli.ai/install.sh | bash', 'Use officecli MCP tools via opencode.json MCP config'],
+  },
+  {
+    domain: 'wiki',
+    keywords: ['wiki', '知識庫', 'obsidian', 'vault', '筆記', 'ingest', '攝取', 'distill', 'query wiki'],
+    skill: null,
+    tools: ['skill("wiki-xxx")'],
+    description: 'Obsidian wiki 知識庫操作',
+    workflow: ['Query: skill("wiki-query")', 'Ingest: skill("wiki-ingest") / skill("ingest-url")', 'Update: skill("wiki-update")'],
+  },
+  {
+    domain: 'analyze',
+    keywords: ['分析', '評估', 'review', '架構 評估', '架構 分析', '架構 檢查', '健康 檢查', 'health check', 'audit', 'lint', 'tech stack', '技術 棧'],
+    skill: null,
+    tools: ['arch_overview', 'smart_learn', 'smart_thinking', 'naming', 'code_query'],
+    description: '專案架構評估與程式碼審查',
+    workflow: ['Learn: smart_learn', 'Architecture: arch_overview', 'Deep analysis: smart_thinking', 'Check naming: naming'],
+  },
+];
+
+/**
+ * Get a structured recommendation for a GENERAL task.
+ * Matches the classified question against domain keywords and returns
+ * the best-matching domain with tools, skill, and workflow steps.
+ *
+ * @param {object} classification - From classifyQuestion()
+ * @param {string} question - Original user question
+ * @returns {object|null} - { domain, skill, tools, description, workflow, confidence } or null
+ */
+export function getGeneralRecommendation(classification, question) {
+  if (classification.category !== CATEGORIES.GENERAL) return null;
+
+  const q = question.toLowerCase();
+  let bestMatch = null;
+  let bestScore = 0;
+
+  for (const domain of DOMAIN_MAP) {
+    const matchedKeywords = domain.keywords.filter(kw => q.includes(kw.toLowerCase()));
+    if (matchedKeywords.length > 0) {
+      // Score: more keyword matches = higher confidence
+      const score = Math.min(0.5 + (matchedKeywords.length * 0.1), 0.95);
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = {
+          domain: domain.domain,
+          skill: domain.skill,
+          tools: domain.tools,
+          description: domain.description,
+          workflow: domain.workflow,
+          confidence: score,
+          matchedKeywords: matchedKeywords.slice(0, 5),
+        };
+      }
+    }
+  }
+
+  return bestMatch;
+}
+
+// ---------------------------------------------------------------------------
 // Main Entry Point
 // ---------------------------------------------------------------------------
 
 /**
  * Execute the full hybrid reasoning pipeline.
  * 1. classify → 2. plan → 3. execute → 4. merge
+ * For GENERAL tasks, returns recommendation instead of executing tools.
  *
  * @param {object} opts
  * @param {string} opts.question - The user question
@@ -781,6 +999,31 @@ export async function executeHybrid(opts = {}) {
 
   // Step 1: Classify
   const classification = classifyQuestion(question, { files, symbols });
+
+  // Step 1b: For GENERAL tasks, return recommendation directly (skip CKG/LSP)
+  if (classification.category === CATEGORIES.GENERAL) {
+    const rec = getGeneralRecommendation(classification, question);
+    const duration = 0;
+    return {
+      answer: rec
+        ? `🎯 General Task — ${rec.description}\n${'─'.repeat(50)}\nDomain: ${rec.domain}\nConfidence: ${Math.round(rec.confidence * 100)}%\n\n${rec.skill ? `Load Skill: skill("${rec.skill}")\n` : ''}Tools: ${rec.tools.join(', ')}\n\nWorkflow:\n${rec.workflow.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}`
+        : `📋 General task detected but domain unclear.\n${'─'.repeat(50)}\nTry being more specific, or use one of these entry points:\n  • Crawl: skill("smart-mcp-crawl")\n  • Refactor: skill("smart-mcp-refactor")\n  • Git: skill("smart-mcp-git")\n  • Security: skill("smart-mcp-security")\n  • Test: skill("smart-mcp-test")\n  • Report: skill("smart-mcp-report")\n  • Lang: skill("smart-mcp-lang")\n  • Wiki: skill("wiki-xxx")\n  • Web search: websearch / exa_search`,
+      classification: {
+        category: CATEGORIES.GENERAL,
+        confidence: rec ? rec.confidence : classification.confidence,
+        isHybrid: false,
+      },
+      confidence: rec ? rec.confidence : 0.5,
+      sources: rec ? [{
+        type: 'recommendation',
+        tool: 'hybrid_router',
+        confidence: rec.confidence,
+        data: { domain: rec.domain, tools: rec.tools, skill: rec.skill },
+      }] : [],
+      metadata: { duration, toolsUsed: rec ? 1 : 0, toolsErrored: 0, deterministic: true, llm: false, isGeneralTask: true },
+      _raw: { recommendation: rec },
+    };
+  }
 
   // Force hybrid mode if requested or below threshold
   if (forceHybrid) {

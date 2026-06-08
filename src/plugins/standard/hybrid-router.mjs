@@ -1,21 +1,20 @@
 // hybrid-router.mjs → smart_hybrid_router
-// Phase 12: Hybrid Reasoning Engine — MCP tool entry point.
+// Phase 12 + Phase 3: Universal Task Router — single entry point for ALL tasks.
 //
 // Routes questions to the optimal analysis path:
-//   structure    → CKG callers/callees + LSP type/ast (deterministic)
-//   change-impact → CKG + impact analysis + import graph (deterministic)
-//   debug        → grep + CKG context + error diagnosis (deterministic)
-//   search       → grep + CKG symbol lookup (deterministic)
-//   semantic     → CKG context + LSP data + LLM path (hybrid)
-//   unknown      → broad context gathering (hybrid)
+//   code tasks (structure/change-impact/debug/search/semantic)
+//     → CKG/LSP/grep tools (deterministic execution)
+//   general tasks (crawl/refactor/git/security/test/report/lang/search_web/edit/plan/office/wiki/analyze)
+//     → structured recommendation (tool/skill/workflow)
+//   unknown → broad context gathering (hybrid)
+//
+// Phase 3 upgrade: LLM only needs to describe the task. Router handles the rest.
 //
 // Output: structured answer with source tool attribution and confidence.
 
 import {
-  classifyQuestion,
-  planPath,
-  executePlan,
-  mergeResults,
+  CATEGORIES,
+  executeHybrid,
   extractSymbols,
 } from '../../lib/hybrid-engine.mjs';
 import { closeAllLspBridges } from '../../lib/lsp-bridge.mjs';
@@ -27,26 +26,32 @@ import { closeAllLspBridges } from '../../lib/lsp-bridge.mjs';
 export default {
   name: 'smart_hybrid_router',
   category: 'standard',
-  description: `Hybrid Reasoning Engine — routes code questions to optimal analysis path.
+  description: `Universal Task Router — single entry point for ALL tasks. Just describe what you need.
 
-Phase 12: Two-layer intelligence. Determines whether a question needs
-deterministic tools (CKG/LSP/grep), LLM analysis, or both.
+Phase 3: LLM only describes the task. Router handles classification + routing.
+  code tasks (structure/debug/search/change-impact/semantic)
+    → deterministic CKG/LSP/grep execution
+  general tasks (crawl/refactor/git/security/test/report/lang/search/edit/plan/office/wiki/analyze)
+    → structured tool/skill recommendation + workflow
 
 Features:
-- Task Classifier: categorizes questions into 6 types (structure/search/debug/change-impact/semantic/unknown)
-- Deterministic execution: automatically calls CKG/LSP/grep for structure/search/debug
-- Confidence scoring: each answer includes confidence + source attribution
+- Universal Classifier: categorizes into 6 code types + 13 general domains
+- Code tasks: automatic CKG/LSP/grep execution with confidence scoring
+- General tasks: returns best-matching skill/tools/workflow recommendation
 - Hybrid fallback: uncertain questions gather context from both paths
 
 Examples:
   { question: "who calls authenticate() in src/auth.ts", root: "." }
-    → structure: CKG callers query + LSP type info
+    → code structure: CKG callers query + LSP type info
 
-  { question: "what if I rename authenticate()", root: ".", files: ["src/auth.ts"] }
-    → change-impact: CKG callers + LSP impact analysis + deps
+  { question: "幫我爬 iyf.tv 的 API", root: "." }
+    → general crawl: recommends skill("smart-mcp-crawl") + workflow
 
   { question: "explain the architecture of this module", files: ["src/lib/hybrid-engine.mjs"] }
-    → semantic: AST + deps + file content for LLM synthesis`,
+    → semantic: AST + deps + file content for LLM synthesis
+
+  { question: "掃描這個專案的漏洞", root: "." }
+    → general security: recommends skill("smart-mcp-security") + tools`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -77,6 +82,7 @@ Examples:
     required: ['question'],
   },
   handler: async (args) => {
+    let needCloseLsp = false;
     try {
       const question = args.question;
       const root = args.root || process.cwd();
@@ -90,17 +96,16 @@ Examples:
           : 'Error: question is required.';
       }
 
-      // Step 1: Classify the question
-      const classification = classifyQuestion(question, { files, symbols });
+      // Single entry point: executeHybrid handles classification + routing
+      //   code tasks → CKG/LSP deterministic execution
+      //   general tasks → structured recommendation (no LSP needed)
+      //   unknown → broad context gathering
+      const merged = await executeHybrid({ question, root, files, symbols, format: 'all' });
 
-      // Step 2: Generate execution plan
-      const plan = planPath(classification, question, { root, files, symbols });
-
-      // Step 3: Execute deterministic tools
-      const execResult = await executePlan(plan);
-
-      // Step 4: Merge outputs
-      const merged = mergeResults(classification, execResult, question);
+      // Track if we need to close LSP (only for non-general tasks)
+      if (!merged.metadata?.isGeneralTask) {
+        needCloseLsp = true;
+      }
 
       if (format === 'json') {
         return JSON.stringify(merged, null, 2);
@@ -109,27 +114,33 @@ Examples:
       // Build human-readable text output
       let text = '';
 
+      // Check if this is a general task recommendation
+      if (merged._raw?.recommendation) {
+        text += merged.answer;
+        return text;
+      }
+
       // Header with classification
-      if (classification.isHybrid) {
+      if (merged.classification?.isHybrid) {
         text += `🔀 Hybrid Analysis`;
       } else {
         text += `🎯 Deterministic Analysis`;
       }
-      text += ` — ${classification.description}\n`;
+      text += ` — ${merged.classification?.description || ''}\n`;
       text += `${'─'.repeat(60)}\n`;
 
       // Classification info
-      text += `\nCategory:   ${classification.category}`;
-      text += `\nConfidence: ${Math.round(classification.confidence * 100)}%`;
-      text += `\nDuration:   ${merged.metadata.duration}ms`;
-      text += `\nTools:      ${merged.metadata.toolsUsed} executed, ${merged.metadata.toolsErrored} errors`;
+      text += `\nCategory:   ${merged.classification?.category || 'unknown'}`;
+      text += `\nConfidence: ${Math.round((merged.classification?.confidence || 0) * 100)}%`;
+      text += `\nDuration:   ${merged.metadata?.duration || 0}ms`;
+      text += `\nTools:      ${merged.metadata?.toolsUsed || 0} executed, ${merged.metadata?.toolsErrored || 0} errors`;
       text += '\n';
 
       // Answer
       text += `\n${merged.answer}\n`;
 
       // Source attribution
-      if (merged.sources.length > 0) {
+      if (merged.sources?.length > 0) {
         text += `\n${'─'.repeat(60)}`;
         text += '\nSources:\n';
         for (const src of merged.sources.slice(0, 8)) {
@@ -148,7 +159,7 @@ Examples:
       }
 
       // Guidance for hybrid mode
-      if (classification.isHybrid) {
+      if (merged.classification?.isHybrid) {
         text += `\n${'─'.repeat(60)}`;
         text += `\n💡 This is a hybrid query. The deterministic context above can be fed to an LLM for deeper analysis.\n`;
         text += `   Alternatively, refine your question with file/symbol context: add files=[...] or improve phrasing.\n`;
@@ -156,7 +167,7 @@ Examples:
 
       return text;
     } finally {
-      await closeAllLspBridges();
+      if (needCloseLsp) await closeAllLspBridges();
     }
   },
 };
