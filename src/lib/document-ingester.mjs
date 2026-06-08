@@ -139,7 +139,7 @@ export async function ingestDocument(filePath, opts = {}) {
     content = result.content;
   }
 
-  return { format, title, totalPages, content, pages };
+  return { format, path: filePath, title, totalPages, content, pages };
 }
 
 // -- Format converter registry -----------------------------------------------
@@ -170,10 +170,27 @@ CONVERTERS.pdf = async function convertPdf(filePath) {
         numPages = parseInt(numPagesCmd, 10) || 0;
       } catch { /* pdfinfo failed, continue without page count */ }
 
-      const allText = execSync(
-        `pdftotext "${filePath}" - 2>/dev/null`,
-        { encoding: 'utf8', timeout: 30000 }
-      );
+      // Run pdftotext, capture stderr for diagnostics
+      let allText, stderr;
+      try {
+        const result = execSync(
+          `pdftotext "${filePath}" - 2>/tmp/smart-pdf-err.$$`,
+          { encoding: 'utf8', timeout: 30000 }
+        );
+        allText = result;
+        stderr = '';
+      } catch (execErr) {
+        // Read stderr from temp file
+        try { stderr = require_fs().readFileSync(`/tmp/smart-pdf-err.${process.pid}`, 'utf8'); } catch {}
+        // If password-protected, return clear message
+        if (/incorrect password|password/i.test(stderr || execErr.stderr || execErr.message)) {
+          return {
+            content: `[PDF is password-protected] — 此 PDF 受密碼保護，請使用非加密版本。\n\nFile: ${filePath}\nSize: ${buf.length} bytes`,
+            pages: ['[PDF is password-protected — provide a non-encrypted version]'],
+          };
+        }
+        throw execErr; // re-throw to fall through to pdf-parse
+      }
 
       // Split into pages (pdftotext uses form feed as page break)
       const rawPages = allText.split('\f').filter(p => p.trim());

@@ -10,7 +10,7 @@
 //   const found = registry.search('contract');
 
 import { DatabaseSync } from 'node:sqlite';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -40,6 +40,8 @@ class DocumentRegistry {
       mkdirSync(dir, { recursive: true });
     }
     this.#db = new DatabaseSync(this.#dbPath);
+    this.#db.exec('PRAGMA journal_mode = WAL');
+    this.#db.exec('PRAGMA synchronous = NORMAL');
     this.#db.exec(`
       CREATE TABLE IF NOT EXISTS documents (
         id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -190,11 +192,17 @@ export function getRegistry(opts = {}) {
   return _defaultRegistry;
 }
 
-/** For testing: reset the singleton */
-export function resetRegistry() {
+/** For testing: reset the singleton, optionally delete the db file */
+export function resetRegistry(opts = {}) {
   if (_defaultRegistry) {
     _defaultRegistry.close();
     _defaultRegistry = null;
+  }
+  if (opts.deleteDb) {
+    const dbPath = opts.dbPath || DEFAULT_DB_PATH;
+    try { unlinkSync(dbPath); } catch { /* ok */ }
+    try { unlinkSync(dbPath + '-wal'); } catch { /* ok */ }
+    try { unlinkSync(dbPath + '-shm'); } catch { /* ok */ }
   }
 }
 
