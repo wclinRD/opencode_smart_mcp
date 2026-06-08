@@ -55,6 +55,7 @@ permission:
 | `smart_security({scan})` | 安全掃描 |
 | `smart_test({root})` | 執行測試 |
 | `smart_context({command})` | Session 管理 |
+| `smart_ingest_document({path})` | 讀取 PDF/DOCX/XLSX/PPTX/HTML 等二進位文件 |
 
 ### 不確定時用 hybrid_router 的例子
 
@@ -67,6 +68,7 @@ permission:
 | 想掃漏洞 | `hybrid_router("掃描專案漏洞")` → 推薦 security skill |
 | 想測測試 | `hybrid_router("跑測試並看覆蓋率")` → 推薦 test workflow |
 | 想做報告 | `hybrid_router("產生架構圖表報告")` → 推薦 report tools |
+| 想讀文件 | `hybrid_router("分析這份合約")` → 推薦 smart_ingest_document |
 | 完全不確定 | `hybrid_router("我該用什麼工具做 X")` → 自動分類 + 推薦 |
 
 ---
@@ -96,6 +98,7 @@ permission:
 | Git 流程 | `git_context → git_commit → smart_test → git_review → git_pr` |
 | 專案上手 | `smart_learn → arch_overview → import_graph → smart_test → smart_security` |
 | 安全修復 | `smart_security → smart_grep → fast_apply → smart_test → rescan` |
+| 文件分析 | `smart_ingest_document → 分析內容 → 摘要/回答問題` |
 
 ---
 
