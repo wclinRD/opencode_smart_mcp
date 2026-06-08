@@ -6,6 +6,7 @@
 //   ingestDocument({ path: "/path/to/large.pdf", offset: 10, limit: 20 })
 
 import { ingestDocument, detectFormat } from '../../lib/document-ingester.mjs';
+import { getRegistry } from '../../lib/document-registry.mjs';
 
 export default {
   name: 'smart_ingest_document',
@@ -20,6 +21,9 @@ Supports:
   - RTF: macOS textutil-based conversion
   - PPTX: slide text extraction (requires python-pptx or pptx2md)
   - Plain text: Markdown, CSV, JSON, YAML, XML — reads directly
+
+Auto-registers in document registry for cross-session lookup.
+Use smart_list_documents to search previously ingested documents.
 
 For large PDFs (>100 pages), use offset/limit to read in chunks.
   Example: { path: "spec.pdf" }            → first 100 pages
@@ -41,12 +45,16 @@ For large PDFs (>100 pages), use offset/limit to read in chunks.
         type: 'number',
         description: 'Max pages to return (default: all, PDF only)',
       },
+      summary: {
+        type: 'string',
+        description: 'Optional short summary of the document content (saved in registry for later search)',
+      },
     },
     required: ['path'],
   },
 
   handler: async (args) => {
-    const { path, offset, limit } = args;
+    const { path, offset, limit, summary } = args;
 
     if (!path) {
       return 'Error: path is required.';
@@ -54,6 +62,15 @@ For large PDFs (>100 pages), use offset/limit to read in chunks.
 
     try {
       const result = await ingestDocument(path, { offset, limit });
+
+      // Auto-register in document registry (cross-session index)
+      try {
+        const registry = getRegistry();
+        registry.register(path, result.format, result.title, { summary: summary || '' });
+      } catch (regErr) {
+        // Registry failure is non-fatal — document content still returned
+        console.error('Document registry error:', regErr.message);
+      }
 
       let output = '';
       output += `📄 **${result.title}**`;
@@ -68,6 +85,7 @@ For large PDFs (>100 pages), use offset/limit to read in chunks.
       const charCount = result.content.length;
       const wordCount = result.content.split(/\s+/).filter(Boolean).length;
       output += `\n\n---\n*${charCount} chars, ~${wordCount} words*`;
+      output += `\n*Registered in document index. Use smart_list_documents to find it later.*`;
 
       return output;
     } catch (err) {

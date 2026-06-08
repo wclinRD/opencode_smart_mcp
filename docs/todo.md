@@ -211,13 +211,46 @@
 - [x] integration test：hybrid_router 分類 document 任務（5 種問法）
 - [x] 全量回歸：**638 tests, 0 fail**
 
-### Phase 4b：知識整合（未來、尚待設計）
+### Phase 4b：Document Registry（文件索引）✅
 
-> 注意：此階段僅為種子想法，**不急著做**，等 Phase 4a 穩定後再討論。
+> 2026-06-08 交付。跨 session 文件索引，讀過的文件自動註冊可查。
+>
+> 關鍵決策：捨棄 CKG/wiki 整合路線（LLM 可自行組合工具做到），
+> 改做文件索引 registry（LLM 無法跨 session 記憶）。
 
-- [ ] 文件內容自動匯入 CKG（可查詢、可 cross-reference）
-- [ ] 文件 + 程式碼聯合分析（如 PDF 規格書 ↔ 實作程式碼比對）
-- [ ] 文件知識自動寫入 Obsidian wiki（wiki-ingest 整合）
+#### 1. `src/lib/document-registry.mjs` — SQLite 文件索引庫 ✅
+
+- [x] SQLite 持久化（Node 26+ node:sqlite，無外部依賴）
+- [x] `register(path, format, title, summary?)` — 註冊/更新文件
+- [x] `list(limit)` — 列出所有文件（最新優先）
+- [x] `search(query, limit)` — 依 title/path/summary 搜尋
+- [x] `get(path)` — 依路徑查詢
+- [x] `delete(path)` — 刪除
+- [x] `count()` — 總數
+- [x] Singleton 模式（getRegistry / resetRegistry）
+- [x] 跨 instance 持久化驗證
+
+#### 2. Plugin 整合 ✅
+
+- [x] `ingest-document.mjs` — ingest 時自動 register（非致命錯誤不影響內容）
+- [x] 接受 `summary` 參數存入 registry
+- [x] 回傳內容標註「已註冊到文件索引」
+- [x] 新增 `src/plugins/standard/list-documents.mjs` — `smart_list_documents` 工具
+- [x] 支援 `query` 搜尋參數、`format` 篩選、`limit` 控制
+
+#### 3. Agent Personality 更新 ✅
+
+- [x] `smart_list_documents` 加入可直接呼叫工具表
+- [x] hybrid_router 例子表新增「想找文件」
+- [x] `~/.config/opencode/agents/smart-mcp.md` 同步
+
+#### 4. 測試 ✅
+
+- [x] DocumentRegistry CRUD（register/list/search/get/delete/count）
+- [x] 搜尋驗證（title/path/summary 三路徑）
+- [x] Singleton 正確性（相同 instance + 跨 instance 持久化）
+- [x] Plugin 整合（auto-register + summary + list-plugin）
+- [x] 全量回歸：**659 tests, 0 fail**
 
 ---
 

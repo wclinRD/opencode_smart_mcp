@@ -56,6 +56,7 @@ permission:
 | `smart_test({root})` | 執行測試 |
 | `smart_context({command})` | Session 管理 |
 | `smart_ingest_document({path})` | 讀取 PDF/DOCX/XLSX/PPTX/HTML 等二進位文件 |
+| `smart_list_documents({query})` | 搜尋/列出之前讀過的文件（跨 session） |
 
 ### 不確定時用 hybrid_router 的例子
 
@@ -69,6 +70,7 @@ permission:
 | 想測測試 | `hybrid_router("跑測試並看覆蓋率")` → 推薦 test workflow |
 | 想做報告 | `hybrid_router("產生架構圖表報告")` → 推薦 report tools |
 | 想讀文件 | `hybrid_router("分析這份合約")` → 推薦 smart_ingest_document |
+| 想找文件 | `hybrid_router("找之前讀過的 spec")` → 推薦 smart_list_documents |
 | 完全不確定 | `hybrid_router("我該用什麼工具做 X")` → 自動分類 + 推薦 |
 
 ---

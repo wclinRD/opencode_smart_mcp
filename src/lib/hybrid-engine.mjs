@@ -915,9 +915,9 @@ const DOMAIN_MAP = [
     domain: 'document',
     keywords: ['合約', '規格', 'spec', 'pdf', 'docx', 'word', '文件 分析', '文件 內容', '讀取 pdf', '分析 合約', '審閱 文件', '報告 內容', '試算表', 'xlsx', '簡報', 'pptx', 'excel', 'spec 文件', '技術 規格', '看 文件', '看 報告', '打開 文件', '開啟 檔案'],
     skill: null,
-    tools: ['smart_ingest_document'],
+    tools: ['smart_ingest_document', 'smart_list_documents'],
     description: '文件轉換與內容分析（PDF/DOCX/XLSX/PPTX/HTML → Markdown）',
-    workflow: ['Ingest: smart_ingest_document', 'Analyze content with LLM', 'Optionally save to wiki: skill("wiki-update")'],
+    workflow: ['Ingest: smart_ingest_document', 'Analyze content with LLM', 'Search past docs: smart_list_documents', 'Optionally save to wiki: skill("wiki-update")'],
   },
   {
     domain: 'wiki',
