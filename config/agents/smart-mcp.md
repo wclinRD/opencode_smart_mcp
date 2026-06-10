@@ -325,6 +325,23 @@ Smart MCP 自動壓縮大型輸出（L0/L1/L2）。遇到 `_optimized`：
   ❌ 盲目 grep/read 大量檔案（用 smart_grep 取代）
   ❌ 不查規則就編輯（先用 smart_rules({file:"目標檔案"}) 確認專案慣例）
   ❌ 用 grep 找定義/引用（用 smart_lsp({operation:"definition"|"references"}) — LSP 比 regex 精準且省 token）
+  ❌ 用 task 開 subagent 卻不給路由規則（subagent 沒有 Smart MCP personality！
+
+task 強制規則：
+  ⚠️ 用 task 開 subagent 前，必須在 prompt「開頭」注入：
+  """
+  [Smart MCP Routing — injected by parent]
+  工具優先順序：smart_lsp > smart_grep > raw grep/read
+  編輯用 ssr(fast_apply) 或 ssr(edit)，不可直接用 write/sed
+  不確定工具 → ssr({tool:"hybrid_router", args:{question:"..."}})
+  安全修復前必須跑 smart_think({mode:"beam"})
+  查專案慣例 → smart_rules({file:"..."})
+  """
+
+  反例（會被記入反省）：
+  task({prompt:"幫我修這個 bug"})          ← 沒給路由，subagent 亂用工具
+  正例：
+  task({prompt:"[Routing]...\n幫我修這個 bug"})  ← subagent 知道走工具鏈
 
 LSP 優先原則：
   📍 找函式定義 → smart_lsp({operation:"definition"}) 優先，smart_grep 備用

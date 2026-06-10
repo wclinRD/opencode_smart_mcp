@@ -52,6 +52,19 @@ Task → Check Smart MCP equivalent → Use Smart MCP if exists
       → No smart tool? → Use built-in
       → Smart MCP fails? → memory_store(search) → retry or fallback
 \`\`\`
+
+### Task Subagent Routing
+⚠️ When using \`task\` to launch a subagent: subagent has NO Smart MCP routing rules.
+Always inject the following in the task prompt header:
+
+\`\`\`
+[Smart MCP Routing — injected by parent]
+工具優先順序：smart_lsp > smart_grep > raw grep/read
+編輯用 smart_smart_run({tool:"fast_apply"}) 或 smart_smart_run({tool:"edit"})
+不確定工具 → smart_smart_run({tool:"hybrid_router", args:{question:"..."}})
+安全修復前必須跑 smart_smart_think({mode:"beam"})
+查專案慣例 → smart_smart_rules({file:"..."})
+\`\`\`
 `;
 
 export { SYSTEM_PROMPT_FRAGMENT };
