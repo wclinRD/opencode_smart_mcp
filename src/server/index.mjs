@@ -21,7 +21,9 @@
 // Adding a new tool: create tools/standard/xxx.mjs → restart → done
 
 import { spawnSync, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
@@ -70,7 +72,7 @@ function gracefulShutdown(signal) {
 // ---------------------------------------------------------------------------
 // Usage stats
 // ---------------------------------------------------------------------------
-const stats = { startTime: Date.now(), totalCalls: 0, totalErrors: 0, totalDurationMs: 0, byTool: new Map(), memoryAutoStoreCount: 0, memoryPreCheckCount: 0, memoryPreCheckHitCount: 0, memoryPreCheckSavedMs: 0 };
+const stats = { startTime: Date.now(), totalCalls: 0, totalErrors: 0, totalDurationMs: 0, byTool: new Map(), memoryAutoStoreCount: 0, memoryPreCheckCount: 0, memoryPreCheckHitCount: 0, memoryPreCheckSavedMs: 0, autoExtractCount: 0 };
 
 // ---------------------------------------------------------------------------
 // Session context
@@ -111,6 +113,7 @@ function getStatsSummary() {
     byTool,
     memory: {
       autoStored: stats.memoryAutoStoreCount,
+      autoExtract: stats.autoExtractCount,
       preCheckLookups: preCheckTotal,
       preCheckHits,
       preCheckHitRate: preCheckTotal > 0 ? (preCheckHits / preCheckTotal * 100).toFixed(1) + '%' : '0%',
@@ -120,7 +123,7 @@ function getStatsSummary() {
   };
 }
 
-function resetStats() { stats.startTime = Date.now(); stats.totalCalls = 0; stats.totalErrors = 0; stats.totalDurationMs = 0; stats.byTool.clear(); stats.memoryAutoStoreCount = 0; stats.memoryPreCheckCount = 0; stats.memoryPreCheckHitCount = 0; stats.memoryPreCheckSavedMs = 0; }
+function resetStats() { stats.startTime = Date.now(); stats.totalCalls = 0; stats.totalErrors = 0; stats.totalDurationMs = 0; stats.byTool.clear(); stats.memoryAutoStoreCount = 0; stats.memoryPreCheckCount = 0; stats.memoryPreCheckHitCount = 0; stats.memoryPreCheckSavedMs = 0; stats.autoExtractCount = 0; }
 
 // ---------------------------------------------------------------------------
 // Runtime config
@@ -405,6 +408,53 @@ function autoStoreToMemory(toolName, args, result, errorCategory) {
 }
 
 /**
+ * D.3 Auto-Extract: Non-blocking extraction of skill_patches from accumulated findings.
+ * Runs periodically (every N tool calls with sufficient findings) and on session end.
+ * Fire-and-forget via spawn + unref — does NOT block the response.
+ */
+const AUTO_EXTRACT_INTERVAL = 5;    // every N successful tool calls
+const AUTO_EXTRACT_MIN_FINDINGS = 3; // minimum findings to bother extracting
+
+function autoExtractSkillPatches(force = false) {
+  stats.autoExtractCount++;
+  try {
+    if (!existsSync(MEMORY_CLI_PATH)) return;
+
+    const findings = contextManager ? contextManager.getFindings() : [];
+    if (!findings || findings.length < AUTO_EXTRACT_MIN_FINDINGS) return;
+
+    // Rate-limit: only run every N calls unless forced (session end)
+    if (!force && contextManager) {
+      const ctx = contextManager.get();
+      if (!ctx) return;
+      const toolCount = ctx.metadata?.toolCount || 0;
+      if (toolCount % AUTO_EXTRACT_INTERVAL !== 0) return;
+    }
+
+    // Write findings to temp file for the child process
+    const tmpDir = mkdtempSync(join(tmpdir(), 'smart-extract-'));
+    const tmpFile = join(tmpDir, 'findings.json');
+    writeFileSync(tmpFile, JSON.stringify(findings), 'utf-8');
+
+    const child = spawn('node', [
+      MEMORY_CLI_PATH, 'extract',
+      '--findings-file', tmpFile,
+      '--min-frequency', '2',
+    ], {
+      timeout: 5000,
+      stdio: 'ignore',
+    });
+    child.unref();
+    setTimeout(() => {
+      try { child.kill(); } catch { /* ok */ }
+      try { import('node:fs').then(fs => fs.rmSync(tmpDir, { recursive: true, force: true })); } catch { /* ok */ }
+    }, 3000).unref();
+  } catch {
+    // Best-effort — never throw from auto-extract
+  }
+}
+
+/**
  * D.2 Pre-Check: Query memory store for known resolution before tool execution.
  * Returns { found: true, output: string } if high-confidence hit, null otherwise.
  */
@@ -604,6 +654,10 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
   // D.1 Auto-Store: non-blocking write failed tool results to memory
   if (!success && toolName !== 'smart_memory_store') {
     autoStoreToMemory(toolName, args, result);
+  }
+  // D.3 Auto-Extract: periodic skill_patch extraction from findings
+  if (success && toolName !== 'smart_memory_store') {
+    autoExtractSkillPatches(false);
   }
   // Attach responsePolicy + responsePipeline for output optimization downstream
   if (def?.responsePolicy) {
@@ -1259,4 +1313,7 @@ rl.on('line', (line) => {
   handleRequest(req);
 });
 
-rl.on('close', () => {});
+rl.on('close', () => {
+  // D.3 Auto-Extract: final skill_patch extraction on session end
+  autoExtractSkillPatches(true);
+});

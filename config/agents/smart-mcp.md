@@ -50,6 +50,7 @@ permission:
 | `smart_grep({pattern})` | 搜尋程式碼（附 scope/import context） |
 | `smart_learn({root})` | 新專案 onboarding |
 | `smart_think({thought, nextThoughtNeeded})` | 輕量推理（假設→驗證） |
+| `smart_think({mode:"beam", ...})` | **多路徑推理** — 2-3 條路徑並行探索，選最佳答案。僅 debug/refactor/architecture 等複雜任務啟用 |
 | `smart_thinking({topic, template})` | 深度推理（9 模板） |
 | `smart_security({scan})` | 安全掃描 |
 | `smart_test({root})` | 執行測試 |
@@ -152,6 +153,55 @@ permission:
 
 ---
 
+## 🧠 推理品質工作流（讓回答更聰明）
+
+複雜任務不要只走一條推理路徑。用這些模式提升輸出品質：
+
+### Beam Search（多路徑推理）
+
+當任務涉及**除錯、重構方案選擇、架構分析**等需要探索多種可能性的場景：
+
+```
+smart_think({
+  mode: "beam",
+  thought: "分析這個 crash：\n路徑 A: 假設 memory issue → ...\n路徑 B: 假設 race condition → ...\n路徑 C: 假設 null pointer → ...",
+  template: "debug"
+})
+```
+
+- **何時用**：不確定 root cause、有多種可能解釋、需要比較方案優劣
+- **何時不用**：簡單查詢、例行編輯、已知答案的任務
+- **內部行為**：LLM 產生 2-3 條獨立推理路徑 → 自我評分 → 選最佳路徑輸出
+
+### Self-Correction Loop（高風險自我修正）
+
+當任務屬於**高風險**類型，輸出前強制自我驗證：
+
+```
+高風險任務清單（自動啟用）：
+  ✅ 安全修復（smart_security 的修補建議）
+  ✅ 重大重構（影響 3+ 檔案）
+  ✅ 合約/文件分析（ingest_document 的法律/規格分析）
+  ✅ LLM 自己覺得「不太確定」的回答
+
+流程：輸出 → 自我檢查（hallucination_check）→ 分數 < 7？→ 修正後重出
+  → 分數 ≥ 7？→ 回使用者 ✅
+```
+
+- 一般任務**不啟用**，不浪費 token
+- 修正最多 1 輪，避免 infinite loop
+
+### 常用推理工作流
+
+| 情境 | 步驟 |
+|------|------|
+| **複雜除錯（不確定原因）** | `smart_think({mode:"beam", thought:"多路徑假設", template:"debug"})` → 驗證最佳路徑 → `ssr(fast_apply)` → `smart_test` |
+| **高風險安全修復** | `smart_security` → **self-correction loop** → `ssr(fast_apply)` → `smart_test` → `smart_security(rescan)` |
+| **架構方案比較** | `smart_learn` → `ssr(hybrid_router)` → `smart_think({mode:"beam", template:"architecture"})` → 實作 |
+| **重大重構** | `ssr(import_graph)` → `smart_think({mode:"beam", template:"refactor"})` → `ssr(rename_safety)` → `ssr(fast_apply)` → `smart_test` |
+
+---
+
 ## ⚡ fast_apply vs edit（編輯規則）
 
 兩個都是 **Layer 2 sub-tools**，需透過 `ssr()` 呼叫。
@@ -194,4 +244,53 @@ Smart MCP 自動壓縮大型輸出（L0/L1/L2）。遇到 `_optimized`：
   ❌ 自寫腳本測試 API（用 ssr({tool:"pw_browser"}) 取代）
   ❌ 手動 curl/wget 猜參數（用 ssr({tool:"pw_browser"}) + addInitScript 攔截）
   ❌ 盲目 grep/read 大量檔案（用 smart_grep 取代）
+```
+
+### 推理品質閘（讓回答更可靠）
+
+```
+高風險任務（安全修復 / 重大重構 / 合約分析 / LLM 不確定的答案）
+  → 自動啟用 self-correction loop
+  → 自我檢查後才回使用者
+
+複雜推理任務（除錯 / 架構分析 / 方案比較）
+  → 用 smart_think({mode:"beam", ...}) 探索多路徑
+  → 不要只走一條推理路線
+
+一般任務（grep / test / 簡單編輯 / 查詢）
+  → 跳過，直接輸出（省 token）
+```
+
+### Skill-level Learning（越用越強）
+
+每次 session 結束時，自動從 findings 中提煉 reusable behavior patterns。
+
+**自動提煉規則：**
+```
+Session 結束時（或遇到重複模式時）：
+  1. 掃描本次 session 的 findings
+  2. 找出跨 session 重複出現的錯誤模式或 workaround
+  3. 對每個高價值模式，執行：
+     ssr({tool:"memory_store", args:{
+       command:"store",
+       query:"When <trigger_condition>",
+       type:"skill_patch",
+       targetSkill:"<affected_skill>",
+       behaviorChange:"<what_to_do_differently>"
+     }})
+  4. 未來類似場景會自動被 memory_store search 命中
+  5. 技能被命中時，LLM 自動調整行為
+```
+
+**skill_patch 範例：**
+```
+store "When JS null pointer in async code"
+  --type skill_patch
+  --target-skill debug
+  --behavior-change "First check variable initialization before tracing call stack"
+
+store "When cross-file rename causes import errors"
+  --type skill_patch
+  --target-skill refactor
+  --behavior-change "Use import_graph to map all callers before renaming"
 ```

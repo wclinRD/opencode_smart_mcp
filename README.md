@@ -109,6 +109,37 @@ npm install crawlee
 npm install impers
 ```
 
+### 選裝：opencode-toon-plugin（Token 優化）
+
+> **⚠️ 若使用 `opencode-toon-plugin`，必須正確設定環境變數，否則所有 `smart_smart_run` 工具都會崩潰！**
+
+`opencode-toon-plugin` 會自動將 bash 指令輸出中的 JSON 編碼為更緊湊的 Toon 格式，節省 token。
+
+```bash
+# 安裝
+npm install opencode-toon-plugin
+```
+```json
+// 在 opencode.json 的 "plugin" 陣列中加入
+"plugin": ["opencode-toon-plugin"]
+```
+
+**⚠️ 關鍵設定**：`OPENCODE_TOON_PLUGIN_TOOLS` 只能包含 `bash`，**不可加入任何 MCP 工具名稱**。
+
+```bash
+# ✅ 正確 — 只處理 bash 輸出
+export OPENCODE_TOON_PLUGIN_TOOLS="bash"
+
+# ❌ 錯誤 — 會導致 smart_smart_run 等 MCP 工具崩潰
+export OPENCODE_TOON_PLUGIN_TOOLS="bash,smart_smart_run,smart_grep,smart_learn,..."
+```
+
+**錯誤原因**：toon plugin 的 `tool.execute.after` handler 使用 `output.output.trim()` 處理輸出結果。bash 工具回傳 `{ output: "..." }` 格式，但 MCP 工具（如 `smart_smart_run`）回傳的是 `{ content: [{ type: 'text', text: '...' }] }`，沒有 `.output` 屬性。若將 MCP 工具加入清單，每次呼叫都會噴錯：
+
+```
+undefined is not an object (evaluating 'output.output.trim')
+```
+
 ---
 
 ## 給 LLM / AI Agent 的安裝指引

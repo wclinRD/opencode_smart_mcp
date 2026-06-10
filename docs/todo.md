@@ -288,6 +288,149 @@
 
 ---
 
+## Phase 6：LLM 增強技術研究缺口
+
+> 2026-06-10 基於 web research 盤點 12 項業界方法。
+> 對應 plan.md Phase 6 章節。
+>
+> 優先級矩陣見 plan.md，此處僅列待辦項目。
+
+### 🥇 Tier 1：高 CP 值（建議先做）
+
+#### 1. Context Caching（KV Cache 重複利用）📋
+
+- [ ] **Provider 評估**：確認目前使用的 model provider（opencode/big-pickle）是否支援 prompt caching
+- [ ] **Agent personality**：system prompt 加入 cache_control breakpoints 標記
+- [ ] **Skill 整合**：各 skill 啟用 caching，減少重複計算
+- [ ] **成效統計**：比較啟用前後 token 用量
+
+#### 2. Prompt Compression（輸入壓縮）📋
+
+- [ ] **研究**：評估 LLMLingua-2 vs Selective Context vs 自實 lightweight compressor
+- [ ] **實作**：新增 `src/lib/prompt-compressor.mjs` — 壓縮引擎
+- [ ] **Plugin**：新增 `src/plugins/standard/compress-prompt.mjs` — `smart_compress_prompt` 工具
+- [ ] **整合**：hybrid_router DOMAIN_MAP 加入 `compress` 領域
+- [ ] **Agent personality**：加入壓縮行為提示（大輸出自動壓縮）
+- [ ] **測試**：壓縮率 benchmark + 準確率驗證
+
+#### 3. Hallucination Detection（輸出真實性檢查）📋
+
+- [ ] **研究**：定義 6 種幻覺類型的評分 prompt（fabrication/misattribution/unfaithful/self-contradiction/off-topic/confident-refusal）
+- [ ] **實作**：新增 `src/plugins/standard/hallucination-check.mjs` — `smart_hallucination_check` 工具
+- [ ] **整合**：高風險工具（debug/error_diagnose/report）自動串接檢查
+- [ ] **Agent personality**：加入輸出自我驗證行為提示
+- [ ] **測試**：各類型幻覺測試集驗證
+
+#### 4. Guardrails（輸出安全閘）📋
+
+- [ ] **設計**：定義規則格式（deny pattern + allow pattern + rewrite rule）
+- [ ] **實作**：新增 `src/plugins/standard/guardrail.mjs` — `smart_guardrail` 工具
+- [ ] **預設規則**：防止 prompt injection 繞過、強制引用來源
+- [ ] **Agent personality**：加入 guardrail 行為提示
+- [ ] **測試**：對抗性 prompt 測試
+
+#### 5. Agent Observability / Tracing（可觀測性）📋
+
+- [ ] **設計**：Span 模型定義（tool call → span，session → trace）
+- [ ] **實作**：新增 `src/lib/tracer.mjs` — 輕量 tracing 引擎
+- [ ] **Plugin**：新增 `src/plugins/standard/trace.mjs` — `smart_trace` 工具
+- [ ] **匯出格式**：支援 JSON（後續可轉 OTel）
+- [ ] **整合**：index.mjs 自動產生 span 包圍每個 tool call
+- [ ] **測試**：multi-span trace 正確性
+
+### 🥈 Tier 2：中長期
+
+#### 6. Multi-Agent Debate（多 Agent 辯論）📋
+
+- [ ] **設計**：Debate protocol（角色分配 + 回合制 + 共識機制）
+- [ ] **Plugin**：新增 `src/plugins/standard/debate.mjs` — `smart_debate` 工具
+- [ ] **整合**：高風險決策自動觸發 debate（如安全修復方案）
+- [ ] **測試**：比較單 agent vs debate 準確率
+
+#### 7. DSPy Prompt Optimization（提示詞自動優化）📋
+
+- [ ] **研究**：DSPy 整合可行性（Python dependency）
+- [ ] **替代方案**：自實 lightweight optimizer（JS only）
+- [ ] **Pilot**：選 1-2 個 skill 建立 eval dataset + metric
+- [ ] **自動化**：skill 修改後自動跑 optimization pipeline
+
+#### 8. Tree of Thoughts / MCTS 搜尋式推理 📋
+
+- [ ] **研究**：升級 `smart_think` 支援分支的路徑設計
+- [ ] **Pilot**：導入 Process Reward Model（可用 LLM-as-Judge 替代）
+- [ ] **實作**：tree search engine + 路徑評估
+- [ ] **測試**：比較線性 CoT vs tree search 正確率
+
+#### 9. Speculative Decoding（推測解碼）📋
+
+- [ ] **Provider check**：opencode/big-pickle 是否支援
+- [ ] **文件**：記錄各 provider 的 speculative decoding 支援狀況
+
+#### 10. LLM-as-Judge 評估管線 📋
+
+- [ ] **設計**：eval dataset 格式 + metric 定義
+- [ ] **Plugin**：新增 `src/plugins/standard/eval.mjs` — `smart_eval` 工具
+- [ ] **整合**：agent personality 修改後自動回歸
+
+### 🥉 Tier 3：長期研究
+
+#### 11. Self-Play 自我對弈學習 📋
+
+- [ ] **研究**：Triadic Self-Evolution 架構在本專案的適用性
+- [ ] **Pilot**：最小可行 loop（Proposer → Solver → Verifier）
+
+#### 12. Automated Red Teaming（自動紅隊測試）📋
+
+- [ ] **研究**：擴充 `smart_security` 支援 LLM red teaming
+- [ ] **設計**：對抗性 prompt 生成 + 評估迴圈
+
+---
+
+## Phase 7：Reasoning Quality — 讓 LLM 真正變聰明
+
+> 2026-06-10 規劃。對應 plan.md Phase 7 章節。
+> 核心目標：在不改變模型參數的前提下，讓 LLM 的**推理品質**直接提升。
+
+### ① Self-Correction Loop（高風險輸出自我修正）✅
+
+- [x] **Agent personality**：定義「高風險任務」清單（安全修復/重大重構/合約分析）→ smart-mcp.md 🚨區塊
+- [x] **行為規則**：高風險任務自動走「輸出 → self-check → 修正 → 最終」循環 → smart-mcp.md 推理品質閘
+- [x] **閾值定義**：hallucination_check 分數 < 7/10 觸發修正，最多 1 輪 → smart-mcp.md
+- [x] **Token 保護**：一般任務跳過 self-correction → smart-mcp.md 推理品質閘
+- [ ] **測試**：高風險 vs 一般任務的正確率比較（依賴 LLM 環境，需手動驗證）
+
+### ② Beam Search Thinking（多路徑推理）✅
+
+- [x] **設計**：`smart_think` 新增 `mode: "beam"` 參數 → thinking.mjs quickThought
+- [x] **路徑產生**：2-3 條獨立推理路徑 prompt 模板 → beams array input + 🧠工作流
+- [x] **信心度評估**：LLM 自我評分機制 → confidence 1-10
+- [x] **路徑收斂**：選擇最高分路徑的邏輯 → selectedBeam + Best: 標示
+- [x] **回退機制**：路徑分歧過大降級回 linear CoT → 無 beams 參數時降級提示
+- [x] **模板綁定**：在 debug/refactor/architecture 模板啟用建議 → 🧠工作流表
+- [x] **Agent personality**：加入 beam search 使用時機提示 → smart-mcp.md 推理品質閘
+- [x] **測試**：15 個 beam mode test (thinking.test.mjs) + 13 個 benchmark test (phase7-benchmark.test.mjs)
+
+### ③ Skill-level Learning（越用越強）✅
+
+- [x] **設計**：`memory_store` 擴充支援 `type: "skill_patch"` → memory-store.mjs
+- [x] **格式**：skill_patch 包含 target_skill + behavior_change + trigger → memory-store.mjs CLI
+- [x] **Plugin schema**：memory_store.mjs plugin 新增 type/targetSkill/behaviorChange → plugins/standard/memory_store.mjs
+- [x] **smart-mcp.md 整合**：新增 Skill-level Learning 工作流章節
+- [x] **自動提煉**：`cmdExtractSkillPatches` + CLI extract command + `autoExtractSkillPatches` hook (server/index.mjs)
+- [x] **非同步**：spawn + unref pattern (同 autoStoreToMemory) + rl.on close 觸發
+- [x] **整合**：hybrid_router → `searchSkillPatches()` 注入 GENERAL/code 路徑
+- [x] **測試**：S1-S5 skill_patch store/search/list/get 完整測試
+
+### ④ 基準測試（Phase 7 Baseline）✅
+
+- [x] **結構測試**：13 個 test in phase7-benchmark.test.mjs（B1-B5 + S1-S5 + R1-R3）
+- [x] **定義指標**：coverage, hallucination, beam_structure, self_correction → benchmarks/phase7-benchmark.sh
+- [x] **建立測試集**：10 debug + 10 architecture scenarios → benchmarks/phase7-benchmark.sh
+- [x] **LLM benchmark script**：benchmarks/phase7-benchmark.sh（需 LLM_API_KEY 執行）
+- [ ] **執行 benchmark**：需設定 LLM_API_KEY + 手動執行 bash benchmarks/phase7-benchmark.sh
+
+---
+
 ## 已決定不做的功能（記入反省）
 
 以下是曾經考慮但經評估後捨棄的方向，記錄以避免重複討論：
@@ -299,3 +442,7 @@
 | Custom workflow pipeline | 重複 — 已存在 skill 機制 | 2026-06-08 |
 | Observability dashboard | 低價值 — 單開發者不需 web dashboard | 2026-06-08 |
 | External integrations (Jira/Slack) | 太早 — plugin 生態未建立 | 2026-06-08 |
+| Fine-tuning / 模型訓練 | 偏離 MCP 工具定位，基礎設施需求過高 | 2026-06-10 |
+| RAG 系統 | 已有 wiki-ingest + search_docs | 2026-06-10 |
+| Multi-modal 支援 | 與 tool-assisted LLM 核心場景不一致 | 2026-06-10 |
+| Inference engine 開發 | 應選擇現有 provider | 2026-06-10 |

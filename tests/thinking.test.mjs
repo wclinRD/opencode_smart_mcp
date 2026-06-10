@@ -169,6 +169,73 @@ describe('quickThought / quickThink', () => {
     assert.ok(result.done);
     assert.equal(typeof result.output, 'string');
   });
+
+  // ── Beam Search mode tests ──
+
+  it('beam mode shows all paths with confidence scores', () => {
+    const result = quickThought({
+      thought: 'Beam reasoning summary',
+      nextThoughtNeeded: false,
+      mode: 'beam',
+      beams: [
+        { name: 'Path A', content: 'Memory issue analysis...', confidence: 7 },
+        { name: 'Path B', content: 'Race condition analysis...', confidence: 3 },
+        { name: 'Path C', content: 'Null pointer analysis...', confidence: 8 },
+      ],
+      selectedBeam: 'Path C',
+    });
+    assert.ok(result.output.includes('Beam Search'));
+    assert.ok(result.output.includes('Path A'));
+    assert.ok(result.output.includes('Path B'));
+    assert.ok(result.output.includes('Path C'));
+    assert.ok(result.output.includes('confidence: 7/10'));
+    assert.ok(result.output.includes('confidence: 8/10'));
+    assert.ok(result.output.includes('[Selected: Path C]'));
+    assert.ok(result.output.includes('Null pointer analysis...'));
+    assert.ok(result.output.includes('Beam Summary'));
+    assert.ok(result.output.includes('Best: Path C'));
+  });
+
+  it('beam mode fallback when beams not provided', () => {
+    const result = quickThought({
+      thought: 'Multi-path analysis...',
+      nextThoughtNeeded: false,
+      mode: 'beam',
+    });
+    assert.ok(result.output.includes('Beam Search'));
+    assert.ok(result.output.includes('Multiple reasoning paths'));
+    assert.ok(result.output.includes('Multi-path analysis...'));
+  });
+
+  it('beam mode with single beam selects it automatically', () => {
+    const result = quickThought({
+      thought: 'Single path analysis',
+      nextThoughtNeeded: false,
+      mode: 'beam',
+      beams: [
+        { name: 'Path A', content: 'The only path', confidence: 9 },
+      ],
+      selectedBeam: 'Path A',
+    });
+    assert.ok(result.output.includes('The only path'));
+    assert.ok(result.output.includes('Best: Path A'));
+  });
+
+  it('beam mode with equal confidence still selects best', () => {
+    const result = quickThought({
+      thought: 'Equal confidence test',
+      nextThoughtNeeded: false,
+      mode: 'beam',
+      beams: [
+        { name: 'Approach 1', content: 'First approach', confidence: 6 },
+        { name: 'Approach 2', content: 'Second approach', confidence: 6 },
+        { name: 'Approach 3', content: 'Third approach', confidence: 7 },
+      ],
+      selectedBeam: 'Approach 3',
+    });
+    assert.ok(result.output.includes('Best: Approach 3'));
+    assert.ok(result.output.includes('confidence: 7/10'));
+  });
 });
 
 // ---------------------------------------------------------------------------

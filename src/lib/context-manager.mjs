@@ -153,6 +153,12 @@ export class ContextManager {
     return this._context ? JSON.parse(JSON.stringify(this._context)) : null;
   }
 
+  /** Get accumulated findings (thread-safe clone). */
+  getFindings() {
+    if (!this._context || !this._context.accumulatedFindings) return [];
+    return JSON.parse(JSON.stringify(this._context.accumulatedFindings));
+  }
+
   /** Get compact summary for injection (small JSON string). */
   getSummary() {
     if (!this._context) return '';

@@ -20,6 +20,7 @@ Key features:
   - needsMoreThoughts flag for beyond-initial-plan exploration
   - Revision with explicit cross-reference (isRevision + revisesThought)
   - Branching with named paths (branchFromThought + branchId)
+  - ⚡ Beam Search mode (mode:"beam"): explore 2-3 alternative reasoning paths with confidence scoring, then select the best one. For complex debug/refactor/architecture tasks.
   - Optional template guidance (debug/refactor/feature/research/decision/analyze/plan_execute/retrospect/architecture)
   - Returns done flag + optional updated totalThoughts`,
   inputSchema: {
@@ -40,6 +41,27 @@ Key features:
       totalThoughts: {
         type: 'number',
         description: 'Total estimated thoughts needed (default: 1)',
+      },
+      mode: {
+        type: 'string',
+        enum: ['beam'],
+        description: 'Reasoning mode. "beam" enables multi-path exploration with 2-3 alternative hypotheses and confidence scoring. Only for complex debug/refactor/architecture tasks.',
+      },
+      beams: {
+        type: 'array',
+        description: 'Pre-defined beam paths for multi-path reasoning. Each beam: {name, content, confidence}. Used with mode:"beam".',
+        items: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Path name (e.g. "Path A")' },
+            content: { type: 'string', description: 'The reasoning content for this path' },
+            confidence: { type: 'number', description: 'Confidence score 1-10' },
+          },
+        },
+      },
+      selectedBeam: {
+        type: 'string',
+        description: 'Name of the selected/correct beam path (e.g. "Path C"). Used with mode:"beam".',
       },
       hypothesis: {
         type: 'string',
@@ -92,6 +114,9 @@ Key features:
       nextThoughtNeeded: Boolean(args.nextThoughtNeeded),
       thoughtNumber: Number(args.thoughtNumber ?? 1),
       totalThoughts: Number(args.totalThoughts ?? 1),
+      mode: args.mode || null,
+      beams: Array.isArray(args.beams) ? args.beams : null,
+      selectedBeam: args.selectedBeam ? String(args.selectedBeam) : null,
       hypothesis: args.hypothesis ? String(args.hypothesis) : null,
       verification: args.verification ? String(args.verification) : null,
       needsMoreThoughts: Boolean(args.needsMoreThoughts),

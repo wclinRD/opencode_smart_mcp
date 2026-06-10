@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
-// memory-store.mjs — Lightweight JSON memory store for error resolutions
+// memory-store.mjs — Lightweight JSON memory store for error resolutions + skill patches
 //
-// Stores past error resolutions, supports fuzzy search for similar cases.
-// Used by error-diagnose to avoid re-diagnosing the same error.
+// Stores past error resolutions and skill-level behavior improvements.
+// Supports fuzzy search for similar cases. Used by error-diagnose to avoid
+// re-diagnosing the same error, and by Phase 7 skill-level learning to
+// aggregate reusable behavior patterns.
 //
 // Usage:
 //   node memory-store.mjs store <error-message> [options]
@@ -13,12 +15,29 @@
 //   node memory-store.mjs delete <id>
 //   node memory-store.mjs stats
 //   node memory-store.mjs export [--format json]
+//   node memory-store.mjs extract [--findings-file <path>] [--min-frequency <N>] [--dry-run]
+//
+// Skill Patch (Phase 7) Usage:
+//   node memory-store.mjs store "trigger condition" \
+//     --type skill_patch \
+//     --target-skill <skill_name> \
+//     --behavior-change "what to do differently"
+//
+// Auto-extract skill patches from accumulated findings:
+//   echo '[{"category":"error","finding":"TypeError: ...","source":"smart_test"}]' \
+//     | node memory-store.mjs extract --min-frequency 2
 //
 // Options:
 //   --resolution <text>   How the error was fixed (for store)
+//   --type <type>         Entry type: "error" (default) or "skill_patch"
+//   --target-skill <s>    Target skill name (for type:skill_patch)
+//   --behavior-change <t> Behavior improvement (for type:skill_patch)
 //   --tools <list>        Comma-separated tool names used
 //   --files <list>        Comma-separated file paths changed
 //   --category <cat>      Error category: build/runtime/test/permission/path/network/lint/git/unknown
+//   --type <type>         Entry type: "error" (default) or "skill_patch"
+//   --target-skill <name> Target skill name (for skill_patch type)
+//   --behavior-change <text> What to do differently (for skill_patch type)
 //   --success <bool>      Whether the resolution was successful (default: true)
 //   --format <fmt>        Output: text, json (default: text)
 //   --data-dir <path>     Override data directory
@@ -219,11 +238,13 @@ function cmdStore(dataDir, errorMsg, options) {
     memory.entries = memory.entries.slice(-Math.floor(MAX_ENTRIES * 0.8)); // remove bottom 20%
   }
   
+  const entryType = options.type || 'error';
   const entry = {
     id: `mem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     hash,
     errorMessage: errorMsg,
-    category: categorizeError(errorMsg),
+    type: entryType,
+    category: entryType === 'skill_patch' ? 'skill_patch' : (options.category || categorizeError(errorMsg)),
     resolution: options.resolution || null,
     toolsUsed: options.tools ? options.tools.split(',').map(s => s.trim()).filter(Boolean) : [],
     filesChanged: options.files ? options.files.split(',').map(s => s.trim()).filter(Boolean) : [],
@@ -232,11 +253,178 @@ function cmdStore(dataDir, errorMsg, options) {
     lastSeen: new Date().toISOString(),
     hitCount: 1,
   };
+
+  // Skill-patch specific fields
+  if (entryType === 'skill_patch') {
+    entry.targetSkill = options.targetSkill || null;
+    entry.behaviorChange = options.behaviorChange || null;
+  }
   
   memory.entries.push(entry);
   saveMemory(dataDir, memory);
   
   return { stored: true, updated: false, id: entry.id, hash, category: entry.category };
+}
+
+// ---------------------------------------------------------------------------
+// Auto-extraction: findings → skill_patches
+// ---------------------------------------------------------------------------
+
+/**
+ * Map finding categories to target skills.
+ */
+const FINDING_TO_SKILL = {
+  security: 'security',
+  error: 'debug',
+  quality: 'refactor',
+  refactor: 'refactor',
+  dependency: 'test',
+};
+
+/**
+ * Behavior change templates per category.
+ * {trigger} is replaced with the finding's core pattern matched text.
+ */
+const BEHAVIOR_CHANGE_TEMPLATES = {
+  security: (trigger) => `Always scan for '${trigger}' before committing — verify with smart_security and never commit credentials`,
+  error: (trigger) => `When seeing '${trigger}', first check variable initialization and add error boundaries before deep tracing`,
+  quality: (trigger) => `Before merging, check for '${trigger}' patterns — address technical debt before it accumulates`,
+  refactor: (trigger) => `When refactoring near '${trigger}', use import_graph first to map all callers before making changes`,
+  dependency: (trigger) => `When '${trigger}' appears, run a full dependency audit and update affected packages`,
+};
+
+/**
+ * Auto-extract skill patches from accumulated findings.
+ * Groups findings by category, and for categories with enough occurrences,
+ * generates a reusable skill_patch.
+ *
+ * @param {string} dataDir - Memory store directory
+ * @param {Array} findings - Array of finding objects [{source, finding, category, severity}]
+ * @param {object} [options]
+ * @param {number} [options.minFrequency=2] - Minimum occurrences to trigger a skill_patch
+ * @param {string} [options.format] - Output format
+ * @param {boolean} [options.dryRun] - If true, don't actually store, just return what would be stored
+ * @returns {object} { extracted: number, patches: Array<{skill, trigger, behavior, finding}> }
+ */
+function cmdExtractSkillPatches(dataDir, findings, options = {}) {
+  if (!findings || !Array.isArray(findings) || findings.length === 0) {
+    return { extracted: 0, patches: [], note: 'No findings to extract from.' };
+  }
+
+  const minFreq = options.minFrequency || 2;
+  const memory = loadMemory(dataDir);
+
+  // 1. Group findings by category — count total occurrences, dedup text for sample
+  const groups = {};
+  for (const f of findings) {
+    if (!f.category || !f.finding) continue;
+    const key = f.category;
+    if (!groups[key]) groups[key] = { count: 0, seenTexts: new Set(), firstFinding: null };
+    groups[key].count++;
+    const dedupKey = f.finding.toLowerCase().slice(0, 80);
+    if (!groups[key].seenTexts.has(dedupKey)) {
+      groups[key].seenTexts.add(dedupKey);
+      if (!groups[key].firstFinding) groups[key].firstFinding = f;
+    }
+  }
+
+  // 2. For each category with count >= minFreq, generate a skill_patch
+  const patches = [];
+  for (const [category, info] of Object.entries(groups)) {
+    if (info.count < minFreq) continue;
+
+    const targetSkill = FINDING_TO_SKILL[category];
+    if (!targetSkill) continue; // skip unmapped categories
+
+    // Derive trigger condition from the finding text
+    const finding = info.firstFinding;
+    const trigger = finding.finding.length > 80
+      ? finding.finding.slice(0, 80) + '...'
+      : finding.finding;
+
+    // Generate behavior change
+    const behaviorChange = BEHAVIOR_CHANGE_TEMPLATES[category]
+      ? BEHAVIOR_CHANGE_TEMPLATES[category](trigger)
+      : `When '${trigger}' appears, investigate and document the pattern`;
+
+    // Build query (trigger condition)
+    const query = `When ${trigger}`;
+
+    // Check if similar skill_patch already exists
+    const existingPatch = memory.entries.find(e =>
+      e.type === 'skill_patch' &&
+      e.targetSkill === targetSkill &&
+      e.errorMessage.toLowerCase().includes(trigger.toLowerCase().slice(0, 40))
+    );
+
+    if (existingPatch) {
+      // Boost existing hitCount instead of duplicating
+      existingPatch.hitCount = (existingPatch.hitCount || 1) + 1;
+      existingPatch.lastSeen = new Date().toISOString();
+      patches.push({
+        id: existingPatch.id,
+        skill: targetSkill,
+        trigger: query,
+        behavior: behaviorChange,
+        finding: trigger,
+        skipped: true,
+        reason: 'Similar patch already exists (hitCount boosted)',
+      });
+      continue;
+    }
+
+    if (options.dryRun) {
+      patches.push({
+        id: null,
+        skill: targetSkill,
+        trigger: query,
+        behavior: behaviorChange,
+        finding: trigger,
+        skipped: false,
+      });
+      continue;
+    }
+
+    // Store the skill_patch (inline into local memory to avoid stale overwrite)
+    const hash = hashError(query);
+    const entry = {
+      id: `mem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      hash,
+      errorMessage: query,
+      type: 'skill_patch',
+      category: 'skill_patch',
+      targetSkill,
+      behaviorChange,
+      resolution: null,
+      toolsUsed: finding.source ? [finding.source] : [],
+      filesChanged: [],
+      success: true,
+      timestamp: new Date().toISOString(),
+      lastSeen: new Date().toISOString(),
+      hitCount: 1,
+    };
+    memory.entries.push(entry);
+
+    patches.push({
+      id: entry.id,
+      skill: targetSkill,
+      trigger: query,
+      behavior: behaviorChange,
+      finding: trigger,
+      skipped: false,
+    });
+  }
+
+  // 3. Save all at once (single write, no stale overwrite)
+  if (!options.dryRun) {
+    saveMemory(dataDir, memory);
+  }
+
+  return {
+    extracted: patches.filter(p => !p.skipped).length,
+    boosted: patches.filter(p => p.skipped).length,
+    patches,
+  };
 }
 
 function cmdSearch(dataDir, query, options) {
@@ -297,9 +485,11 @@ function cmdList(dataDir, options) {
   entries = entries.slice(0, limit);
   
   return { total: memory.entries.length, shown: entries.length, entries: entries.map(e => ({
-    id: e.id, category: e.category, errorMessage: e.errorMessage.slice(0, 120),
+    id: e.id, type: e.type, category: e.category, errorMessage: e.errorMessage.slice(0, 120),
     resolution: e.resolution ? e.resolution.slice(0, 200) : null,
     success: e.success, hitCount: e.hitCount || 1, lastSeen: e.lastSeen, timestamp: e.timestamp,
+    targetSkill: e.type === 'skill_patch' ? e.targetSkill : undefined,
+    behaviorChange: e.type === 'skill_patch' ? e.behaviorChange : undefined,
   })) };
 }
 
@@ -424,8 +614,12 @@ function formatText(command, result) {
       out.push('');
       for (const e of result.entries) {
         const status = e.success ? '✅' : '❌';
-        out.push(`  ${status} ${e.id}`);
+        const typeTag = e.type === 'skill_patch' ? ' [skill_patch]' : '';
+        out.push(`  ${status} ${e.id}${typeTag}`);
         out.push(`     ${e.category}: ${e.errorMessage.slice(0, 100)}`);
+        if (e.type === 'skill_patch' && e.targetSkill) {
+          out.push(`     Skill: ${e.targetSkill}`);
+        }
         out.push(`     Hits: ${e.hitCount} | Last: ${e.lastSeen.slice(0, 10)}`);
         out.push('');
       }
@@ -437,16 +631,22 @@ function formatText(command, result) {
         break;
       }
       const e = result.entry;
-      out.push(`Entry: ${e.id}`);
-      out.push(`  Category:    ${e.category}`);
-      out.push(`  Success:     ${e.success ? '✅ yes' : '❌ no'}`);
-      out.push(`  Error:       ${e.errorMessage}`);
-      out.push(`  Resolution:  ${e.resolution || '(none recorded)'}`);
-      if (e.toolsUsed && e.toolsUsed.length > 0) out.push(`  Tools Used:  ${e.toolsUsed.join(', ')}`);
-      if (e.filesChanged && e.filesChanged.length > 0) out.push(`  Files:       ${e.filesChanged.join(', ')}`);
-      out.push(`  Created:     ${e.timestamp}`);
-      out.push(`  Last Seen:   ${e.lastSeen}`);
-      out.push(`  Hit Count:   ${e.hitCount || 1}`);
+      const typeTag = e.type === 'skill_patch' ? ' [skill_patch]' : '';
+      out.push(`Entry: ${e.id}${typeTag}`);
+      out.push(`  Type:         ${e.type || 'error'}`);
+      out.push(`  Category:     ${e.category}`);
+      out.push(`  Success:      ${e.success ? '✅ yes' : '❌ no'}`);
+      out.push(`  Description:  ${e.errorMessage}`);
+      out.push(`  Resolution:   ${e.resolution || '(none recorded)'}`);
+      if (e.type === 'skill_patch') {
+        out.push(`  Target Skill: ${e.targetSkill || '(not specified)'}`);
+        out.push(`  Behavior:     ${e.behaviorChange || '(not specified)'}`);
+      }
+      if (e.toolsUsed && e.toolsUsed.length > 0) out.push(`  Tools Used:   ${e.toolsUsed.join(', ')}`);
+      if (e.filesChanged && e.filesChanged.length > 0) out.push(`  Files:        ${e.filesChanged.join(', ')}`);
+      out.push(`  Created:      ${e.timestamp}`);
+      out.push(`  Last Seen:    ${e.lastSeen}`);
+      out.push(`  Hit Count:    ${e.hitCount || 1}`);
       break;
     }
     case 'confirm': {
@@ -488,6 +688,18 @@ function formatText(command, result) {
       out.push(`  Newest: ${result.newestEntry?.slice(0, 10) || '-'}`);
       break;
     }
+    case 'extract': {
+      const noun = result.dryRun ? 'Would extract' : 'Extracted';
+      out.push(`${noun} ${result.extracted} skill patch(es)${result.boosted > 0 ? `, boosted ${result.boosted} existing` : ''}`);
+      out.push('');
+      for (const p of result.patches) {
+        const icon = p.skipped ? '↻' : '✦';
+        const idStr = p.skipped ? `(hitCount++)` : p.id ? p.id.slice(0, 24) + '...' : '(preview)';
+        out.push(`  ${icon} [${p.skill}] ${p.trigger.slice(0, 80)}`);
+        out.push(`     ${idStr} → ${p.behavior.slice(0, 120)}`);
+      }
+      break;
+    }
   }
   
   return out.join('\n');
@@ -504,32 +716,42 @@ Usage: node memory-store.mjs <command> [options]
 Lightweight memory store for error resolutions with fuzzy search.
 
 Commands:
-  store <error-message>   Store a new resolution
-  search <error-message>  Find similar past resolutions
-  list                    List stored entries
-  get <id>                Get entry details by ID
-  confirm <id>            Confirm a resolution was effective (boosts weight)
-  delete <id>             Delete an entry
-  stats                   Show memory statistics
-  export                  Export all entries as JSON
+  store <error-message>      Store a new resolution or skill_patch
+  search <error-message>     Find similar past resolutions
+  list                       List stored entries
+  get <id>                   Get entry details by ID
+  confirm <id>               Confirm a resolution was effective (boosts weight)
+  delete <id>                Delete an entry
+  stats                      Show memory statistics
+  export                     Export all entries as JSON
+  extract                    Auto-generate skill_patches from findings (pipe JSON stdin)
 
 Options:
-  --resolution <text>       How the error was fixed (for store)
-  --tools <list>            Comma-separated tools used (for store)
-  --files <list>            Comma-separated files changed (for store)
-  --category <cat>          Filter by category (for list)
-  --success <bool>          Whether resolution was successful (default: true)
-  --format <fmt>            Output: text, json (default: text)
-  --data-dir <path>         Override data directory
-  --limit <N>               Max results (default: 10 for search, 50 for list)
-  --threshold <N>           Fuzzy match threshold 0-1 (default: 0.4)
-  --vector                  Use hybrid vector search (TF-IDF + fuzzy, better for semantic matching)
-  --vector-threshold <N>    Vector match threshold 0-1 (default: 0.1)
-  -h, --help                Show this help
+  --resolution <text>        How the error was fixed (for store)
+  --type <type>              Entry type: "error" (default) or "skill_patch" (for store)
+  --target-skill <name>      Target skill name (for type:skill_patch)
+  --behavior-change <text>   What to do differently (for type:skill_patch)
+  --tools <list>             Comma-separated tools used (for store)
+  --files <list>             Comma-separated files changed (for store)
+  --category <cat>           Filter by category (for list)
+  --success <bool>           Whether resolution was successful (default: true)
+  --format <fmt>             Output: text, json (default: text)
+  --data-dir <path>          Override data directory
+  --limit <N>                Max results (default: 10 for search, 50 for list)
+  --threshold <N>            Fuzzy match threshold 0-1 (default: 0.4)
+  --vector                   Use hybrid vector search (TF-IDF + fuzzy, better for semantic matching)
+  --vector-threshold <N>     Vector match threshold 0-1 (default: 0.1)
+  --findings-file <path>     Path to findings JSON (for extract)
+  --min-frequency <N>        Min occurrences to trigger patch (default: 2, for extract)
+  --dry-run                  Preview without storing (for extract)
+  -h, --help                 Show this help
 
 Examples:
   node memory-store.mjs store "TypeError: Cannot read property" --resolution "Check null" --tools "grep,debug"
+  node memory-store.mjs store "When JS null pointer" --type skill_patch --target-skill debug --behavior-change "Check init first"
   node memory-store.mjs search "cannot read property"
+  node memory-store.mjs extract --findings-file ./findings.json --min-frequency 2 --dry-run
+  echo '[{"category":"error","finding":"TypeError"}]' | node memory-store.mjs extract
   node memory-store.mjs stats
 `);
 }
@@ -541,12 +763,15 @@ function parseArgs() {
     process.exit(0);
   }
   
-  const knownCommands = ['store', 'search', 'list', 'get', 'confirm', 'delete', 'stats', 'export'];
+  const knownCommands = ['store', 'search', 'list', 'get', 'confirm', 'delete', 'stats', 'export', 'extract'];
   const opts = {
     command: knownCommands.includes(args[0]) ? args[0] : null,
     commandArgs: [],
     dataDir: null,
     format: 'text',
+    type: 'error',
+    targetSkill: null,
+    behaviorChange: null,
     resolution: null,
     tools: null,
     files: null,
@@ -556,6 +781,9 @@ function parseArgs() {
     threshold: null,
     vector: false,
     vectorThreshold: null,
+    findingsFile: null,
+    minFrequency: 2,
+    dryRun: false,
   };
   
   if (!opts.command) {
@@ -587,6 +815,9 @@ function parseArgs() {
     switch (args[i]) {
       case '--data-dir': opts.dataDir = args[++i]; break;
       case '--format': opts.format = args[++i]; break;
+      case '--type': opts.type = args[++i]; break;
+      case '--target-skill': opts.targetSkill = args[++i]; break;
+      case '--behavior-change': opts.behaviorChange = args[++i]; break;
       case '--resolution': opts.resolution = args[++i]; break;
       case '--tools': opts.tools = args[++i]; break;
       case '--files': opts.files = args[++i]; break;
@@ -596,6 +827,9 @@ function parseArgs() {
       case '--threshold': opts.threshold = parseFloat(args[++i]); break;
       case '--vector': opts.vector = true; break;
       case '--vector-threshold': opts.vectorThreshold = parseFloat(args[++i]); break;
+      case '--findings-file': opts.findingsFile = args[++i]; break;
+      case '--min-frequency': opts.minFrequency = parseInt(args[++i], 10); break;
+      case '--dry-run': opts.dryRun = true; break;
     }
     i++;
   }
@@ -649,6 +883,30 @@ function main() {
     case 'export':
       result = cmdExport(dataDir);
       break;
+    case 'extract': {
+      // Read findings from a file or stdin (pipe)
+      let findings;
+      if (opts.findingsFile) {
+        findings = JSON.parse(readFileSync(opts.findingsFile, 'utf-8'));
+      } else {
+        try {
+          const stdin = readFileSync('/dev/stdin', 'utf-8').trim();
+          if (!stdin) {
+            console.error('Findings required. Pipe JSON via stdin or use --findings-file');
+            process.exit(1);
+          }
+          findings = JSON.parse(stdin);
+        } catch {
+          console.error('Failed to read findings from stdin. Pipe JSON or use --findings-file');
+          process.exit(1);
+        }
+      }
+      result = cmdExtractSkillPatches(dataDir, findings, {
+        minFrequency: opts.minFrequency,
+        dryRun: opts.dryRun,
+      });
+      break;
+    }
   }
   
   switch (opts.format) {

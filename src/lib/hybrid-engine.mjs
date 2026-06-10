@@ -19,9 +19,10 @@
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { resolve, relative, dirname, extname, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getCkgEngine } from './ckg-engine.mjs';
 import { getLspBridge } from './lsp-bridge.mjs';
-import { execSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -993,6 +994,58 @@ export function getGeneralRecommendation(classification, question) {
  * @param {boolean} [opts.forceHybrid] - Skip classification, gather broad context
  * @returns {Promise<object>} Merged result with answer + sources
  */
+// ---------------------------------------------------------------------------
+// Skill Patch Integration (Phase 7)
+// ---------------------------------------------------------------------------
+
+/**
+ * Search memory store for skill_patches relevant to the classified question.
+ * Returns array of matching patches (empty if none found or if store is unavailable).
+ * This lets the hybrid_router adjust its recommendation based on past learning.
+ */
+const MEMORY_CLI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../cli/memory-store.mjs');
+
+function searchSkillPatches(question, categoryName) {
+  try {
+    if (!existsSync(MEMORY_CLI_PATH)) return [];
+
+    // Search with the question — memory-store's fuzzy search finds similar text
+    const result = spawnSync('node', [
+      MEMORY_CLI_PATH, 'search', question,
+      '--limit', '3',
+      '--format', 'json',
+    ], { encoding: 'utf-8', timeout: 3000, maxBuffer: 1024 * 10 });
+
+    if (result.status !== 0 || !result.stdout) return [];
+
+    const parsed = JSON.parse(result.stdout);
+    if (!parsed || !parsed.found || !parsed.entries) return [];
+
+    // Filter to skill_patches with reasonable similarity
+    return parsed.entries.filter(e =>
+      e.type === 'skill_patch' &&
+      e.targetSkill &&
+      (e.similarity >= 0.5)
+    );
+  } catch {
+    return []; // best-effort
+  }
+}
+
+/**
+ * Format skill_patch findings as an annotation string.
+ */
+function formatSkillPatches(patches) {
+  if (!patches || patches.length === 0) return '';
+  const lines = [];
+  lines.push('');
+  lines.push('📌 Phase 7 Skill Patches:');
+  for (const p of patches) {
+    lines.push(`   • [${p.targetSkill}] ${p.behaviorChange || p.errorMessage?.slice(0, 100)}`);
+  }
+  return lines.join('\n');
+}
+
 export async function executeHybrid(opts = {}) {
   const {
     question = '',
@@ -1015,14 +1068,24 @@ export async function executeHybrid(opts = {}) {
   // Step 1: Classify
   const classification = classifyQuestion(question, { files, symbols });
 
+  // Phase 7: Search for skill_patches matching this question
+  const skillPatches = searchSkillPatches(question, classification.category);
+  const skillPatchAnnotation = formatSkillPatches(skillPatches);
+
   // Step 1b: For GENERAL tasks, return recommendation directly (skip CKG/LSP)
   if (classification.category === CATEGORIES.GENERAL) {
     const rec = getGeneralRecommendation(classification, question);
     const duration = 0;
+
+    // Annotate answer with skill_patches if found
+    let answer = rec
+      ? `🎯 General Task — ${rec.description}\n${'─'.repeat(50)}\nDomain: ${rec.domain}\nConfidence: ${Math.round(rec.confidence * 100)}%\n\n${rec.skill ? `Load Skill: skill("${rec.skill}")\n` : ''}Tools: ${rec.tools.join(', ')}\n\nWorkflow:\n${rec.workflow.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}`
+      : `📋 General task detected but domain unclear.\n${'─'.repeat(50)}\nTry being more specific, or use one of these entry points:\n  • Crawl: skill("smart-mcp-crawl")\n  • Refactor: skill("smart-mcp-refactor")\n  • Git: skill("smart-mcp-git")\n  • Security: skill("smart-mcp-security")\n  • Test: skill("smart-mcp-test")\n  • Report: skill("smart-mcp-report")\n  • Lang: skill("smart-mcp-lang")\n  • Wiki: skill("wiki-xxx")\n  • Web search: websearch / exa_search`;
+
+    if (skillPatchAnnotation) answer += skillPatchAnnotation;
+
     return {
-      answer: rec
-        ? `🎯 General Task — ${rec.description}\n${'─'.repeat(50)}\nDomain: ${rec.domain}\nConfidence: ${Math.round(rec.confidence * 100)}%\n\n${rec.skill ? `Load Skill: skill("${rec.skill}")\n` : ''}Tools: ${rec.tools.join(', ')}\n\nWorkflow:\n${rec.workflow.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}`
-        : `📋 General task detected but domain unclear.\n${'─'.repeat(50)}\nTry being more specific, or use one of these entry points:\n  • Crawl: skill("smart-mcp-crawl")\n  • Refactor: skill("smart-mcp-refactor")\n  • Git: skill("smart-mcp-git")\n  • Security: skill("smart-mcp-security")\n  • Test: skill("smart-mcp-test")\n  • Report: skill("smart-mcp-report")\n  • Lang: skill("smart-mcp-lang")\n  • Wiki: skill("wiki-xxx")\n  • Web search: websearch / exa_search`,
+      answer,
       classification: {
         category: CATEGORIES.GENERAL,
         confidence: rec ? rec.confidence : classification.confidence,
@@ -1036,7 +1099,7 @@ export async function executeHybrid(opts = {}) {
         data: { domain: rec.domain, tools: rec.tools, skill: rec.skill },
       }] : [],
       metadata: { duration, toolsUsed: rec ? 1 : 0, toolsErrored: 0, deterministic: true, llm: false, isGeneralTask: true },
-      _raw: { recommendation: rec },
+      _raw: { recommendation: rec, skillPatches },
     };
   }
 
@@ -1047,6 +1110,11 @@ export async function executeHybrid(opts = {}) {
     classification.isHybrid = true;
   }
 
+  // Phase 7: Inject skill_patches into plan metadata for code tasks
+  const skillPatchMeta = skillPatches.length > 0
+    ? { skillPatches: skillPatches.map(p => ({ targetSkill: p.targetSkill, behaviorChange: p.behaviorChange })) }
+    : {};
+
   // Step 2: Plan
   const plan = planPath(classification, question, { root, files, symbols });
 
@@ -1055,6 +1123,12 @@ export async function executeHybrid(opts = {}) {
 
   // Step 4: Merge
   const merged = mergeResults(classification, execResult, question);
+
+  // Attach skill_patch annotation to answer if found
+  if (skillPatchAnnotation && merged.answer) {
+    merged.answer += skillPatchAnnotation;
+    merged.skillPatches = skillPatches;
+  }
 
   return merged;
 }

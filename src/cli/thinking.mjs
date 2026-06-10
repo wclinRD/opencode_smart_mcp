@@ -237,6 +237,9 @@ export function quickThought(args) {
     branchFromThought = null,
     branchId = null,
     template = null,
+    mode = null,      // "beam" for multi-path reasoning
+    beams = null,     // Pre-parsed beam paths (array of {name, content, confidence?})
+    selectedBeam = null, // Name of the selected beam path
   } = args;
 
   const effectiveTotal = adjustTotalThoughts ?? totalThoughts;
@@ -287,9 +290,50 @@ export function quickThought(args) {
     lines.push('');
   }
 
-  // ── Main content ──
-  lines.push(thought);
-  lines.push('');
+  // ── Beam Search block ──
+  if (mode === 'beam') {
+    const pathList = Array.isArray(beams) ? beams : [];
+    if (pathList.length > 0) {
+      lines.push(`┌─ Beam Search (${pathList.length} paths) ───────────────`);
+      for (const beam of pathList) {
+        const marker = beam.name === selectedBeam ? '→' : ' ';
+        const conf = beam.confidence != null ? ` (confidence: ${beam.confidence}/10)` : '';
+        lines.push(`│ ${marker} ${beam.name}${conf}`);
+      }
+      lines.push(`└────────────────────────────────────────────────────`);
+      lines.push('');
+      // Show the selected beam's content as main thought
+      const selected = pathList.find(b => b.name === selectedBeam);
+      if (selected) {
+        lines.push(`[Selected: ${selected.name}]`);
+        lines.push('');
+        lines.push(selected.content);
+      } else {
+        lines.push(thought);
+      }
+      lines.push('');
+      // Show beam summary
+      const sorted = [...pathList].sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+      if (sorted.length > 0) {
+        lines.push(`─ Beam Summary ─`);
+        lines.push(`  Explored ${pathList.length} paths. Best: ${sorted[0].name} (${sorted[0].confidence || '?'}/10)`);
+        lines.push('');
+      }
+    } else {
+      // Fallback: beams not provided, treat thought as raw multi-path text
+      lines.push(`┌─ Beam Search ───────────────────────────────────`);
+      lines.push(`│ Multiple reasoning paths explored below`);
+      lines.push(`└────────────────────────────────────────────────────`);
+      lines.push('');
+      lines.push(thought);
+      lines.push('');
+    }
+    // Skip the normal main content below
+  } else {
+    // ── Main content (non-beam mode) ──
+    lines.push(thought);
+    lines.push('');
+  }
 
   // ── Optional template guidance ──
   if (template && TEMPLATES[template]) {
