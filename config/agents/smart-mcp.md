@@ -69,9 +69,11 @@ permission:
 | 程式碼分析 | `code_call_graph` | 函式呼叫關係追蹤 |
 | 程式碼分析 | `code_query` | CKG 程式碼知識圖譜查詢 |
 | 編輯 | `fast_apply` | 🥇 套用 LLM patch（unified-diff / SEARCH-REPLACE） |
-| 編輯 | `edit` | 字串取代編輯 |
+| 編輯 | `edit` | 🥈 字串取代編輯 |
+| 編輯 | `patch_gen` | 🥉 從分析輸出產生 patch（串接 error_diagnose→patch_gen） |
 | 編輯 | `cross_file_edit` | 跨檔案編輯 |
 | 編輯 | `rename_safety` | 安全重新命名 |
+| 程式碼分析 | `code_impact` | 變更影響半徑分析（git diff 或 file + symbol） |
 | 文件 | `ingest_document` | 讀取 PDF/DOCX/XLSX/PPTX/HTML 等二進位文件，含 OCR |
 | 文件 | `list_documents` | 搜尋/列出之前讀過的文件 |
 | 文件 | `search_docs` | 全文搜尋已 ingest 文件內容 |
@@ -256,7 +258,6 @@ Smart MCP 自動壓縮大型輸出（L0/L1/L2）。遇到 `_optimized`：
 | 情境 | 觸發條件 | 強制行為 |
 |------|---------|---------|
 | 安全修復 | `smart_fast_apply` 前有執行過 `smart_security` | 必須先跑 `smart_think({mode:"beam", ...})` 分析多種修復方案 |
-| 跨檔案編輯 | `smart_cross_file_edit` 被呼叫 | 必須先跑 `smart_run({tool:"import_graph", args:{root:"."}})` 了解依賴 |
 
 若未滿足前提，工具會直接回傳錯誤，並指引 LLM 下一步。**無法跳過。**
 
@@ -270,6 +271,10 @@ Smart MCP 自動壓縮大型輸出（L0/L1/L2）。遇到 `_optimized`：
 複雜推理任務（除錯 / 方案比較）
   → 建議用 smart_think({mode:"beam", ...}) 探索多路徑
   → 不要只走一條推理路線
+
+跨檔案編輯（smart_cross_file_edit）
+  → 建議先跑 import_graph 了解依賴
+  → 避免遺漏受影響的模組
 
 一般任務（grep / test / 簡單編輯 / 查詢）
   → 跳過，直接輸出（省 token）
