@@ -741,19 +741,159 @@ opencode + Smart MCP   vs    Claude Code
 
 ### 真正該關注的事
 
-目前 plan.md Phase 6 (LLM 增強技術) 和 Phase 7 (Reasoning Quality) 已經覆蓋了實際上有幫助的方向：
-
 | 真有幫助的項目 | 所屬 Phase | 原因 |
 |--------------|-----------|------|
 | Beam Search Thinking / CiT / Forest | Phase 7 ✅ 已實作 | 讓 LLM 在同一個 context budget 下做出更好的推理 |
 | Self-Correction Loop | Phase 7 ✅ 已實作 | 高風險任務的輸出可靠度提升 |
-| Skill-level Learning | Phase 7 ✅ 已實作 | 越用越強，記憶可跨 session 累積 |
 | LSP Bridge | Phase 8 ✅ 已完成 | Type-aware 程式碼理解，比 grep 精準且省 token |
 | Full-text Search | Phase 5 ✅ 已完成 | 文件內容搜尋，跨 session 找到關鍵資訊 |
 | Hallucination Detection | Phase 6 📋 計畫中 | 輸出真實性檢查，生產級門檻 |
+| Error Recovery / Benchmark / Sandbox / Auto Memory | Phase 10 📋 規劃中 | 讓人敢放手、持續用、越用越好 |
 
 ### 結論
 
-Phase 6 + 7 + 8 已經走對方向。**不需要為了追上 Claude Code 而做功能複製。** 現有路線圖涵蓋了對「同一個 LLM 變聰明」有真正幫助的項目，繼續執行即可。
+Phase 6 + 7 + 8 走方向是對的。Phase 10 補上「信任 + 持續用 + 越用越好」這條 missing link。**不需要為了追上 Claude Code 而做功能複製 — Smart MCP + OpenCode 的武器是工具深度，不是 agent loop。**
 
 ---
+
+## Phase 10：Trust, Continuity & Learning — 放心用・持續用・越用好
+
+> 2026-06-10 規劃。基於與市面 AI agent 比較後的缺點分析。
+> 核心問題：Smart MCP 有深厚的工具層（LSP/CKG/Workflow），
+> 但缺少讓人敢**放手**讓 agent 做事、願意**每天用**、而且**越用越好**的機制。
+
+### 放心用（Trust）
+
+#### 10.1 Sandbox Execution
+
+讓 agent 不只是「建議你跑什麼」，而是直接在安全環境執行給你看。
+
+**作法**：新增 `smart_exec` MCP tool，接收 `{ language, code, files?, timeout }`，
+在 sandbox（deno / container）執行，回傳 stdout + stderr + exit code。
+
+```
+LLM: 「這個 bug 應該在這…我跑個測試確認」
+  → smart_exec({ language: "bash", code: "node test/index.test.mjs" })
+  → 回傳: { stdout: "...", stderr: "", exitCode: 0, duration: "1.2s" }
+```
+
+| 項目 | 說明 |
+|------|------|
+| 安全策略 | deno `--allow-none`（最嚴）、docker container、可設定 whitelist commands |
+| 使用者控制 | Permission level: allow / prompt / deny |
+| 風險 | deno sandbox 不可用 → 降級回「請使用者手動執行」 |
+
+| 不上什麼 | 原因 |
+|---------|------|
+| 任意 runtime 支援 | 只做 node/python/bash/deno（覆蓋 90% 開發場景），其他提示安裝 |
+| 網路存取 | 預設阻擋，白名單開啟 |
+| Persistent filesystem | 暫存目錄用完即焚 |
+
+#### 10.2 Impact Warning 自動觸發
+
+`code_impact` 已存在（Phase 4），但需要 LLM 主動呼叫才會跑。
+改為在高風險編輯（cross_file_edit / fast_apply 影響 > 2 檔案）時自動觸發。
+
+**作法**：擴充 Server 端 quality gate，類似 HIGH_RISK_PREREQUISITES：
+- `smart_fast_apply` 偵測影響檔案數 > 2 → 自動叫 code_impact
+- 回傳結果讓 LLM 知道「這個修改會影響 5 個模組，是否繼續？」
+
+| 不上什麼 | 原因 |
+|---------|------|
+| 強制阻擋 | 資訊性展示，LLM 仍可決定繼續（避免過度 friction） |
+| Full dependency graph | code_impact 已有 git diff + symbol analysis，足夠 |
+
+---
+
+### 持續用（Daily Driver）
+
+#### 10.3 Error Recovery 統一策略
+
+目前 tool timeout / crash → LLM 要自己想辦法重試。
+改為 Server 端內建 retry + fallback。
+
+**作法**：`invokeTool` 層加入：
+- Retry：3 次 exponential backoff（1s → 2s → 4s）
+- Fallback：LSP 不通 → grep、ingest_document 不通 → 提示安裝
+- Timeout 統一處理（不讓 LLM 看到 raw timeout error）
+
+| 項目 | 說明 |
+|------|------|
+| 實作位置 | `src/server/index.mjs` — `invokeTool` wrapper |
+| Retry 條件 | Network error / timeout / transient error |
+| Fallback 定義 | 每個 plugin 可選宣告 `fallbackTool` |
+
+#### 10.4 Context Budget 主動管理
+
+目前 context budget 只報 warning（現在 121%），不會自動反應。
+改為 Server 端監控累積輸出大小，在 threshold 自動升壓縮層級。
+
+**作法**：在 output-optimizer 加入 budget-aware mode：
+- `cumulativeOutput > 80% threshold` → 從 L0 自降為 L1
+- `> 90%` → 自降為 L2（強制摘要）
+- `> 100%` → 只回傳 metadata，內容存檔讓 LLM 可 `smart_context get` 取回
+
+| 項目 | 說明 |
+|------|------|
+| 實作位置 | `src/lib/output-optimizer.mjs` + `src/lib/output-pipeline.mjs` |
+| 累積計算 | 追蹤 respond() 總輸出 bytes |
+| 限制 | Server 只能控制自身輸出，client side context 由 OpenCode 管理 |
+
+---
+
+### 越用好（Learning）
+
+#### 10.5 Auto Memory Injection
+
+目前 `memory_store` 是被動的 — LLM 要主動「記得去查」才行。
+改為：session 啟動（或新 task 開始）時，Server 自動查詢相關記憶並注入 context。
+
+**作法**：
+- `smart_memory_search` 在 session init / tool call 時自動觸發
+- 依 `keyword extraction from user query` → 找相關 `finding` / `skill_patch`
+- 注入到初始 context 中（不增加 LLM 負擔，content 可見）
+
+| 項目 | 說明 |
+|------|------|
+| 觸發時機 | Session init + 每次 user query 到來時 |
+| 注入量 | 限制 3-5 條，每條 < 200 chars（不爆 budget） |
+| 來源 | `memory_store` 的 findings + skill_patches |
+
+#### 10.6 Skill-level Learning（從 Phase 7 移入）
+
+> ✅ 已在 Phase 7 實作（memory_store type:skill_patch + autoExtractSkillPatches）。
+> 移到 Phase 10 是因為它屬於「越用越好」，不是「推理品質」。
+> 維持現有實作，不需變動。
+
+#### 10.7 Benchmark 套件
+
+> ✅ 已在 Phase 7 實作初步結構（phase7-benchmark.test.mjs + benchmarks/phase7-benchmark.sh）。
+> 移到 Phase 10，後續擴充為完整 agent 評測。
+
+**擴充方向**：
+- 新增真實 CRUD 場景（改 1 檔案 / 跨 3 檔案重構 / 找 bug 修復 / API 串接）
+- 每次 release 前自動跑 benchmark → 分數有感的提升/下降
+- Aider-style polyglot benchmark 為長期目標
+
+---
+
+### 優先級
+
+| 優先 | 項目 | 類別 | 難度 | 時間 | 相依 |
+|------|------|------|------|------|------|
+| 🥇 | Error Recovery (10.3) | 持續用 | 🟢 低 | 1-2 天 | 無 |
+| 🥇 | Benchmark 擴充 (10.7) | 越用好 | 🟢 低 | 1-2 天 | 無 |
+| 🥇 | Impact Warning (10.2) | 放心用 | 🟢 低 | 1 天 | code_impact 已存在 |
+| 🥇 | Sandbox Execution (10.1) | 放心用 | 🟡 中 | 3-5 天 | 無 |
+| 🥇 | Auto Memory Injection (10.5) | 越用好 | 🟡 中 | 3-5 天 | memory_store 已存在 |
+| 🥈 | Context Budget (10.4) | 持續用 | 🟡 中 | 2-3 天 | output-optimizer 已存在 |
+| 🥈 | Skill-level Learning (10.6) | 越用好 | 🟢 已完成 | — | 從 Phase 7 搬入 |
+
+### 不上什麼
+
+| 項目 | 原因 |
+|------|------|
+| **Diff Preview 機制** | Client UI 責任，Smart MCP 提供 smart_diff tool 即可 |
+| **Session Continuity 框架** | 太模糊，被 Auto Memory Injection (10.5) 涵蓋 |
+| **全自動 agent loop** | 這是 OpenCode 的責任，Smart MCP 是工具層 |
+| **多模態/視覺理解** | Provider 層次，MCP 無法控制 |

@@ -50,7 +50,7 @@ permission:
 |------|------|
 | `smart_grep({pattern})` | 搜尋程式碼（附 scope/import context） |
 | `smart_learn({root})` | 新專案 onboarding |
-| `smart_think({thought, nextThoughtNeeded})` | **快思** — 假設→驗證（輕量）。`mode:"beam"` = 多路徑。`mode:"cit"` = BN-DP 自動判斷分支。`mode:"forest"` = 多樹共識推理 |
+| `smart_think({mode, thought, nextThoughtNeeded})` | **快思**（🥇 預設 `mode:"cit"` — BN-DP 自動判斷分支）。`"beam"`=高風險多路徑。`"forest"`=多樹 consensus 投票 |
 | `smart_deep_think({topic, template})` | **慢想** — 深度分析（9 模板）。一次完整輸出 |
 | `smart_security({scan})` | 安全掃描 |
 | `smart_test({root})` | 執行測試 |
@@ -58,7 +58,7 @@ permission:
 | `smart_rules({file})` | 查詢專案規則（AGENTS.md / .cursorrules 等）— **編輯前必查** |
 | `smart_lsp({operation, file, line, character})` | **Type-aware 程式碼理解** — 找定義、查引用、看型別、診斷錯誤。支援 TS/JS/Python/Rust/Swift/PHP |
 
-> **💡 快思 vs 慢想**：不確定 root cause、有多種可能 → `smart_think`（快思 + beam/cit/forest）。需要系統性分析、完整評估 → `smart_deep_think`（慢想 + 模板）。兩者不會搞混：`think` = 來回對話式推理，`deep_think` = 單次完整深度分析。
+> **💡 快思 vs 慢想**：`smart_think`（🥇 預設 `mode:"cit"`）是來回對話式推理。`smart_deep_think`（慢想 + 模板）是單次完整深度分析。不確定 root cause 或有多種可能 → `think`。需要系統性完整評估 → `deep_think`。
 
 ### 🟠 Layer 2：Sub-tools（透過 ssr 呼叫）
 

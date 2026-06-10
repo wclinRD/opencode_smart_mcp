@@ -328,25 +328,6 @@
 - [x] **Agent personality**：加入 beam search 使用時機提示 → smart-mcp.md 推理品質閘
 - [x] **測試**：15 個 beam mode test (thinking.test.mjs) + 13 個 benchmark test (phase7-benchmark.test.mjs)
 
-### ③ Skill-level Learning（越用越強）✅
-
-- [x] **設計**：`memory_store` 擴充支援 `type: "skill_patch"` → memory-store.mjs
-- [x] **格式**：skill_patch 包含 target_skill + behavior_change + trigger → memory-store.mjs CLI
-- [x] **Plugin schema**：memory_store.mjs plugin 新增 type/targetSkill/behaviorChange → plugins/standard/memory_store.mjs
-- [x] **smart-mcp.md 整合**：新增 Skill-level Learning 工作流章節
-- [x] **自動提煉**：`cmdExtractSkillPatches` + CLI extract command + `autoExtractSkillPatches` hook (server/index.mjs)
-- [x] **非同步**：spawn + unref pattern (同 autoStoreToMemory) + rl.on close 觸發
-- [x] **整合**：hybrid_router → `searchSkillPatches()` 注入 GENERAL/code 路徑
-- [x] **測試**：S1-S5 skill_patch store/search/list/get 完整測試
-
-### ④ 基準測試（Phase 7 Baseline）✅
-
-- [x] **結構測試**：13 個 test in phase7-benchmark.test.mjs（B1-B5 + S1-S5 + R1-R3）
-- [x] **定義指標**：coverage, hallucination, beam_structure, self_correction → benchmarks/phase7-benchmark.sh
-- [x] **建立測試集**：10 debug + 10 architecture scenarios → benchmarks/phase7-benchmark.sh
-- [x] **LLM benchmark script**：benchmarks/phase7-benchmark.sh（需 LLM_API_KEY 執行）
-- [ ] **執行 benchmark**：需設定 LLM_API_KEY + 手動執行 bash benchmarks/phase7-benchmark.sh
-
 ---
 
 ### ⑤ Phase 7 校正：Beam Search 適用範圍修正 ✅ (2026-06-10)
@@ -420,6 +401,65 @@
 
 ---
 
+## Phase 10：Trust, Continuity & Learning
+
+> 對應 plan.md Phase 10 章節。
+> 補上「放心用・持續用・越用好」三條 missing link。
+
+### 10.1 Sandbox Execution
+
+- [ ] **設計**：決定 sandbox 技術（deno --allow-none / docker / 兩者並行）
+- [ ] **實作**：新增 `src/plugins/standard/exec.mjs` — `smart_exec` tool
+- [ ] **安全**：Permission level（allow / prompt / deny）
+- [ ] **降級**：sandbox 不可用 → 提示使用者手動執行
+- [ ] **測試**：基本 sandbox 執行 + 錯誤路徑 + 安全限制驗證
+- [ ] **Agent personality**：加入 smart_exec 使用時機與安全提示
+
+### 10.2 Impact Warning 自動觸發
+
+- [ ] **設計**：在 quality gate 加入自動 code_impact 觸發條件（edit > 2 files）
+- [ ] **實作**：擴充 `src/server/index.mjs` `checkHighRiskPrerequisites()`
+- [ ] **測試**：單檔編輯不觸發、多檔編輯自動觸發
+
+### 10.3 Error Recovery 統一策略
+
+- [ ] **設計**：retry (3次 exponential backoff) + fallback 定義格式
+- [ ] **實作**：`invokeTool` 加入 retry wrapper + fallback chain
+- [ ] **Fallback 定義**：各 plugin 可選宣告 fallbackTool（LSP→grep, ingest→提示安裝）
+- [ ] **測試**：timeout retry + fallback 正確性
+
+### 10.4 Context Budget 主動管理
+
+- [ ] **設計**：threshold 定義（80%→L1, 90%→L2, 100%→存檔）
+- [ ] **實作**：`output-optimizer.mjs` 加入 budget-aware auto-escalation
+- [ ] **測試**：各 threshold 壓縮層級正確升級
+
+### 10.5 Auto Memory Injection（自動記憶注入）
+
+- [ ] **設計**：session init 自動查 memory_store + 注入策略（3-5條, <200 chars each）
+- [ ] **實作**：tool call wrapper 在 user query 時自動觸發 memory search
+- [ ] **測試**：相關記憶正確注入 + 不爆 budget
+
+### 10.6 Skill-level Learning（從 Phase 7 移入）✅
+
+> 已在 Phase 7 實作完畢。`memory_store type:skill_patch` + `autoExtractSkillPatches` hook。
+> 移入 Phase 10 是為了分類一致（「越用越好」而非「推理品質」），實作不變。
+
+- [x]  8 項 skill_patch 全部完成（store/search/list/get + auto-extract）
+
+### 10.7 Benchmark 套件（從 Phase 7 移入）✅
+
+> 已在 Phase 7 實作初步結構。13 tests + shell script + 場景定義。
+
+- [x]  結構測試：13 tests（B1-B5 + S1-S5 + R1-R3）
+- [x]  定義指標：coverage / hallucination / beam_structure / self_correction
+- [x]  建立場景集：10 debug + 10 architecture
+- [x]  LLM benchmark script
+- [ ]  **執行 benchmark**：需手動跑 `bash benchmarks/phase7-benchmark.sh`
+- [ ]  **擴充真實場景**：CRUD 任務（改1檔案/跨3檔案重構/找bug修復/API串接）
+
+---
+
 ## 已決定不做的功能（記入反省）
 
 以下是曾經考慮但經評估後捨棄的方向，記錄以避免重複討論：
@@ -454,6 +494,10 @@
 | **LLM-as-Judge Eval** | 開發者工具，非 core value | 2026-06-10 |
 | **Self-Play** | 需 RL 基礎設施，超出 MCP server 範圍 | 2026-06-10 |
 | **Automated Red Teaming** | 複雜度高，單開發者事件率極低 | 2026-06-10 |
+| **Diff Preview 機制** | Client UI 責任，server 不該管使用者看到什麼 | 2026-06-10 |
+| **Session Continuity 框架** | 太模糊，被 Auto Memory Injection (Phase 10.5) 涵蓋 | 2026-06-10 |
+| **全自動 agent loop** | OpenCode 的責任，Smart MCP 是工具層 | 2026-06-10 |
+| **多模態/視覺理解** | Provider 層次，MCP server 無法控制 | 2026-06-10 |
 
 ### 模式歸納
 

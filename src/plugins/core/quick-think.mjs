@@ -3,28 +3,18 @@ import { quickThink } from '../../cli/thinking.mjs';
 export default {
   name: 'smart_think',
   responsePolicy: { maxLevel: 0 }, // Conversational; keep raw
-  description: `Advanced conversational reasoning engine — surpasses sequential-thinking.
+  description: `Conversational reasoning engine — surpasses sequential-thinking.
 
-Supports full hypothesis → verify → repeat cycle with structured output. Use for multi-step reasoning, debugging, decision analysis, and research exploration.
+Default mode: mode:"cit" (BN-DP auto-branch). Only branches when uncertain — saves ~70% tokens on routine tasks.
+  mode:"beam" → explore 2-3 alternative paths with confidence scoring. Use for high-risk decisions.
+  mode:"forest" → multi-tree reasoning with consensus voting. Use for complex multi-angle problems.
 
 Core workflow:
-  1. Start reasoning: thought + nextThoughtNeeded=true
-  2. Each step: add hypothesis to test, or verification to confirm/reject
-  3. Continue: set nextThoughtNeeded=true to keep going
-  4. Adjust plan mid-stream: set needsMoreThoughts=true + adjustTotalThoughts
-  5. Complete: set nextThoughtNeeded=false
+  thought + nextThoughtNeeded=true → hypothesis → verification → repeat → nextThoughtNeeded=false
 
-Key features:
-  - Hypothesis generation + verification with auto-verdict detection
-  - Dynamic total adjustment mid-stream (adjustTotalThoughts)
-  - needsMoreThoughts flag for beyond-initial-plan exploration
-  - Revision with explicit cross-reference (isRevision + revisesThought)
-  - Branching with named paths (branchFromThought + branchId)
-  - ⚡ Beam Search mode (mode:"beam"): explore 2-3 alternative reasoning paths with confidence scoring, then select the best one. For complex debug/refactor/architecture tasks.
-  - 🎯 CiT mode (mode:"cit"): Chain-in-Tree BN-DP — auto-detect if branching needed. Only branch when uncertain (saves 70%+ tokens on routine tasks). Uses branchingNeeded + branchReasoning to show assessment.
-  - 🌲 Forest-of-Thought mode (mode:"forest"): Multi-tree reasoning with consensus voting. Each tree explores independent reasoning branches, then cross-tree consensus selects the best conclusion. Uses trees[] + consensus{}.
-  - Optional template guidance (debug/refactor/feature/research/decision/analyze/plan_execute/retrospect/architecture)
-  - Returns done flag + optional updated totalThoughts`,
+Supports: template guidance (debug/refactor/architecture...), branchFromThought, isRevision,
+needsMoreThoughts (beyond initial plan), adjustTotalThoughts (mid-stream expansion).
+Returns done flag + optional updated totalThoughts.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -47,7 +37,7 @@ Key features:
       mode: {
         type: 'string',
         enum: ['beam', 'cit', 'forest'],
-        description: 'Reasoning mode. "beam" = multi-path exploration. "cit" = BN-DP auto-branch. "forest" = multi-tree Forest-of-Thought with consensus voting.',
+        description: 'Reasoning mode (default: "cit" — BN-DP auto-branch, only branches when uncertain). "beam" for high-risk multi-path exploration. "forest" for multi-angle consensus voting.',
       },
       beams: {
         type: 'array',

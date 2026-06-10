@@ -21,7 +21,7 @@ opencode prefixes MCP server "smart" tools with \`smart_\`. So internal \`smart_
 ### Layer 1: Native Tools (direct call, no router)
 - \`smart_smart_grep\` — regex code search (scope + import context)
 - \`smart_smart_learn\` — project onboarding (lang, structure, conventions)
-- \`smart_smart_think\` — fast reasoning (hypothesis→verify; mode:"beam" multi-path, mode:"cit" BN-DP, mode:"forest" multi-tree consensus)
+- \`smart_smart_think\` — fast reasoning (default mode:"cit" — BN-DP, only branches when uncertain). mode:"beam" for high-risk. mode:"forest" for multi-angle consensus.
 - \`smart_smart_deep_think\` — deep analysis (9 templates: analyze/debug/refactor/research/decision/architecture/retrospect/feature/plan_execute)
 - \`smart_smart_security\` — security scan (credentials/injection/deps)
 - \`smart_smart_test\` — run tests (auto-detects vitest/jest/mocha/ava/node:test)
