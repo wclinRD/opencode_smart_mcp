@@ -230,41 +230,14 @@ smart_think({
   mode: "forest",
   thought: "綜合分析 crash root cause",
   trees: [
-    {
-      name: "Tree 1: Static Analysis",
-      branches: [
-        {name:"Null pointer", content:"Parser missing null check...", confidence:8},
-        {name:"Memory leak", content:"Alloc without free in loop...", confidence:4},
-      ],
-      selectedBranch: "Null pointer",
-    },
-    {
-      name: "Tree 2: Runtime Analysis",
-      branches: [
-        {name:"Race condition", content:"Concurrent write to buffer...", confidence:6},
-      ],
-      selectedBranch: "Race condition",
-    },
-    {
-      name: "Tree 3: Git History",
-      branches: [
-        {name:"Recent regression", content:"Commit abc123 introduced bug...", confidence:7},
-      ],
-      selectedBranch: "Recent regression",
-    },
+    {name:"Static", branches:[{name:"Null pointer", content:"...", confidence:8}], selectedBranch:"Null pointer"},
+    {name:"Runtime", branches:[{name:"Race cond", content:"...", confidence:6}], selectedBranch:"Race cond"},
   ],
-  consensus: {
-    conclusion: "Null pointer from Tree 1 + regression from Tree 3 point to same root cause",
-    agreeingTrees: ["Tree 1: Static Analysis", "Tree 3: Git History"],
-    totalTrees: 3,
-    confidence: 8,
-    primaryTree: "Tree 1: Static Analysis",
-  },
-  template: "debug"
+  consensus: {conclusion:"Null+Race", agreeingTrees:["Static","Runtime"], totalTrees:2, confidence:7}
 })
 ```
 
-- **何時用**：複雜 bug 需多角度分析、架構重大決策、跨領域問題
+- **何時用**：user 說「綜合分析」「從多個角度」「交叉驗證」「static/runtime/git 分析」
 - **何時不用**：例行推理、已知答案（用 cit chain 更省）
 - **內部行為**：各 tree 獨立推理分支 → 選最佳 → cross-tree consensus voting
 
@@ -275,7 +248,7 @@ smart_think({
 | **例行推理、有方向** | `mode:"cit"` chain | 最省 token（~70%） |
 | **不確定、需探索 2-3 方向** | `mode:"cit"` branch | 自動判斷是否分支 |
 | **高風險、行為閘強制** | `mode:"beam"` | 強制多路徑，無略過 |
-| **複雜 bug、多角度驗證** | `mode:"forest"` | 多樹 consensus，精度最高 |
+| **「綜合分析」「從不同角度」「交叉驗證」** | `mode:"forest"` | 多樹 consensus，精度最高 |
 
 ### Self-Correction Loop（高風險自我修正）
 
