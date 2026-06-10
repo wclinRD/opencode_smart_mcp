@@ -35,6 +35,7 @@ import { optimizeOutputSync } from '../lib/output-optimizer.mjs';
 import { getDefaultCache } from '../lib/cache-manager.mjs';
 import { createPipeline, optimizeOutput as pipelineOptimize } from '../lib/output-pipeline.mjs';
 import { isStructuredError } from '../lib/safe-handler.mjs';
+import { getContextBudget, resetContextBudget } from '../lib/context-budget.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -106,6 +107,8 @@ function getStatsSummary() {
   }
   const preCheckHits = stats.memoryPreCheckHitCount;
   const preCheckTotal = stats.memoryPreCheckCount;
+  const budget = getContextBudget();
+  const budgetStatus = budget.getStatus();
   return {
     uptimeMs: Date.now() - stats.startTime, totalCalls: stats.totalCalls, totalErrors: stats.totalErrors,
     errorRate: stats.totalCalls > 0 ? (stats.totalErrors / stats.totalCalls * 100).toFixed(1) + '%' : '0%',
@@ -119,6 +122,16 @@ function getStatsSummary() {
       preCheckHitRate: preCheckTotal > 0 ? (preCheckHits / preCheckTotal * 100).toFixed(1) + '%' : '0%',
       preCheckTimeSavedMs: stats.memoryPreCheckSavedMs,
       preCheckAvgSavedMs: preCheckHits > 0 ? Math.round(stats.memoryPreCheckSavedMs / preCheckHits) : 0,
+    },
+    tokens: {
+      estimatedTotal: budgetStatus.estimatedTokens,
+      maxBudget: budgetStatus.maxTokens,
+      remaining: budgetStatus.remainingTokens,
+      usedPct: budgetStatus.usedPct,
+      status: budgetStatus.status,
+      compressedCalls: budgetStatus.compressedCount,
+      savingsChars: budgetStatus.savingsChars,
+      savingsPct: budgetStatus.savingsPct,
     },
   };
 }
@@ -900,12 +913,41 @@ function respond(id, result, opts = {}) {
   const pipeline = result._responsePipeline;
   delete result._responsePolicy; // strip before sending over wire
   delete result._responsePipeline;
+
   if (policy && opts.optimize !== false && result?.content?.[0]?.type === 'text' && typeof result.content[0].text === 'string') {
-    const opt = applyOptimization(result.content[0].text, policy, { ...opts, chain: pipeline });
+    const originalSize = result.content[0].text.length;
+
+    // Context budget: auto-increase compression when budget is low
+    const budget = getContextBudget();
+    const compressionDecision = budget.decideCompression(originalSize, policy.maxLevel || 0);
+    const effectivePolicy = compressionDecision.shouldCompress
+      ? { ...policy, maxLevel: compressionDecision.level }
+      : policy;
+
+    const opt = applyOptimization(result.content[0].text, effectivePolicy, { ...opts, chain: pipeline });
     if (opt.meta) {
       result.content[0].text = opt.text + '\n\n---\n' + JSON.stringify(opt.meta, null, 2) + '\n---';
-      debugLog(`Output opt: ${opt.meta._optimized.savings} saved (L${opt.meta._optimized.level})`);
+      debugLog(`Output opt: ${opt.meta._optimized.savings} saved (L${opt.meta._optimized.level})${compressionDecision.shouldCompress ? ' [budget: ' + compressionDecision.reason + ']' : ''}`);
     }
+
+    // Track output size for context budget
+    const finalSize = result.content[0].text.length;
+    budget.track(
+      result._toolName || 'unknown',
+      finalSize,
+      opt.meta?._optimized?.level > 0,
+      originalSize
+    );
+
+    // Budget warning: inject budget status into output when low
+    if (budget.isLow()) {
+      const status = budget.getStatus();
+      result.content[0].text += `\n\n---\n📊 Context Budget: ${status.usedPct} used (${status.remainingPct} remaining) — ${status.recommendation}\n---`;
+    }
+  } else if (result?.content?.[0]?.type === 'text' && typeof result.content[0].text === 'string') {
+    // Track even non-optimized outputs
+    const budget = getContextBudget();
+    budget.track(result._toolName || 'unknown', result.content[0].text.length);
   }
 
   // Legacy Toonify background optimization (fire-and-forget, kept for compat)
@@ -936,7 +978,7 @@ function respondError(id, code, message, data) {
 
 const CONTEXT_TOOL_DESCRIPTION =
   'Query or manage session context. Use this to see what tools have been called, what findings accumulated, or to reset/list sessions.\n' +
-  '  command: "get" (default) | "summary" | "history" | "findings" | "reset" | "sessions" | "delete" | "inject" | "workflow-stats" | "merge"\n' +
+  '  command: "get" (default) | "summary" | "history" | "findings" | "reset" | "sessions" | "delete" | "inject" | "workflow-stats" | "merge" | "budget"\n' +
   '  sessionId: optional, for resume/delete operations';
 
 /**
@@ -997,7 +1039,8 @@ function handleSmartContext(id, args) {
 
       case 'reset': {
         contextManager.reset();
-        result = `Session reset. SessionId: ${contextManager.get()?.sessionId}`;
+        resetContextBudget();
+        result = `Session reset. SessionId: ${contextManager.get()?.sessionId}\nContext budget also reset.`;
         break;
       }
 
@@ -1044,8 +1087,14 @@ function handleSmartContext(id, args) {
         break;
       }
 
+      case 'budget': {
+        const budget = getContextBudget();
+        result = JSON.stringify(budget.getStatus(), null, 2);
+        break;
+      }
+
       default:
-        result = `Unknown command: ${cmd}. Available: get, summary, history, findings, reset, sessions, delete, inject, workflow-stats, merge`;
+        result = `Unknown command: ${cmd}. Available: get, summary, history, findings, reset, sessions, delete, inject, workflow-stats, merge, budget`;
     }
 
     respond(id, { content: [{ type: 'text', text: result }] }, { optimize: false });
@@ -1253,6 +1302,7 @@ function handleRequest(req) {
 
     case 'smart/health': {
       const ctx = contextManager.get();
+      const budget = getContextBudget();
       respond(id, {
         status: 'ok', version: '3.1.0',
         toolsRegistered: toolMap.size, toolNames: Array.from(toolMap.keys()),
@@ -1264,6 +1314,7 @@ function handleRequest(req) {
           errorCount: ctx.metadata.errorCount,
           findingCount: ctx.accumulatedFindings.length,
         } : null,
+        budget: budget.getStatus(),
       });
       break;
     }

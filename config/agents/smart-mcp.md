@@ -53,7 +53,8 @@ permission:
 | `smart_deep_think({topic, template})` | **慢想** — 深度分析（9 模板）。一次完整輸出 |
 | `smart_security({scan})` | 安全掃描 |
 | `smart_test({root})` | 執行測試 |
-| `smart_context({command})` | Session 管理 |
+| `smart_context({command})` | Session 管理（含 context budget 查詢：`smart_context({command:"budget"})`） |
+| `smart_rules({file})` | 查詢專案規則（AGENTS.md / .cursorrules 等）— **編輯前必查** |
 
 > **💡 快思 vs 慢想**：不確定 root cause、有多種可能 → `smart_think`（快思 + beam）。需要系統性分析、完整評估 → `smart_deep_think`（慢想 + 模板）。兩者不會搞混：`think` = 來回對話式推理，`deep_think` = 單次完整深度分析。
 
@@ -149,10 +150,11 @@ permission:
 | 重構 | `ssr(import_graph) → ssr(code_impact) → ssr(rename_safety) → ssr(fast_apply) → smart_test` |
 | 新功能 | `ssr(planner) → ssr(arch_overview) → smart_think → ssr(fast_apply) → smart_test` |
 | Git 流程 | `ssr(git_context) → ssr(git_commit) → smart_test → ssr(git_review) → ssr(git_pr)` |
-| 專案上手 | `smart_learn → ssr(arch_overview) → ssr(import_graph) → smart_test → smart_security` |
+| 專案上手 | `smart_learn → smart_rules → ssr(arch_overview) → ssr(import_graph) → smart_test → smart_security` |
 | 安全修復 | `smart_security → smart_grep → ssr(fast_apply) → smart_test → rescan` |
 | 文件分析 | `ssr(ingest_document) → 分析內容 → 摘要/回答問題` |
 | 掃描 PDF | `ssr(ingest_document args:{ocr:true}) → 自動 OCR → 分析內容` |
+| 編輯前檢查 | `smart_rules({file:"目標檔案"}) → 確認規則 → 編輯` |
 
 ---
 
@@ -247,6 +249,12 @@ Smart MCP 自動壓縮大型輸出（L0/L1/L2）。遇到 `_optimized`：
   ❌ 自寫腳本測試 API（用 ssr({tool:"pw_browser"}) 取代）
   ❌ 手動 curl/wget 猜參數（用 ssr({tool:"pw_browser"}) + addInitScript 攔截）
   ❌ 盲目 grep/read 大量檔案（用 smart_grep 取代）
+  ❌ 不查規則就編輯（先用 smart_rules({file:"目標檔案"}) 確認專案慣例）
+
+Context Budget 意識：
+  📊 每次收到 budget warning 時，優先壓縮/摘要舊輸出
+  📊 大檔案 (>400 lines) 編輯用 hashline 格式（ssr fast_apply format:"hashline"）
+  📊 用 smart_context({command:"budget"}) 隨時檢查剩餘 context 空間
 ```
 
 ### 推理品質閘（讓回答更可靠）

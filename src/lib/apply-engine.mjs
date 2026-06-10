@@ -214,6 +214,229 @@ function matchL4(contentLines, searchLines) {
  * @returns {{ line: number, level: number } | null}
  */
 /**
+ * Level 6: Gap-tolerant subsequence matching — handles lines added/removed
+ * between search lines. Uses line fingerprints (normalized whitespace).
+ * Allows up to 50% gap ratio (gaps between matched lines / total search lines).
+ * @returns 1-indexed line or -1
+ */
+function matchL6(contentLines, searchLines) {
+  if (searchLines.length === 0) return -1;
+
+  // Compute fingerprints: trimmed, whitespace-normalized, non-empty meaningful lines
+  const searchSig = searchLines
+    .map(l => normalizeWS(l))
+    .filter(s => s.length > 0);
+  if (searchSig.length === 0) return -1;
+
+  const contentSig = contentLines.map(l => normalizeWS(l));
+
+  // Lenient match: a search line matches a content line if:
+  //   1. Exact fingerprint match, OR
+  //   2. One is a substring of the other (handles trailing `{`, missing semicolons, etc.)
+  function linesMatch(searchFp, contentFp) {
+    if (searchFp === contentFp) return true;
+    if (!searchFp || !contentFp) return false;
+    // Substring match in either direction (for lenient comparison)
+    if (searchFp.length >= 5 && contentFp.includes(searchFp)) return true;
+    if (contentFp.length >= 5 && searchFp.includes(contentFp)) return true;
+    return false;
+  }
+
+  // Find longest subsequence match using greedy sliding window
+  const gapRatio = 0.5;
+  const maxAllowedGap = Math.max(1, Math.floor(searchSig.length * gapRatio));
+
+  let bestStart = -1;
+  let bestGap = Infinity;
+
+  for (let ci = 0; ci < contentSig.length; ci++) {
+    if (!linesMatch(searchSig[0], contentSig[ci])) continue;
+
+    let si = 0;
+    let cj = ci;
+    let matched = 0;
+    let gap = 0;
+
+    while (si < searchSig.length && cj < contentSig.length) {
+      if (linesMatch(searchSig[si], contentSig[cj])) {
+        si++;
+        matched++;
+      } else {
+        gap++;
+        if (gap > maxAllowedGap) break;
+      }
+      cj++;
+    }
+
+    if (matched === searchSig.length && gap < bestGap) {
+      bestStart = ci;
+      bestGap = gap;
+    }
+  }
+
+  if (bestStart === -1) return -1;
+
+  // Verify: at least 2 meaningful lines matched
+  if (searchSig.length <= 2) return bestStart + 1;
+  if (bestGap <= maxAllowedGap) return bestStart + 1;
+
+  return -1;
+}
+
+/**
+ * Compute line-level fingerprints for a file content.
+ * Returns array of { lineNum, fingerprint, raw } for each line.
+ * Fingerprint = trimmed + whitespace-collapsed content.
+ * Useful for hashline-based addressing (line number + content verification).
+ *
+ * @param {string} content - file content
+ * @param {object} [opts]
+ * @param {boolean} [opts.includeRaw=false] - include raw line text in result
+ * @returns {Array<{lineNum:number, fingerprint:string, raw?:string}>}
+ */
+export function computeLineFingerprints(content, opts = {}) {
+  if (!content) return [];
+  const lines = content.split('\n');
+  return lines.map((raw, i) => ({
+    lineNum: i + 1,
+    fingerprint: normalizeWS(raw),
+    ...(opts.includeRaw ? { raw } : {}),
+  }));
+}
+
+/**
+ * Verify a line's content by fingerprint at a specific line number.
+ * Used for hashline-based addressing: "edit line 42 if content hash matches".
+ * Returns strict match first, then fuzzy if strict fails.
+ *
+ * @param {string} content - full file content
+ * @param {number} lineNum - 1-indexed line number
+ * @param {string} expectedContent - expected line content (trimmed comparison)
+ * @returns {{ ok: boolean, actual: string, fuzzy: boolean }}
+ */
+export function verifyLineFingerprint(content, lineNum, expectedContent) {
+  if (!content || !lineNum || !expectedContent) {
+    return { ok: false, actual: '', fuzzy: false };
+  }
+  const lines = content.split('\n');
+  if (lineNum < 1 || lineNum > lines.length) {
+    return { ok: false, actual: '', fuzzy: false };
+  }
+  const actual = lines[lineNum - 1];
+  const expectedNorm = normalizeWS(expectedContent);
+  const actualNorm = normalizeWS(actual);
+
+  if (actualNorm === expectedNorm) {
+    return { ok: true, actual, fuzzy: false };
+  }
+
+  // Fuzzy fallback: check if content is "close enough" (substring)
+  if (expectedNorm && actualNorm &&
+      (actualNorm.includes(expectedNorm) || expectedNorm.includes(actualNorm))) {
+    return { ok: true, actual, fuzzy: true };
+  }
+
+  return { ok: false, actual, fuzzy: false };
+}
+
+/**
+ * Apply a hashline edit: replace lines at a specific line number range
+ * with content verification via fingerprint.
+ *
+ * Format:
+ *   { file, startLine, endLine, oldContent, newContent }
+ *   - startLine: 1-indexed start line
+ *   - endLine: 1-indexed end line (inclusive, can be same as startLine)
+ *   - oldContent: expected content of the range (for verification)
+ *   - newContent: replacement content
+ *
+ * @param {string} filePath
+ * @param {{ startLine: number, endLine: number, oldContent: string, newContent: string }} change
+ * @param {{ undo?: boolean }} [opts]
+ * @returns {{ status: 'applied'|'conflict'|'error', file: string, ... }}
+ */
+export function applyHashline(filePath, change, opts = {}) {
+  const { startLine, endLine, oldContent, newContent } = change;
+  const { undo = false } = opts;
+
+  if (!startLine || !endLine || startLine > endLine) {
+    return { status: 'error', file: filePath, error: `Invalid line range: ${startLine}-${endLine}` };
+  }
+
+  // Read file
+  let content;
+  try {
+    content = readFileSync(filePath, 'utf-8');
+  } catch (e) {
+    return { status: 'error', file: filePath, error: `Cannot read: ${e.message}` };
+  }
+
+  const lines = content.split('\n');
+  if (endLine > lines.length) {
+    return {
+      status: 'conflict', file: filePath,
+      error: `Line range ${startLine}-${endLine} exceeds file length (${lines.length} lines)`,
+    };
+  }
+
+  // Verify oldContent against the line range
+  const actualRange = lines.slice(startLine - 1, endLine).join('\n');
+  const oldNorm = normalizeWS(oldContent || '');
+  const actualNorm = normalizeWS(actualRange);
+
+  if (oldNorm !== actualNorm) {
+    // Try line-by-line fingerprint verification for better error reporting
+    const fpOld = computeLineFingerprints(oldContent || '', { includeRaw: true });
+    const fpActual = computeLineFingerprints(actualRange, { includeRaw: true });
+
+    const mismatches = [];
+    for (let i = 0; i < Math.max(fpOld.length, fpActual.length); i++) {
+      const o = fpOld[i];
+      const a = fpActual[i];
+      if (!o || !a || o.fingerprint !== a.fingerprint) {
+        mismatches.push({
+          line: startLine + i,
+          expected: o?.raw || '(missing)',
+          actual: a?.raw || '(missing)',
+        });
+      }
+    }
+
+    return {
+      status: 'conflict', file: filePath,
+      error: `Content mismatch at line ${startLine}. File has changed since LLM read it.`,
+      details: {
+        expected: oldContent,
+        actual: actualRange,
+        mismatches: mismatches.slice(0, 5), // show first 5 mismatches
+        hint: 'The file has drifted — re-read the file and generate a new edit.',
+      },
+    };
+  }
+
+  // Apply replacement
+  const before = lines.slice(0, startLine - 1).join('\n');
+  const after = lines.slice(endLine).join('\n');
+  const prefix = before ? before + '\n' : '';
+  const suffix = after ? '\n' + after : '';
+  const newContent_full = prefix + newContent + suffix;
+
+  // Create undo snapshot
+  if (undo) {
+    try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* */ }
+  }
+
+  try {
+    writeFileSync(filePath, newContent_full, 'utf-8');
+  } catch (e) {
+    return { status: 'error', file: filePath, error: `Cannot write: ${e.message}` };
+  }
+
+  const diff = generateDiffSummary(content, newContent_full, filePath);
+  return { status: 'applied', file: filePath, matchLevel: 6, diff, backup: undo ? (filePath + '.apply.bak') : undefined };
+}
+
+/**
  * Level 5: Partial/lenient matching for abbreviated context.
  * Matches meaningful lines independently — allows gaps.
  * Returns 1-indexed line of best anchor match.
@@ -256,6 +479,7 @@ export function fuzzyMatch(content, search, opts = {}) {
   r = matchL3(cl, sl);                if (r !== -1) return { line: r, level: 3 };
   r = matchL4(cl, sl);                if (r !== -1) return { line: r, level: 4 };
   r = matchL5(cl, sl);                if (r !== -1) return { line: r, level: 5 };
+  r = matchL6(cl, sl);                if (r !== -1) return { line: r, level: 6 };
 
   return null;
 }

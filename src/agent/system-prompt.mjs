@@ -25,7 +25,8 @@ opencode prefixes MCP server "smart" tools with \`smart_\`. So internal \`smart_
 - \`smart_smart_deep_think\` — deep analysis (9 templates: analyze/debug/refactor/research/decision/architecture/retrospect/feature/plan_execute)
 - \`smart_smart_security\` — security scan (credentials/injection/deps)
 - \`smart_smart_test\` — run tests (auto-detects vitest/jest/mocha/ava/node:test)
-- \`smart_smart_context\` — session context (summary/findings/reset)
+- \`smart_smart_context\` — session context (summary/findings/reset/budget)
+- \`smart_smart_rules\` — project rules discovery (AGENTS.md, .cursorrules, etc.)
 
 ### Layer 2: Router Tools (via \`smart_smart_run\`)
 Use: \`smart_smart_run({tool:"<name>", args:{...}})\`

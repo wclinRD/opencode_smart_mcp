@@ -27,6 +27,7 @@ import {
   applyWholeFile,
   applyUnifiedDiff,
   applyAtomic,
+  applyHashline,
   parseSearchReplace,
   parseSearchReplaceText,
   parseUnifiedDiff,
@@ -34,6 +35,8 @@ import {
   checkBalance,
   checkFileAccess,
   expandLazyMarkers,
+  computeLineFingerprints,
+  verifyLineFingerprint,
 } from '../../lib/apply-engine.mjs';
 
 export default {
@@ -41,14 +44,15 @@ export default {
   category: 'edit',
   cli: 'fast-apply.mjs',
   description: `Use when: need to apply LLM-suggested code edits faster and more accurately.
-Supports 5 input formats (ordered by token efficiency):
+Supports 6 input formats (ordered by token efficiency):
   - unified-diff: git diff format — MOST token-efficient (40-60% savings). Use +/- lines only, no unchanged lines needed.
   - lazy: SEARCH/REPLACE with // ... existing code ... markers (80-98% savings for large files)
+  - hashline: line-number + content-hash addressing — MOST ROBUST for large files (>400 lines). Specify line range directly. No fuzzy match ambiguity.
   - partial: abbreviated SEARCH context (fewer lines, L5 fuzzy matching)
   - search-replace: standard SEARCH/REPLACE blocks (Aider-compatible)
   - whole-file: full file replacement (most tokens)
-💡 Tip: prefer unified-diff for small edits (only changed +/- lines), lazy for large files with few changes.
-Features: 5-level fuzzy matching, atomic multi-file apply, undo snapshots, binary/access checks.
+💡 Tip: prefer unified-diff for small edits, hashline for >400 line files, lazy for large files with few changes.
+Features: 6-level fuzzy matching (L6 = gap-tolerant subsequence), hashline addressing with content verification, atomic multi-file apply, undo snapshots, binary/access checks.
 Dry-run by default — safe to use without side effects.`,
 
   inputSchema: {
@@ -56,8 +60,8 @@ Dry-run by default — safe to use without side effects.`,
     properties: {
       format: {
         type: 'string',
-        enum: ['search-replace', 'lazy', 'partial', 'unified-diff', 'whole-file'],
-        description: 'Input format (default: search-replace). Token efficiency: unified-diff (best, +/- only) > lazy > partial > search-replace > whole-file.',
+        enum: ['search-replace', 'lazy', 'partial', 'unified-diff', 'whole-file', 'hashline'],
+        description: 'Input format (default: search-replace). Token efficiency: unified-diff (best, +/- only) > lazy > hashline > partial > search-replace > whole-file. Use hashline for large files (>400 lines) where SEARCH/REPLACE matching is unreliable.',
       },
       blocks: {
         type: 'array',
@@ -87,6 +91,21 @@ Dry-run by default — safe to use without side effects.`,
           content: { type: 'string' },
         },
         description: 'Whole file replacement (for format=whole-file)',
+      },
+      changes: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            file: { type: 'string', description: 'Target file path' },
+            startLine: { type: 'number', description: 'Start line (1-indexed)' },
+            endLine: { type: 'number', description: 'End line (1-indexed, inclusive)' },
+            oldContent: { type: 'string', description: 'Expected content of the line range (for verification)' },
+            newContent: { type: 'string', description: 'Replacement content' },
+          },
+          required: ['file', 'startLine', 'endLine', 'newContent'],
+        },
+        description: 'Hashline edit changes (for format=hashline). Specify line range directly with content verification — most robust for large files.',
       },
       files: {
         type: 'array',
@@ -164,6 +183,8 @@ Dry-run by default — safe to use without side effects.`,
         const diffInput = args.diff || args.text || '';
         const parsed = parseUnifiedDiff(diffInput);
         changes = parsed.map(f => ({ file: f.file, type: 'diff', hunks: f.hunks }));
+      } else if (format === 'hashline' && args.changes) {
+        changes = args.changes.map(c => ({ ...c, type: 'hashline' }));
       } else if (format === 'whole-file' && args.whole) {
         changes = [{ ...args.whole, type: 'whole' }];
       } else if (args.text) {
@@ -254,6 +275,40 @@ Dry-run by default — safe to use without side effects.`,
           type: 'whole-file',
           size: ch.content.length,
         });
+      } else if (ch.type === 'hashline') {
+        const content = readFileSafe(ch.file);
+        if (content === null) {
+          previewResults.push({ file: ch.file, status: 'error', error: 'File not found' });
+          continue;
+        }
+        const lines = content.split('\n');
+        const rangeOk = ch.startLine >= 1 && ch.endLine <= lines.length;
+        let verified = false;
+        let fpMatch = false;
+        if (rangeOk && ch.oldContent) {
+          const v = verifyLineFingerprint(
+            lines.slice(ch.startLine - 1, ch.endLine).join('\n'),
+            1, // relative line 1 within the range
+            ch.oldContent.split('\n')[0] // verify first line of oldContent
+          );
+          verified = v.ok;
+          fpMatch = v.fuzzy;
+        } else if (rangeOk && !ch.oldContent) {
+          verified = true; // no oldContent to verify, trust line numbers
+        }
+        previewResults.push({
+          file: ch.file,
+          status: rangeOk ? (verified ? 'ready' : 'conflict') : 'error',
+          type: 'hashline',
+          startLine: ch.startLine,
+          endLine: ch.endLine,
+          fileLines: lines.length,
+          contentVerified: verified,
+          fingerprintMatch: fpMatch,
+          error: !rangeOk
+            ? `Line range ${ch.startLine}-${ch.endLine} exceeds file (${lines.length} lines)`
+            : (!verified && ch.oldContent ? `Content mismatch at line ${ch.startLine} — file has drifted` : undefined),
+        });
       }
     }
 
@@ -337,6 +392,8 @@ Dry-run by default — safe to use without side effects.`,
           r = applyUnifiedDiff(ch.file, ch.hunks, { undo });
         } else if (ch.type === 'whole') {
           r = applyWholeFile(ch.file, ch.content, { undo });
+        } else if (ch.type === 'hashline') {
+          r = applyHashline(ch.file, { startLine: ch.startLine, endLine: ch.endLine, oldContent: ch.oldContent || '', newContent: ch.newContent }, { undo });
         }
         appResults.push(r || { status: 'error', file: ch.file, error: 'Unknown type' });
       }
@@ -415,7 +472,14 @@ function formatOutput(data, format) {
       const matchInfo = p.matchLevel ? ` (fuzzy L${p.matchLevel})` : '';
       out.push(`${icon} ${p.file}${matchInfo}`);
       if (p.status === 'ready') {
-        out.push(`   Search: ${p.searchLines} lines → Replace: ${p.replaceLines} lines`);
+        if (p.type === 'hashline') {
+          out.push(`   Lines ${p.startLine}-${p.endLine} (file: ${p.fileLines} lines)`);
+          if (p.contentVerified && p.fingerprintMatch) out.push(`   ✅ Content verified (fuzzy fingerprint match)`);
+          else if (p.contentVerified) out.push(`   ✅ Content verified (exact match)`);
+          else if (!p.oldContent) out.push(`   ⚡ Line range mode (no oldContent verification)`);
+        } else {
+          out.push(`   Search: ${p.searchLines} lines → Replace: ${p.replaceLines} lines`);
+        }
         if (p.matchLevel > 2) out.push(`   ⚡ Fuzzy match level ${p.matchLevel}`);
         if (p.balanced === false) out.push(`   ⚠️  Brace balance issue detected`);
       } else if (p.status === 'conflict') {
