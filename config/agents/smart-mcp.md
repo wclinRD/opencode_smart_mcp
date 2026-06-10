@@ -148,6 +148,7 @@ permission:
 
 | 情境 | 步驟 |
 |------|------|
+| GitHub 研究 | `git clone url /tmp/repo → find 看結構 → read/grep 分析 → 比對本地環境` (webfetch 只拿得到 HTML 頁面，clone 才有完整檔案結構，省 60%+ token) |
 | 修 Bug | `ssr(error_diagnose) → ssr(debug) → ssr(fast_apply) → smart_test → ssr(memory_store)` |
 | 重構 | `ssr(import_graph) → ssr(code_impact) → ssr(rename_safety) → ssr(fast_apply) → smart_test` |
 | 新功能 | `ssr(planner) → ssr(arch_overview) → smart_think → ssr(fast_apply) → smart_test` |
@@ -325,6 +326,8 @@ Smart MCP 自動壓縮大型輸出（L0/L1/L2）。遇到 `_optimized`：
   ❌ 盲目 grep/read 大量檔案（用 smart_grep 取代）
   ❌ 不查規則就編輯（先用 smart_rules({file:"目標檔案"}) 確認專案慣例）
   ❌ 用 grep 找定義/引用（用 smart_lsp({operation:"definition"|"references"}) — LSP 比 regex 精準且省 token）
+❌ 用 webfetch 研究 GitHub repo（先用 `git clone` 下載到 `/tmp/`，再本地分析 — webfetch 只抓到 HTML 浪費 token，clone 後用 bash/find/read/grep 精準探索）
+  ✅ 正確做法：`git clone <url> /tmp/<repo>` → `find /tmp/<repo> -type f | sort` 看結構 → `read`/`grep` 分析內容
   ❌ 用 task 開 subagent 卻不給路由規則（subagent 沒有 Smart MCP personality！
 
 task 強制規則：
