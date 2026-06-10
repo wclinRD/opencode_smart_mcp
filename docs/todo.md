@@ -254,135 +254,53 @@
 
 ---
 
-## Phase 5：全文文件檢索（Full-text Document Search）
+## Phase 5：全文文件檢索（Full-text Document Search） ✅
 
-> **目標**：讓使用者可以搜尋已 ingest 文件的**內容**，而不只是 metadata。
-> 對應 plan.md Phase 5 章節。
+> ✅ 2026-06-10 全部完成。28 個 document-registry 測試 + 7 個 Phase 5 測試通過。
 
-### 1. `document-registry.mjs` 擴充 🔨
+### 1. `document-registry.mjs` 擴充 ✅
 
-- [ ] 新增 `content TEXT` 欄位（ALTER TABLE ADD COLUMN migration）
-- [ ] `storeContent(path, content)` — 儲存文件內容片段
-- [ ] `searchContent(query, limit)` — LIKE %query% 全文搜尋（支援多詞 AND）
-- [ ] 內部 migration 機制（schema version tracking）
+- [x] 新增 `content TEXT` 欄位（ALTER TABLE ADD COLUMN + auto-migration）
+- [x] `storeContent(path, content)` — 儲存文件內容片段
+- [x] `searchContent(query, limit)` — LIKE %query% 全文搜尋（支援多詞 AND）
+- [x] 內部 migration 機制（schema version tracking）
 
-### 2. Plugin 擴充 🔨
+### 2. Plugin 擴充 ✅
 
-- [ ] `ingest-document.mjs` — ingest 後自動 storeContent（前 4000 chars）
-- [ ] `src/plugins/standard/search-docs.mjs` — `smart_search_docs` 新工具
-- [ ] 支援參數：`query`（必填）、`limit`（可選，預設 10）
-- [ ] 回傳格式：路徑 + 格式 + title + 摘要片段 + updated_at
+- [x] `ingest-document.mjs` — ingest 後自動 storeContent（前 4000 chars）
+- [x] `src/plugins/standard/search-docs.mjs` — `smart_search_docs` 工具（126 行）
+- [x] 支援參數：`query`（必填）、`limit`（可選，預設 10）
+- [x] 回傳格式：路徑 + 格式 + title + 摘要片段 + updated_at
 
-### 3. 整合 🔨
+### 3. 整合 ✅
 
-- [ ] `src/lib/hybrid-engine.mjs` DOMAIN_MAP 加入 `smart_search_docs`
-- [ ] `config/agents/smart-mcp.md` 加入 direct-call table + router 例子
-- [ ] Synced to `~/.config/opencode/agents/smart-mcp.md`
+- [x] `src/lib/hybrid-engine.mjs` DOMAIN_MAP 加入 `smart_search_docs`
+- [x] `config/agents/smart-mcp.md` 加入 direct-call table + router 例子
+- [x] Synced to `~/.config/opencode/agents/smart-mcp.md`
 
-### 4. 測試 🔨
+### 4. 測試 ✅
 
-- [ ] storeContent / searchContent unit tests
-- [ ] Migration 測試（舊 schema 無 content 欄位 → 自動加欄位）
-- [ ] Plugin 整合測試（ingest auto-store + search-docs）
-- [ ] 全量 regression
+- [x] storeContent / searchContent unit tests
+- [x] Migration 測試（舊 schema 無 content 欄位 → 自動加欄位）
+- [x] Plugin 整合測試（ingest auto-store + search-docs）
+- [x] 全量 regression（695 tests, 0 fail）
 
 ---
 
-## Phase 6：LLM 增強技術研究缺口
+## Phase 6：Hallucination Detection
 
-> 2026-06-10 基於 web research 盤點 12 項業界方法。
-> 對應 plan.md Phase 6 章節。
->
-> 優先級矩陣見 plan.md，此處僅列待辦項目。
+> 2026-06-10 誠實盤點後縮減。原始 12 項中 11 項已被現有功能覆蓋或價值不足。
+> 移除項目見「已決定不做的功能」表格。
 
-### 🥇 Tier 1：高 CP 值（建議先做）
+### 唯一保留項目 📋
 
-#### 1. Context Caching（KV Cache 重複利用）📋
-
-- [ ] **Provider 評估**：確認目前使用的 model provider（opencode/big-pickle）是否支援 prompt caching
-- [ ] **Agent personality**：system prompt 加入 cache_control breakpoints 標記
-- [ ] **Skill 整合**：各 skill 啟用 caching，減少重複計算
-- [ ] **成效統計**：比較啟用前後 token 用量
-
-#### 2. Prompt Compression（輸入壓縮）📋
-
-- [ ] **研究**：評估 LLMLingua-2 vs Selective Context vs 自實 lightweight compressor
-- [ ] **實作**：新增 `src/lib/prompt-compressor.mjs` — 壓縮引擎
-- [ ] **Plugin**：新增 `src/plugins/standard/compress-prompt.mjs` — `smart_compress_prompt` 工具
-- [ ] **整合**：hybrid_router DOMAIN_MAP 加入 `compress` 領域
-- [ ] **Agent personality**：加入壓縮行為提示（大輸出自動壓縮）
-- [ ] **測試**：壓縮率 benchmark + 準確率驗證
-
-#### 3. Hallucination Detection（輸出真實性檢查）📋
+#### Hallucination Detection（輸出真實性檢查）
 
 - [ ] **研究**：定義 6 種幻覺類型的評分 prompt（fabrication/misattribution/unfaithful/self-contradiction/off-topic/confident-refusal）
 - [ ] **實作**：新增 `src/plugins/standard/hallucination-check.mjs` — `smart_hallucination_check` 工具
 - [ ] **整合**：高風險工具（debug/error_diagnose/report）自動串接檢查
 - [ ] **Agent personality**：加入輸出自我驗證行為提示
 - [ ] **測試**：各類型幻覺測試集驗證
-
-#### 4. Guardrails（輸出安全閘）📋
-
-- [ ] **設計**：定義規則格式（deny pattern + allow pattern + rewrite rule）
-- [ ] **實作**：新增 `src/plugins/standard/guardrail.mjs` — `smart_guardrail` 工具
-- [ ] **預設規則**：防止 prompt injection 繞過、強制引用來源
-- [ ] **Agent personality**：加入 guardrail 行為提示
-- [ ] **測試**：對抗性 prompt 測試
-
-#### 5. Agent Observability / Tracing（可觀測性）📋
-
-- [ ] **設計**：Span 模型定義（tool call → span，session → trace）
-- [ ] **實作**：新增 `src/lib/tracer.mjs` — 輕量 tracing 引擎
-- [ ] **Plugin**：新增 `src/plugins/standard/trace.mjs` — `smart_trace` 工具
-- [ ] **匯出格式**：支援 JSON（後續可轉 OTel）
-- [ ] **整合**：index.mjs 自動產生 span 包圍每個 tool call
-- [ ] **測試**：multi-span trace 正確性
-
-### 🥈 Tier 2：中長期
-
-#### 6. Multi-Agent Debate（多 Agent 辯論）📋
-
-- [ ] **設計**：Debate protocol（角色分配 + 回合制 + 共識機制）
-- [ ] **Plugin**：新增 `src/plugins/standard/debate.mjs` — `smart_debate` 工具
-- [ ] **整合**：高風險決策自動觸發 debate（如安全修復方案）
-- [ ] **測試**：比較單 agent vs debate 準確率
-
-#### 7. DSPy Prompt Optimization（提示詞自動優化）📋
-
-- [ ] **研究**：DSPy 整合可行性（Python dependency）
-- [ ] **替代方案**：自實 lightweight optimizer（JS only）
-- [ ] **Pilot**：選 1-2 個 skill 建立 eval dataset + metric
-- [ ] **自動化**：skill 修改後自動跑 optimization pipeline
-
-#### 8. Tree of Thoughts / MCTS 搜尋式推理 📋
-
-- [ ] **研究**：升級 `smart_think` 支援分支的路徑設計
-- [ ] **Pilot**：導入 Process Reward Model（可用 LLM-as-Judge 替代）
-- [ ] **實作**：tree search engine + 路徑評估
-- [ ] **測試**：比較線性 CoT vs tree search 正確率
-
-#### 9. Speculative Decoding（推測解碼）📋
-
-- [ ] **Provider check**：opencode/big-pickle 是否支援
-- [ ] **文件**：記錄各 provider 的 speculative decoding 支援狀況
-
-#### 10. LLM-as-Judge 評估管線 📋
-
-- [ ] **設計**：eval dataset 格式 + metric 定義
-- [ ] **Plugin**：新增 `src/plugins/standard/eval.mjs` — `smart_eval` 工具
-- [ ] **整合**：agent personality 修改後自動回歸
-
-### 🥉 Tier 3：長期研究
-
-#### 11. Self-Play 自我對弈學習 📋
-
-- [ ] **研究**：Triadic Self-Evolution 架構在本專案的適用性
-- [ ] **Pilot**：最小可行 loop（Proposer → Solver → Verifier）
-
-#### 12. Automated Red Teaming（自動紅隊測試）📋
-
-- [ ] **研究**：擴充 `smart_security` 支援 LLM red teaming
-- [ ] **設計**：對抗性 prompt 生成 + 評估迴圈
 
 ---
 
@@ -456,50 +374,49 @@
 
 ---
 
-## Phase 8：Universal LSP Bridge
+## Phase 8：Universal LSP Bridge ✅
 
-> 2026-06-10 規劃。將現有 LSP bridge 暴露為 MCP tool。
-> 對應 plan.md Phase 8 章節。
+> ✅ 2026-06-10 全部完成。7 個 LSP 測試通過。
 
-### 1. 新增 `src/plugins/core/lsp.mjs` — smart_lsp MCP tool 🔨
+### 1. 新增 `src/plugins/core/lsp.mjs` — smart_lsp MCP tool ✅
 
-- [ ] Handler-based plugin（import LspBridge，無 CLI）
-- [ ] 支援 operations: symbols, references, hover, definition, diagnostics
-- [ ] 自動依副檔名選 language server
-- [ ] inputSchema: operation (enum), file (required), line, character
-- [ ] responsePolicy: maxLevel 0（輸出小，不需壓縮）
+- [x] Handler-based plugin（import LspBridge，無 CLI）
+- [x] 支援 operations: symbols, references, hover, definition, diagnostics
+- [x] 自動依副檔名選 language server
+- [x] inputSchema: operation (enum), file (required), line, character
+- [x] responsePolicy: maxLevel 0（輸出小，不需壓縮）
 
-### 2. 擴充 `src/lib/lsp-bridge.mjs` 🔨
+### 2. 擴充 `src/lib/lsp-bridge.mjs` ✅
 
-- [ ] 新增 PHP (intelephense) 到 LSP_CONFIGS
-- [ ] 新增 `getDiagnostics(filePath)` 方法（textDocument/diagnostic + pull model）
-- [ ] 確保 auto-detect 正確選擇 language server
+- [x] 新增 PHP (intelephense) 到 LSP_CONFIGS
+- [x] 新增 `getDiagnostics(filePath)` 方法（textDocument/diagnostic + pull model）
+- [x] 確保 auto-detect 正確選擇 language server
 
-### 3. 更新 `config/agents/smart-mcp.md` 🔨
+### 3. 更新 `config/agents/smart-mcp.md` ✅
 
-- [ ] Layer 1 Direct tools 表格加入 `smart_lsp`
-- [ ] 常用工作流加入 LSP 使用場景
-- [ ] 行為閘加入「理解程式碼優先 LSP」規則
-- [ ] permission 加入 `smart_lsp: allow`
+- [x] Layer 1 Direct tools 表格加入 `smart_lsp`
+- [x] 常用工作流加入 LSP 使用場景
+- [x] 行為閘加入「理解程式碼優先 LSP」規則
+- [x] permission 加入 `smart_lsp: allow`
 
-### 4. 更新 4 個 SKILL.md 🔨
+### 4. 更新 4 個 SKILL.md ✅
 
-- [ ] php-lsp: 「無 native LSP」→「使用 smart_lsp，CLI fallback」
-- [ ] pyright-lsp: 同上
-- [ ] typescript-lsp: 同上
-- [ ] swift-lsp: 同上
+- [x] php-lsp: 「無 native LSP」→「使用 smart_lsp，CLI fallback」
+- [x] pyright-lsp: 同上
+- [x] typescript-lsp: 同上
+- [x] swift-lsp: 同上
 
-### 5. 同步 🔨
+### 5. 同步 ✅
 
-- [ ] `~/.config/opencode/agents/smart-mcp.md` 同步
+- [x] `~/.config/opencode/agents/smart-mcp.md` 同步
 
-### 6. 測試 🔨
+### 6. 測試 ✅
 
-- [ ] smart_lsp plugin 載入驗證
-- [ ] 各 operation 正確性（symbols/references/hover/definition）
-- [ ] PHP language server 偵測
-- [ ] 不支援的語言降級提示
-- [ ] 全量 regression
+- [x] smart_lsp plugin 載入驗證
+- [x] 各 operation 正確性（symbols/references/hover/definition）
+- [x] PHP language server 偵測
+- [x] 不支援的語言降級提示
+- [x] 全量 regression（695 tests, 0 fail）
 
 ---
 
@@ -518,3 +435,36 @@
 | RAG 系統 | 已有 wiki-ingest + search_docs | 2026-06-10 |
 | Multi-modal 支援 | 與 tool-assisted LLM 核心場景不一致 | 2026-06-10 |
 | Inference engine 開發 | 應選擇現有 provider | 2026-06-10 |
+| **Context Compactor**（conversation compaction） | 已有 output-optimizer + opencode-wm 記憶提取。更多 compaction 是 opencode client 端責任 | 2026-06-10 |
+| **Tool Strategy Feedback Loop** | LLM 已在 session 內自適應，router 加學習層複雜度 > 效益 | 2026-06-10 |
+| **Sub-agent** | opencode 原生支援 Task tool | 2026-06-10 |
+| **Persistent Shell** | bash tool 已支援 workdir，stale state 風險 > 效益 | 2026-06-10 |
+| **Permission System** | opencode 已有 permission 機制 | 2026-06-10 |
+| **Streaming UI** | Smart MCP 是 MCP server，UI 是 opencode 責任 | 2026-06-10 |
+| **Hooks System** | opencode 已有 hooks 機制 | 2026-06-10 |
+| **Cost Tracking** | opencode 已有 `/cost` + smart_context budget | 2026-06-10 |
+| **Context Caching** | provider 設定問題，非 code 工作 | 2026-06-10 |
+| **Prompt Compression** | 與現有 output-optimizer (L0/L1/L2) + opencode compaction 重疊 | 2026-06-10 |
+| **Guardrails** | Server 端 HIGH_RISK_PREREQUISITES 已做到強制攔截 | 2026-06-10 |
+| **Agent Observability / Tracing** | 單開發者 debug 工具，不影響 LLM 表現 | 2026-06-10 |
+| **Multi-Agent Debate** | Beam Search / Forest-of-Thought 已達類似多路徑推理效果 | 2026-06-10 |
+| **DSPy Prompt Optimization** | Skill-level Learning (skill_patch) 為輕量替代 | 2026-06-10 |
+| **Tree of Thoughts / MCTS** | Forest-of-Thought 已做到多樹分支 + consensus | 2026-06-10 |
+| **Speculative Decoding** | provider 選擇問題，非 code 工作 | 2026-06-10 |
+| **LLM-as-Judge Eval** | 開發者工具，非 core value | 2026-06-10 |
+| **Self-Play** | 需 RL 基礎設施，超出 MCP server 範圍 | 2026-06-10 |
+| **Automated Red Teaming** | 複雜度高，單開發者事件率極低 | 2026-06-10 |
+
+### 模式歸納
+
+這些「不做」的項目有一個共同模式：**opencode 層已有對應功能，Smart MCP 不需要重複實作。**
+
+| Smart MCP 該做的事 | opencode 層的事 |
+|-------------------|----------------|
+| Output optimizer (L0/L1/L2) | Conversation compaction |
+| Memory store + skill_patch | Session context management |
+| Code intelligence (LSP/CKG/Impact) | Agent loop + sub-agent |
+| Document ingestion + search | Permission system + hooks |
+| Reasoning tools (think/deep_think) | UI + cost tracking + streaming |
+
+> 這不是缺陷，是**設計分工**。Smart MCP 的深度（LSP/CKG/Impact/Reasoning templates）才是真正的護城河。

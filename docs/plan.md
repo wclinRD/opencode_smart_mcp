@@ -19,7 +19,7 @@
 
 ---
 
-## 一、核心問題
+## 核心問題
 
 Smart MCP 已實作 4 項 token 優化手段，但零散未成體系：
 
@@ -34,7 +34,7 @@ Smart MCP 已實作 4 項 token 優化手段，但零散未成體系：
 
 ---
 
-## 二、設計哲學：分層擔責 + 透明告知 + 按需取回
+## 設計哲學：分層擔責 + 透明告知 + 按需取回
 
 ```
 LLM 端不可控（放掉）               MCP Server 端可控（全力做）
@@ -55,7 +55,7 @@ Streaming response (MCP protocol)  透明標記 + 按需取回 ✅
 
 ---
 
-## 三、壓縮層級定義
+## 壓縮層級定義
 
 | 層級 | 名稱 | 作法 | 資訊損失 | 適用 |
 |------|------|------|---------|------|
@@ -66,7 +66,7 @@ Streaming response (MCP protocol)  透明標記 + 按需取回 ✅
 
 ---
 
-## 四、Response Policy 機制
+## Response Policy 機制
 
 每個 Plugin 宣告自己的壓縮邊界：
 
@@ -103,7 +103,7 @@ export default {
 
 ---
 
-## 五、調適後的壓縮 Response 格式
+## 調適後的壓縮 Response 格式
 
 壓縮過的回應附加 `_optimized` metadata：
 
@@ -124,7 +124,7 @@ LLM 可根據 `_optimized.level` 決定是否需要取回完整版。
 
 ---
 
-## 六、Agent 行為規範
+## Agent 行為規範
 
 Agent personality 中明確定義：
 
@@ -138,9 +138,7 @@ Agent personality 中明確定義：
 
 ---
 
-## 七、實作路線
-
-### Phase 1：核心架構（目前）
+## Phase 1：核心架構
 
 ```
 目標：建立基礎壓縮 pipeline，L1 全面啟用，L2 限 3 工具
@@ -156,7 +154,9 @@ Agent personality 中明確定義：
 | Plugin responsePolicy | 各核心工具宣告壓縮邊界 |
 | Agent personality | 加入 token 優化行為提示 |
 
-### Phase 2：Smart Output Pipeline（Phase 1 後）
+---
+
+## Phase 2：Smart Output Pipeline
 
 ```
 目標：完整 Pipeline Layer（format → compress → truncate → cache）
@@ -172,7 +172,7 @@ Agent personality 中明確定義：
 
 ---
 
-## 八、預期成效
+## 預期成效
 
 | 優化項目 | 目前 | Phase 1 後 | Phase 2 後 |
 |---------|------|-----------|-----------|
@@ -187,7 +187,7 @@ Agent personality 中明確定義：
 
 ---
 
-## 十、Phase 3：Universal Task Router（LLM 路由減壓）
+## Phase 3：Universal Task Router（LLM 路由減壓）
 
 ### 核心問題
 
@@ -356,43 +356,32 @@ Smart MCP 目前只能讀純文字格式（.js, .ts, .py, .md, .txt, .json, .yam
 
 ## Phase 5：全文文件檢索（Full-text Document Search）
 
-> 2026-06-08 規劃。Phase 4b 只能搜 metadata（title/path/summary），Phase 5 讓你搜**內容**。
+> ✅ 2026-06-08 實作完成，7 個 Phase 5 測試 + 28 個 registry 測試全部通過。
+> `search-docs.mjs` (126 行) + `document-registry.mjs` content search + excerpt extraction。
 
-### 動機
+### 交付項目
 
-Phase 4b 的 document registry 追蹤「看過哪些文件」，但無法回答「在哪份文件的哪個段落提到 X」。使用者需要的是：
-- 「上週看的那份 ONFI spec，提到 timing constraints 的段落在哪？」
-- 「那份合約裡關於賠償條款怎麼寫的？」
-- 「記得 Q&A 表裡有討論 bridge mode issue，細節是什麼？」
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| `storeContent()` / `searchContent()` | ✅ | document-registry.mjs，支援多詞 AND 搜尋 |
+| DB auto-migration（ADD COLUMN content） | ✅ | schema version tracking |
+| `smart_search_docs` MCP tool | ✅ | search-docs.mjs，含 excerpt extraction |
+| hybrid-engine DOMAIN_MAP 整合 | ✅ | document 領域 |
+| Agent personality 更新 | ✅ | direct-call table + router 例子 |
+| 測試 | ✅ 28 pass, 0 fail | store/search/migration/plugin integration |
 
-這些全是 **全文內容搜尋**，不是 metadata 搜尋。
-
-### 架構
+### 架構說明
 
 ```
-Ingest 流程（修改 ingest-document plugin）：
+Ingest 流程：
   File → ingestDocument() → registry.register(metadata)
                            → registry.storeContent(path, 前4000chars)
 
-搜尋流程（新工具 smart_search_docs）：
+搜尋流程：
   query → registry.searchContent(query)
     → SELECT * FROM documents WHERE content LIKE '%q1%' AND content LIKE '%q2%'
-    → 回傳：檔案路徑 + 格式 + 內容片段（含 match 前後文）
-
-儲存：
-  重用 ~/.smart/cache/documents.db，新增 content TEXT 欄位
-  不引入 FTS5（Node 26 node:sqlite 不支援 extension loading）
-  LIKE '%query%' 對單開發者 local 工具（數百份文件內）效能足夠
+    → 回傳：路徑 + 格式 + 內容片段（含 match 前後文）
 ```
-
-### 為何不選其他方向
-
-| 候選方向 | 不選原因 |
-|---------|---------|
-| Code+Doc 交叉比對 | 依賴 CKG 複雜基礎設施，Phase 6 再評估 |
-| 自主工作流引擎 | Phase 3 已拒絕（auto-execution），LLM 已能勝任 |
-| 文件變更追蹤 | 使用頻率太低，不配 Phase 編號 |
-| 文件→Wiki 橋接 | LLM 已能組合 ingest_document → wiki-capture 完成 |
 
 ### 不上什麼
 
@@ -401,254 +390,41 @@ Ingest 流程（修改 ingest-document plugin）：
 - 不做 ranking/scoring — 簡單按 updated_at 排序
 - 不做中文分詞 — 單字匹配就夠
 
-### 成效預估
-
-| 指標 | 改善前 | 改善後 |
-|------|--------|--------|
-| 文件搜尋範圍 | 只有 title/path/summary | 文件**內容**也可搜 |
-| 找到目標時間 | 要記得文件名稱或摘要 | 忘記文件名也沒關係，搜內容即可 |
-| 跨 session 可用性 | 知道看過但找不到內容 | 直接跳到相關段落 |
-| 新工具數 | 0 | 1 (`smart_search_docs`) |
-
 ---
 
-## Phase 6：LLM 增強技術研究缺口
+## Phase 6：Hallucination Detection
 
-> 2026-06-10 研究補充。基於 web search 調查 2025-2026 年 LLM augmentation 技術，
-> 盤點 Smart MCP 尚未實作但具備潛力的 12 項方法。
-> 對應 todo.md Phase 6。
+> 2026-06-10 → 2026-06-10 誠實盤點後大幅縮減。
+> 原始 12 項 research 清單中，11 項已被現有功能覆蓋或價值不足 — 僅保留 1 項真正有 incremental value 的項目。
 
-### 核心發現
+### 保留的唯一項目：Hallucination Detection
 
-Smart MCP 目前的增強策略集中在「工具層」（54 個 MCP tool）+「知識層」（洋蔥 skill）
-+「記憶層」（memory_store）。以下 12 項是業界已驗證但專案尚未觸及的領域。
-
----
-
-### 🥇 Tier 1：高 CP 值，建議優先實作
-
-#### 1. Context Caching（KV Cache 重複利用）
-
-| 層面 | 說明 |
-|------|------|
-| **問題** | 每次工具呼叫都從頭計算完整 prompt，system prompt + skill 內容重複浪費 |
-| **業界做法** | Anthropic Prompt Caching（cached tokens 90% off）、OpenAI 自動 caching（50% off） |
-| **實作方式** | Agent personality 指定 cache_control breakpoints；Provider 層即生效，agent 端 awareness |
-| **效益** | 工具呼叫的 system prompt 可 cached，節省 50-90% token 成本 |
-| **難度** | 🟢 低 — provider 原生支援，只需配置 |
-
-#### 2. Prompt Compression（輸入壓縮）
-
-| 層面 | 說明 |
-|------|------|
-| **問題** | 工具回傳的大輸出直接餵給 LLM，冗餘 token 浪費 + lost-in-the-middle 效應 |
-| **業界做法** | LLMLingua-2（10x 壓縮準確率幾乎不降）、Selective Context、RECOMP |
-| **實作方式** | 新增 `compress_prompt` tool，在傳給 LLM 前自動壓縮冗餘檢索文件/歷史紀錄 |
-| **效益** | 省 50-80% token + 減輕 lost-in-the-middle 提升準確率 |
-| **難度** | 🟡 中 — 需整合 LLMLingua 或自實 lightweight compressor |
-
-#### 3. Hallucination Detection（輸出真實性檢查）
+**為什麼留這個：**
+現有系統完全沒有輸出驗證機制。LLM 可能亂掰函式名稱、錯誤歸因、引用不存在的檔案。Phase 7 的 self-correction loop 是 LLM 自己檢查自己（可能錯過盲點），hallucination check 是用獨立 LLM-as-Judge 交叉驗證 groundedness — 兩者互補。
 
 | 層面 | 說明 |
 |------|------|
 | **問題** | LLM 可能編造事實、錯誤歸因、離題，但 Smart MCP 完全不檢查就回傳 |
 | **業界做法** | Faithfulness judge / Groundedness score / Consistency check / Context adherence |
-| **實作方式** | 新增 `hallucination_check` tool，回應前用 LLM-as-Judge 自我驗證 |
+| **實作方式** | 新增 `hallucination_check` tool，回應前用 LLM-as-Judge 驗證 |
 | **效益** | 輸出可靠度大幅提升，達到生產級門檻 |
 | **難度** | 🟡 中 — 需定義評分 prompt + 判斷閾值 |
 
-#### 4. Guardrails（輸出安全閘）
+### 其餘 11 項已移除的原因
 
-| 層面 | 說明 |
-|------|------|
-| **問題** | 目前「行為閘」在 agent prompt 層，LLM 輸出無過濾直接回使用者 |
-| **業界做法** | Constitutional AI、NVIDIA NeMo Guardrails、Guardrails AI |
-| **實作方式** | 新增 `guardrail` tool，設定「永遠不執行 X」「永遠引用來源」等規則 |
-| **效益** | 安全合規、防止 prompt injection 繞過 |
-| **難度** | 🟢 低 — 規則式過濾即可開始 |
-
-#### 5. Agent Observability / Tracing（可觀測性）
-
-| 層面 | 說明 |
-|------|------|
-| **問題** | `smart_context` 只記錄工具呼叫清單，無標準化 span/trace，debug 困難 |
-| **業界做法** | Arize Phoenix、LangFuse、Traceloop；基於 OpenTelemetry 的 span + trace + eval |
-| **實作方式** | 新增 `trace` tool，匯出 OTel 相容格式 + 可視化 agent 決策路徑 |
-| **效益** | 開發者 debug agent 行為效率提升 |
-| **難度** | 🟡 中 — 需設計 span 模型 + 匯出格式 |
-
----
-
-### 🥈 Tier 2：高價值但實作成本較高
-
-#### 6. Multi-Agent Debate（多 Agent 辯論）
-
-| 層面 | 說明 |
-|------|------|
-| **問題** | 單一 LLM 做所有推理，無校驗機制 |
-| **業界做法** | MAD 框架：多個 LLM 角色互相辯論收斂出最佳答案；iMAD（2025）選擇性觸發，token 省 92% |
-| **實作方式** | 新增 `debate` tool，高風險決策（安全修復、重構方案）啟用多 Agent 辯論 |
-| **效益** | 複雜推理準確率 +13.5% |
-| **難度** | 🟠 高 — 需多 LLM 呼叫 + 共識機制 |
-
-#### 7. DSPy Prompt Optimization（提示詞自動優化）
-
-| 層面 | 說明 |
-|------|------|
-| **問題** | 所有 skill 的 system prompt 人工撰寫，無法自動改善 |
-| **業界做法** | DSPy 框架：定義 Signature + metric → compiler 自動找最佳 prompt + few-shot |
-| **實作方式** | 對每個 skill 建立 eval dataset + metric，離線跑 optimizer |
-| **效益** | 手寫 prompt 54% → 自動優化 90%；跨模型可移植 |
-| **難度** | 🟡 中 — 需收集 training examples + 設計 metric |
-
-#### 8. Tree of Thoughts / MCTS 搜尋式推理
-
-| 層面 | 說明 |
-|------|------|
-| **問題** | `smart_think` 只有線性 CoT（一條路徑到底），複雜問題無法探索多路徑 |
-| **業界做法** | CMCTS（2025）：7B + MCTS 勝過 72B；Self-Guided Self-Play（2026）：樹狀搜尋 |
-| **實作方式** | 升級 `smart_think` 支援多路徑分支 + Process Reward Model 評估 |
-| **效益** | 複雜推理場景（除錯、數學、規劃）品質大幅提升 |
-| **難度** | 🔴 非常高 — 需 reward model + tree search engine |
-
-#### 9. Speculative Decoding（推測解碼）
-
-| 層面 | 說明 |
-|------|------|
-| **問題** | 這是 inference 層的優化，agent 端不需直接實作，但可 awareness |
-| **業界做法** | EAGLE-2、vLLM/SGLang 原生支援；小模型草稿 → 大模型平行驗證，2-4x 加速 |
-| **實作方式** | 選擇支援 speculative decoding 的 provider / inference engine |
-| **效益** | 2-4x 生成加速 |
-| **難度** | 🟢 低 — provider 選擇問題 |
-
-#### 10. LLM-as-Judge 評估管線
-
-| 層面 | 說明 |
-|------|------|
-| **問題** | 無系統化評估 agent 輸出品質的方法 |
-| **業界做法** | 多 judge 面板（weak judges, strong panel）：3 個不相關 judge 聯合判定 |
-| **實作方式** | 新增 `eval` tool，每次修改 agent personality 後自動跑回歸測試 |
-| **效益** | 品質量化 + 回歸保護 |
-| **難度** | 🟡 中 — 需設計 eval datasets |
-
----
-
-### 🥉 Tier 3：長期研究方向
-
-#### 11. Self-Play 自我對弈學習
-
-| 層面 | 說明 |
-|------|------|
-| **問題** | LLM 參數固定，不隨使用改善 |
-| **業界做法** | Triadic Self-Evolution（2026）：Proposer/Solver/Verifier 三角；SGS：7B 經 200 輪勝 671B |
-| **實作方式** | `self_evolve` tool：從成功/失敗案例學習，不只是儲存記憶 |
-| **效益** | 長期持續進步 |
-| **難度** | 🔴 非常高 — 需 RL 訓練基礎設施 |
-
-#### 12. Automated Red Teaming（自動紅隊測試）
-
-| 層面 | 說明 |
-|------|------|
-| **問題** | `smart_security` 掃 source code 不掃 LLM 本身 |
-| **業界做法** | Giskard Continuous Red Teaming：動態多輪攻擊，context-aware |
-| **實作方式** | 擴充 `smart_security` 支援 LLM red teaming |
-| **效益** | 防止 prompt injection 繞過 agent 限制 |
-| **難度** | 🟠 高 — 需對抗性 prompt 生成 |
-
----
-
-### 優先級矩陣
-
-| 優先 | 技術 | 難度 | 效益 | 時間估計 |
-|------|------|------|------|---------|
-| 🥇 | Context Caching | 🟢 低 | token 省 50-90% | 1 天 |
-| 🥇 | Guardrails | 🟢 低 | 安全合規 | 1-2 天 |
-| 🥇 | Prompt Compression | 🟡 中 | token 省 50-80% + 準確率↑ | 3-5 天 |
-| 🥇 | Hallucination Detection | 🟡 中 | 輸出可靠度↑ | 3-5 天 |
-| 🥈 | Agent Observability | 🟡 中 | debug 效率↑ | 5-7 天 |
-| 🥈 | DSPy Prompt Optimization | 🟡 中 | skill 效能↑ | 5-7 天 |
-| 🥈 | LLM-as-Judge Eval | 🟡 中 | 品質量化 | 3-5 天 |
-| 🥈 | Multi-Agent Debate | 🟠 高 | 準確率 +13% | 7-14 天 |
-| 🥈 | Speculative Decoding | 🟢 低 | 2-4x 加速 | 選擇 provider |
-| 🥈 | Tree of Thoughts / MCTS | 🔴 非常高 | 複雜推理 | 14-30 天 |
-| 🥉 | Self-Play | 🔴 非常高 | 持續進步 | 30+ 天 |
-| 🥉 | Automated Red Teaming | 🟠 高 | 安全性 | 7-14 天 |
-
----
-
-### 不上什麼（Phase 6 對應）
-
-| 項目 | 原因 |
-|------|------|
-| **Fine-tuning / 模型訓練** | 訓練基礎設施需求過高，偏離 MCP 工具定位 |
-| **RAG 系統** | 已有 wiki-ingest + search_docs，不需另建 vector DB |
-| **Multi-modal 支援** | 與 tool-assisted LLM 核心場景不一致 |
-| **Inference engine 開發** | 應選擇現有 provider，不自己寫 |
-
----
-
-## Phase 8：Universal LSP Bridge — 讓 LLM 看懂程式碼
-
-> 2026-06-10 規劃。基於 research.md 的競爭分析。
-> 核心問題：LSP bridge 已存在但未暴露為 MCP tool，LLM 無法使用 type-aware 程式碼理解。
-
-### 現狀
-
-| 元件 | 狀態 |
-|------|------|
-| `src/lib/lsp-bridge.mjs` | ✅ 已實作（TS/Python/Rust/Swift），支援 getSymbols/getReferences/getHover/getDefinition |
-| 內部使用 | ✅ code-call-graph、code-impact 等插件使用 |
-| MCP tool 暴露 | ❌ 無 — LLM 看不到 |
-| SKILL.md | ❌ 4 個 skill 都寫「無 native LSP，用 CLI」 |
-| PHP 支援 | ❌ LSP bridge 無 intelephense |
-| Diagnostics | ❌ LSP bridge 無 getDiagnostics 方法 |
-
-### 解決方案
-
-```
-新增 smart_lsp MCP tool（handler-based，~80 行）
-  → 包裝現有 LspBridge API
-  → 自動依副檔名選 language server
-  → 支援 operations: symbols, references, hover, definition, diagnostics
-  → 加入 PHP (intelephense) 支援
-```
-
-### 實作項目
-
-| 步驟 | 內容 | 檔案 |
-|------|------|------|
-| 1 | 新增 `smart_lsp` plugin | `src/plugins/core/lsp.mjs` |
-| 2 | LSP bridge 加 PHP + getDiagnostics | `src/lib/lsp-bridge.mjs` |
-| 3 | System prompt 加路由規則 | `config/agents/smart-mcp.md` |
-| 4 | 更新 4 個 SKILL.md | `~/.config/opencode/skills/{php,pyright,typescript,swift}-lsp/SKILL.md` |
-| 5 | 同步 agent config | `~/.config/opencode/agents/smart-mcp.md` |
-
-### 架構
-
-```
-LLM (OpenCode)
-  │ smart_lsp({operation:"definition", file:"src/auth.ts", line:42, character:10})
-  ▼
-Smart MCP Server
-  │ src/plugins/core/lsp.mjs (handler-based)
-  │   → import { getLspBridge } from '../../lib/lsp-bridge.mjs'
-  ▼
-LSP Bridge (src/lib/lsp-bridge.mjs)
-  │ 自動依副檔名選 language server
-  ├─ .ts/.tsx → typescript-language-server
-  ├─ .py      → pylsp
-  ├─ .rs      → rust-analyzer
-  ├─ .swift   → sourcekit-lsp
-  └─ .php     → intelephense (NEW)
-```
-
-### 不上什麼
-
-| 項目 | 原因 |
-|------|------|
-| 通用 LSP protocol bridge（任意 language server） | 現有 5 語言覆蓋 90% 使用場景，其餘用 CLI fallback |
-| LSP 自動安裝 | 依賴管理複雜，交給使用者 |
-| workspace/symbol 跨檔案搜尋 | LSP bridge 已支援但 LLM 使用頻率低，先用 file-level operations |
+| 項目 | 移除原因 | 已有替代 |
+|------|---------|---------|
+| Context Caching | provider 設定問題，不是 code 工作 | 選有支援的 provider 即可 |
+| Prompt Compression | 與現有 output-optimizer L0/L1/L2 + opencode compaction 重疊 | Phase 1-2 ✅ |
+| Guardrails | Server 端 HIGH_RISK_PREREQUISITES 已做到強制攔截 | Phase 7 ✅ |
+| Observability / Tracing | 單開發者 debug 工具，不會讓 LLM 變聰明 | — |
+| Multi-Agent Debate | Beam Search / Forest-of-Thought 已達類似效果 | Phase 7 ✅ |
+| DSPy Prompt Optimization | Skill-level Learning (skill_patch) 是輕量替代 | Phase 7 ✅ |
+| Tree of Thoughts / MCTS | Forest-of-Thought 已做到多樹分支 + consensus | Phase 7 ✅ |
+| Speculative Decoding | provider 選擇問題，不是 code 工作 | — |
+| LLM-as-Judge Eval | 開發者工具，非 core value | — |
+| Self-Play | 需 RL 基礎設施，超出 MCP server 範圍 | — |
+| Automated Red Teaming | 複雜度高，單開發者事件率極低 | — |
 
 ---
 
@@ -877,23 +653,107 @@ LLM 呼叫 high-risk tool
 
 ---
 
+## Phase 8：Universal LSP Bridge — 讓 LLM 看懂程式碼
 
+> ✅ 2026-06-10 完成。7 個 LSP 測試全部通過。
+> 將現有 LspBridge (src/lib/lsp-bridge.mjs) 暴露為 `smart_lsp` MCP tool，
+> 讓 LLM 可以直接進行 type-aware 程式碼理解（找定義、查引用、看型別、診斷錯誤）。
 
-## 九、不做什麼（完整列表）
+### 實作交付
+
+| 項目 | 狀態 | 檔案 |
+|------|------|------|
+| `smart_lsp` MCP tool（5 種 operation） | ✅ 127 行，handler-based | `src/plugins/core/lsp.mjs` |
+| PHP intelephense 支援 | ✅ 已加入 LSP_CONFIGS | `src/lib/lsp-bridge.mjs` |
+| `getDiagnostics()` 方法 | ✅ textDocument/diagnostic | `src/lib/lsp-bridge.mjs` |
+| Agent personality 路由規則 | ✅ 11 處提及 | `config/agents/smart-mcp.md` |
+| 4 個 SKILL.md 更新 | ✅ php/pyright/typescript/swift | `~/.config/opencode/skills/*/SKILL.md` |
+| Agent config 同步 | ✅ | `~/.config/opencode/agents/smart-mcp.md` |
+| 測試 | ✅ 7 tests, 0 fail | `tests/lsp-bridge.test.mjs` |
+
+### 架構
+
+```
+LLM (OpenCode)
+  │ smart_lsp({operation:"definition", file:"src/auth.ts", line:42, character:10})
+  ▼
+Smart MCP Server
+  │ src/plugins/core/lsp.mjs (handler-based)
+  │   → import { getLspBridge } from '../../lib/lsp-bridge.mjs'
+  ▼
+LSP Bridge (src/lib/lsp-bridge.mjs)
+  │ 自動依副檔名選 language server
+  ├─ .ts/.tsx → typescript-language-server
+  ├─ .py      → pylsp
+  ├─ .rs      → rust-analyzer
+  ├─ .swift   → sourcekit-lsp
+  └─ .php     → intelephense (NEW)
+```
+
+### 不上什麼
 
 | 項目 | 原因 |
 |------|------|
-| L3 Truncated（只回摘要 + cache key） | 風險 > 效益，改用 format:full 互動機制 |
-| Progressive tool loading（ToolSearch） | 需 opencode 支援 MCP protocol 擴展 |
-| Context compaction pipeline | 需 opencode client 端支援 |
-| Prompt caching（cache_control） | 需 Anthropic API 支援 |
-| Streaming response chunks | MCP protocol 不支援分塊 |
-| **Auto-execution**（router 自動執行而非推薦） | Router 無對話 context，可能做錯事。當前「推薦→LLM決定」是安全機制不是浪費 |
-| **Session-aware routing** | LLM 呼叫 router 時已帶完整對話歷史，router 不需重複記憶 |
-| **Custom workflow pipeline** | 等同 skill 功能已存在。加強 skill 建立工具即可 |
-| **Observability dashboard** | 單開發者場景價值低，web UI scope 過大 |
-| **External integrations**（Jira/Slack/GitHub Issues） | 產品成熟後再說，現階段 plugin 生態未建立 |
-| **Fine-tuning / 模型訓練** | 訓練基礎設施需求過高，偏離 MCP 工具定位 |
-| **RAG 系統** | 已有 wiki-ingest + search_docs，不需另建 vector DB |
-| **Multi-modal 支援** | 與 tool-assisted LLM 核心場景不一致 |
-| **Inference engine 開發** | 應選擇現有 provider，不自己寫 |
+| 通用 LSP protocol bridge（任意 language server） | 現有 5 語言覆蓋 90% 使用場景，其餘用 CLI fallback |
+| LSP 自動安裝 | 依賴管理複雜，交給使用者 |
+| workspace/symbol 跨檔案搜尋 | LSP bridge 已支援但 LLM 使用頻率低，先用 file-level operations |
+
+---
+
+## Phase 9：與 Claude Code 比較後的誠實盤點
+
+> 2026-06-10 基於與 Claude Code 架構比較後的自我批判。
+> 評估標準：同一個 LLM 的前提下，這個功能真的能讓 smart-agent 變聰明/變有效率嗎？
+> 還是只是「人家有我也要有」的功能堆疊？
+
+### 盤點
+
+| # | 落後項目 | 原始印象 | 誠實評估 | Verdict |
+|---|---------|---------|---------|---------|
+| 1 | **Context Compactor** | 缺 conversation compaction 長 session 會 degradation | 已有 output-optimizer (L0/L1/L2) 壓工具輸出 + opencode-wm hook compaction 做記憶提取。更多 compaction 是 opencode client 端的責任，不是 MCP server 的。diminishing returns。 | ❌ **不實作** — 已夠用，opencode 端處理 |
+| 2 | **Tool Strategy Feedback Loop** | 讓 hybrid_router 從使用中學習、自適應 | LLM 本身就在 session 中自適應 — 這次用 grep 找到結果，下次會繼續用。hybrid_router 是靜態分類器，加了學習會增加複雜度但 LLM 不一定會用。 | ❌ **不實作** — LLM 已在 session 內自適應 |
+| 3 | **Sub-agent** | 可平行化閱讀/搜尋 | opencode 已有 Task tool 可 spawn sub-agent。Smart MCP 不需要再實作一層。 | ❌ **已有替代** — opencode 原生支援 |
+| 4 | **Persistent Shell** | cd 狀態保留、env 累積 | 對效率有些幫助，但增加 stale state 風險。bash tool 已支援 workdir 參數。 | ❌ **不實作** — 風險 > 效益 |
+| 5 | **Permission System** | 安全基礎設施 | opencode 已有 permission 機制。Smart MCP 疊一層只增加 friction。 | ❌ **已有替代** — opencode 原生支援 |
+| 6 | **Streaming UI** | UX 改善 | Smart MCP 是 MCP server，不是 standalone agent。UI 是 opencode 的責任。 | ❌ **不適用** — 不在責任範圍 |
+| 7 | **Hooks System** | pre/post tool hooks | opencode 已有 hooks 機制。 | ❌ **已有替代** — opencode 原生支援 |
+| 8 | **Cost Tracking** | Token / API cost 追蹤 | opencode 已有 `/cost` 指令。Smart MCP 的 `smart_context budget` 已提供 context budget 查詢。 | ❌ **已有替代** — 兩層都已做到 |
+
+### 關鍵洞察
+
+**Smart MCP 的定位是「MCP server」不是「agent loop」**。Claude Code 的優勢架構（agent loop、context compaction pipeline、sub-agent、hooks）很大部分是 **Agent 層**而不是 Tool 層的責任。而 opencode 本身就是那個 Agent 層。
+
+所以正確的比較不是：
+
+```
+Smart MCP             vs    Claude Code
+（沒有 agent loop）         （有 agent loop）
+```
+
+而是：
+
+```
+opencode + Smart MCP   vs    Claude Code
+（opencode 是 agent）        （monolithic）
+```
+
+在這個架構下，Smart MCP 應該專注在**工具深度**，而不是複製 Claude Code 的 agent 基礎設施。這正是目前路線圖的方向。
+
+### 真正該關注的事
+
+目前 plan.md Phase 6 (LLM 增強技術) 和 Phase 7 (Reasoning Quality) 已經覆蓋了實際上有幫助的方向：
+
+| 真有幫助的項目 | 所屬 Phase | 原因 |
+|--------------|-----------|------|
+| Beam Search Thinking / CiT / Forest | Phase 7 ✅ 已實作 | 讓 LLM 在同一個 context budget 下做出更好的推理 |
+| Self-Correction Loop | Phase 7 ✅ 已實作 | 高風險任務的輸出可靠度提升 |
+| Skill-level Learning | Phase 7 ✅ 已實作 | 越用越強，記憶可跨 session 累積 |
+| LSP Bridge | Phase 8 ✅ 已完成 | Type-aware 程式碼理解，比 grep 精準且省 token |
+| Full-text Search | Phase 5 ✅ 已完成 | 文件內容搜尋，跨 session 找到關鍵資訊 |
+| Hallucination Detection | Phase 6 📋 計畫中 | 輸出真實性檢查，生產級門檻 |
+
+### 結論
+
+Phase 6 + 7 + 8 已經走對方向。**不需要為了追上 Claude Code 而做功能複製。** 現有路線圖涵蓋了對「同一個 LLM 變聰明」有真正幫助的項目，繼續執行即可。
+
+---
