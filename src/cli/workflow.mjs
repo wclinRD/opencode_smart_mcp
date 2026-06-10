@@ -59,7 +59,7 @@ const WORKFLOW_TEMPLATES = {
     steps: [
       { tool: 'smart_impact_flow',    args: {}, description: 'Analyze change impact via CKG call graph', dependsOn: [], onFailure: 'warn' },
       { tool: 'smart_code_call_graph', args: { depth: 2 }, description: 'Confirm impact scope with call graph', dependsOn: [0], onFailure: 'skip' },
-      { tool: 'smart_thinking',       args: { template: 'refactor', topic: '$goal' }, description: 'Think about impact results & plan safe changes', dependsOn: [0, 1], onFailure: 'skip' },
+      { tool: 'smart_deep_think',       args: { template: 'refactor', topic: '$goal' }, description: 'Think about impact results & plan safe changes', dependsOn: [0, 1], onFailure: 'skip' },
       { tool: 'smart_cross_file_edit', args: {}, description: 'Apply refactor changes across files', dependsOn: [2], onFailure: 'warn' },
       { tool: 'smart_test',           args: {}, description: 'Run tests to verify refactor', dependsOn: [3], onFailure: 'warn' },
     ],
@@ -78,7 +78,7 @@ const WORKFLOW_TEMPLATES = {
     description: 'Research a topic: search the web, synthesize findings with thinking, generate report',
     steps: [
       { tool: 'smart_exa_search',     args: { query: '$goal' }, description: 'Search the web for relevant information', dependsOn: [], onFailure: 'abort' },
-      { tool: 'smart_thinking',       args: { template: 'research', topic: '$goal' }, description: 'Synthesize research findings into insights', dependsOn: [0], onFailure: 'warn' },
+      { tool: 'smart_deep_think',       args: { template: 'research', topic: '$goal' }, description: 'Synthesize research findings into insights', dependsOn: [0], onFailure: 'warn' },
       { tool: 'smart_report',         args: { type: 'custom', title: '$goal' }, description: 'Generate structured research report', dependsOn: [1], onFailure: 'skip' },
     ],
   },
@@ -86,7 +86,7 @@ const WORKFLOW_TEMPLATES = {
     description: 'Deep research: crawl a URL at exhaustive depth, analyze quality, synthesize findings',
     steps: [
       { tool: 'smart_research',       args: { url: '$goal', depth: 'exhaustive' }, description: 'Crawl URL with exhaustive depth (clean + markdown + chunk)', dependsOn: [], onFailure: 'abort' },
-      { tool: 'smart_thinking',       args: { template: 'research', topic: '$goal' }, description: 'Synthesize research findings', dependsOn: [0], onFailure: 'warn' },
+      { tool: 'smart_deep_think',       args: { template: 'research', topic: '$goal' }, description: 'Synthesize research findings', dependsOn: [0], onFailure: 'warn' },
       { tool: 'smart_report',         args: { type: 'custom', title: '$goal' }, description: 'Generate research report', dependsOn: [1], onFailure: 'skip' },
     ],
   },
@@ -123,7 +123,7 @@ const WORKFLOW_TEMPLATES = {
     steps: [
       { tool: 'smart_impact_flow',    args: {}, description: 'Analyze change impact via CKG', dependsOn: [], onFailure: 'abort' },
       { tool: 'smart_code_call_graph', args: { depth: 2 }, description: 'Confirm impact scope with call graph', dependsOn: [0], onFailure: 'warn' },
-      { tool: 'smart_thinking',       args: { template: 'refactor', topic: '$goal' }, description: 'Plan migration steps from impact data', dependsOn: [0, 1], onFailure: 'abort' },
+      { tool: 'smart_deep_think',       args: { template: 'refactor', topic: '$goal' }, description: 'Plan migration steps from impact data', dependsOn: [0, 1], onFailure: 'abort' },
       { tool: 'smart_cross_file_edit', args: {}, description: 'Apply migration changes across files', dependsOn: [2], onFailure: 'warn' },
       { tool: 'smart_test',           args: {}, description: 'Run tests after migration', dependsOn: [3], onFailure: 'warn' },
     ],
@@ -134,7 +134,7 @@ const WORKFLOW_TEMPLATES = {
       { tool: 'smart_grep',           args: { pattern: '$goal' }, description: 'Search codebase for relevant patterns', dependsOn: [], onFailure: 'skip' },
       { tool: 'smart_code_ast',       args: {}, description: 'Extract AST symbols for context', dependsOn: [0], onFailure: 'skip' },
       { tool: 'smart_code_call_graph', args: { depth: 1 }, description: 'Trace call graph relationships', dependsOn: [0, 1], onFailure: 'skip' },
-      { tool: 'smart_thinking',       args: { template: 'analyze', topic: '$goal' }, description: 'Analyze findings and identify issues', dependsOn: [0, 1, 2], onFailure: 'skip' },
+      { tool: 'smart_deep_think',       args: { template: 'analyze', topic: '$goal' }, description: 'Analyze findings and identify issues', dependsOn: [0, 1, 2], onFailure: 'skip' },
       { tool: 'smart_report',         args: { type: 'custom', title: '$goal' }, description: 'Generate code review report', dependsOn: [3], onFailure: 'skip' },
     ],
   },
@@ -171,7 +171,7 @@ const TOOL_CLI_MAP = {
   smart_learn: 'learn-adapt.mjs',
   smart_security: 'security-scan.mjs',
   smart_test: 'test-runner.mjs',
-  smart_thinking: 'thinking.mjs',
+  smart_deep_think: 'thinking.mjs',
   // smart_think has no CLI — handler only
 
   // Standard tools used in templates
@@ -682,7 +682,7 @@ const TOOL_ARGS_CONVERTERS = {
   smart_research: (a) => { const c = []; if (a.url) c.push(String(a.url)); if (a.depth) c.push('--depth', String(a.depth)); c.push('--json'); return c; },
 
   // thinking: positional topic
-  smart_thinking: (a) => { const c = []; if (a.topic) c.push(String(a.topic)); if (a.template) c.push('--template', String(a.template)); if (a.steps) c.push('--steps', String(a.steps)); if (a.format) c.push('--format', String(a.format)); if (a.plan) c.push('--plan', String(a.plan)); if (a.planStep) c.push('--plan-step', String(a.planStep)); if (a.state) c.push('--state', String(a.state)); if (a.record) c.push('--record', String(a.record)); if (a.branch) c.push('--branch', String(a.branch)); if (a.restore) c.push('--restore', String(a.restore)); if (a.iterative) c.push('--iterative'); if (a.dynamic) c.push('--dynamic'); if (a.advance) c.push('--advance'); if (a.finish) c.push('--finish'); if (a.status) c.push('--status'); if (a.cancel) c.push('--cancel'); c.push('--no-color'); return c; },
+  smart_deep_think: (a) => { const c = []; if (a.topic) c.push(String(a.topic)); if (a.template) c.push('--template', String(a.template)); if (a.steps) c.push('--steps', String(a.steps)); if (a.format) c.push('--format', String(a.format)); if (a.plan) c.push('--plan', String(a.plan)); if (a.planStep) c.push('--plan-step', String(a.planStep)); if (a.state) c.push('--state', String(a.state)); if (a.record) c.push('--record', String(a.record)); if (a.branch) c.push('--branch', String(a.branch)); if (a.restore) c.push('--restore', String(a.restore)); if (a.iterative) c.push('--iterative'); if (a.dynamic) c.push('--dynamic'); if (a.advance) c.push('--advance'); if (a.finish) c.push('--finish'); if (a.status) c.push('--status'); if (a.cancel) c.push('--cancel'); c.push('--no-color'); return c; },
 
   // report: positional type
   smart_report: (a) => { const c = []; if (a.type) c.push(String(a.type)); if (a.title) c.push('--title', String(a.title)); if (a.input) c.push('--input', String(a.input)); if (a.output) c.push('--output', String(a.output)); if (a.theme) c.push('--theme', String(a.theme)); if (a.root) c.push('--root', String(a.root)); c.push('--no-color'); return c; },

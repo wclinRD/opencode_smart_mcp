@@ -146,7 +146,7 @@ const SYSTEM_PROMPT_FRAGMENT = `
 - 搜尋程式碼 → smart_grep（比 grep 更語意感知）
 - 理解新專案 → smart_learn（一次取得架構/依賴/慣例）
 - 複雜推理 → smart_think（快速 hypothesis→verify）
-- 深度分析 → smart_thinking（9 模板 + 動態多輪）
+- 深度分析 → smart_deep_think（9 模板 + 動態多輪）
 - 安全掃描 → smart_security（credentials/injection/deps）
 - 執行測試 → smart_test（自動偵測 framework）
 - 除錯錯誤 → smart_error_diagnose（對照 pattern KB）
@@ -186,7 +186,7 @@ export function recommendTools(goal, context) {
 const STRATEGIES = {
   'debug-error': ['smart_grep', 'smart_error_diagnose', 'smart_cross_file_edit', 'smart_test'],
   'refactor': ['smart_learn', 'smart_import_graph', 'smart_rename_safety', 'smart_cross_file_edit', 'smart_test'],
-  'security-audit': ['smart_security', 'smart_grep', 'smart_thinking'],
+  'security-audit': ['smart_security', 'smart_grep', 'smart_deep_think'],
   'understand-codebase': ['smart_learn', 'smart_grep', 'smart_import_graph'],
   // ...
 };

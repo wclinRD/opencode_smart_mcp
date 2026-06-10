@@ -78,7 +78,7 @@ const AVAILABLE_TOOLS = {
 
   // Meta
   smart_tool_stats:        { task: 'meta',      description: 'Tool usage statistics & patterns' },
-  smart_thinking:          { task: 'meta',      description: 'Structured reasoning templates' },
+  smart_deep_think:          { task: 'meta',      description: 'Structured reasoning templates' },
   smart_integrate:         { task: 'meta',      description: 'Multi-tool orchestration' },
 };
 
@@ -574,7 +574,7 @@ const WORKFLOW_TEMPLATES = {
     description: 'Research a topic: search the web, synthesize findings with thinking, generate report',
     steps: [
       { tool: 'smart_exa_search',     args: { query: '$goal' }, description: 'Search the web for relevant information', dependsOn: [], onFailure: 'abort' },
-      { tool: 'smart_thinking',       args: { template: 'research', topic: '$goal' }, description: 'Synthesize research findings into insights', dependsOn: [0], onFailure: 'warn' },
+      { tool: 'smart_deep_think',       args: { template: 'research', topic: '$goal' }, description: 'Synthesize research findings into insights', dependsOn: [0], onFailure: 'warn' },
       { tool: 'smart_report',         args: { type: 'custom', title: '$goal' }, description: 'Generate structured research report', dependsOn: [1], onFailure: 'skip' },
     ],
   },

@@ -232,7 +232,7 @@ LLM 問「我要做 X」→ hybrid_router 自動分類 → code task？執行工
 | edit | 編輯、修改、patch、replace | fast_apply / edit / cross_file_edit |
 | plan | 規劃、workflow、流程、任務分解 | planner / workflow / compose |
 | office | Office、文件、Word、Excel、PPT | officecli MCP tools（外部整合） |
-| analyze | 分析、評估、架構、review | arch_overview / smart_learn / smart_thinking |
+| analyze | 分析、評估、架構、review | arch_overview / smart_learn / smart_deep_think |
 | wiki | wiki、知識庫、筆記、obsidian | skill("wiki-xxx") |
 
 ### 實作階段
@@ -748,6 +748,71 @@ Cross-cutting   │ Agent Observability + Skill-level Learning
 | **DSPy 自動 prompt 優化** | Python dependency + eval dataset 建置成本高，skill-level learning 為輕量替代 |
 
 ---
+
+### Phase 7 誠實盤點：已實作但無法強制
+
+Phase 7 三條路徑已完成開發（程式碼 + prompt 規則），
+但有一根本限制未被解決：**品質閘寫在 prompt 裡，LLM 可以選擇不遵守。**
+
+| 機制 | 狀態 | 問題 |
+|------|------|------|
+| Beam Search Thinking | ✅ 程式碼 + prompt 規則完整 | **使用與否由 LLM 自主判斷，無法強制** |
+| Self-Correction Loop | ✅ prompt 規則完整 | 高風險任務識別依賴 LLM 自評，可能漏掉 |
+| Skill-level Learning | ✅ 程式碼 + prompt 規則完整 | memory_store 查詢與否由 LLM 決定 |
+
+#### 2026-06-10 修正記錄：Beam Search 適用範圍校正
+
+根據實際調用分析，發現 `smart-mcp.md` 有三處矛盾導致 beam search 被誤用：
+
+| 位置 | 改前 | 改後 | 原因 |
+|------|------|------|------|
+| Beam Search 說明 | 除錯、重構方案選擇、**架構分析** | 除錯、重構方案選擇 | 架構分析是線性綜合，無競爭假設 |
+| 推理品質閘 | 除錯 /** 架構分析** / 方案比較 | 除錯 / 方案比較 | 同上 |
+| 常用推理工作流 | 架構方案比較用 `mode:"beam"` | 改用一般 `smart_think` | 方案比較不需多路徑 |
+
+#### 實際調用統計（經驗觀察）
+
+| 場景 | Beam Search 觸發？ | 原因 |
+|------|-------------------|------|
+| 股票分析 | ❌ 從未觸發 | 資料收集 + 公式打分，無競爭假設，正確 |
+| 專案架構分析 | ❌ 不走 beam | 已修正排除，走 `smart_deep_think` 正確 |
+| 複雜除錯（不確定原因） | ✅ 偶爾觸發 | 品質閘建議，LLM 自行判斷 |
+| 重大重構（多方案比較） | ✅ 偶爾觸發 | 同上 |
+| 一般查詢 / 編輯 | ❌ 不觸發 | 品質閘明確跳過，正確 |
+
+#### 解決方案：Server 端強制執行（2026-06-10 已實作）
+
+在 `src/server/index.mjs` 的 `invokeTool` 中，加入品質閘強制檢查：
+
+```
+LLM 呼叫 high-risk tool
+  → server 檢查 session context 中是否有前提工具呼叫紀錄
+  → 無？回傳錯誤（含下一步指引）
+  → 有？執行工具
+          ↑ LLM 無法繞過，因為 server 不執行
+```
+
+| 強制規則 | 檢查條件 | 前提要求 |
+|---------|---------|---------|
+| 安全修復 | `smart_fast_apply` 前有 `smart_security` | 必須先跑 `smart_think({mode:"beam",...})` |
+| 跨檔案編輯 | `smart_cross_file_edit` 被呼叫 | 必須先跑 `import_graph` |
+
+**技術實作**：`HIGH_RISK_PREREQUISITES` map + `checkHighRiskPrerequisites()` 攔截在 `invokeTool` 中，早於 handler/CLI 執行。搭配 `contextManager` 的 `toolHistory` 查詢前提工具。
+
+**與 prompt 品質閘的差異**：
+
+| 層面 | Prompt 建議（舊） | Server 強制（新） |
+|------|-----------------|-----------------|
+| 可繞過？ | ✅ LLM 可選擇不理 | ❌ 完全無法繞過 |
+| 實作位置 | `config/agents/smart-mcp.md` | `src/server/index.mjs` |
+| 錯誤回應 | 無（LLM 直接忽略） | 回傳結構化錯誤，指引 LLM 下一步 |
+| 維護成本 | 低（純文字） | 中（需定義規則 + 測試） |
+
+**不上什麼**：不拦截一般工具呼叫（grep/learn/test/think），不實作 post-execution 驗證（留給 Phase 6 hallucination_check）。
+
+---
+
+
 
 ## 九、不做什麼（完整列表）
 

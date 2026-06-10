@@ -1,7 +1,7 @@
 export default {
   name: 'smart_planner',
   category: 'plan',
-  description: 'Use when: need to decompose a goal into steps, track execution state, or re-plan on failure. Supports plan generation + execution state (execute/next/report/replan commands). Use its output as input for smart_thinking plan_execute template. For full lifecycle: execute → next → report (repeats) → done. On step failure, auto-replans remaining steps.',
+  description: 'Use when: need to decompose a goal into steps, track execution state, or re-plan on failure. Supports plan generation + execution state (execute/next/report/replan commands). Use its output as input for smart_deep_think plan_execute template. For full lifecycle: execute → next → report (repeats) → done. On step failure, auto-replans remaining steps.',
   inputSchema: {
     type: 'object',
     properties: {

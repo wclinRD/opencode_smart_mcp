@@ -17,7 +17,7 @@ describe('SYSTEM_PROMPT_FRAGMENT', () => {
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_security'));
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_test'));
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_think'));
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_thinking'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_deep_think'));
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_context'));
   });
 

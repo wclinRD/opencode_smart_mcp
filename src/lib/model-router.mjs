@@ -162,7 +162,7 @@ export function classifyTask(taskType, opts = {}) {
  * Suggest the most cost-effective tier for a given tool name.
  * Used by agent to determine whether to call a tool directly vs via LLM.
  *
- * @param {string} toolName - e.g. 'smart_grep', 'smart_thinking'
+ * @param {string} toolName - e.g. 'smart_grep', 'smart_deep_think'
  * @returns {number} Tier ID (1-4)
  */
 export function suggestTierForTool(toolName) {
@@ -505,7 +505,7 @@ export function estimateSavings(callPattern = {}) {
  */
 export function suggestRoute(question) {
   if (!question) {
-    return { tier: 3, tierName: 'medium-api', estimatedCost: 0.01, tool: 'smart_thinking', reasoning: 'No question provided, defaulting to medium' };
+    return { tier: 3, tierName: 'medium-api', estimatedCost: 0.01, tool: 'smart_deep_think', reasoning: 'No question provided, defaulting to medium' };
   }
 
   const lower = question.toLowerCase();
@@ -541,5 +541,5 @@ export function suggestRoute(question) {
   }
 
   // Default → T3
-  return { tier: 3, tierName: 'medium-api', estimatedCost: 0.01, tool: 'smart_thinking', reasoning: 'General query → medium API as default' };
+  return { tier: 3, tierName: 'medium-api', estimatedCost: 0.01, tool: 'smart_deep_think', reasoning: 'General query → medium API as default' };
 }

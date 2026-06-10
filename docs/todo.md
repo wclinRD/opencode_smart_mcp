@@ -431,6 +431,31 @@
 
 ---
 
+### ⑤ Phase 7 校正：Beam Search 適用範圍修正 ✅ (2026-06-10)
+
+> 實際調用分析後發現 smart-mcp.md 有三處矛盾，
+> 導致 beam search 被建議用在不需要多路徑推理的場景（架構分析）。
+
+- [x] **Beam Search 說明**：移除「架構分析」— 它是線性綜合，無競爭假設
+- [x] **推理品質閘**：移除「架構分析」— 不應強制走 beam
+- [x] **常用推理工作流**：架構方案比較改為一般 `smart_think`，不用 `mode:"beam"`
+- [x] **同步** `~/.config/opencode/agents/smart-mcp.md`
+
+### ⑥ 核心限制：品質閘無法強制執行 ✅ (2026-06-10)
+
+> 已實作 Server 端強制執行機制。不同於 prompt 文字規則，LLM 無法繞過。
+
+- [x] **設計**：定義「強制執行 vs 建議」的分界線 — `src/server/index.mjs` 的 `HIGH_RISK_PREREQUISITES` map
+- [x] **研究**：MCP server 端可在 `invokeTool` 中攔截工具呼叫（检查 `contextManager.toolHistory`）
+- [x] **Pilot**：`smart_fast_apply` 安全修復 — 強制先跑 `smart_think({mode:"beam"})`
+- [x] **Pilot**：`smart_cross_file_edit` — 強制先跑 `import_graph`
+- [x] **Agent personality**：`smart-mcp.md` 品質閘區塊新增「強制執行 vs 建議」分界說明
+- [x] **Error fix**：新增 `_enforcement` 錯誤類型 + 指引訊息
+- [x] **plan.md**：Phase 7 新增設計文件
+- [ ] **測試**：驗證高風險任務無法繞過品質閘（待補 test case）
+
+---
+
 ## 已決定不做的功能（記入反省）
 
 以下是曾經考慮但經評估後捨棄的方向，記錄以避免重複討論：

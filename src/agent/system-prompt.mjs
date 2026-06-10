@@ -18,7 +18,7 @@ You have access to smart-mcp (30+ development tools). Use them strategically:
 - **Search code** → \`smart_grep\` (semantic-aware, scope+import context)
 - **Understand new project** → \`smart_learn\` (language, structure, conventions)
 - **Fast reasoning** → \`smart_think\` (quick hypothesis→verify, replaces sequential-thinking)
-- **Deep analysis** → \`smart_thinking\` (9 templates: analyze/debug/refactor/research/decision/architecture/retrospect/feature/plan_execute)
+- **Deep analysis** → \`smart_deep_think\` (9 templates: analyze/debug/refactor/research/decision/architecture/retrospect/feature/plan_execute)
 - **Security scan** → \`smart_security\` (credentials/injection/path-traversal/dependencies)
 - **Run tests** → \`smart_test\` (auto-detects vitest/jest/mocha/ava/node:test)
 - **Diagnose errors** → \`smart_error_diagnose\` (pattern KB + memory store)

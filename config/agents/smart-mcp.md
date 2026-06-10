@@ -12,7 +12,7 @@ permission:
   smart_context: allow
   smart_grep: allow
   smart_learn: allow
-  smart_thinking: allow
+  smart_deep_think: allow
   smart_think: allow
   smart_security: allow
   smart_test: allow
@@ -49,12 +49,13 @@ permission:
 |------|------|
 | `smart_grep({pattern})` | 搜尋程式碼（附 scope/import context） |
 | `smart_learn({root})` | 新專案 onboarding |
-| `smart_think({thought, nextThoughtNeeded})` | 輕量推理（假設→驗證） |
-| `smart_think({mode:"beam", ...})` | **多路徑推理** — 2-3 條路徑並行探索，選最佳答案。僅 debug/refactor/architecture 等複雜任務啟用 |
-| `smart_thinking({topic, template})` | 深度推理（9 模板） |
+| `smart_think({thought, nextThoughtNeeded})` | **快思** — 假設→驗證（輕量）。`mode:"beam"` = 多路徑探索 |
+| `smart_deep_think({topic, template})` | **慢想** — 深度分析（9 模板）。一次完整輸出 |
 | `smart_security({scan})` | 安全掃描 |
 | `smart_test({root})` | 執行測試 |
 | `smart_context({command})` | Session 管理 |
+
+> **💡 快思 vs 慢想**：不確定 root cause、有多種可能 → `smart_think`（快思 + beam）。需要系統性分析、完整評估 → `smart_deep_think`（慢想 + 模板）。兩者不會搞混：`think` = 來回對話式推理，`deep_think` = 單次完整深度分析。
 
 ### 🟠 Layer 2：Sub-tools（透過 ssr 呼叫）
 
@@ -98,7 +99,7 @@ permission:
 3. smart_grep({pattern:"TODO|FIXME|HACK"})                       ← 技術債
 4. smart_test({root})                                             ← 測試健康度
 5. smart_security({scan:"all"})                                   ← 安全態勢
-6. smart_thinking({template:"architecture"})                      ← 綜合分析
+6. smart_deep_think({template:"architecture"})                      ← 綜合分析
 ```
 
 ---
@@ -159,7 +160,7 @@ permission:
 
 ### Beam Search（多路徑推理）
 
-當任務涉及**除錯、重構方案選擇、架構分析**等需要探索多種可能性的場景：
+當任務涉及**除錯、重構方案選擇**等需要探索多種可能性的場景：
 
 ```
 smart_think({
@@ -197,7 +198,7 @@ smart_think({
 |------|------|
 | **複雜除錯（不確定原因）** | `smart_think({mode:"beam", thought:"多路徑假設", template:"debug"})` → 驗證最佳路徑 → `ssr(fast_apply)` → `smart_test` |
 | **高風險安全修復** | `smart_security` → **self-correction loop** → `ssr(fast_apply)` → `smart_test` → `smart_security(rescan)` |
-| **架構方案比較** | `smart_learn` → `ssr(hybrid_router)` → `smart_think({mode:"beam", template:"architecture"})` → 實作 |
+| **架構方案比較** | `smart_learn` → `ssr(hybrid_router)` → `smart_think({template:"architecture"})` → 實作 |
 | **重大重構** | `ssr(import_graph)` → `smart_think({mode:"beam", template:"refactor"})` → `ssr(rename_safety)` → `ssr(fast_apply)` → `smart_test` |
 
 ---
@@ -248,13 +249,26 @@ Smart MCP 自動壓縮大型輸出（L0/L1/L2）。遇到 `_optimized`：
 
 ### 推理品質閘（讓回答更可靠）
 
+> ⚠️ **重要**：以下規則分兩種 —「建議」由 LLM 自主判斷，「強制」由 MCP Server 端執行，無法繞過。
+
+#### ✅ 強制執行（Server 端強制，不可繞過）
+
+| 情境 | 觸發條件 | 強制行為 |
+|------|---------|---------|
+| 安全修復 | `smart_fast_apply` 前有執行過 `smart_security` | 必須先跑 `smart_think({mode:"beam", ...})` 分析多種修復方案 |
+| 跨檔案編輯 | `smart_cross_file_edit` 被呼叫 | 必須先跑 `smart_run({tool:"import_graph", args:{root:"."}})` 了解依賴 |
+
+若未滿足前提，工具會直接回傳錯誤，並指引 LLM 下一步。**無法跳過。**
+
+#### 📋 建議遵循（LLM 自主判斷，但建議遵守）
+
 ```
-高風險任務（安全修復 / 重大重構 / 合約分析 / LLM 不確定的答案）
-  → 自動啟用 self-correction loop
+高風險任務（重大重構 / 合約分析 / LLM 不確定的答案）
+  → 建議啟用 self-correction loop
   → 自我檢查後才回使用者
 
-複雜推理任務（除錯 / 架構分析 / 方案比較）
-  → 用 smart_think({mode:"beam", ...}) 探索多路徑
+複雜推理任務（除錯 / 方案比較）
+  → 建議用 smart_think({mode:"beam", ...}) 探索多路徑
   → 不要只走一條推理路線
 
 一般任務（grep / test / 簡單編輯 / 查詢）

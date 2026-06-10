@@ -13,7 +13,7 @@ describe('SYSTEM_PROMPT_FRAGMENT', () => {
   it('contains tool selection guidance', () => {
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_grep'));
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_think'));
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_thinking'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_deep_think'));
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_security'));
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_test'));
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_error_diagnose'));

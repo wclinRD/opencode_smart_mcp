@@ -7,7 +7,7 @@ import {
 } from '../../cli/thinking.mjs';
 
 export default {
-  name: 'smart_thinking',
+  name: 'smart_deep_think',
   category: 'think',
   responsePolicy: { maxLevel: 0 }, // Structured reasoning; keep raw
   description: 'Use when: need structured reasoning — analyzing complex problems, debugging, making decisions, researching, or planning. Supports 9 templates (debug/refactor/feature/research/decision/analyze/plan_execute/retrospect/architecture) + 3 modes (static/iterative/dynamic). Avoid when: need quick answer to simple question (use quick-think instead).',

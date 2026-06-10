@@ -491,9 +491,9 @@ describe('Phase 4: Workflow Engine', () => {
 
     // Verify tool stats
     assert.ok(state.toolStats['smart_exa_search'], 'should have exa_search stats');
-    assert.ok(state.toolStats['smart_thinking'], 'should have thinking stats');
+    assert.ok(state.toolStats['smart_deep_think'], 'should have thinking stats');
     assert.ok(state.toolStats['smart_report'], 'should have report stats');
     assert.equal(state.toolStats['smart_exa_search'].calls, 1, 'exa_search called once');
-    assert.equal(state.toolStats['smart_thinking'].calls, 1, 'thinking called once');
+    assert.equal(state.toolStats['smart_deep_think'].calls, 1, 'thinking called once');
   });
 });

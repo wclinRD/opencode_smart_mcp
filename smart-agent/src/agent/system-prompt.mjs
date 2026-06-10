@@ -22,7 +22,7 @@ IMPORTANT: opencode prefixes all tools from MCP server "smart" with \`smart_\`. 
 - **Security scan** → \`smart_smart_security({scan, root})\`
 - **Run tests** → \`smart_smart_test({root})\`
 - **Fast reasoning** → \`smart_smart_think({thought, nextThoughtNeeded})\`
-- **Deep analysis** → \`smart_smart_thinking({topic, template})\`
+- **Deep analysis** → \`smart_smart_deep_think({topic, template})\`
 - **Context mgmt** → \`smart_smart_context({command})\`
 
 ### Router Tools (via smart_smart_run)

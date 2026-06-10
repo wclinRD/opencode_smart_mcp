@@ -160,7 +160,7 @@ smart/
 | `smart_think` | 快速推理引擎（hypothesis → verify → repeat 循環） |
 | `smart_security` | 掃描 credentials、injection、path traversal、dependency 漏洞 |
 | `smart_test` | 自動偵測並執行測試（vitest/jest/mocha/ava/node:test） |
-| `smart_thinking` | 結構化推理，9 種 template + 動態多輪推理 |
+| `smart_deep_think` | 結構化推理，9 種 template + 動態多輪推理 |
 
 ## 標準 Tools（20 個，透過 smart_run router 呼叫）
 

@@ -153,8 +153,8 @@ describe('suggestTierForTool', () => {
     assert.equal(suggestTierForTool('smart_think'), 4);
   });
 
-  it('returns T4 for smart_thinking', () => {
-    assert.equal(suggestTierForTool('smart_thinking'), 4);
+  it('returns T4 for smart_deep_think', () => {
+    assert.equal(suggestTierForTool('smart_deep_think'), 4);
   });
 
   it('returns T4 for smart_workflow', () => {

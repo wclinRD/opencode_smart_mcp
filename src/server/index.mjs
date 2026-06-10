@@ -193,6 +193,7 @@ const ERROR_FIXES = {
   _notFound:   'Unknown tool or resource. Use help to list all available tools.',
   _exit:       'Tool exited non-zero. Check input validity; some tools need specific environment setup.',
   _cancel:     'Tool was cancelled mid-execution. Partial results may exist.',
+  _enforcement:'Prerequisites not met. Follow the instructions in the error message.',
 
   // -- smart_grep --
   smart_grep: {
@@ -207,10 +208,10 @@ const ERROR_FIXES = {
     generic:    'Project may not exist or lacks readable structure. Verify root path.',
   },
 
-  // -- smart_thinking --
-  smart_thinking: {
-    missing:    'topic is required for static/dynamic modes. Usage: smart_thinking(topic:"your question", template:"analyze")',
-    generic:    'Dynamic mode needs an active session. Start one with: smart_thinking(topic:"...", dynamic:true)',
+  // -- smart_deep_think --
+  smart_deep_think: {
+    missing:    'topic is required for static/dynamic modes. Usage: smart_deep_think(topic:"your question", template:"analyze")',
+    generic:    'Dynamic mode needs an active session. Start one with: smart_deep_think(topic:"...", dynamic:true)',
   },
 
   // -- smart_security --
@@ -505,6 +506,48 @@ function preCheckMemory(toolName, args) {
 }
 
 // ---------------------------------------------------------------------------
+// Quality Enforcement: High-risk tool call prerequisites (Phase 7 ⑥)
+// ---------------------------------------------------------------------------
+//
+// SYSTEM-LEVEL enforcement — unlike prompt-based quality gates,
+// the LLM CANNOT bypass these checks. If prerequisites aren't met,
+// the tool returns a structured error telling the LLM what to do first.
+//
+// Each entry: toolName → { check: (toolHistory) => null|blocked }
+
+const HIGH_RISK_PREREQUISITES = {
+  // ── Security fix: require beam search after security scan ──
+  'smart_fast_apply': {
+    check: (toolHistory) => {
+      const recentScans = toolHistory.filter(h => h.tool === 'smart_security' && h.ok).slice(-3);
+      if (recentScans.length === 0) return null;
+      const latestScanTime = new Date(recentScans[recentScans.length - 1].timestamp).getTime();
+      const hasBeamAfter = toolHistory.some(h =>
+        h.tool === 'smart_think' && h.args?.mode === 'beam' && h.ok &&
+        new Date(h.timestamp).getTime() > latestScanTime
+      );
+      if (!hasBeamAfter) {
+        return { allowed: false, message: '🔒 Quality Gate: Security fix requires multi-path analysis first.\n\nsmart_security found issues this session. Before applying fixes, explore all approaches via beam search:\n\n  smart_think({mode:"beam", thought:"分析安全修復方案...", template:"debug"})\n\nThis ensures you don\'t miss edge cases.' };
+      }
+      return null;
+    },
+  },
+};
+
+/**
+ * Check high-risk prerequisites before tool execution.
+ * @returns {object|null} null = allowed, { allowed:false, message } = blocked
+ */
+function checkHighRiskPrerequisites(toolName, args) {
+  const rule = HIGH_RISK_PREREQUISITES[toolName];
+  if (!rule) return null;
+  ensureContext();
+  const ctx = contextManager.get();
+  if (!ctx || !Array.isArray(ctx.toolHistory)) return null;
+  return rule.check(ctx.toolHistory);
+}
+
+// ---------------------------------------------------------------------------
 // smart_run — Router dispatcher for standard tools
 // ---------------------------------------------------------------------------
 
@@ -689,6 +732,14 @@ function invokeTool(def, args, timeoutOverride, signal) {
       const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
       return captureAndReturn(def.name, args, { ok: true, output: precheck.output }, elapsedMs, def);
     }
+  }
+
+  // Phase 7 ⑥: Quality Enforcement — check high-risk tool prerequisites
+  // If block returns a message, return it as error (LLM must follow instructions)
+  const enforcement = checkHighRiskPrerequisites(def.name, args);
+  if (enforcement) {
+    const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+    return captureAndReturn(def.name, args, { ok: false, error: enforcement.message }, elapsedMs, def);
   }
 
   // Direct handler path — no process spawn overhead

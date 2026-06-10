@@ -130,7 +130,7 @@ const CLASSIFIER_PATTERNS = [
     ],
     category: CATEGORIES.SEMANTIC,
     confidence: 0.7,
-    tools: ['smart_code_query', 'smart_code_ast', 'smart_thinking', 'smart_diagram'],
+    tools: ['smart_code_query', 'smart_code_ast', 'smart_deep_think', 'smart_diagram'],
     description: 'Semantic query — gathers CKG context + LSP data for LLM synthesis',
   },
 
@@ -269,7 +269,7 @@ export function classifyQuestion(question, context = {}) {
     return {
       category: CATEGORIES.UNKNOWN,
       confidence: 0.3,
-      tools: ['smart_code_query', 'smart_grep', 'smart_thinking'],
+      tools: ['smart_code_query', 'smart_grep', 'smart_deep_think'],
       patterns: [],
       isHybrid: true,
     };
@@ -932,9 +932,9 @@ const DOMAIN_MAP = [
     domain: 'analyze',
     keywords: ['分析', '評估', 'review', '架構 評估', '架構 分析', '架構 檢查', '健康 檢查', 'health check', 'audit', 'lint', 'tech stack', '技術 棧'],
     skill: null,
-    tools: ['arch_overview', 'smart_learn', 'smart_thinking', 'naming', 'code_query'],
+    tools: ['arch_overview', 'smart_learn', 'smart_deep_think', 'naming', 'code_query'],
     description: '專案架構評估與程式碼審查',
-    workflow: ['Learn: smart_learn', 'Architecture: arch_overview', 'Deep analysis: smart_thinking', 'Check naming: naming'],
+    workflow: ['Learn: smart_learn', 'Architecture: arch_overview', 'Deep analysis: smart_deep_think', 'Check naming: naming'],
   },
 ];
 

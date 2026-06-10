@@ -68,8 +68,8 @@ const TASK_PATTERNS = [
   {
     patterns: [/research|search.*web|find.*(library|api|example)|how\s*to/i],
     primary: 'smart_exa_search',
-    alternatives: ['smart_github_search', 'smart_thinking'],
-    chain: ['smart_exa_search', 'smart_github_search', 'smart_thinking', 'smart_report'],
+    alternatives: ['smart_github_search', 'smart_deep_think'],
+    chain: ['smart_exa_search', 'smart_github_search', 'smart_deep_think', 'smart_report'],
     reason: 'Research: search the web → find real code examples → synthesize findings → generate report',
   },
   {
@@ -82,8 +82,8 @@ const TASK_PATTERNS = [
   {
     patterns: [/optimize|performance|slow|bottleneck|profile/i],
     primary: 'smart_grep',
-    alternatives: ['smart_thinking', 'smart_debug'],
-    chain: ['smart_grep', 'smart_debug', 'smart_thinking', 'smart_cross_file_edit', 'smart_test'],
+    alternatives: ['smart_deep_think', 'smart_debug'],
+    chain: ['smart_grep', 'smart_debug', 'smart_deep_think', 'smart_cross_file_edit', 'smart_test'],
     reason: 'Performance optimization: search for perf-sensitive patterns → analyze → deep think → optimize → verify',
   },
   {
