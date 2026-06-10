@@ -21,6 +21,8 @@ Key features:
   - Revision with explicit cross-reference (isRevision + revisesThought)
   - Branching with named paths (branchFromThought + branchId)
   - ⚡ Beam Search mode (mode:"beam"): explore 2-3 alternative reasoning paths with confidence scoring, then select the best one. For complex debug/refactor/architecture tasks.
+  - 🎯 CiT mode (mode:"cit"): Chain-in-Tree BN-DP — auto-detect if branching needed. Only branch when uncertain (saves 70%+ tokens on routine tasks). Uses branchingNeeded + branchReasoning to show assessment.
+  - 🌲 Forest-of-Thought mode (mode:"forest"): Multi-tree reasoning with consensus voting. Each tree explores independent reasoning branches, then cross-tree consensus selects the best conclusion. Uses trees[] + consensus{}.
   - Optional template guidance (debug/refactor/feature/research/decision/analyze/plan_execute/retrospect/architecture)
   - Returns done flag + optional updated totalThoughts`,
   inputSchema: {
@@ -44,12 +46,12 @@ Key features:
       },
       mode: {
         type: 'string',
-        enum: ['beam'],
-        description: 'Reasoning mode. "beam" enables multi-path exploration with 2-3 alternative hypotheses and confidence scoring. Only for complex debug/refactor/architecture tasks.',
+        enum: ['beam', 'cit', 'forest'],
+        description: 'Reasoning mode. "beam" = multi-path exploration. "cit" = BN-DP auto-branch. "forest" = multi-tree Forest-of-Thought with consensus voting.',
       },
       beams: {
         type: 'array',
-        description: 'Pre-defined beam paths for multi-path reasoning. Each beam: {name, content, confidence}. Used with mode:"beam".',
+        description: 'Pre-defined beam paths for multi-path reasoning. Each beam: {name, content, confidence}. Used with mode:"beam" or mode:"cit" when branchingNeeded=true.',
         items: {
           type: 'object',
           properties: {
@@ -61,7 +63,53 @@ Key features:
       },
       selectedBeam: {
         type: 'string',
-        description: 'Name of the selected/correct beam path (e.g. "Path C"). Used with mode:"beam".',
+        description: 'Name of the selected/correct beam path (e.g. "Path C"). Used with mode:"beam" or mode:"cit" when branchingNeeded=true.',
+      },
+      branchingNeeded: {
+        type: 'boolean',
+        description: 'CiT BN-DP assessment result. true = branching needed (explore multiple paths). false = chain mode (single path sufficient). Used with mode:"cit" only.',
+      },
+      branchReasoning: {
+        type: 'string',
+        description: 'CiT BN-DP reasoning: why branching is or is not needed at this step. Used with mode:"cit" only.',
+      },
+      trees: {
+        type: 'array',
+        description: 'Forest-of-Thought trees. Each: {name:string, branches:[{name,content,confidence}], selectedBranch:string}. Used with mode:"forest".',
+        items: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Tree name (e.g. "Static Analysis", "Dynamic Analysis")' },
+            branches: {
+              type: 'array',
+              description: 'Reasoning branches within this tree',
+              items: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string', description: 'Branch name' },
+                  content: { type: 'string', description: 'Branch reasoning content' },
+                  confidence: { type: 'number', description: 'Confidence score 1-10' },
+                },
+              },
+            },
+            selectedBranch: { type: 'string', description: 'Name of the best branch in this tree' },
+          },
+        },
+      },
+      consensus: {
+        type: 'object',
+        description: 'Forest-of-Thought consensus result — cross-tree voting. Used with mode:"forest".',
+        properties: {
+          conclusion: { type: 'string', description: 'Winning conclusion from across all trees' },
+          agreeingTrees: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Tree names that agree on the conclusion',
+          },
+          totalTrees: { type: 'number', description: 'Total number of trees' },
+          confidence: { type: 'number', description: 'Overall confidence 1-10' },
+          primaryTree: { type: 'string', description: 'Tree name with strongest evidence' },
+        },
       },
       hypothesis: {
         type: 'string',
@@ -117,6 +165,10 @@ Key features:
       mode: args.mode || null,
       beams: Array.isArray(args.beams) ? args.beams : null,
       selectedBeam: args.selectedBeam ? String(args.selectedBeam) : null,
+      branchingNeeded: args.branchingNeeded != null ? Boolean(args.branchingNeeded) : null,
+      branchReasoning: args.branchReasoning ? String(args.branchReasoning) : null,
+      trees: Array.isArray(args.trees) ? args.trees : null,
+      consensus: args.consensus || null,
       hypothesis: args.hypothesis ? String(args.hypothesis) : null,
       verification: args.verification ? String(args.verification) : null,
       needsMoreThoughts: Boolean(args.needsMoreThoughts),

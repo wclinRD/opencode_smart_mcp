@@ -237,9 +237,13 @@ export function quickThought(args) {
     branchFromThought = null,
     branchId = null,
     template = null,
-    mode = null,      // "beam" for multi-path reasoning
+    mode = null,      // "beam" | "cit" | "forest"
     beams = null,     // Pre-parsed beam paths (array of {name, content, confidence?})
     selectedBeam = null, // Name of the selected beam path
+    branchingNeeded = null, // CiT BN-DP: true=need branch, false=chain
+    branchReasoning = null, // CiT BN-DP: why branching is/isn't needed
+    trees = null,     // FoT: array of {name, branches: [{name, content, confidence}], selectedBranch}
+    consensus = null, // FoT: {conclusion, agreeingTrees, totalTrees, confidence}
   } = args;
 
   const effectiveTotal = adjustTotalThoughts ?? totalThoughts;
@@ -290,47 +294,142 @@ export function quickThought(args) {
     lines.push('');
   }
 
-  // ── Beam Search block ──
-  if (mode === 'beam') {
-    const pathList = Array.isArray(beams) ? beams : [];
-    if (pathList.length > 0) {
-      lines.push(`┌─ Beam Search (${pathList.length} paths) ───────────────`);
-      for (const beam of pathList) {
-        const marker = beam.name === selectedBeam ? '→' : ' ';
-        const conf = beam.confidence != null ? ` (confidence: ${beam.confidence}/10)` : '';
-        lines.push(`│ ${marker} ${beam.name}${conf}`);
+  // ── Forest-of-Thought block ──
+  if (mode === 'forest') {
+    const treeList = Array.isArray(trees) ? trees : [];
+
+    if (treeList.length > 0) {
+      const totalBranches = treeList.reduce((sum, t) => sum + (t.branches?.length || 0), 0);
+
+      // Forest overview
+      lines.push(`┌─ Forest-of-Thought (${treeList.length} trees, ${totalBranches} branches) ──`);
+      for (const tree of treeList) {
+        const bCount = tree.branches?.length || 0;
+        const sel = tree.selectedBranch || '';
+        const marker = consensus?.primaryTree === tree.name ? '→' : ' ';
+        lines.push(`│ ${marker} ${tree.name} (${bCount} branches)${sel ? ` → ${sel}` : ''}`);
       }
-      lines.push(`└────────────────────────────────────────────────────`);
+      lines.push(`└───────────────────────────────────────────────────────`);
       lines.push('');
-      // Show the selected beam's content as main thought
-      const selected = pathList.find(b => b.name === selectedBeam);
-      if (selected) {
-        lines.push(`[Selected: ${selected.name}]`);
-        lines.push('');
-        lines.push(selected.content);
-      } else {
-        lines.push(thought);
+
+      // Per-tree details
+      for (const tree of treeList) {
+        const branches = Array.isArray(tree.branches) ? tree.branches : [];
+        if (branches.length > 0) {
+          lines.push(`┌─ ${tree.name} ─────────────────────────────────────`);
+          for (const br of branches) {
+            const marker = br.name === tree.selectedBranch ? '→' : ' ';
+            const conf = br.confidence != null ? ` (conf: ${br.confidence}/10)` : '';
+            lines.push(`│ ${marker} ${br.name}${conf}`);
+          }
+          lines.push(`└────────────────────────────────────────────────────`);
+          lines.push('');
+
+          // Show selected branch content
+          const selected = branches.find(b => b.name === tree.selectedBranch);
+          if (selected) {
+            lines.push(`[${tree.name} → ${selected.name}]`);
+            lines.push('');
+            lines.push(selected.content);
+            lines.push('');
+          }
+        }
       }
-      lines.push('');
-      // Show beam summary
-      const sorted = [...pathList].sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
-      if (sorted.length > 0) {
-        lines.push(`─ Beam Summary ─`);
-        lines.push(`  Explored ${pathList.length} paths. Best: ${sorted[0].name} (${sorted[0].confidence || '?'}/10)`);
+
+      // Consensus
+      if (consensus) {
+        lines.push(`┌─ Forest Consensus ─────────────────────`);
+        lines.push(`│ ${consensus.conclusion}`);
+        if (consensus.agreeingTrees) {
+          const agreeList = Array.isArray(consensus.agreeingTrees) ? consensus.agreeingTrees : [];
+          lines.push(`│ Agreement: ${agreeList.length}/${consensus.totalTrees || treeList.length} trees`);
+          for (const t of agreeList) {
+            lines.push(`│  ✓ ${t}`);
+          }
+        }
+        if (consensus.confidence != null) {
+          lines.push(`│ Overall confidence: ${consensus.confidence}/10`);
+        }
+        lines.push(`└──────────────────────────────────────────`);
         lines.push('');
       }
     } else {
-      // Fallback: beams not provided, treat thought as raw multi-path text
-      lines.push(`┌─ Beam Search ───────────────────────────────────`);
-      lines.push(`│ Multiple reasoning paths explored below`);
-      lines.push(`└────────────────────────────────────────────────────`);
+      // Fallback: no structured trees
+      lines.push(`┌─ Forest-of-Thought ───────────────────────`);
+      lines.push(`│ Multiple reasoning trees explored below`);
+      lines.push(`└──────────────────────────────────────────────`);
       lines.push('');
       lines.push(thought);
       lines.push('');
     }
+  // ── CiT / Beam Search block ──
+  } else if (mode === 'beam' || mode === 'cit') {
+    // --- BN-DP Assessment (CiT only) ---
+    if (mode === 'cit') {
+      const needsBranch = branchingNeeded === true;
+      const branchLabel = needsBranch ? 'YES → branch' : 'NO → chain';
+      lines.push(`┌─ CiT BN-DP ─────────────────────────────`);
+      lines.push(`│ Branch: ${branchLabel}`);
+      if (branchReasoning) {
+        lines.push(`│ ${branchReasoning}`);
+      }
+      lines.push(`└───────────────────────────────────────────`);
+      lines.push('');
+    }
+
+    // --- Chain mode (CiT, no branching needed) ---
+    if (mode === 'cit' && branchingNeeded !== true) {
+      lines.push(`[Chain] Single reasoning path — no branch needed.`);
+      lines.push('');
+      lines.push(thought);
+      lines.push('');
+    }
+    // --- Branch mode (beam or CiT with branching) ---
+    else {
+      const pathList = Array.isArray(beams) ? beams : [];
+      if (pathList.length > 0) {
+        const label = mode === 'cit' ? 'Branching' : 'Beam Search';
+        lines.push(`┌─ ${label} (${pathList.length} paths) ───────────────`);
+        for (const beam of pathList) {
+          const marker = beam.name === selectedBeam ? '→' : ' ';
+          const conf = beam.confidence != null ? ` (confidence: ${beam.confidence}/10)` : '';
+          lines.push(`│ ${marker} ${beam.name}${conf}`);
+        }
+        lines.push(`└────────────────────────────────────────────────────`);
+        lines.push('');
+        // Show the selected beam's content as main thought
+        const selected = pathList.find(b => b.name === selectedBeam);
+        if (selected) {
+          lines.push(`[Selected: ${selected.name}]`);
+          lines.push('');
+          lines.push(selected.content);
+        } else {
+          lines.push(thought);
+        }
+        lines.push('');
+        // Show beam/branch summary
+        const sorted = [...pathList].sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+        if (sorted.length > 0) {
+          const prefix = mode === 'cit' ? 'Branch' : 'Beam';
+          lines.push(`─ ${prefix} Summary ─`);
+          lines.push(`  Explored ${pathList.length} paths. Best: ${sorted[0].name} (${sorted[0].confidence || '?'}/10)`);
+          lines.push('');
+        }
+      } else {
+        // Fallback: no structured beams
+        if (mode === 'beam') {
+          lines.push(`┌─ Beam Search ───────────────────────────────────`);
+          lines.push(`│ Multiple reasoning paths explored below`);
+          lines.push(`└────────────────────────────────────────────────────`);
+          lines.push('');
+        }
+        lines.push(thought);
+        lines.push('');
+      }
+    }
     // Skip the normal main content below
   } else {
-    // ── Main content (non-beam mode) ──
+    // ── Main content (non-beam, non-cit mode) ──
     lines.push(thought);
     lines.push('');
   }

@@ -50,7 +50,7 @@ permission:
 |------|------|
 | `smart_grep({pattern})` | 搜尋程式碼（附 scope/import context） |
 | `smart_learn({root})` | 新專案 onboarding |
-| `smart_think({thought, nextThoughtNeeded})` | **快思** — 假設→驗證（輕量）。`mode:"beam"` = 多路徑探索 |
+| `smart_think({thought, nextThoughtNeeded})` | **快思** — 假設→驗證（輕量）。`mode:"beam"` = 多路徑。`mode:"cit"` = BN-DP 自動判斷分支。`mode:"forest"` = 多樹共識推理 |
 | `smart_deep_think({topic, template})` | **慢想** — 深度分析（9 模板）。一次完整輸出 |
 | `smart_security({scan})` | 安全掃描 |
 | `smart_test({root})` | 執行測試 |
@@ -58,7 +58,7 @@ permission:
 | `smart_rules({file})` | 查詢專案規則（AGENTS.md / .cursorrules 等）— **編輯前必查** |
 | `smart_lsp({operation, file, line, character})` | **Type-aware 程式碼理解** — 找定義、查引用、看型別、診斷錯誤。支援 TS/JS/Python/Rust/Swift/PHP |
 
-> **💡 快思 vs 慢想**：不確定 root cause、有多種可能 → `smart_think`（快思 + beam）。需要系統性分析、完整評估 → `smart_deep_think`（慢想 + 模板）。兩者不會搞混：`think` = 來回對話式推理，`deep_think` = 單次完整深度分析。
+> **💡 快思 vs 慢想**：不確定 root cause、有多種可能 → `smart_think`（快思 + beam/cit/forest）。需要系統性分析、完整評估 → `smart_deep_think`（慢想 + 模板）。兩者不會搞混：`think` = 來回對話式推理，`deep_think` = 單次完整深度分析。
 
 ### 🟠 Layer 2：Sub-tools（透過 ssr 呼叫）
 
@@ -167,9 +167,47 @@ permission:
 
 複雜任務不要只走一條推理路徑。用這些模式提升輸出品質：
 
-### Beam Search（多路徑推理）
+### CiT BN-DP（省 token 預設模式）🥇
 
-當任務涉及**除錯、重構方案選擇**等需要探索多種可能性的場景：
+**預設推理模式**。每次推理先做 BN-DP（Branching Necessity）評估，只在不確定時分支：
+
+```
+# 不確定 → 分支探索
+smart_think({
+  mode: "cit",
+  thought: "分析 crash...",
+  branchingNeeded: true,
+  branchReasoning: "無法直觀判斷 — 需探索多個方向",
+  beams: [
+    {name:"memory leak", content:"...", confidence:7},
+    {name:"null pointer", content:"...", confidence:8},
+    {name:"race", content:"...", confidence:5},
+  ],
+  selectedBeam: "null pointer",
+  template: "debug"
+})
+
+# 確定 → 走 chain（省 token）
+smart_think({
+  mode: "cit",
+  thought: "Root cause 已明確：parser 的 null check missing",
+  branchingNeeded: false,
+  branchReasoning: "錯誤 trace 指向唯一位置，不需分支",
+  template: "debug"
+})
+```
+
+| 情況 | 用哪個 |
+|------|--------|
+| **不確定 root cause / 方案優劣難分** | `mode:"cit"` + `branchingNeeded:true` + `beams:[...]` |
+| **有明確方向、只需直線推論** | `mode:"cit"` + `branchingNeeded:false`（省 ~70% token） |
+| **高風險（安全修復、重大重構）** | `mode:"beam"`（強制多路徑，行為閘用） |
+
+> **省 token 原理**：CiT 論文證明 BN-DP 保證不慢於 baseline。多數推理步驟不需分支 → chain mode 省 token。只在 LLM 真的不確定時才花 token 展開多路徑。
+
+### Beam Search（多路徑推理 — 行為閘專用）
+
+當**行為閘強制要求**或**高風險**場景：
 
 ```
 smart_think({
@@ -179,9 +217,65 @@ smart_think({
 })
 ```
 
-- **何時用**：不確定 root cause、有多種可能解釋、需要比較方案優劣
-- **何時不用**：簡單查詢、例行編輯、已知答案的任務
+- **何時用**：行為閘強制、安全修復（must explore all paths）、高風險決策
+- **何時不用**：日常推理（用 cit 更省）
 - **內部行為**：LLM 產生 2-3 條獨立推理路徑 → 自我評分 → 選最佳路徑輸出
+
+### Forest-of-Thought（多樹共識推理 — 高精度模式）🌲
+
+當需要**跨角度交叉驗證**或**高精度決策**時。多棵獨立推理樹從不同角度分析，最後 consensus voting：
+
+```
+smart_think({
+  mode: "forest",
+  thought: "綜合分析 crash root cause",
+  trees: [
+    {
+      name: "Tree 1: Static Analysis",
+      branches: [
+        {name:"Null pointer", content:"Parser missing null check...", confidence:8},
+        {name:"Memory leak", content:"Alloc without free in loop...", confidence:4},
+      ],
+      selectedBranch: "Null pointer",
+    },
+    {
+      name: "Tree 2: Runtime Analysis",
+      branches: [
+        {name:"Race condition", content:"Concurrent write to buffer...", confidence:6},
+      ],
+      selectedBranch: "Race condition",
+    },
+    {
+      name: "Tree 3: Git History",
+      branches: [
+        {name:"Recent regression", content:"Commit abc123 introduced bug...", confidence:7},
+      ],
+      selectedBranch: "Recent regression",
+    },
+  ],
+  consensus: {
+    conclusion: "Null pointer from Tree 1 + regression from Tree 3 point to same root cause",
+    agreeingTrees: ["Tree 1: Static Analysis", "Tree 3: Git History"],
+    totalTrees: 3,
+    confidence: 8,
+    primaryTree: "Tree 1: Static Analysis",
+  },
+  template: "debug"
+})
+```
+
+- **何時用**：複雜 bug 需多角度分析、架構重大決策、跨領域問題
+- **何時不用**：例行推理、已知答案（用 cit chain 更省）
+- **內部行為**：各 tree 獨立推理分支 → 選最佳 → cross-tree consensus voting
+
+### 完整 triage 表
+
+| 情境 | 模式 | 原因 |
+|------|------|------|
+| **例行推理、有方向** | `mode:"cit"` chain | 最省 token（~70%） |
+| **不確定、需探索 2-3 方向** | `mode:"cit"` branch | 自動判斷是否分支 |
+| **高風險、行為閘強制** | `mode:"beam"` | 強制多路徑，無略過 |
+| **複雜 bug、多角度驗證** | `mode:"forest"` | 多樹 consensus，精度最高 |
 
 ### Self-Correction Loop（高風險自我修正）
 
@@ -205,7 +299,9 @@ smart_think({
 
 | 情境 | 步驟 |
 |------|------|
-| **複雜除錯（不確定原因）** | `smart_think({mode:"beam", thought:"多路徑假設", template:"debug"})` → 驗證最佳路徑 → `ssr(fast_apply)` → `smart_test` |
+| **一般除錯（有方向）** | `smart_think({mode:"cit", branchingNeeded:false, ...})` → `ssr(fast_apply)` → `smart_test` |
+| **複雜除錯（不確定原因）** | `smart_think({mode:"cit", branchingNeeded:true, beams:[...], template:"debug"})` → 驗證最佳 → `ssr(fast_apply)` → `smart_test` |
+| **多角度交叉驗證** | `smart_think({mode:"forest", trees:[...], consensus:{...}, template:"debug"})` → `ssr(fast_apply)` → `smart_test` |
 | **高風險安全修復** | `smart_security` → **self-correction loop** → `ssr(fast_apply)` → `smart_test` → `smart_security(rescan)` |
 | **架構方案比較** | `smart_learn` → `ssr(hybrid_router)` → `smart_think({template:"architecture"})` → 實作 |
 | **重大重構** | `ssr(import_graph)` → `smart_think({mode:"beam", template:"refactor"})` → `ssr(rename_safety)` → `ssr(fast_apply)` → `smart_test` |
@@ -289,8 +385,10 @@ Context Budget 意識：
   → 自我檢查後才回使用者
 
 複雜推理任務（除錯 / 方案比較）
-  → 建議用 smart_think({mode:"beam", ...}) 探索多路徑
-  → 不要只走一條推理路線
+  → 預設用 smart_think({mode:"cit", ...}) — BN-DP 自動判斷是否分支
+  → 高精度用 mode:"forest"（多樹 consensus 適合複雜 bug）
+  → 高風險時改用 mode:"beam"（行為閘強制）
+  → 不要只走一條推理路線（除非 BN-DP 確認不需要）
 
 跨檔案編輯（smart_cross_file_edit）
   → 建議先跑 import_graph 了解依賴

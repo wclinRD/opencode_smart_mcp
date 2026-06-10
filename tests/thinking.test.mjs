@@ -236,6 +236,203 @@ describe('quickThought / quickThink', () => {
     assert.ok(result.output.includes('Best: Approach 3'));
     assert.ok(result.output.includes('confidence: 7/10'));
   });
+
+  // ── CiT mode tests ──
+
+  it('cit mode chain (branchingNeeded=false) shows BN-DP assessment + chain label', () => {
+    const result = quickThought({
+      thought: 'Root cause already clear from stack trace — no need to branch.',
+      nextThoughtNeeded: true,
+      mode: 'cit',
+      branchingNeeded: false,
+      branchReasoning: 'Error trace points to unique location, single path sufficient',
+    });
+    assert.ok(result.output.includes('CiT BN-DP'));
+    assert.ok(result.output.includes('Branch: NO'));
+    assert.ok(result.output.includes('chain'));
+    assert.ok(result.output.includes('single path sufficient'));
+    assert.ok(result.output.includes('[Chain]'));
+    assert.ok(result.output.includes('Root cause already clear'));
+    // Should NOT show beam/branch markers
+    assert.equal(result.output.includes('Branching ('), false);
+    assert.equal(result.output.includes('Beam Search'), false);
+  });
+
+  it('cit mode branch (branchingNeeded=true) shows BN-DP + branching paths', () => {
+    const result = quickThought({
+      thought: 'Need to explore multiple hypotheses.',
+      nextThoughtNeeded: false,
+      mode: 'cit',
+      branchingNeeded: true,
+      branchReasoning: 'Multiple possible root causes — null pointer, race condition, or config issue',
+      beams: [
+        { name: 'Null pointer', content: 'Null check missing in parser...', confidence: 8 },
+        { name: 'Race condition', content: 'Concurrent access to shared state...', confidence: 5 },
+      ],
+      selectedBeam: 'Null pointer',
+    });
+    assert.ok(result.output.includes('CiT BN-DP'));
+    assert.ok(result.output.includes('Branch: YES'));
+    assert.ok(result.output.includes('Multiple possible root causes'));
+    assert.ok(result.output.includes('Branching (2 paths)'));
+    assert.ok(result.output.includes('Null pointer'));
+    assert.ok(result.output.includes('Race condition'));
+    assert.ok(result.output.includes('[Selected: Null pointer]'));
+    assert.ok(result.output.includes('Null check missing in parser...'));
+    assert.ok(result.output.includes('Branch Summary'));
+    assert.ok(result.output.includes('Best: Null pointer (8/10)'));
+  });
+
+  it('cit mode chain with no branchingNeeded defaults to chain view', () => {
+    const result = quickThought({
+      thought: 'Single path analysis continues...',
+      nextThoughtNeeded: true,
+      mode: 'cit',
+      branchingNeeded: false,
+    });
+    assert.ok(result.output.includes('CiT BN-DP'));
+    assert.ok(result.output.includes('Branch: NO'));
+    assert.ok(result.output.includes('[Chain]'));
+  });
+
+  it('cit mode with branching but no beams falls back to thought', () => {
+    const result = quickThought({
+      thought: 'Branching analysis without structured beams...',
+      nextThoughtNeeded: false,
+      mode: 'cit',
+      branchingNeeded: true,
+      branchReasoning: 'Testing fallback',
+    });
+    assert.ok(result.output.includes('CiT BN-DP'));
+    assert.ok(result.output.includes('Branch: YES'));
+    assert.ok(result.output.includes('Testing fallback'));
+    // Should still show the thought content
+    assert.ok(result.output.includes('Branching analysis without structured beams...'));
+  });
+
+  it('beam mode still works unchanged after cit additions', () => {
+    const result = quickThought({
+      thought: 'Classic beam search',
+      nextThoughtNeeded: false,
+      mode: 'beam',
+      beams: [
+        { name: 'Path X', content: 'Path X content', confidence: 9 },
+      ],
+      selectedBeam: 'Path X',
+    });
+    assert.ok(result.output.includes('Beam Search'));
+    assert.ok(result.output.includes('Path X'));
+    assert.equal(result.output.includes('CiT BN-DP'), false);
+  });
+
+  // ── Forest-of-Thought mode tests ──
+
+  it('forest mode shows multiple trees with branches and consensus', () => {
+    const result = quickThought({
+      thought: 'Forest summary',
+      nextThoughtNeeded: false,
+      mode: 'forest',
+      trees: [
+        {
+          name: 'Static Analysis',
+          branches: [
+            { name: 'Null pointer', content: 'Null check missing...', confidence: 8 },
+            { name: 'Memory leak', content: 'Alloc without free...', confidence: 4 },
+          ],
+          selectedBranch: 'Null pointer',
+        },
+        {
+          name: 'Dynamic Analysis',
+          branches: [
+            { name: 'Race condition', content: 'Concurrent access...', confidence: 6 },
+          ],
+          selectedBranch: 'Race condition',
+        },
+      ],
+      consensus: {
+        conclusion: 'Null pointer in parser is root cause',
+        agreeingTrees: ['Static Analysis', 'Dynamic Analysis'],
+        totalTrees: 2,
+        confidence: 8,
+        primaryTree: 'Static Analysis',
+      },
+    });
+    assert.ok(result.output.includes('Forest-of-Thought'));
+    assert.ok(result.output.includes('2 trees'));
+    assert.ok(result.output.includes('Static Analysis'));
+    assert.ok(result.output.includes('Dynamic Analysis'));
+    assert.ok(result.output.includes('Null pointer'));
+    assert.ok(result.output.includes('Race condition'));
+    assert.ok(result.output.includes('Forest Consensus'));
+    assert.ok(result.output.includes('Null pointer in parser'));
+    assert.ok(result.output.includes('2/2 trees'));
+    assert.ok(result.output.includes('8/10'));
+  });
+
+  it('forest mode fallback when no trees provided', () => {
+    const result = quickThought({
+      thought: 'Raw forest reasoning...',
+      nextThoughtNeeded: false,
+      mode: 'forest',
+    });
+    assert.ok(result.output.includes('Forest-of-Thought'));
+    assert.ok(result.output.includes('Multiple reasoning trees'));
+    assert.ok(result.output.includes('Raw forest reasoning...'));
+  });
+
+  it('forest mode single tree with multiple branches', () => {
+    const result = quickThought({
+      thought: 'Single tree forest',
+      nextThoughtNeeded: true,
+      mode: 'forest',
+      trees: [
+        {
+          name: 'Root Cause Analysis',
+          branches: [
+            { name: 'Config issue', content: 'Wrong env variable...', confidence: 7 },
+            { name: 'Network timeout', content: 'DNS resolution fails...', confidence: 5 },
+            { name: 'Auth error', content: 'Token expired...', confidence: 3 },
+          ],
+          selectedBranch: 'Config issue',
+        },
+      ],
+      consensus: {
+        conclusion: 'Config issue is most likely',
+        agreeingTrees: ['Root Cause Analysis'],
+        totalTrees: 1,
+        confidence: 7,
+      },
+    });
+    assert.ok(result.output.includes('Forest-of-Thought'));
+    assert.ok(result.output.includes('1 trees, 3 branches'));
+    assert.ok(result.output.includes('Config issue'));
+    assert.ok(result.output.includes('Network timeout'));
+    assert.ok(result.output.includes('Auth error'));
+    assert.ok(result.output.includes('Forest Consensus'));
+    assert.ok(result.output.includes('1/1 trees'));
+  });
+
+  it('forest mode with large tree count formatting', () => {
+    const result = quickThought({
+      thought: 'Multi-tree analysis',
+      nextThoughtNeeded: false,
+      mode: 'forest',
+      trees: [
+        { name: 'Tree 1: Logs', branches: [{ name: 'Error A', content: '...', confidence: 6 }], selectedBranch: 'Error A' },
+        { name: 'Tree 2: Metrics', branches: [{ name: 'Spike B', content: '...', confidence: 8 }], selectedBranch: 'Spike B' },
+        { name: 'Tree 3: Code', branches: [{ name: 'Bug C', content: '...', confidence: 7 }], selectedBranch: 'Bug C' },
+      ],
+      consensus: {
+        conclusion: 'Bug C with supporting evidence from Metrics',
+        agreeingTrees: ['Tree 2: Metrics', 'Tree 3: Code'],
+        totalTrees: 3,
+        confidence: 9,
+      },
+    });
+    assert.ok(result.output.includes('3 trees'));
+    assert.ok(result.output.includes('2/3 trees'));
+    assert.ok(result.output.includes('Bug C with supporting'));
+  });
 });
 
 // ---------------------------------------------------------------------------
