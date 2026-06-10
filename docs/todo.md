@@ -456,6 +456,53 @@
 
 ---
 
+## Phase 8：Universal LSP Bridge
+
+> 2026-06-10 規劃。將現有 LSP bridge 暴露為 MCP tool。
+> 對應 plan.md Phase 8 章節。
+
+### 1. 新增 `src/plugins/core/lsp.mjs` — smart_lsp MCP tool 🔨
+
+- [ ] Handler-based plugin（import LspBridge，無 CLI）
+- [ ] 支援 operations: symbols, references, hover, definition, diagnostics
+- [ ] 自動依副檔名選 language server
+- [ ] inputSchema: operation (enum), file (required), line, character
+- [ ] responsePolicy: maxLevel 0（輸出小，不需壓縮）
+
+### 2. 擴充 `src/lib/lsp-bridge.mjs` 🔨
+
+- [ ] 新增 PHP (intelephense) 到 LSP_CONFIGS
+- [ ] 新增 `getDiagnostics(filePath)` 方法（textDocument/diagnostic + pull model）
+- [ ] 確保 auto-detect 正確選擇 language server
+
+### 3. 更新 `config/agents/smart-mcp.md` 🔨
+
+- [ ] Layer 1 Direct tools 表格加入 `smart_lsp`
+- [ ] 常用工作流加入 LSP 使用場景
+- [ ] 行為閘加入「理解程式碼優先 LSP」規則
+- [ ] permission 加入 `smart_lsp: allow`
+
+### 4. 更新 4 個 SKILL.md 🔨
+
+- [ ] php-lsp: 「無 native LSP」→「使用 smart_lsp，CLI fallback」
+- [ ] pyright-lsp: 同上
+- [ ] typescript-lsp: 同上
+- [ ] swift-lsp: 同上
+
+### 5. 同步 🔨
+
+- [ ] `~/.config/opencode/agents/smart-mcp.md` 同步
+
+### 6. 測試 🔨
+
+- [ ] smart_lsp plugin 載入驗證
+- [ ] 各 operation 正確性（symbols/references/hover/definition）
+- [ ] PHP language server 偵測
+- [ ] 不支援的語言降級提示
+- [ ] 全量 regression
+
+---
+
 ## 已決定不做的功能（記入反省）
 
 以下是曾經考慮但經評估後捨棄的方向，記錄以避免重複討論：

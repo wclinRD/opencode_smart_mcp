@@ -16,6 +16,7 @@ permission:
   smart_think: allow
   smart_security: allow
   smart_test: allow
+  smart_lsp: allow
   webfetch: allow
   websearch: allow
   bash:
@@ -55,6 +56,7 @@ permission:
 | `smart_test({root})` | 執行測試 |
 | `smart_context({command})` | Session 管理（含 context budget 查詢：`smart_context({command:"budget"})`） |
 | `smart_rules({file})` | 查詢專案規則（AGENTS.md / .cursorrules 等）— **編輯前必查** |
+| `smart_lsp({operation, file, line, character})` | **Type-aware 程式碼理解** — 找定義、查引用、看型別、診斷錯誤。支援 TS/JS/Python/Rust/Swift/PHP |
 
 > **💡 快思 vs 慢想**：不確定 root cause、有多種可能 → `smart_think`（快思 + beam）。需要系統性分析、完整評估 → `smart_deep_think`（慢想 + 模板）。兩者不會搞混：`think` = 來回對話式推理，`deep_think` = 單次完整深度分析。
 
@@ -155,6 +157,9 @@ permission:
 | 文件分析 | `ssr(ingest_document) → 分析內容 → 摘要/回答問題` |
 | 掃描 PDF | `ssr(ingest_document args:{ocr:true}) → 自動 OCR → 分析內容` |
 | 編輯前檢查 | `smart_rules({file:"目標檔案"}) → 確認規則 → 編輯` |
+| 理解程式碼 | `smart_lsp({operation:"hover", file, line, character}) → 看型別 → smart_lsp({operation:"definition"}) → 追程式碼` |
+| 重構前檢查 | `smart_lsp({operation:"references", file, line, character}) → 找所有引用 → ssr(rename_safety)` |
+| 型別錯誤 | `smart_lsp({operation:"diagnostics", file}) → 定位錯誤 → ssr(fast_apply)` |
 
 ---
 
@@ -250,6 +255,13 @@ Smart MCP 自動壓縮大型輸出（L0/L1/L2）。遇到 `_optimized`：
   ❌ 手動 curl/wget 猜參數（用 ssr({tool:"pw_browser"}) + addInitScript 攔截）
   ❌ 盲目 grep/read 大量檔案（用 smart_grep 取代）
   ❌ 不查規則就編輯（先用 smart_rules({file:"目標檔案"}) 確認專案慣例）
+  ❌ 用 grep 找定義/引用（用 smart_lsp({operation:"definition"|"references"}) — LSP 比 regex 精準且省 token）
+
+LSP 優先原則：
+  📍 找函式定義 → smart_lsp({operation:"definition"}) 優先，smart_grep 備用
+  📍 看變數型別 → smart_lsp({operation:"hover"})（~50 tokens vs 讀整個檔案）
+  📍 找所有引用 → smart_lsp({operation:"references"}) 優先，smart_grep 備用
+  📍 檢查錯誤 → smart_lsp({operation:"diagnostics"}) 優先，手動編譯備用
 
 Context Budget 意識：
   📊 每次收到 budget warning 時，優先壓縮/摘要舊輸出

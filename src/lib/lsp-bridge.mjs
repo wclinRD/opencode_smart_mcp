@@ -105,6 +105,19 @@ const LSP_CONFIGS = {
     ],
     env: {},
   },
+  php: {
+    name: 'intelephense',
+    args: ['--stdio'],
+    fileExts: ['.php', '.phtml', '.php3', '.php4', '.php5', '.php7', '.php8', '.phps', '.inc'],
+    languageId: 'php',
+    findCandidates: [
+      '/opt/homebrew/bin/intelephense',
+      '/usr/local/bin/intelephense',
+      process.env.HOME + '/.npm-global/bin/intelephense',
+      process.env.HOME + '/npm/bin/intelephense',
+    ],
+    env: {},
+  },
 };
 
 /**
@@ -297,6 +310,50 @@ export class LspBridge {
       line: def.range.start.line + 1,
       col: def.range.start.character
     };
+  }
+
+  /** 取得檔案的診斷資訊（錯誤、警告） */
+  async getDiagnostics(filePath) {
+    const absPath = resolve(this.rootDir, filePath);
+    if (!existsSync(absPath)) {
+      return { error: `File not found: ${filePath}`, diagnostics: [] };
+    }
+
+    const cacheKey = `diag:${absPath}`;
+    const cached = this._cache.get(cacheKey);
+    if (cached) return cached;
+
+    const lang = this._langForFile(filePath);
+    const cfg = LSP_CONFIGS[lang];
+    const languageId = cfg ? cfg.languageId : 'typescript';
+
+    await this.ensureOpen(lang);
+    await this._didOpen(absPath, lang, languageId);
+
+    // Use textDocument/diagnostic pull model if supported, fallback to published diagnostics
+    const cap = this._serverCapabilities.get(lang);
+    if (cap?.capabilities?.diagnosticProvider) {
+      try {
+        const result = await this._sendRequest('textDocument/diagnostic', {
+          textDocument: { uri: this._toUri(absPath) }
+        }, lang);
+        const diagnostics = this._normalizeDiagnostics(result, absPath);
+        const output = { file: filePath, diagnostics };
+        this._cache.set(cacheKey, output);
+        return output;
+      } catch {
+        // Fall through to published diagnostics
+      }
+    }
+
+    // Fallback: return empty (published diagnostics require active watching)
+    const output = {
+      file: filePath,
+      diagnostics: [],
+      note: 'Diagnostics not available via pull model. Use CLI for type checking: npx tsc --noEmit, pyright, php -l, swift build, cargo check'
+    };
+    this._cache.set(cacheKey, output);
+    return output;
   }
 
   /** 優雅關閉所有 LSP process */
@@ -625,6 +682,26 @@ export class LspBridge {
       26: 'type-parameter',
     };
     return map[kind] || 'unknown';
+  }
+
+  _normalizeDiagnostics(result, absPath) {
+    const items = result?.items || result || [];
+    if (!Array.isArray(items)) return [];
+    return items.map(d => ({
+      line: d.range?.start?.line != null ? d.range.start.line + 1 : 0,
+      col: d.range?.start?.character || 0,
+      endLine: d.range?.end?.line != null ? d.range.end.line + 1 : undefined,
+      endCol: d.range?.end?.character,
+      severity: this._severityToString(d.severity),
+      message: d.message || '',
+      code: d.code || undefined,
+      source: d.source || undefined,
+    }));
+  }
+
+  _severityToString(severity) {
+    const map = { 1: 'error', 2: 'warning', 3: 'information', 4: 'hint' };
+    return map[severity] || 'unknown';
   }
 }
 

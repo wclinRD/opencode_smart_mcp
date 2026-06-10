@@ -587,6 +587,71 @@ Smart MCP 目前的增強策略集中在「工具層」（54 個 MCP tool）+「
 
 ---
 
+## Phase 8：Universal LSP Bridge — 讓 LLM 看懂程式碼
+
+> 2026-06-10 規劃。基於 research.md 的競爭分析。
+> 核心問題：LSP bridge 已存在但未暴露為 MCP tool，LLM 無法使用 type-aware 程式碼理解。
+
+### 現狀
+
+| 元件 | 狀態 |
+|------|------|
+| `src/lib/lsp-bridge.mjs` | ✅ 已實作（TS/Python/Rust/Swift），支援 getSymbols/getReferences/getHover/getDefinition |
+| 內部使用 | ✅ code-call-graph、code-impact 等插件使用 |
+| MCP tool 暴露 | ❌ 無 — LLM 看不到 |
+| SKILL.md | ❌ 4 個 skill 都寫「無 native LSP，用 CLI」 |
+| PHP 支援 | ❌ LSP bridge 無 intelephense |
+| Diagnostics | ❌ LSP bridge 無 getDiagnostics 方法 |
+
+### 解決方案
+
+```
+新增 smart_lsp MCP tool（handler-based，~80 行）
+  → 包裝現有 LspBridge API
+  → 自動依副檔名選 language server
+  → 支援 operations: symbols, references, hover, definition, diagnostics
+  → 加入 PHP (intelephense) 支援
+```
+
+### 實作項目
+
+| 步驟 | 內容 | 檔案 |
+|------|------|------|
+| 1 | 新增 `smart_lsp` plugin | `src/plugins/core/lsp.mjs` |
+| 2 | LSP bridge 加 PHP + getDiagnostics | `src/lib/lsp-bridge.mjs` |
+| 3 | System prompt 加路由規則 | `config/agents/smart-mcp.md` |
+| 4 | 更新 4 個 SKILL.md | `~/.config/opencode/skills/{php,pyright,typescript,swift}-lsp/SKILL.md` |
+| 5 | 同步 agent config | `~/.config/opencode/agents/smart-mcp.md` |
+
+### 架構
+
+```
+LLM (OpenCode)
+  │ smart_lsp({operation:"definition", file:"src/auth.ts", line:42, character:10})
+  ▼
+Smart MCP Server
+  │ src/plugins/core/lsp.mjs (handler-based)
+  │   → import { getLspBridge } from '../../lib/lsp-bridge.mjs'
+  ▼
+LSP Bridge (src/lib/lsp-bridge.mjs)
+  │ 自動依副檔名選 language server
+  ├─ .ts/.tsx → typescript-language-server
+  ├─ .py      → pylsp
+  ├─ .rs      → rust-analyzer
+  ├─ .swift   → sourcekit-lsp
+  └─ .php     → intelephense (NEW)
+```
+
+### 不上什麼
+
+| 項目 | 原因 |
+|------|------|
+| 通用 LSP protocol bridge（任意 language server） | 現有 5 語言覆蓋 90% 使用場景，其餘用 CLI fallback |
+| LSP 自動安裝 | 依賴管理複雜，交給使用者 |
+| workspace/symbol 跨檔案搜尋 | LSP bridge 已支援但 LLM 使用頻率低，先用 file-level operations |
+
+---
+
 ## Phase 7：Reasoning Quality — 讓 LLM 真正變聰明
 
 > 2026-06-10 規劃。基於 Phase 1-6 的誠實反省。

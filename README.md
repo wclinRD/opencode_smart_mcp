@@ -706,17 +706,17 @@ export default {
 
 列出所有 router tool：
 ```
-smart_run(tool: "help", args: {})
+smart_smart_run({tool: "help", args: {}})
 ```
 
 查詢特定 tool schema：
 ```
-smart_run(tool: "describe", args: {name: "coverage"})
+smart_smart_run({tool: "describe", args: {name: "coverage"}})
 ```
 
 預熱（pre-warm）多個 tools：
 ```
-smart_run(tool: "warmUp", args: {tools: ["coverage", "debug", "naming"]})
+smart_smart_run({tool: "warmUp", args: {tools: ["coverage", "debug", "naming"]}})
 ```
 
 查詢 server 健康狀態：
