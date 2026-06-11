@@ -11,13 +11,98 @@
 //   diagnostics — get errors/warnings for a file
 //
 // Auto-detects language from file extension:
-//   .ts/.tsx/.js/.jsx → typescript-language-server
-//   .py               → pylsp
-//   .rs               → rust-analyzer
-//   .swift            → sourcekit-lsp
-//   .php              → intelephense
+//   .ts/.tsx/.js/.jsx/.mjs/.cjs → typescript-language-server
+//   .py/.pyw                    → pylsp
+//   .rs                         → rust-analyzer
+//   .swift                      → sourcekit-lsp
+//   .php/.phtml/.inc            → intelephense
 
+import { extname } from 'node:path';
 import { getLspBridge, closeAllLspBridges } from '../../lib/lsp-bridge.mjs';
+
+// ---------------------------------------------------------------------------
+// LSP install commands per language
+// ---------------------------------------------------------------------------
+const INSTALL_COMMANDS = {
+  typescript: {
+    name: 'TypeScript/JavaScript',
+    exts: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'],
+    // istanbul ignore next — only used in error messages
+    install: () => {
+      if (process.platform === 'darwin') return 'brew install typescript-language-server';
+      return 'npm install -g typescript-language-server';
+    },
+    fallback: (file, line, character) => {
+      if (line) return `smart_grep({pattern:"...", include:"${file}"}) with line ${line} context`;
+      return `smart_grep({pattern:"...", include:"${file}"})`;
+    },
+  },
+  python: {
+    name: 'Python',
+    exts: ['.py', '.pyw'],
+    // istanbul ignore next — only used in error messages
+    install: () => {
+      if (process.platform === 'darwin') return 'brew install pylsp || pip3 install "python-lsp-server[all]"';
+      return 'pip install "python-lsp-server[all]"';
+    },
+    fallback: (file, line) => {
+      if (line) return `smart_grep({pattern:"...", include:"${file}"}) with line ${line} context`;
+      return `smart_grep({pattern:"...", include:"${file}"})`;
+    },
+  },
+  rust: {
+    name: 'Rust',
+    exts: ['.rs'],
+    // istanbul ignore next — only used in error messages
+    install: () => {
+      if (process.platform === 'darwin') return 'brew install rust-analyzer || rustup component add rust-analyzer';
+      return 'rustup component add rust-analyzer';
+    },
+    fallback: (file, line) => {
+      if (line) return `smart_grep({pattern:"...", include:"${file}"}) with line ${line} context`;
+      return `smart_grep({pattern:"...", include:"${file}"})`;
+    },
+  },
+  swift: {
+    name: 'Swift',
+    exts: ['.swift'],
+    // istanbul ignore next — only used in error messages
+    install: () => 'xcode-select --install   # sourcekit-lsp ships with Xcode',
+    fallback: (file, line) => {
+      if (line) return `smart_grep({pattern:"...", include:"${file}"}) with line ${line} context`;
+      return `smart_grep({pattern:"...", include:"${file}"})`;
+    },
+  },
+  php: {
+    name: 'PHP',
+    exts: ['.php', '.phtml', '.php3', '.php4', '.php5', '.php6', '.php7', '.php8', '.phps', '.inc'],
+    // istanbul ignore next — only used in error messages
+    install: () => 'npm install -g intelephense',
+    fallback: (file, line) => {
+      if (line) return `smart_grep({pattern:"...", include:"${file}"}) with line ${line} context`;
+      return `smart_grep({pattern:"...", include:"${file}"})`;
+    },
+  },
+};
+
+/** All supported file extensions */
+const SUPPORTED_EXTS = new Set();
+for (const cfg of Object.values(INSTALL_COMMANDS)) {
+  for (const ext of cfg.exts) SUPPORTED_EXTS.add(ext);
+}
+
+/**
+ * Detect language from file extension.
+ * @param {string} filePath
+ * @returns {object|null} Language config or null if unsupported
+ */
+function detectLang(filePath) {
+  const ext = extname(filePath).toLowerCase();
+  for (const [lang, cfg] of Object.entries(INSTALL_COMMANDS)) {
+    if (cfg.exts.includes(ext)) return { lang, ...cfg };
+  }
+  return null;
+}
 
 export default {
   name: 'smart_lsp',
@@ -54,16 +139,28 @@ export default {
 
   async handler(args) {
     const root = args.root || process.cwd();
+    const file = args.file || '';
+
+    // Phase 10 — LSP startup degradation: validate file extension early
+    const langInfo = detectLang(file);
+    if (!langInfo) {
+      return JSON.stringify({
+        error: `Unsupported file type: ${file}`,
+        supported: [...SUPPORTED_EXTS].join(', '),
+        suggestion: `This file type is not supported by smart_lsp. Use smart_grep to search text patterns, or read the file directly.`,
+      });
+    }
+
     const bridge = getLspBridge(root);
 
     try {
       switch (args.operation) {
         case 'symbols': {
-          const result = await bridge.getSymbols(args.file);
+          const result = await bridge.getSymbols(file);
           if (result.error) return JSON.stringify(result);
-          const { file, symbols } = result;
+          const { file: f, symbols } = result;
           if (!symbols || symbols.length === 0) {
-            return JSON.stringify({ file, symbols: [], note: 'No symbols found. File may be empty or language server not started.' });
+            return JSON.stringify({ file: f, symbols: [], note: 'No symbols found. File may be empty or language server not started.' });
           }
           // Return compact symbol list
           const compact = symbols.map(s => ({
@@ -72,27 +169,27 @@ export default {
             line: s.line,
             signature: s.signature,
           }));
-          return JSON.stringify({ file, symbols: compact, total: compact.length });
+          return JSON.stringify({ file: f, symbols: compact, total: compact.length });
         }
 
         case 'references': {
           if (!args.line) {
             return JSON.stringify({ error: 'line parameter required for references operation' });
           }
-          const result = await bridge.getReferences(args.file, args.line, args.character || 0);
+          const result = await bridge.getReferences(file, args.line, args.character || 0);
           if (result.error) return JSON.stringify(result);
-          const { file, references } = result;
+          const { file: f, references } = result;
           if (!references || references.length === 0) {
-            return JSON.stringify({ file, references: [], note: 'No references found.' });
+            return JSON.stringify({ file: f, references: [], note: 'No references found.' });
           }
-          return JSON.stringify({ file, references, total: references.length });
+          return JSON.stringify({ file: f, references, total: references.length });
         }
 
         case 'hover': {
           if (!args.line) {
             return JSON.stringify({ error: 'line parameter required for hover operation' });
           }
-          const result = await bridge.getHover(args.file, args.line, args.character || 0);
+          const result = await bridge.getHover(file, args.line, args.character || 0);
           return JSON.stringify(result);
         }
 
@@ -100,12 +197,12 @@ export default {
           if (!args.line) {
             return JSON.stringify({ error: 'line parameter required for definition operation' });
           }
-          const result = await bridge.getDefinition(args.file, args.line, args.character || 0);
+          const result = await bridge.getDefinition(file, args.line, args.character || 0);
           return JSON.stringify(result);
         }
 
         case 'diagnostics': {
-          const result = await bridge.getDiagnostics(args.file);
+          const result = await bridge.getDiagnostics(file);
           return JSON.stringify(result);
         }
 
@@ -116,11 +213,26 @@ export default {
           });
       }
     } catch (err) {
+      const msg = err.message || '';
+      // Phase 10 — LSP startup degradation: detect missing LSP → specific install + grep fallback
+      const installCfg = langInfo?.install;
+      const fallbackHint = langInfo?.fallback;
+      const installCmd = installCfg ? installCfg() : '';
+      const fallback = fallbackHint ? fallbackHint(file, args.line, args.character) : 'smart_grep({pattern:"..."})';
+
+      if (msg.includes('not found') || msg.includes('ENOENT') || msg.includes('spawn')) {
+        return JSON.stringify({
+          error: `${langInfo.name} language server not found`,
+          installCommand: installCmd,
+          hint: `Run the install command above, then restart OpenCode.`,
+          suggestion: `Meanwhile, use ${fallback} as a text-based alternative.`,
+        });
+      }
+
       return JSON.stringify({
-        error: err.message || 'LSP operation failed',
-        hint: err.message?.includes('not found')
-          ? `Language server not installed. Install with your package manager.`
-          : 'Check that the language server is installed and the file exists.',
+        error: msg || 'LSP operation failed',
+        hint: 'Check that the file exists and the language server is properly installed.',
+        suggestion: `Use ${fallback} as a text-based alternative.`,
       });
     }
   },

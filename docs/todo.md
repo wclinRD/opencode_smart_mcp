@@ -550,7 +550,7 @@
 | 7 | 🏗️ 架構 | TOOL_CLI_MAP 重複 — compose-engine.mjs 和 workflow.mjs 各維護一份 | 📋 待辦 | 🟡 P2 |
 | 8 | 💡 增強 | Impact Warning auto-trigger (Phase 10.2) — fast_apply >2 檔自動跑 code_impact | ✅ 已修 | 🟡 P2 |
 | 9 | ⚡ 效能 | Context Budget proactive (Phase 10.4) — 自動升級壓縮層級 | ✅ 已修 | 🟡 P2 |
-| 10 | 🔧 功能 | LSP startup 降級指引 — 未安裝時給安裝指令 + grep fallback | 📋 待辦 | 🟡 P2 |
+| 10 | 🔧 功能 | LSP startup 降級指引 — 未安裝時給安裝指令 + grep fallback | ✅ 已修 | 🟡 P2 |
 | 11 | 🧪 測試 | Benchmark 自動化 + CI 整合 | 📋 待辦 | 🔵 P3 |
 | 12 | 🔧 功能 | Sandbox Execution (Phase 10.1) — deno/docker sandbox | 📋 待辦 | 🔵 P3 |
 | 13 | 🧪 測試 | Phase 7 benchmark — 需手動執行，無真實場景 CRUD 數據 | 📋 待辦 | 🔵 P3 |
@@ -585,4 +585,19 @@
   - 檔案不存在 / 空白 → 靜默跳過（不 crash）
 - **Tests**: `tests/memory-injection.test.mjs` — 6 個測試案例，全部通過
 - **Regression**: 747/747 pass，無 regressions
+
+### ✅ Phase 10.6 — LSP Startup 降級指引（2026-06-11）
+- **`src/plugins/core/lsp.mjs`** — handler 開頭立即檢查副檔名：
+  - 不支援的副檔名 → 回傳 `error` + `supported`（列出所有受支援） + `suggestion`（提示 smart_grep）
+  - 支援的副檔名但 LSP 未安裝 → 回傳 `installCommand`（具體安裝指令） + `suggestion`（grep fallback）
+- **平台感知安裝指令**：
+  - macOS: `brew install typescript-language-server`
+  - Linux: `npm install -g typescript-language-server`
+  - macOS: `brew install pylsp || pip3 install "python-lsp-server[all]"`
+  - 其餘: `pip install "python-lsp-server[all]"`
+  - Rust: `rustup component add rust-analyzer`
+  - Swift: `xcode-select --install`（sourcekit-lsp 隨 Xcode 附贈）
+  - PHP: `npm install -g intelephense`
+- **Tests**: `tests/lsp-degradation.test.mjs` — 9 tests（unsupported ext / missing params / file not found / suggestion format）
+- **Regression**: 788/788 pass，無 regressions
 
