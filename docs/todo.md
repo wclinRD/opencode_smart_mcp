@@ -1051,3 +1051,96 @@ flowchart LR
 | 管理 UI | CLI json 編輯即可 |
 | 路徑 A/B/C 互斥 | 三路徑可並存 |
 
+---
+
+## Phase 16：Knowledge Graph Memory — 結構化知識圖譜
+
+> 2026-06-12 規劃。基於 MCP 生態圈研究（官方 87K⭐ memory server）。
+> 在 memory.db 新增 entities + relations tables，讓 LLM 可以理解「結構」而非只是「相似度」。
+
+### 1. `memory-db.mjs` 擴充 — KG tables + CRUD
+
+- [ ] 新增 `kg_entities` table（name, type, observations JSON, embedding BLOB）
+- [ ] 新增 `kg_relations` table（from, to, relationType, created_at）
+- [ ] `createEntities(entities)` — INSERT OR IGNORE
+- [ ] `createRelations(relations)` — INSERT OR IGNORE（skip duplicates）
+- [ ] `searchNodes(query, limit)` — 跨 name/type/observations 搜尋
+- [ ] `openNodes(names)` — 取出 nodes + 它們之間的 relations
+- [ ] `readGraph()` — 整個 graph
+- [ ] `deleteEntities(names)` — cascade relations
+- [ ] `deleteObservations(entityName, observations)` — 刪除特定 observations
+- [ ] `deleteRelations(relations)` — 刪除特定 relations
+- [ ] `addObservations(entityName, observations)` — 新增 observations
+- [ ] Schema migration（auto-add kg tables to existing memory.db）
+
+### 2. Plugin — `smart_kg_*` MCP tools
+
+- [ ] `src/plugins/standard/kg-create-entities.mjs`
+- [ ] `src/plugins/standard/kg-create-relations.mjs`
+- [ ] `src/plugins/standard/kg-search-nodes.mjs`
+- [ ] `src/plugins/standard/kg-open-nodes.mjs`
+- [ ] `src/plugins/standard/kg-read-graph.mjs`
+- [ ] `src/plugins/standard/kg-delete-entities.mjs`
+- [ ] `src/plugins/standard/kg-delete-observations.mjs`
+- [ ] `src/plugins/standard/kg-delete-relations.mjs`
+
+### 3. 整合
+
+- [ ] hybrid-engine DOMAIN_MAP 新增 `kg` 領域
+- [ ] Agent personality 更新（KG 工具加入 direct-call table）
+- [ ] Manifest 自動註冊（Phase 15）
+
+### 4. 測試
+
+- [ ] KG CRUD unit tests
+- [ ] searchNodes / openNodes / readGraph tests
+- [ ] Cascade delete tests
+- [ ] Migration tests（舊 DB 自動加 KG tables）
+- [ ] Plugin integration tests
+- [ ] 全量回歸
+
+---
+
+## Phase 17：Database Query — 資料庫查詢
+
+> 2026-06-12 規劃。補 Smart MCP 完全沒有的 DB 能力。
+
+### 1. `src/lib/db-query.mjs` — SQL 查詢引擎
+
+- [ ] SQLite 支援（better-sqlite3，已安裝）
+- [ ] PostgreSQL 支援（可選，pg npm）
+- [ ] Schema introspection（列出 tables + columns + types）
+- [ ] 安全：唯讀、timeout 10s、row limit 1000、禁止 DDL/DML
+
+### 2. Plugin
+
+- [ ] `src/plugins/standard/db-introspect.mjs` — `smart_db_introspect`
+- [ ] `src/plugins/standard/db-query.mjs` — `smart_db_query`
+
+### 3. 整合 + 測試
+
+- [ ] hybrid-engine DOMAIN_MAP 新增 `database` 領域
+- [ ] Agent personality 更新
+- [ ] 測試 + 全量回歸
+
+---
+
+## Phase 18：Automated PR Review — 自動化程式碼審查
+
+> 2026-06-12 規劃。組合既有工具做自動化 PR review。
+
+### 1. Plugin
+
+- [ ] `src/plugins/standard/pr-review.mjs` — `smart_pr_review`
+  - git_diff(base, head) → 變更清單
+  - security_scan(變更檔案) → 安全問題
+  - code_impact(變更檔案) → 影響範圍
+  - LSP diagnostics(變更檔案) → 型別/語法錯誤
+  - 結構化輸出：安全性/效能/可維護性/測試覆蓋
+
+### 2. 整合 + 測試
+
+- [ ] hybrid-engine DOMAIN_MAP 新增 `review` 領域
+- [ ] Agent personality 更新
+- [ ] 測試 + 全量回歸
+

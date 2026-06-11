@@ -2080,3 +2080,109 @@ tools/call 到達
 | `config/agents/smart-mcp.md` | +12 | Agent personality updates |
 | `.opencode/skills/deep-research/SKILL.md` | 180 | 7-phase research pipeline |
 | `config/skills/deep-research/SKILL.md` | 180 | Synced copy |
+
+---
+
+## Phase 16：Knowledge Graph Memory — 結構化知識圖譜
+
+> 2026-06-12 規劃。基於 MCP 生態圈研究（官方 87K⭐ memory server）。
+> 核心洞察：Smart MCP 的 semantic memory（向量+BM25+RRF）擅長「找相似」，
+> 但完全無法回答「X 和 Y 的關係是什麼」— 這是 structured knowledge 的領域。
+
+### 核心問題
+
+```
+Semantic Memory（現有）：
+  Q: "之前那個 memory leak 的解法？"
+  → searchHybrid("memory leak") → ✅ 找到相似 error message
+
+  Q: "auth module 依賴哪些服務？"
+  → searchHybrid("auth module 依賴") → ❌ 只能找文字相似，不懂結構
+
+Knowledge Graph（新增）：
+  Q: "auth module 依賴哪些服務？"
+  → search_nodes("auth") → open_nodes(["auth","db","cache"]) → ✅ 找到關係
+```
+
+### 設計
+
+| 層面 | 作法 |
+|------|------|
+| **資料模型** | Entity (name, type, observations[]) + Relation (from→to, relationType) |
+| **儲存** | 共用 `memory.db` (better-sqlite3)，新增 `kg_entities` + `kg_relations` tables |
+| **查詢** | search_nodes(query) 跨 name/type/observations；open_nodes(names) 圖遍歷 |
+| **整合** | entity name → embedding → 可與 semantic memory hybrid search |
+| **生命週期** | 共用 Phase 10.8 Memory Lifecycle（stale entities 自動清理） |
+
+### 工具設計
+
+| 工具 | 說明 |
+|------|------|
+| `smart_kg_create_entities` | 建立多個 entity（name, type, observations） |
+| `smart_kg_create_relations` | 建立多個 relation（from, to, relationType） |
+| `smart_kg_search_nodes` | 跨 name/type/observations 搜尋 nodes |
+| `smart_kg_open_nodes` | 取出指定 nodes + 它們之間的 relations |
+| `smart_kg_read_graph` | 讀取整個 knowledge graph |
+| `smart_kg_delete_entities` | 刪除 entities（cascade relations） |
+| `smart_kg_delete_observations` | 刪除特定 observations |
+| `smart_kg_delete_relations` | 刪除特定 relations |
+
+### 與現有系統關係
+
+| 既有功能 | 關係 |
+|---------|------|
+| Semantic Memory (Phase 11) | 互補：semantic 找相似，KG 找關係。entity name 可 embedding → hybrid search |
+| Auto Memory Injection (10.5) | 可同時注入 KG 結果（entity + relations） |
+| Memory Lifecycle (10.8) | 共用 lifecycle 邏輯，stale entities 自動清理 |
+| memory-db.mjs | 共用 SQLite connection，不增加依賴 |
+| Manifest (Phase 15) | 自動註冊到 manifest.json（domain: memory） |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| 可回答的問題類型 | 相似度搜尋 only | + 關係查詢、圖遍歷 |
+| 跨 session 知識 | 向量 + BM25 | + 結構化 entity-relation |
+| 專案知識累積 | 被動（LLM 手動 store） | 主動（entity 自動關聯） |
+
+---
+
+## Phase 17：Database Query — 資料庫查詢
+
+> 2026-06-12 規劃。補 Smart MCP 完全沒有的 DB 能力。
+> 官方 MCP 有 PostgreSQL/SQLite reference servers。
+
+### 設計
+
+| 層面 | 作法 |
+|------|------|
+| **支援** | SQLite（內建 better-sqlite3）+ PostgreSQL（可選 pg npm） |
+| **安全** | 唯讀、query timeout 10s、row limit 1000、禁止 DDL/DML |
+| **工具** | `smart_db_introspect`（schema）+ `smart_db_query`（唯讀 SQL） |
+
+### 預期成效
+
+- LLM 可以直接探索專案資料庫 schema
+- 回答「users table 有哪些欄位？」「本月訂單數？」
+- 驗證程式碼中的 SQL query 是否正確
+
+---
+
+## Phase 18：Automated PR Review — 自動化程式碼審查
+
+> 2026-06-12 規劃。最低 effort，展示 Smart MCP 工具組合的威力。
+> 組合 git_diff + security_scan + code_impact + LSP diagnostics。
+
+### 設計
+
+| 層面 | 作法 |
+|------|------|
+| **輸入** | `smart_pr_review({ base, head })` |
+| **流程** | git_diff → security_scan → code_impact → LSP diagnostics → 結構化輸出 |
+| **輸出** | 安全性 / 效能 / 可維護性 / 測試覆蓋 / fix suggestions |
+
+### 預期成效
+
+- 不是只找 bug，而是給結構化建議
+- 結合專案知識（memory + KG）做 contextual review
+- 展示 Smart MCP 工具組合的威力
