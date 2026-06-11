@@ -543,6 +543,18 @@ const HIGH_RISK_PREREQUISITES = {
       return null;
     },
   },
+  // ── Cross-file edit: require import_graph first ──
+  'smart_cross_file_edit': {
+    check: (toolHistory) => {
+      const hasImportGraph = toolHistory.some(h =>
+        h.tool === 'smart_import_graph' && h.ok
+      );
+      if (!hasImportGraph) {
+        return { allowed: false, message: '🔒 Quality Gate: Cross-file edit requires import dependency analysis first.\n\nBefore modifying multiple files, understand the import graph:\n\n  ssr({tool:"import_graph", args:{root:"."}})\n\nThis ensures you don\'t miss affected modules.' };
+      }
+      return null;
+    },
+  },
 };
 
 /**

@@ -440,6 +440,26 @@
 - [ ] **實作**：tool call wrapper 在 user query 時自動觸發 memory search
 - [ ] **測試**：相關記憶正確注入 + 不爆 budget
 
+### 10.2b Impact Warning auto-trigger — 實作 ✅ (2026-06-11)
+
+> 在 quality gate 加入 `cross_file_edit` → `import_graph` 強制檢查。
+
+- [x] 新增 `smart_cross_file_edit` 到 `HIGH_RISK_PREREQUISITES` map
+- [x] 檢查 logic：toolHistory 中是否有成功的 `smart_import_graph` call
+- [x] 測試：有 import_graph 記錄通過、無記錄被阻擋
+
+### 10.2c Quality Gate 測試補全 ✅ (2026-06-11)
+
+> HIGH_RISK_PREREQUISITES 五種情境的整合測試。全部通過。
+> 測試檔案：`tests/quality-gate.test.mjs`
+> 全量回歸：**741 tests, 0 fail**（+5 新測試）
+
+- [x] 整合測試：`smart_grep`（無規則 → 通過）
+- [x] 整合測試：`smart_fast_apply`（有 security scan + beam → 通過）
+- [x] 整合測試：`smart_fast_apply`（有 security scan 但無 beam → 被擋）
+- [x] 整合測試：`smart_cross_file_edit`（有 import_graph → 通過）
+- [x] 整合測試：`smart_cross_file_edit`（無 import_graph → 被擋）
+
 ### 10.6 Skill-level Learning（從 Phase 7 移入）✅
 
 > 已在 Phase 7 實作完畢。`memory_store type:skill_patch` + `autoExtractSkillPatches` hook。
@@ -512,3 +532,25 @@
 | Reasoning tools (think/deep_think) | UI + cost tracking + streaming |
 
 > 這不是缺陷，是**設計分工**。Smart MCP 的深度（LSP/CKG/Impact/Reasoning templates）才是真正的護城河。
+
+---
+
+## Quality & Maintenance Audit（2026-06-11 新增）
+
+### 發現的問題
+
+| # | 類別 | 項目 | 狀態 | 優先 |
+|---|------|------|------|------|
+| 1 | 🧪 測試 | Quality gate enforcement 無測試覆蓋 (HIGH_RISK_PREREQUISITES) — 5 tests 通過 | ✅ 已修 | 🔴 P0 |
+| 2 | 🛡️ 品質 | Quality Gate 只有 security→beam search 一條規則 — 補 cross_file_edit→import_graph server 端強制 | ✅ 已修 | 🔴 P0 |
+| 3 | 🔧 功能 | Hallucination Detection (Phase 6) — `smart_hallucination_check` 工具未實作 | 📋 待辦 | 🟠 P1 |
+| 5 | 💡 增強 | Auto Memory Injection (Phase 10.5) — session init 自動注入記憶 | 📋 待辦 | 🟠 P1 |
+| 6 | 🔧 功能 | Error Recovery (Phase 10.3) — retry + fallback chain | 📋 待辦 | 🟠 P1 |
+| 7 | 🏗️ 架構 | TOOL_CLI_MAP 重複 — compose-engine.mjs 和 workflow.mjs 各維護一份 | 📋 待辦 | 🟡 P2 |
+| 8 | 💡 增強 | Impact Warning auto-trigger (Phase 10.2) — 多檔編輯自動觸發 | 📋 待辦 | 🟡 P2 |
+| 9 | ⚡ 效能 | Context Budget proactive (Phase 10.4) — 自動升級壓縮層級 | 📋 待辦 | 🟡 P2 |
+| 10 | 🔧 功能 | LSP startup 降級指引 — 未安裝時給安裝指令 + grep fallback | 📋 待辦 | 🟡 P2 |
+| 11 | 🧪 測試 | Benchmark 自動化 + CI 整合 | 📋 待辦 | 🔵 P3 |
+| 12 | 🔧 功能 | Sandbox Execution (Phase 10.1) — deno/docker sandbox | 📋 待辦 | 🔵 P3 |
+| 13 | 🧪 測試 | Phase 7 benchmark — 需手動執行，無真實場景 CRUD 數據 | 📋 待辦 | 🔵 P3 |
+
