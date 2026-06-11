@@ -287,20 +287,61 @@
 
 ---
 
-## Phase 6：Hallucination Detection
+## Phase 6：Hallucination Detection — 輸出真實性驗證層
 
-> 2026-06-10 誠實盤點後縮減。原始 12 項中 11 項已被現有功能覆蓋或價值不足。
+> 2026-06-10 誠實盤點 → 2026-06-12 完整規劃。對應 plan.md Phase 6 章節。
+> 原始 12 項中 11 項已被現有功能覆蓋或價值不足，保留 1 項。
 > 移除項目見「已決定不做的功能」表格。
 
-### 唯一保留項目 📋
+### 互補關係：Phase 6 vs Phase 7
 
-#### Hallucination Detection（輸出真實性檢查）
+| 層面 | Phase 7 Self-Correction ✅ | Phase 6 Hallucination Detection 📋 |
+|------|---------------------------|-----------------------------------|
+| 檢查者 | LLM 自己檢查自己 | 獨立 LLM-as-Judge 交叉驗證 |
+| 盲點 | 可能錯過自己的錯誤假設 | 客觀 groundedness 驗證 |
+| 整合 | prompt-level 建議性 | server-level post-execution hook |
 
-- [ ] **研究**：定義 6 種幻覺類型的評分 prompt（fabrication/misattribution/unfaithful/self-contradiction/off-topic/confident-refusal）
-- [ ] **實作**：新增 `src/plugins/standard/hallucination-check.mjs` — `smart_hallucination_check` 工具
-- [ ] **整合**：高風險工具（debug/error_diagnose/report）自動串接檢查
-- [ ] **Agent personality**：加入輸出自我驗證行為提示
-- [ ] **測試**：各類型幻覺測試集驗證
+**流程**：LLM 輸出 → self-check（Phase 7）→ hallucination check（Phase 6）→ 修正（必要時）
+
+### ① 研究：6 種幻覺類型評分 Prompt 📋
+
+- [ ] **Fabrication** prompt：編造不存在的函式/檔案/API 檢測邏輯
+- [ ] **Misattribution** prompt：錯誤歸因檢測邏輯
+- [ ] **Unfaithful** prompt：偏離工具結果檢測邏輯
+- [ ] **Self-contradiction** prompt：前後矛盾檢測邏輯
+- [ ] **Off-topic** prompt：答非所問檢測邏輯
+- [ ] **Confident refusal** prompt：過度自信錯誤否定檢測邏輯
+
+### ② 核心實作 📋
+
+- [ ] `src/lib/hallucination-judge.mjs` — LLM-as-Judge 引擎（規則 based，不依賴外部 LLM API）
+  - 5 項結構化檢查（Factual / Consistency / Groundedness / Off-topic / Confidence）
+  - 回傳：`{ checks: [{type, passed, detail}], overallScore: 1-10, verdict: "pass"|"warn"|"fail" }`
+- [ ] `src/plugins/standard/hallucination-check.mjs` — `smart_hallucination_check` MCP tool
+  - 參數：output（必填）, context, query, toolName, strictness
+  - responsePolicy: maxLevel 0（檢查結果不能壓縮）
+
+### ③ Server 端整合 📋
+
+- [ ] `src/server/index.mjs` — captureAndReturn() 加入 post-execution hook
+  - 高風險工具（security / error_diagnose / deep_think / ingest_document）自動觸發
+  - 沿用 `_pendingHallucination` promise 模式（同 Impact Warning）
+  - respond() 中 await 並 append 檢查結果
+  - 低風險工具跳過，不浪費 token
+
+### ④ hybrid-engine + Personality 整合 📋
+
+- [ ] `src/lib/hybrid-engine.mjs` DOMAIN_MAP 新增 `hallucination_check` 領域
+- [ ] `config/agents/smart-mcp.md` 更新：
+  - hallucination_check 加入直接呼叫工具表
+  - self-correction loop 流程整合（Phase 6 作為 independent judge）
+  - 高風險任務清單同步
+
+### ⑤ 測試 📋
+
+- [ ] `tests/hallucination-judge.test.mjs` — 6 類型幻覺各 2-3 案例驗證
+- [ ] `tests/hallucination-integration.test.mjs` — server hook + high-risk auto-trigger + regression
+- [ ] 全量回歸：既有 tests 不受影響
 
 ---
 
@@ -544,7 +585,7 @@
 |---|------|------|------|------|
 | 1 | 🧪 測試 | Quality gate enforcement 無測試覆蓋 (HIGH_RISK_PREREQUISITES) — 5 tests 通過 | ✅ 已修 | 🔴 P0 |
 | 2 | 🛡️ 品質 | Quality Gate 只有 security→beam search 一條規則 — 補 cross_file_edit→import_graph server 端強制 | ✅ 已修 | 🔴 P0 |
-| 3 | 🔧 功能 | Hallucination Detection (Phase 6) — `smart_hallucination_check` 工具未實作 | 📋 待辦 | 🟠 P1 |
+| 3 | 🔧 功能 | Hallucination Detection (Phase 6) — 已規劃 4 項交付（judge engine + plugin + server hook + tests） | 📋 規劃完成 | 🟠 P1 |
 | 5 | 💡 增強 | Auto Memory Injection (Phase 10.5) — session init 自動注入記憶 | ✅ 已修 | 🟠 P1 |
 | 6 | 🔧 功能 | Error Recovery (Phase 10.3) — retry + fallback chain | ✅ 已修 | 🟠 P1 |
 | 7 | 🏗️ 架構 | TOOL_CLI_MAP 重複 — compose-engine.mjs 和 workflow.mjs 各維護一份 | 📋 待辦 | 🟡 P2 |

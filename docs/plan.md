@@ -392,23 +392,143 @@ Ingest 流程：
 
 ---
 
-## Phase 6：Hallucination Detection
+## Phase 6：Hallucination Detection — 輸出真實性驗證層
 
-> 2026-06-10 → 2026-06-10 誠實盤點後大幅縮減。
+> 2026-06-10 誠實盤點 → 2026-06-12 完整規劃。
 > 原始 12 項 research 清單中，11 項已被現有功能覆蓋或價值不足 — 僅保留 1 項真正有 incremental value 的項目。
 
-### 保留的唯一項目：Hallucination Detection
+### 核心定位
 
-**為什麼留這個：**
-現有系統完全沒有輸出驗證機制。LLM 可能亂掰函式名稱、錯誤歸因、引用不存在的檔案。Phase 7 的 self-correction loop 是 LLM 自己檢查自己（可能錯過盲點），hallucination check 是用獨立 LLM-as-Judge 交叉驗證 groundedness — 兩者互補。
+**現狀問題**：Smart MCP 有輸出優化（Phase 1-2）、路由（Phase 3）、文件（Phase 4-5）、推理品質（Phase 7）、LSP（Phase 8）、記憶（Phase 10-11），但**完全沒有輸出真實性驗證**。LLM 可能亂掰函式名稱、錯誤歸因、引用不存在的檔案，沒有任何機制攔截。
 
-| 層面 | 說明 |
+**Phase 6 vs Phase 7 Self-Correction**：
+
+| 層面 | Phase 7 Self-Correction ✅ | Phase 6 Hallucination Detection 📋 |
+|------|---------------------------|-----------------------------------|
+| 檢查者 | **LLM 自己**（self-check） | **獨立 LLM-as-Judge**（第三方驗證） |
+| 盲點 | 可能錯過自己的錯誤假設 | 客觀 groundedness 驗證 |
+| Token 成本 | 低（同一 context） | 中（額外 LLM call） |
+| 整合深度 | prompt-level（建議性） | server-level（可強制） |
+| 現狀 | ✅ prompt 規則已定義 | ❌ 尚未實作 |
+
+**互補關係**：LLM 輸出 → self-check（Phase 7）→ independent judge（Phase 6）→ 需修正？→ 最多 1 輪
+
+### 實作範圍：4 項交付
+
+#### ① 研究：6 種幻覺類型評分 Prompt
+
+| # | 類型 | 定義 | 檢測方式 |
+|---|------|------|---------|
+| 1 | **Fabrication** | 編造不存在的函式/檔案/API | 比對工具輸出中是否包含未回傳的資訊 |
+| 2 | **Misattribution** | 錯誤歸因（說 A 函式造成 B 錯誤） | 交叉比對 error stack 與歸因 |
+| 3 | **Unfaithful** | 偏離使用者問題或工具結果 | 比對輸出與工具實際回傳內容 |
+| 4 | **Self-contradiction** | 前後矛盾 | 同一輸出內邏輯一致性檢查 |
+| 5 | **Off-topic** | 答非所問 | 比對輸出主題與原始 query |
+| 6 | **Confident refusal** | 過度自信的錯誤否定 | 檢查絕對性用語 + 工具結果對照 |
+
+評分輸出格式：
+```json
+{ "score": 8, "issues": [{"type":"fabrication","detail":"...","severity":"high"}], "verdict": "pass" }
+```
+verdict: pass (≥7) | warn (4-6) | fail (<4)
+
+#### ② 核心：`src/lib/hallucination-judge.mjs`
+
+LLM-as-Judge 引擎，不直接 call LLM（Server 端無 LLM 存取權），而是產出**結構化檢查清單**供 LLM 自我驗證：
+
+```
+檢查流程：
+  Output + Tool Context + Query
+    ├─ 1. Factual Check：輸出中提到的函式/檔案/API 是否在工具結果中？
+    ├─ 2. Consistency Check：輸出內部是否邏輯一致？
+    ├─ 3. Groundedness Check：結論是否可從工具回傳內容回溯？
+    ├─ 4. Off-topic Check：回答是否偏離原始問題？
+    └─ 5. Confidence Check：是否有過度自信的錯誤陳述？
+    → 回傳結構化檢查清單：{ checks: [{type, passed, detail}], overallScore, verdict }
+```
+
+#### ③ Plugin：`src/plugins/standard/hallucination-check.mjs`
+
+```js
+smart_hallucination_check {
+  output: string,        // 要檢查的 LLM 輸出
+  context?: string,      // 工具回傳的原始內容
+  query?: string,        // 原始使用者問題
+  toolName?: string,     // 輸出來自哪個工具
+  strictness?: number,   // 嚴格度 1-10（預設 5）
+}
+```
+
+#### ④ Server 端整合：Post-execution Hook
+
+沿用 `captureAndReturn()` 的 Impact Warning 模式（Phase 10.2）：
+
+```js
+// captureAndReturn() 中：
+if (success && isHighRiskOutput(toolName)) {
+  result._pendingHallucination = triggerHallucinationCheck(toolName, args, result);
+}
+
+// respond() 中：
+if (result._pendingHallucination) {
+  const hcResult = await result._pendingHallucination;
+  if (hcResult?.verdict === 'fail' || hcResult?.verdict === 'warn') {
+    result.content[0].text += '\n\n---\n⚠️ ' + hcResult.summary + '\n---';
+  }
+}
+```
+
+**高風險工具判定**（與 Phase 7 self-correction 一致）：
+
+| 工具 | 自動檢查？ | 理由 |
+|------|-----------|------|
+| `smart_security` 輸出 | ✅ | 安全修復不能錯 |
+| `smart_error_diagnose` | ✅ | 錯誤歸因必須正確 |
+| `smart_deep_think` (report/report模板) | ✅ | 報告類輸出 |
+| `ingest_document` 摘要 | ✅ | 合約/規格分析 |
+| `smart_grep` / `smart_test` | ❌ | 低風險，跳過省 token |
+
+### 交付清單
+
+| # | 項目 | 檔案 | 預計工時 |
+|---|------|------|---------|
+| 1 | 6 種幻覺類型評分 prompt + 定義 | `src/lib/hallucination-judge.mjs` | 0.5 天 |
+| 2 | Hallucination Judge 引擎 | `src/lib/hallucination-judge.mjs` | 1 天 |
+| 3 | MCP Plugin + schema | `src/plugins/standard/hallucination-check.mjs` | 0.5 天 |
+| 4 | Server 端 post-execution hook | `src/server/index.mjs` | 0.5 天 |
+| 5 | hybrid-router DOMAIN_MAP 整合 | `src/lib/hybrid-engine.mjs` | 0.25 天 |
+| 6 | Agent personality 更新 | `config/agents/smart-mcp.md` | 0.25 天 |
+| 7 | 測試：6 類型幻覺驗證 | `tests/hallucination-judge.test.mjs` | 1 天 |
+| 8 | 測試：server 整合 + regression | `tests/hallucination-integration.test.mjs` | 0.5 天 |
+| | **總計** | | **~4.5 天** |
+
+### 整合架構
+
+```
+invokeTool() → invokeToolWithRetry()
+  → 成功
+    → captureAndReturn()
+      → HIGH_RISK_PREREQUISITES (pre-execution quality gate)
+      → autoStoreToMemory / autoExtractSkillPatches
+      → Impact Warning (multi-file edits ≥3)
+      → hallucination check (high-risk tools)    ← Phase 6
+    → respond()
+      → _pendingImpact  await
+      → _pendingHallucination await              ← Phase 6
+      → output-optimizer (L0/L1/L2)
+      → context budget check
+  → 全部失敗
+    → fallback chain (Error Recovery 10.3)
+```
+
+### 不上什麼
+
+| 項目 | 原因 |
 |------|------|
-| **問題** | LLM 可能編造事實、錯誤歸因、離題，但 Smart MCP 完全不檢查就回傳 |
-| **業界做法** | Faithfulness judge / Groundedness score / Consistency check / Context adherence |
-| **實作方式** | 新增 `hallucination_check` tool，回應前用 LLM-as-Judge 驗證 |
-| **效益** | 輸出可靠度大幅提升，達到生產級門檻 |
-| **難度** | 🟡 中 — 需定義評分 prompt + 判斷閾值 |
+| 依賴外部 LLM API | 規則 based 檢查就夠用（Server 端無 LLM 存取權） |
+| 自動修改輸出 | 只標記不修改，留給 LLM 決定 |
+| 全量輸出檢查 | 只檢查高風險工具，一般工具跳過 |
+| Real-time streaming 檢查 | 產出完整後一次性檢查，streaming 檢查太複雜 |
 
 ### 其餘 11 項已移除的原因
 
@@ -431,8 +551,9 @@ Ingest 流程：
 ## Phase 7：Reasoning Quality — 讓 LLM 真正變聰明
 
 > 2026-06-10 規劃。基於 Phase 1-6 的誠實反省。
-> 核心洞察：Phase 1-6 讓 LLM 更**有效率**、更**安全**、更**多才多藝**，
-> 但沒有直接讓它變得更**聰明**。
+> 核心洞察：Phase 1-5 讓 LLM 更**有效率**、更**安全**、更**多才多藝**，
+> Phase 6（Hallucination Detection）讓輸出更**可靠**，
+> 但都沒有直接讓它變得更**聰明**。
 
 ### 誠實盤點：6 個 Phase 的「智慧」貢獻
 
@@ -442,10 +563,10 @@ Ingest 流程：
 | 3 | Universal Task Router | 減輕決策負擔 | ⚠️ 減少失誤，沒提升品質 |
 | 4 | 文件轉換 | 看得懂更多格式 | ❌ 變廣，沒變深 |
 | 5 | 全文搜尋 | 記得住更多內容 | ❌ 記憶變好，推理沒變 |
-| 6 | Context Caching / Guardrails / 等 | 更快更省更安全 | ❌ 純 infrastructure 層 |
+| 6 | Hallucination Detection | 輸出真實性驗證 | ⚠️ 減少幻覺，提升可信度 |
 
-**結論**：截至 Phase 6，Smart MCP 的所有增強都在**基礎設施層**，
-LLM 的推理品質完全由外部 provider 的模型決定。
+**結論**：截至 Phase 6，Smart MCP 的增強主要在**基礎設施層**（Phase 1-5）+ **輸出驗證層**（Phase 6），
+但 LLM 的推理品質仍然完全由外部 provider 的模型決定。
 
 ### 核心問題
 
@@ -460,7 +581,7 @@ Phase 7 要解決的是：**在不改變模型參數、不引入外部 reward mo
 
 ### 解決方案：三條可行的路
 
-不同於 Phase 6 的多數學術研究導向項目，這三條路都是**輕量、可直接疊加**在現有架構上：
+不同於 Phase 6（Hallucination Detection — 輸出真實性驗證），Phase 7 的三條路都是**輕量、可直接疊加**在現有架構上：
 
 | 路徑 | 作法 | 工程難度 | 智慧提升 | 與現有系統關係 |
 |------|------|---------|---------|-------------|
@@ -559,16 +680,17 @@ Token 成本僅多 2-3 倍（僅在複雜任務啟用，一般任務不受影響
 
 ---
 
-### 整合架構：Quality Layer + Reasoning Layer
+### 整合架構：Quality Layer + Reasoning Layer + Verification Layer
 
-Phase 6 的 Quality Layer 與 Phase 7 的 Reasoning Layer 合併為統一 pipeline：
+Phase 6（Hallucination Detection）、Phase 7（Reasoning Quality）、Phase 10（Error Recovery）合併為統一 pipeline：
 
 ```
-Pre-call 層     │ Guardrails (input) + Context Caching
-Call 層         │ Speculative Decoding + Prompt Compression
-Reasoning 層 🌟 │ Beam Search Thinking + Self-Correction Loop
-Post-call 層    │ Hallucination Detection + L2 Summary (Phase 1-2)
-Cross-cutting   │ Agent Observability + Skill-level Learning
+Pre-call 層     │ Quality Gate (HIGH_RISK_PREREQUISITES) + Error Recovery (retry)
+Call 層         │ LSP Bridge + Smart Tools
+Reasoning 層 🌟 │ Beam Search Thinking + Self-Correction Loop (Phase 7)
+Post-call 層 🛡️ │ Hallucination Detection (Phase 6) + Impact Warning (Phase 10.2)
+Output 層       │ L0/L1/L2 Output Optimizer + Context Budget (Phase 1-2 / 10.4)
+Cross-cutting   │ Skill-level Learning + Auto Memory Injection (Phase 10.5/10.6)
 ```
 
 ### 優先級矩陣
@@ -747,7 +869,7 @@ opencode + Smart MCP   vs    Claude Code
 | Self-Correction Loop | Phase 7 ✅ 已實作 | 高風險任務的輸出可靠度提升 |
 | LSP Bridge | Phase 8 ✅ 已完成 | Type-aware 程式碼理解，比 grep 精準且省 token |
 | Full-text Search | Phase 5 ✅ 已完成 | 文件內容搜尋，跨 session 找到關鍵資訊 |
-| Hallucination Detection | Phase 6 📋 計畫中 | 輸出真實性檢查，生產級門檻 |
+| Hallucination Detection | Phase 6 📋 規劃完成 | 輸出真實性檢查，生產級門檻。4 項交付：judge engine + plugin + server hook + tests |
 | Error Recovery / Benchmark / Sandbox / Auto Memory | Phase 10 📋 規劃中 | 讓人敢放手、持續用、越用越好 |
 
 ### 結論
