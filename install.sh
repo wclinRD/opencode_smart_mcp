@@ -19,6 +19,8 @@ set -euo pipefail
 SMART_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_SRC="$SMART_DIR/config/skills"
 AGENTS_SRC="$SMART_DIR/config/agents"
+PLUGIN_SRC="$SMART_DIR/plugin/compaction-fix.js"
+PLUGIN_DST="$HOME/.config/opencode/plugins/compaction-fix.js"
 SKILLS_DST="$HOME/.config/opencode/skills"
 AGENTS_DST="$HOME/.config/opencode/agents"
 OPECODE_CONFIG="$HOME/.config/opencode/opencode.json"
@@ -45,7 +47,8 @@ for arg in "$@"; do
       echo "  2. 設定 opencode MCP server（opencode.json）"
       echo "  3. 部署 skills 到 ~/.config/opencode/skills/"
       echo "  4. 部署 agent config 到 ~/.config/opencode/agents/"
-      echo "  5. 驗證所有組件"
+      echo "  5. 部署 compaction-fix plugin 到 ~/.config/opencode/plugins/"
+      echo "  6. 驗證所有組件"
       exit 0
       ;;
   esac
@@ -113,6 +116,13 @@ if [ "$MODE" = "check" ]; then
     warn "Agent config 目錄不存在"
   fi
 
+  # 檢查 plugin
+  if [ -f "$PLUGIN_DST" ]; then
+    ok "Compaction-fix plugin 已部署"
+  else
+    warn "Compaction-fix plugin 未部署"
+  fi
+
   # 檢查 Node.js
   if command -v node &>/dev/null; then
     node_ver=$(node --version)
@@ -152,6 +162,12 @@ if [ "$MODE" = "uninstall" ]; then
     ok "移除 agent config: smart-mcp.md"
   fi
 
+  # 移除 plugin
+  if [ -f "$PLUGIN_DST" ]; then
+    rm -f "$PLUGIN_DST"
+    ok "移除 plugin: compaction-fix.js"
+  fi
+
   # 從 opencode.json 移除 smart MCP
   if [ -f "$OPECODE_CONFIG" ]; then
     if command -v node &>/dev/null; then
@@ -178,7 +194,7 @@ echo "========================"
 echo ""
 
 # Step 1: npm install
-echo "📦 Step 1/5: 安裝 npm 依賴..."
+echo "📦 Step 1/6: 安裝 npm 依賴..."
 if [ -f "$SMART_DIR/package.json" ]; then
   (cd "$SMART_DIR" && npm install --silent 2>&1 | tail -1) && ok "npm 依賴安裝完成" || warn "npm install 可能有問題，請手動檢查"
 else
@@ -187,11 +203,11 @@ fi
 
 # Step 2: 設定 opencode MCP server
 echo ""
-echo "⚙️  Step 2/5: 設定 opencode MCP server..."
+echo "⚙️  Step 2/6: 設定 opencode MCP server..."
 mkdir -p "$(dirname "$OPECODE_CONFIG")"
 
 if [ -f "$OPECODE_CONFIG" ]; then
-  # 使用 node 合併設定（保留現有 mcp servers）
+  # 使用 node 合併設定（保留現有 mcp servers 和 plugins）
   node -e "
     const fs = require('fs');
     let config = {};
@@ -202,14 +218,27 @@ if [ -f "$OPECODE_CONFIG" ]; then
       command: ['node', '$SMART_DIR/src/server/index.mjs'],
       enabled: true
     };
+    // 加入 compaction-fix plugin（避免重複）
+    if (!config.plugin) config.plugin = [];
+    const pluginPath = '$SMART_DIR/plugin/compaction-fix.js';
+    const hasPlugin = config.plugin.some(p =>
+      (typeof p === 'string' && p.includes('compaction-fix')) ||
+      (Array.isArray(p) && p[0] && p[0].includes('compaction-fix'))
+    );
+    if (!hasPlugin) {
+      config.plugin.push([pluginPath, { debug: false }]);
+    }
     fs.writeFileSync('$OPECODE_CONFIG', JSON.stringify(config, null, 2) + '\n');
-  " 2>/dev/null && ok "opencode.json 已設定 Smart MCP" || warn "無法更新 opencode.json"
+  " 2>/dev/null && ok "opencode.json 已設定 Smart MCP + compaction-fix plugin" || warn "無法更新 opencode.json"
 else
   # 建立新的 opencode.json
   node -e "
     const fs = require('fs');
     const config = {
       '\\$schema': 'https://opencode.ai/config.json',
+      plugin: [
+        ['$SMART_DIR/plugin/compaction-fix.js', { debug: false }]
+      ],
       mcp: {
         smart: {
           type: 'local',
@@ -219,12 +248,12 @@ else
       }
     };
     fs.writeFileSync('$OPECODE_CONFIG', JSON.stringify(config, null, 2) + '\n');
-  " 2>/dev/null && ok "opencode.json 已建立" || warn "無法建立 opencode.json"
+  " 2>/dev/null && ok "opencode.json 已建立（含 compaction-fix plugin）" || warn "無法建立 opencode.json"
 fi
 
 # Step 3: 部署 skills
 echo ""
-echo "🔧 Step 3/5: 部署 skills..."
+echo "🔧 Step 3/6: 部署 skills..."
 if [ -f "$SKILLS_SRC/install-skills.sh" ]; then
   bash "$SKILLS_SRC/install-skills.sh" 2>&1 | tail -5
   ok "Skills 部署完成"
@@ -234,7 +263,7 @@ fi
 
 # Step 4: 部署 agent config
 echo ""
-echo "🤖 Step 4/5: 部署 agent config..."
+echo "🤖 Step 4/6: 部署 agent config..."
 mkdir -p "$AGENTS_DST"
 if [ -f "$AGENTS_SRC/smart-mcp.md" ]; then
   cp "$AGENTS_SRC/smart-mcp.md" "$AGENTS_DST/smart-mcp.md"
@@ -243,9 +272,20 @@ else
   warn "找不到 smart-mcp.md，跳過 agent config 部署"
 fi
 
-# Step 5: 驗證
+# Step 5: 部署 compaction-fix plugin
 echo ""
-echo "✅ Step 5/5: 驗證安裝..."
+echo "🔌 Step 5/6: 部署 compaction-fix plugin..."
+mkdir -p "$(dirname "$PLUGIN_DST")"
+if [ -f "$PLUGIN_SRC" ]; then
+  cp "$PLUGIN_SRC" "$PLUGIN_DST"
+  ok "Compaction-fix plugin 已部署: $PLUGIN_DST"
+else
+  warn "找不到 compaction-fix.js，跳過 plugin 部署"
+fi
+
+# Step 6: 驗證
+echo ""
+echo "✅ Step 6/6: 驗證安裝..."
 
 PASS=0
 FAIL=0
@@ -295,6 +335,14 @@ if [ -f "$AGENTS_DST/smart-mcp.md" ]; then
   PASS=$((PASS + 1))
 else
   warn "Agent config 不存在"
+fi
+
+# 檢查 plugin
+if [ -f "$PLUGIN_DST" ]; then
+  ok "Compaction-fix plugin 存在"
+  PASS=$((PASS + 1))
+else
+  warn "Compaction-fix plugin 不存在"
 fi
 
 echo ""

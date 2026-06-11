@@ -46,9 +46,10 @@
 //   -h, --help            Show help
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { resolve, join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
-import { createVectorizer, hybridSearch } from '../lib/embedding.mjs';
+import { createVectorizer, hybridSearch, getSentenceEmbedding, tryLoadSentenceModel, isSentenceModelAvailable } from '../lib/embedding.mjs';
+import { MemoryDB, getMemoryDB } from '../lib/memory-db.mjs';
 
 const HOME = process.env.HOME || process.env.USERPROFILE || '/tmp';
 
@@ -905,6 +906,264 @@ function formatText(command, result) {
 }
 
 // ---------------------------------------------------------------------------
+// SQLite backend (--db mode)
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize a MemoryDB entry (snake_case SQLite) → camelCase (JSON interface)
+ * so existing formatText() works unchanged.
+ */
+function normalizeDBEntry(e) {
+  if (!e) return null;
+  return {
+    id: e.id,
+    hash: e.hash,
+    errorMessage: e.error_message ?? e.errorMessage,
+    type: e.type ?? 'error',
+    category: e.category,
+    status: e.status ?? 'active',
+    resolution: e.resolution,
+    toolsUsed: e.tools_used ? (typeof e.tools_used === 'string' ? e.tools_used.split(',').filter(s => s.trim()) : e.tools_used) : [],
+    filesChanged: e.files_changed ? (typeof e.files_changed === 'string' ? e.files_changed.split(',').filter(s => s.trim()) : e.files_changed) : [],
+    success: e.success === 1 || e.success === true,
+    hitCount: e.hit_count ?? e.hitCount ?? 1,
+    keep: e.keep,
+    expiresAt: e.expires_at ?? e.expiresAt,
+    targetSkill: e.target_skill ?? e.targetSkill,
+    behaviorChange: e.behavior_change ?? e.behaviorChange,
+    confirmedAt: e.confirmed_at
+      ? (Array.isArray(e.confirmed_at) ? e.confirmed_at : e.confirmed_at.split(',').filter(Boolean))
+      : (Array.isArray(e.confirmedAt) ? e.confirmedAt : []),
+    timestamp: e.created_at ?? e.timestamp ?? e.last_seen ?? new Date().toISOString(),
+    lastSeen: e.last_seen ?? e.lastSeen ?? e.created_at ?? new Date().toISOString(),
+  };
+}
+
+/**
+ * Open (or get singleton) MemoryDB for a data directory.
+ */
+function openDB(dataDir, semantic) {
+  const dbPath = join(dataDir, 'memory.db');
+  const db = getMemoryDB(dbPath);
+
+  // Migrate existing JSON data on first use
+  const jsonPath = join(dataDir, 'resolutions.json');
+  let migration = null;
+  if (existsSync(jsonPath)) {
+    migration = db.migrateFromJSON(jsonPath);
+  }
+
+  // Pre-load sentence model if semantic search requested
+  if (semantic) {
+    tryLoadSentenceModel().catch(() => {});
+  }
+
+  return { db, migration };
+}
+
+function cmdStoreDB(db, errorMsg, opts) {
+  const hash = hashError(errorMsg);
+
+  const existing = db.getEntryByHash(hash);
+  if (existing) {
+    db.touchEntry(existing.id);
+    const updates = {};
+    if (opts.resolution) updates.resolution = opts.resolution;
+    if (opts.success !== undefined) updates.success = opts.success ? 1 : 0;
+    if (Object.keys(updates).length > 0) db.updateEntry(existing.id, updates);
+    const lifecycle = db.runLifecycle();
+    return { stored: true, updated: true, id: existing.id, hash, hitCount: (existing.hit_count || 1) + 1, lifecycle };
+  }
+
+  const entry = {
+    id: `mem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    hash,
+    error_message: errorMsg,
+    type: opts.type || 'error',
+    category: opts.type === 'skill_patch' ? 'skill_patch' : (opts.category || categorizeError(errorMsg)),
+    resolution: opts.resolution || null,
+    tools_used: opts.tools ? opts.tools.split(',').map(s => s.trim()).filter(Boolean).join(',') : null,
+    files_changed: opts.files ? opts.files.split(',').map(s => s.trim()).filter(Boolean).join(',') : null,
+    success: opts.success !== undefined ? opts.success : true,
+    hit_count: 1,
+    keep: opts.keep === 'always' ? 'always' : null,
+    expires_at: opts.ttl ? new Date(parseTTL(opts.ttl)).toISOString() : null,
+  };
+
+  if (opts.type === 'skill_patch') {
+    entry.target_skill = opts.targetSkill || null;
+    entry.behavior_change = opts.behaviorChange || null;
+  }
+
+  const inserted = db.insertEntry(entry);
+
+  // Auto-embed if --semantic
+  if (opts.semantic) {
+    getSentenceEmbedding(errorMsg).then(emb => {
+      if (emb) db.storeEmbedding(inserted.id, emb);
+    }).catch(() => {});
+  }
+
+  const lifecycle = db.runLifecycle();
+  return { stored: true, updated: false, id: inserted.id, hash, category: entry.category, lifecycle };
+}
+
+function cmdSearchDB(db, query, opts) {
+  const lifecycle = db.runLifecycle();
+
+  const total = db.countEntries();
+  if (total === 0) {
+    return { found: false, count: 0, entries: [], note: 'Memory store is empty. No past resolutions available.', lifecycle };
+  }
+
+  // 1. Exact hash match (fast path)
+  const hash = hashError(query);
+  const exact = db.getEntryByHash(hash);
+  if (exact) {
+    db.touchEntry(exact.id);
+    const e = normalizeDBEntry(exact);
+    return { found: true, count: 1, entries: [{ ...e, similarity: 1.0, matchType: 'exact' }], matchType: 'exact', lifecycle };
+  }
+
+  const limit = opts.limit || 10;
+
+  // 2. Try hybrid search (FTS5 + optional vector via RRF)
+  //    Uses FTS5 BM25 sync (always available).
+  //    If --semantic and model loaded, fire-and-forget embedding for
+  //    hybrid enhancement (logged to stderr, doesn't block output).
+  let embeddingPromise = null;
+  if ((opts.semantic || opts.vector) && isSentenceModelAvailable()) {
+    embeddingPromise = getSentenceEmbedding(query).catch(() => null);
+  }
+
+  if (embeddingPromise) {
+    // Attempt hybrid inline via synchronous check (rare — model loads async)
+    // For immediate CLI output, FTS5 gives great results already
+    const hybridResults = db.searchFTS(query, limit * 2);
+    if (hybridResults.length > 0) {
+      const entries = hybridResults.slice(0, limit).map(e => {
+        const norm = normalizeDBEntry(e);
+        norm.similarity = Math.round((1 - (hybridResults.indexOf(e) / limit) * 0.4) * 100) / 100;
+        norm.matchType = 'fts';
+        return norm;
+      });
+      return { found: true, count: entries.length, entries, matchType: 'fts', lifecycle };
+    }
+  }
+
+  // 3. FTS5 BM25 search (best quality, always synchronous)
+  const ftsResults = db.searchFTS(query, limit * 2);
+  if (ftsResults.length > 0) {
+    const entries = ftsResults.slice(0, limit).map(e => {
+      const norm = normalizeDBEntry(e);
+      norm.similarity = Math.round((1 - (ftsResults.indexOf(e) / limit) * 0.4) * 100) / 100;
+      norm.matchType = 'fts';
+      return norm;
+    });
+    return { found: true, count: entries.length, entries, matchType: 'fts', lifecycle };
+  }
+
+  return { found: false, count: 0, entries: [], matchType: 'none', note: 'No similar past resolution found in memory.', lifecycle };
+}
+
+function cmdListDB(db, opts) {
+  const lifecycle = db.runLifecycle();
+  const total = db.countEntries();
+  const entries = db.listEntries({
+    category: opts.category || undefined,
+    includeArchived: opts.includeArchived,
+    limit: opts.limit || 50,
+  });
+  const shown = entries.map(e => {
+    const norm = normalizeDBEntry(e);
+    return {
+      id: norm.id, type: norm.type, category: norm.category, status: norm.status || 'active',
+      errorMessage: (norm.errorMessage || '').slice(0, 120),
+      resolution: norm.resolution ? norm.resolution.slice(0, 200) : null,
+      success: norm.success, hitCount: norm.hitCount,
+      lastSeen: norm.lastSeen, timestamp: norm.timestamp,
+      targetSkill: norm.type === 'skill_patch' ? norm.targetSkill : undefined,
+      behaviorChange: norm.type === 'skill_patch' ? norm.behaviorChange : undefined,
+    };
+  });
+
+  return { total, shown: shown.length, entries: shown, lifecycle };
+}
+
+function cmdGetDB(db, id) {
+  const entry = db.getEntry(id);
+  if (!entry) return { found: false, error: `No entry with id '${id}'` };
+  return { found: true, entry: normalizeDBEntry(entry) };
+}
+
+function cmdDeleteDB(db, id) {
+  const entry = db.getEntry(id);
+  if (!entry) return { deleted: false, error: `No entry with id '${id}'` };
+  db.deleteEntry(id);
+  return { deleted: true, id, errorMessage: entry.error_message || entry.errorMessage };
+}
+
+function cmdConfirmDB(db, id, opts) {
+  const entry = db.getEntry(id);
+  if (!entry) return { confirmed: false, error: `No entry with id '${id}'` };
+
+  // +2 hits (+1 from touchEntry, +1 bonus for explicit confirmation)
+  db.touchEntry(id);
+  const updates = {
+    hit_count: (entry.hit_count || 1) + 2,
+    confirmed_at: entry.confirmed_at
+      ? entry.confirmed_at + ',' + new Date().toISOString()
+      : new Date().toISOString(),
+  };
+  if (opts.tools) {
+    const newTools = opts.tools.split(',').map(s => s.trim()).filter(Boolean);
+    const existing = entry.tools_used ? entry.tools_used.split(',').filter(Boolean) : [];
+    const merged = [...new Set([...existing, ...newTools])];
+    updates.tools_used = merged.join(',');
+  }
+  if (opts.resolution) updates.resolution = opts.resolution;
+
+  db.updateEntry(id, updates);
+  return {
+    confirmed: true, id, hitCount: updates.hit_count,
+    confirmCount: (entry.confirmed_at || '').split(',').filter(Boolean).length + 1,
+    errorMessage: entry.error_message || entry.errorMessage,
+  };
+}
+
+function cmdStatsDB(db) {
+  const stats = db.stats();
+  const entries = db.listEntries({ includeArchived: true, limit: 999999 });
+  const byCategory = {};
+  let successes = 0, totalHits = 0;
+  let oldest = null, newest = null;
+  for (const e of entries) {
+    const cat = e.category || 'unknown';
+    byCategory[cat] = (byCategory[cat] || 0) + 1;
+    if (e.success === 1 || e.success === true) successes++;
+    totalHits += e.hit_count || 1;
+    if (!oldest || e.created_at < oldest) oldest = e.created_at;
+    if (!newest || e.created_at > newest) newest = e.created_at;
+  }
+  return {
+    totalEntries: stats.total,
+    byCategory,
+    successRate: stats.total > 0 ? Math.round((successes / stats.total) * 100) : 0,
+    totalHits,
+    avgHitsPerEntry: stats.total > 0 ? (totalHits / stats.total).toFixed(1) : '0',
+    archivedCount: stats.archivedCount,
+    temporaryCount: stats.temporaryCount,
+    oldestEntry: oldest,
+    newestEntry: newest,
+  };
+}
+
+function cmdExportDB(db) {
+  const entries = db.listEntries({ includeArchived: true, limit: 999999 });
+  return { version: 1, entries: entries.map(normalizeDBEntry) };
+}
+
+// ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
@@ -948,6 +1207,8 @@ Options:
   --ttl <duration>           Auto-expire after duration (e.g. 7d, 30d, 1h) (for store)
   --keep always              Prevent auto-cleanup for this entry (for store)
   --include-archived         Include archived entries in search/list results
+  --db                       Use SQLite backend (MemoryDB) instead of JSON
+  --semantic                 Enable semantic search via @huggingface/transformers (implies --db)
   -h, --help                 Show this help
 
 Examples:
@@ -957,22 +1218,29 @@ Examples:
   node memory-store.mjs store "Permanent rule" --keep always
   node memory-store.mjs search "cannot read property"
   node memory-store.mjs search "old fix" --include-archived
+  node memory-store.mjs --db search "fts5 full text search"
+  node memory-store.mjs --db --semantic search "semantic search via embeddings"
   node memory-store.mjs extract --findings-file ./findings.json --min-frequency 2 --dry-run
   echo '[{"category":"error","finding":"TypeError"}]' | node memory-store.mjs extract
   node memory-store.mjs stats
 `);
 }
 
+/**
+ * Global flags that can appear before the command name.
+ */
+const GLOBAL_FLAGS = new Set(['--db', '--semantic', '--data-dir', '--format', '--help', '-h']);
+
 function parseArgs() {
-  const args = process.argv.slice(2);
-  if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
+  const rawArgs = process.argv.slice(2);
+  if (rawArgs.length === 0 || rawArgs[0] === '--help' || rawArgs[0] === '-h') {
     printHelp();
     process.exit(0);
   }
   
   const knownCommands = ['store', 'search', 'list', 'get', 'confirm', 'delete', 'stats', 'export', 'extract'];
   const opts = {
-    command: knownCommands.includes(args[0]) ? args[0] : null,
+    command: null,
     commandArgs: [],
     dataDir: null,
     format: 'text',
@@ -994,7 +1262,36 @@ function parseArgs() {
     ttl: null,
     keep: null,
     includeArchived: false,
+    db: false,
+    semantic: false,
   };
+
+  // Phase 1: Consume global flags before the command name
+  let idx = 0;
+  while (idx < rawArgs.length) {
+    const arg = rawArgs[idx];
+    if (GLOBAL_FLAGS.has(arg)) {
+      switch (arg) {
+        case '--db': opts.db = true; break;
+        case '--semantic': opts.semantic = true; break;
+        case '--data-dir': opts.dataDir = rawArgs[++idx]; break;
+        case '--format': opts.format = rawArgs[++idx]; break;
+        case '--help': case '-h': printHelp(); process.exit(0);
+      }
+      idx++;
+    } else {
+      break;
+    }
+  }
+
+  // Remaining args: command + its flags
+  const args = rawArgs.slice(idx);
+  if (args.length === 0) {
+    console.error('Command required. Usage: memory-store.mjs [global-flags] <command> [options]');
+    process.exit(1);
+  }
+
+  opts.command = knownCommands.includes(args[0]) ? args[0] : null;
   
   if (!opts.command) {
     console.error(`Unknown command: ${args[0]}`);
@@ -1043,6 +1340,8 @@ function parseArgs() {
       case '--ttl': opts.ttl = args[++i]; break;
       case '--keep': opts.keep = args[++i]; break;
       case '--include-archived': opts.includeArchived = true; break;
+      case '--db': opts.db = true; break;
+      case '--semantic': opts.semantic = true; break;
     }
     i++;
   }
@@ -1057,79 +1356,96 @@ function parseArgs() {
 function main() {
   const opts = parseArgs();
   const dataDir = getDataDir(opts.dataDir);
+  const useDB = opts.db || opts.semantic;
   let result;
-  
+
+  // ── SQLite backend (--db or --semantic) ─────────────────────────────
+  if (useDB) {
+    const { db, migration } = openDB(dataDir, opts.semantic);
+    if (migration && migration.migrated > 0) {
+      console.error(`📀 Migrated ${migration.migrated} entries from JSON (${migration.skipped} skipped via hash dedup)`);
+    }
+
+    switch (opts.command) {
+      case 'store': {
+        const errorMsg = opts.commandArgs.join(' ');
+        if (!errorMsg) { console.error('Error message required for store command'); process.exit(1); }
+        result = cmdStoreDB(db, errorMsg, opts);
+        break;
+      }
+      case 'search': {
+        const query = opts.commandArgs.join(' ');
+        if (!query) { console.error('Search query required for search command'); process.exit(1); }
+        result = cmdSearchDB(db, query, opts);
+        break;
+      }
+      case 'list':  result = cmdListDB(db, opts); break;
+      case 'get':   result = cmdGetDB(db, opts.commandArgs[0]); break;
+      case 'confirm': result = cmdConfirmDB(db, opts.commandArgs[0], opts); break;
+      case 'delete': result = cmdDeleteDB(db, opts.commandArgs[0]); break;
+      case 'stats': result = cmdStatsDB(db); break;
+      case 'export': result = cmdExportDB(db); break;
+      case 'extract':
+        // extract uses JSON findings pipeline, still valid
+        result = cmdExtractSkillPatches(dataDir, readFindings(opts), {
+          minFrequency: opts.minFrequency, dryRun: opts.dryRun,
+        });
+        break;
+      default:
+        console.error(`Unknown command: ${opts.command}`);
+        process.exit(1);
+    }
+
+    switch (opts.format) {
+      case 'json': console.log(JSON.stringify(result, null, 2)); break;
+      default:     console.log(formatText(opts.command, result)); break;
+    }
+    return;
+  }
+
+  // ── JSON backend (default) ─────────────────────────────────────────
   switch (opts.command) {
     case 'store': {
       const errorMsg = opts.commandArgs.join(' ');
-      if (!errorMsg) {
-        console.error('Error message required for store command');
-        process.exit(1);
-      }
+      if (!errorMsg) { console.error('Error message required for store command'); process.exit(1); }
       result = cmdStore(dataDir, errorMsg, opts);
       break;
     }
     case 'search': {
       const query = opts.commandArgs.join(' ');
-      if (!query) {
-        console.error('Search query required for search command');
-        process.exit(1);
-      }
+      if (!query) { console.error('Search query required for search command'); process.exit(1); }
       result = cmdSearch(dataDir, query, opts);
       break;
     }
-    case 'list':
-      result = cmdList(dataDir, opts);
-      break;
-    case 'get':
-      result = cmdGet(dataDir, opts.commandArgs[0]);
-      break;
-    case 'confirm':
-      result = cmdConfirm(dataDir, opts.commandArgs[0], opts);
-      break;
-    case 'delete':
-      result = cmdDelete(dataDir, opts.commandArgs[0]);
-      break;
-    case 'stats':
-      result = cmdStats(dataDir);
-      break;
-    case 'export':
-      result = cmdExport(dataDir);
-      break;
-    case 'extract': {
-      // Read findings from a file or stdin (pipe)
-      let findings;
-      if (opts.findingsFile) {
-        findings = JSON.parse(readFileSync(opts.findingsFile, 'utf-8'));
-      } else {
-        try {
-          const stdin = readFileSync('/dev/stdin', 'utf-8').trim();
-          if (!stdin) {
-            console.error('Findings required. Pipe JSON via stdin or use --findings-file');
-            process.exit(1);
-          }
-          findings = JSON.parse(stdin);
-        } catch {
-          console.error('Failed to read findings from stdin. Pipe JSON or use --findings-file');
-          process.exit(1);
-        }
-      }
-      result = cmdExtractSkillPatches(dataDir, findings, {
-        minFrequency: opts.minFrequency,
-        dryRun: opts.dryRun,
+    case 'list':  result = cmdList(dataDir, opts); break;
+    case 'get':   result = cmdGet(dataDir, opts.commandArgs[0]); break;
+    case 'confirm': result = cmdConfirm(dataDir, opts.commandArgs[0], opts); break;
+    case 'delete': result = cmdDelete(dataDir, opts.commandArgs[0]); break;
+    case 'stats': result = cmdStats(dataDir); break;
+    case 'export': result = cmdExport(dataDir); break;
+    case 'extract':
+      result = cmdExtractSkillPatches(dataDir, readFindings(opts), {
+        minFrequency: opts.minFrequency, dryRun: opts.dryRun,
       });
       break;
-    }
   }
   
   switch (opts.format) {
-    case 'json':
-      console.log(JSON.stringify(result, null, 2));
-      break;
-    default:
-      console.log(formatText(opts.command, result));
-      break;
+    case 'json': console.log(JSON.stringify(result, null, 2)); break;
+    default:     console.log(formatText(opts.command, result)); break;
   }
+}
+
+/**
+ * Read findings from --findings-file or stdin.
+ * Extracted to avoid duplication between JSON and SQLite dispatch paths.
+ */
+function readFindings(opts) {
+  if (opts.findingsFile) {
+    return JSON.parse(readFileSync(opts.findingsFile, 'utf-8'));
+  }
+  const stdin = readFileSync('/dev/stdin', 'utf-8').trim();
+  return stdin ? JSON.parse(stdin) : [];
 }
 
 main();

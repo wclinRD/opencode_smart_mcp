@@ -2,11 +2,12 @@
 //
 // Runs after `npm install smart-agent` to:
 // 1. Install/update companion skills to ~/.config/opencode/skills/
-// 2. Print setup instructions
+// 2. Install compaction-fix plugin to ~/.config/opencode/plugins/
+// 3. Print setup instructions
 //
 // Usage: node src/install/postinstall.mjs
 
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, copyFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,6 +31,20 @@ async function main() {
     } else {
       console.log('⚠️  skills 安裝未完成（可之後手動執行: bash config/skills/install-skills.sh）');
     }
+  }
+
+  // ---- Step 2: 安裝 compaction-fix plugin ----
+  const pluginSrc = resolve(PROJECT_ROOT, 'plugin/compaction-fix.js');
+  const pluginDstDir = resolve(homedir(), '.config', 'opencode', 'plugins');
+  const pluginDst = resolve(pluginDstDir, 'compaction-fix.js');
+
+  if (existsSync(pluginSrc)) {
+    console.log('\n🔌 正在安裝 compaction-fix plugin ...\n');
+    mkdirSync(pluginDstDir, { recursive: true });
+    copyFileSync(pluginSrc, pluginDst);
+    console.log(`✅ Compaction-fix plugin 已安裝到 ${pluginDst}`);
+  } else {
+    console.log('⚠️  找不到 compaction-fix.js，跳過 plugin 安裝');
   }
 
   // ---- Step 2: 顯示指引 ----

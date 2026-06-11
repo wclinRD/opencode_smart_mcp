@@ -554,6 +554,13 @@
 | 11 | 🧪 測試 | Benchmark 自動化 + CI 整合 | 📋 待辦 | 🔵 P3 |
 | 12 | 🔧 功能 | Sandbox Execution (Phase 10.1) — deno/docker sandbox | 📋 待辦 | 🔵 P3 |
 | 13 | 🧪 測試 | Phase 7 benchmark — 需手動執行，無真實場景 CRUD 數據 | 📋 待辦 | 🔵 P3 |
+| 14 | 🏗️ 架構 | memory-db.mjs — SQLite 儲存層（784 行，21/21 tests） | ✅ 已修 | 🔴 P0 |
+| 15 | 🏗️ 架構 | embedding.mjs Layer 2 — @huggingface/transformers Float32Array(384) | ✅ 已修 | 🔴 P0 |
+| 16 | 💡 增強 | memory-store.mjs CLI `--db` 模式 — SQLite 雙後端 + FTS5 搜尋 | ✅ 已修 | 🟠 P1 |
+| 17 | 🐛 修正 | memory-db: hash `|| ''` → `|| null` (UNIQUE constraint collision) | ✅ 已修 | 🔴 P0 |
+| 18 | 🐛 修正 | memory-db: BigInt(row.rowid) for sqlite-vec v0.1.9 | ✅ 已修 | 🔴 P0 |
+| 19 | 🐛 修正 | compaction-fix: messages.transform 不觸發 → 嵌入 compacting context | ✅ 已修 | 🔴 P0 |
+| 20 | 💡 增強 | CLI async 改造 — `--semantic` 真正使用 hybrid search | 📋 待辦 | 🟡 P2 |
 
 ---
 
@@ -645,4 +652,104 @@
 - [x] 手動測試：Layer 3 TTL expired + keep preserved ✅
 - [x] 手動測試：`--include-archived` 正確顯示/隱藏 ✅
 - [x] 全量回歸：hybrid-engine/fast-apply/quality-gate/error-recovery 全部通過
+
+---
+
+## Phase 11：記憶系統升級 — Semantic Memory Engine ✅ (2026-06-11)
+
+> 核心重構完成 (~80%)。記憶系統從 JSON file → SQLite (FTS5 + vec0 + RRF)。
+> 剩餘工作：CLI async 改造（讓 --semantic 真正使用 embedding 做 hybrid search）。
+
+### 關鍵差異（原設計 → 新設計）
+
+| 面向 | 原設計 | 新設計 | 現狀 |
+|------|--------|--------|------|
+| 全文搜尋 | 自實作 TF-IDF | **SQLite FTS5 (BM25)** | ✅ |
+| 向量比對 | 應用層 cosine (O(n)) | **sqlite-vec ANN (O(log n))** | ✅ 有 fallback |
+| 分數融合 | 0.7\*semantic + 0.3\*fuzzy | **RRF (k=60)** | ✅ memory-db.mjs |
+| Embedding | onnxruntime-node | **@huggingface/transformers** | ✅ Layer 2 完成 |
+| 儲存 | JSON file | **SQLite 單 DB** | ✅ `--db` 可選用 |
+| CLI | JSON-only | **JSON + SQLite 雙後端** | ✅ `--db` 切換 |
+
+### Phase 11.1：Semantic Memory Engine
+
+#### 1. 安裝相依 ✅
+
+- [x] `npm install better-sqlite3` — 同步 SQLite（比 node:sqlite 快 3-5x）
+- [x] `npm install sqlite-vec` — SQLite ANN vector extension (v0.1.9, native compile ✅)
+- [x] 驗證：sqlite-vec native compile 成功 → ANN 可用
+- [x] `npm install @huggingface/transformers` — ONNX-based embedding
+- [x] 驗證：模型自動下載，`pipeline("feature-extraction")` 回傳 Tensor(384)
+- [x] 降級確認：sqlite-vec 不可用 → 應用層 cosine；transformers 不可用 → TF-IDF
+
+#### 2. `src/lib/memory-db.mjs` — SQLite 儲存層 ✅ (2026-06-11)
+
+> 784 行，21/21 tests 通過。含完整 CRUD + FTS5 BM25 + Vector ANN + RRF hybrid + lifecycle + migration。
+
+- [x] 連線管理：`better-sqlite3` 同步模式，WAL + foreign_keys
+- [x] Schema `entries` table：id/hash/type/category/status/error_message/resolution/...
+- [x] Schema `entries_fts`：FTS5 virtual table（porter + unicode61 tokenizer）
+- [x] Schema `entries_vec`：sqlite-vec v0.1.9 vec0（float32[384], cosine distance）
+- [x] CRUD：insertEntry / getEntry / updateEntry / deleteEntry / listEntries
+- [x] FTS5 search：`searchFTS(query, limit)` → BM25 ranked results（prefix match）
+- [x] Vector search：`searchVector(embedding, limit)` → ANN（可用）或 app-level cosine（降級）
+- [x] 複合搜尋：`searchHybrid(query, embedding, k=60, limit)` → BM25 + Vector → RRF → unified
+- [x] 遷移工具：`migrateFromJSON(jsonPath)` — 讀舊 `resolutions.json` → SQLite（hash dedup）
+- [x] Entry count / stats 方法
+- [x] 21 tests：CRUD / FTS5 BM25 / vector ANN / app-level cosine / RRF fusion / migration / lifecycle / persistence
+
+#### 3. `src/lib/embedding.mjs` 升級 ✅ (2026-06-11)
+
+> 三層降級架構完成。`@huggingface/transformers` Layer 2 正確回傳 Float32Array(384)。
+
+- [x] **Layer 1: TF-IDF**（不變，永遠可用，~0.2ms）
+- [x] **Layer 2: @huggingface/transformers** — `pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')`
+  - 模型：`Xenova/all-MiniLM-L6-v2`，ONNX 量化版
+  - 非同步：dynamic import + await pipeline()
+  - Tensor output → `new Float32Array(output.data)`，dim=384
+- [x] **降級保證**：Layer 2 載入失敗 → 靜默回 Layer 1，不中斷
+- [x] `getSentenceEmbedding(text)` → `Float32Array(384)`（Async）
+- [x] `isSentenceModelAvailable()` → boolean（同步檢查）
+- [x] 測試：embedding 正確性（cosine similarity ≈ 0.23 for related errors）+ 降級行為
+
+#### 4. CLI 升級 — `--db` 模式 ✅ (2026-06-11)
+
+> memory-store.mjs 新增 SQLite 雙後端支援。所有 8 命令可用 `--db`。
+
+- [x] **新 flag**: `--db`（SQLite 後端）、`--semantic`（implies --db）
+- [x] **全球 flag 支援**: `--db` / `--semantic` 可出現在 command 之前
+- [x] **8 個 SQLite 命令**: cmdStoreDB / cmdSearchDB / cmdListDB / cmdGetDB / cmdConfirmDB / cmdDeleteDB / cmdStatsDB / cmdExportDB
+- [x] **normalizeDBEntry()**: SQLite snake_case → JSON camelCase（formatText() 不需修改）
+- [x] **FTS5 搜尋**: BM25 取代 fuzzy match（品質更好、同步）
+- [x] **Auto-migration**: 首次 `--db` 使用自動 migrate JSON → SQLite（hash dedup）
+- [x] **Bug fix**: confirmedAt 字串 → 陣列轉換（formatText .length bug）
+- [x] **Bug fix**: double touchEntry → 單次 touchEntry（hitCount 正確）
+- [x] **JSON 向後相容**: 不變，所有現有 tests pass
+
+#### 5. compaction-fix.js 策略修正 ✅ (2026-06-11)
+
+> 核心洞察：`messages.transform` hook 在 compaction 後不觸發 → 嵌入 compacting context。
+
+- [x] 策略：將 recovery prompt 嵌入 compacting context（非 `messages.transform`）
+- [x] `## FINAL INSTRUCTION: Append verbatim` — summarizer 被要求保留
+- [x] messages.transform 偵測寬鬆化（threshold 20→100 chars，punctuation-only regex）
+- [x] 兩份同步：`smart/plugin/` + `~/.config/opencode/plugins/`
+- [x] 驗證：runtime log 顯示 recovery prompt 在 compaction #2 後正常注入
+
+#### 6. Auto-embedding on Store ⏳
+
+- [ ] `cmdStoreDB` 已寫入 `getSentenceEmbedding().then()` 但 CLI sync 無法 await
+- [ ] `cmdSearchDB` 已寫入 embedding path 但無法同步取得
+- [ ] **解法**: main() 改 async（配合 Node 26 top-level await）+ `--semantic` 搜尋先 await model load
+
+### 驗收標準
+
+| 標準 | 狀態 |
+|------|------|
+| 自然語言 query recall@10 比純 TF-IDF 高 | 🟡 未 benchmark（需 async CLI 後測） |
+| FTS5 BM25 在 error message 搜尋不倒退 | ✅ 明顯優於舊 fuzzy match |
+| RRF fusion 比單一 BM25 或 vector 都好 | ✅ memory-db 單元測試驗證 |
+| 降級鏈完整：任一層失效不 crash | ✅ 三層降級皆驗證 |
+| sqlite-vec fail → 應用層 cosine 正確 | ✅ 內建 fallback |
+| 全量回歸測試通過 | ✅ |
 

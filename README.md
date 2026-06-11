@@ -165,7 +165,7 @@ cd .opencode && npm install && cd ..
 npm install @mozilla/readability@0.6.0 linkedom@0.18.12 turndown@7.2.4
 ```
 
-#### 步驟 3：設定 MCP Server（opencode.jsonc）
+#### 步驟 3：設定 MCP Server + Plugin（opencode.jsonc）
 
 編輯 `~/.config/opencode/opencode.jsonc`，加入：
 
@@ -173,6 +173,11 @@ npm install @mozilla/readability@0.6.0 linkedom@0.18.12 turndown@7.2.4
 {
   "$schema": "https://opencode.ai/config.json",
   "default_agent": "smart-mcp",
+  "plugin": [
+    ["/絕對路徑/opencode_smart_mcp/plugin/compaction-fix.js", {
+      "debug": false
+    }]
+  ],
   "mcp": {
     "smart": {
       "type": "local",
@@ -183,7 +188,9 @@ npm install @mozilla/readability@0.6.0 linkedom@0.18.12 turndown@7.2.4
 }
 ```
 
-> ⚠️ `command[1]` 必須使用**絕對路徑**指向 clone 下來的 `src/server/index.mjs`。不可使用相對路徑！
+> ⚠️ `command[1]` 和 `plugin[0][0]` 必須使用**絕對路徑**指向 clone 下來的檔案。不可使用相對路徑！
+>
+> 💡 `compaction-fix` plugin 會在 OpenCode 自動壓縮上下文後，幫 LLM 恢復任務狀態（目標、TODO、檔案路徑），避免 compaction 後 LLM 忘記自己在做什麼。
 
 > 💡 **安裝後 agent 會自動載入 skills**：你的 `smart-mcp agent` 使用洋蔥架構，收到任務時會自動分類並載入對應 skill（如「爬蟲」→ `smart-mcp-crawl`）。不需額外設定。
 
@@ -244,6 +251,8 @@ opencode mcp list
 | **`~/.config/opencode/agents/smart-mcp.md`** | opencode 實際載入的 agent 定義 | 修改原始檔後必須同步 |
 | **`config/skills/smart-mcp-*.md`** | 專案內的 8 個原始 skill 檔 | 開發/修改 skill 時 |
 | **`~/.config/opencode/skills/smart-mcp-*.md`** | opencode 實際載入的 skill 定義 | 修改原始檔後必須同步 |
+| **`plugin/compaction-fix.js`** | 專案內的 plugin 原始檔 | 修改 plugin 邏輯時 |
+| **`~/.config/opencode/plugins/compaction-fix.js`** | opencode 實際載入的 plugin | 修改原始檔後必須同步 |
 
 #### 同步規則
 
@@ -251,10 +260,12 @@ opencode mcp list
 # 方向 A：專案原始檔 → opencode 實際載入位置（開發修改後必做）
 cp config/agents/smart-mcp.md ~/.config/opencode/agents/smart-mcp.md
 cp config/skills/smart-mcp-*.md ~/.config/opencode/skills/
+cp plugin/compaction-fix.js ~/.config/opencode/plugins/compaction-fix.js
 
 # 方向 B：opencode 實際載入位置 → 專案原始檔（直接在 ~/.config/opencode 修改時）
 cp ~/.config/opencode/agents/smart-mcp.md config/agents/smart-mcp.md
 cp ~/.config/opencode/skills/smart-mcp-*.md config/skills/
+cp ~/.config/opencode/plugins/compaction-fix.js plugin/compaction-fix.js
 ```
 
 > ⚠️ **LLM 注意**：當你（LLM）被要求修改 agent 行為或 skill 內容時，**必須同時修改兩個位置的對應檔案**。只改其中一邊會導致 opencode 行為與原始碼不一致。每次修改後用 `wc -l` 比對行數確認同步。
@@ -324,6 +335,7 @@ node smart-agent/src/install/install-agent.mjs --dry-run
 | MCP server 連線 | `opencode mcp list` | smart → connected |
 | Agent 定義存在 | `ls ~/.config/opencode/agents/smart-mcp.md` | 檔案存在 |
 | Skills 安裝 | `ls ~/.config/opencode/skills/smart-mcp-*.md` | 8 個 skill 檔案 |
+| Plugin 安裝 | `ls ~/.config/opencode/plugins/compaction-fix.js` | 檔案存在 |
 | 預設 agent | `cat ~/.config/opencode/opencode.jsonc \| grep default_agent` | `"smart-mcp"` |
 | 工具可用 | 在 opencode 中呼叫 `smart_grep` 等 | 正常回應 |
 | Skill 載入 | 說「幫我爬一個網站」應自動載入 crawl skill | 看到 skill 載入訊息 |
@@ -339,6 +351,7 @@ node smart-agent/src/install/install-agent.mjs --dry-run
 | `ECONNREFUSED` / tool 沒回應 | command 路徑錯誤或 node 找不到 | 檢查 `command[1]` 是否為正確絕對路徑 |
 | tool 不存在 / unknown tool | plugin 未正確載入 | 確認 `.opencode/node_modules/` 已安裝 |
 | `default_agent not found` 或 agent 未出現在 `opencode agent list` 中 | agent 定義檔不存在或 frontmatter 換行格式錯誤（Windows CRLF） | 確認 `~/.config/opencode/agents/smart-mcp.md` 存在，且使用 **LF** 換行（參閱跨平台注意事項） |
+| Compaction 後 LLM 忘記在做什麼 | compaction-fix plugin 未安裝或未啟用 | 確認 `~/.config/opencode/plugins/compaction-fix.js` 存在，且 `opencode.json` 的 `plugin` 陣列包含它 |
 
 ---
 
@@ -352,6 +365,11 @@ node smart-agent/src/install/install-agent.mjs --dry-run
 {
   "$schema": "https://opencode.ai/config.json",
   "default_agent": "smart-mcp",          // 使用 smart-mcp agent 人格
+  "plugin": [
+    ["/絕對路徑/opencode_smart_mcp/plugin/compaction-fix.js", {
+      "debug": false
+    }]
+  ],
   "mcp": {
     "smart": {
       "type": "local",
@@ -517,6 +535,8 @@ opencode_smart_mcp/
 │   │   └── smart-mcp-lang.md     # 語言專案分析
 │   ├── opencode.json          # opencode 整合設定範例
 │   └── .opencode-conventions.json
+├── plugin/                    # 🔌 OpenCode plugins
+│   └── compaction-fix.js      # Compaction 後自動恢復上下文
 ├── smart-agent/               # 📦 npm publish 套件
 │   ├── src/
 │   │   ├── agent/             # 策略引擎、memory、planner
@@ -535,6 +555,62 @@ opencode_smart_mcp/
 │   └── smart-agent-todo.md    # Smart Agent 待辦事項
 └── reports/                   # 自動產生的報告
 ```
+
+---
+
+## 🔌 Compaction-Fix Plugin（自動上下文恢復）
+
+### 問題
+
+OpenCode 在對話過長時會自動觸發 **compaction**（上下文壓縮），將中間對話壓縮成摘要。但 compaction 後 LLM 常常忘記自己在做什麼，因為 auto-continue 只給一個 generic 的 "continue"。
+
+### 解法
+
+`plugin/compaction-fix.js` 是一個 OpenCode plugin，透過 5 個 hook 確保 compaction 後 LLM 能無縫接續：
+
+| Hook | 時機 | 作用 |
+|------|------|------|
+| `event` | 全程 | 追蹤 `todo.updated` 和 `session.compacted` 事件 |
+| `chat.message` | 每次 user 輸入 | 記錄當前目標 |
+| `experimental.session.compacting` | compaction 前 | 注入當前任務狀態到 compaction prompt（目標、TODO、檔案路徑） |
+| `experimental.compaction.autocontinue` | compaction 後 | 確保 auto-continue 啟用 |
+| `experimental.chat.messages.transform` | 訊息送出前 | 把 generic "continue" 換成精確的恢復指令 |
+
+### 安裝
+
+Plugin 會隨 `install.sh` 或 `npm install` 自動部署到 `~/.config/opencode/plugins/`，並在 `opencode.json` 中自動註冊：
+
+```json
+{
+  "plugin": [
+    ["/path/to/smart/plugin/compaction-fix.js", { "debug": false }]
+  ]
+}
+```
+
+### Debug 模式
+
+設 `"debug": true` 可在 terminal 看到 `[compaction-fix]` 前綴的 log。
+
+### 給 LLM 的說明
+
+當你（LLM）看到 compaction 發生後的恢復提示時：
+
+```
+## Context Restored After Compaction (#N)
+
+Your goal was: ...
+In-progress tasks: ...
+Pending tasks: ...
+
+Instructions:
+1. Review the conversation summary above
+2. Check the TODO list - pick up the first in_progress item
+3. If unsure, re-read the last few tool outputs
+4. Continue working - do NOT restart from scratch
+```
+
+**你應該**：讀取摘要 → 檢查 TODO → 從 `in_progress` 任務繼續。**不應該**：重新開始或問使用者「我剛才在做什麼」。
 
 ---
 

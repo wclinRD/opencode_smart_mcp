@@ -1,12 +1,12 @@
-// embedding.mjs — Zero-dependency TF-IDF vectorizer + cosine similarity
+// embedding.mjs — Three-tier embedding engine
 //
-// Lightweight embedding engine for error message semantic search.
-// TF-IDF works well for dev tool error messages because they share
-// distinctive keywords ("not found", "undefined", "cannot read").
+// Layers:
+//   1. TF-IDF Vectorizer (zero deps) ← always available, fast, ~0.2ms
+//   2. @huggingface/transformers (optional) ← 384-dim sentence embeddings, ~30ms
+//   3. Hybrid search: TF-IDF + sentence embeddings combined
 //
-// Architecture:
-//   TF-IDF Vectorizer (zero deps) ← primary, always available
-//   Sentence Embedding (optional)  ← @xenova/transformers, auto-detected
+// The vector dimension is 384 for all tiers (all-MiniLM-L6-v2).
+// This matches sqlite-vec's float[384] for ANN.
 //
 // Usage:
 //   import { createVectorizer } from './embedding.mjs';
@@ -14,9 +14,11 @@
 //   const v = vec.getVector("Error: Cannot find module 'foo'");
 //   const score = vec.cosineSimilarity(v1, v2);
 //
-// Hybrid search:
-//   import { hybridSearch } from './embedding.mjs';
-//   const results = hybridSearch(query, entries, { textKey: 'errorMessage' });
+// Sentence embeddings (with @huggingface/transformers):
+//   import { getSentenceEmbedding, tryLoadSentenceModel } from './embedding.mjs';
+//   await tryLoadSentenceModel();
+//   const emb = await getSentenceEmbedding("error message text");
+//   // emb is Float32Array(384), ready for sqlite-vec storage
 
 // ---------------------------------------------------------------------------
 // Tokenizer
@@ -214,43 +216,45 @@ export function hybridSearch(query, entries, options = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Sentence embedding bridge (optional, for @xenova/transformers)
+// Sentence embedding bridge (Layer 2: @huggingface/transformers)
 // ---------------------------------------------------------------------------
 
 let _sentenceModel = null;
 let _sentenceLoadAttempted = false;
 
 /**
- * Try to load @xenova/transformers pipeline for deep semantic search.
- * Falls back silently if not available.
+ * Try to load the @huggingface/transformers feature-extraction pipeline.
+ * Uses all-MiniLM-L6-v2 (384-dim), quantized.
+ * Falls back silently if module not installed or loading fails.
  *
- * @returns {Promise<Object|null>} { extractor: pipeline } or null
+ * @param {Object} [options]
+ * @param {string} [options.model='Xenova/all-MiniLM-L6-v2']
+ * @param {boolean} [options.quantized=true]
+ * @returns {Promise<Object|null>} { extractor } or null
  */
-export async function tryLoadSentenceModel() {
+export async function tryLoadSentenceModel(options = {}) {
   if (_sentenceModel) return _sentenceModel;
   if (_sentenceLoadAttempted) return null;
 
+  const { model = 'Xenova/all-MiniLM-L6-v2', quantized = true } = options;
   _sentenceLoadAttempted = true;
 
   try {
-    // Dynamic import — module may not be installed
-    const { pipeline } = await import('@xenova/transformers');
-    const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
-      quantized: true,
-    });
+    const { pipeline } = await import('@huggingface/transformers');
+    const extractor = await pipeline('feature-extraction', model, { quantized });
     _sentenceModel = { extractor };
     return _sentenceModel;
   } catch {
-    // Module not available — silently return null
     return null;
   }
 }
 
 /**
- * Get sentence embedding vector if model is loaded.
+ * Get a 384-dim sentence embedding vector as Float32Array.
+ * Returns null if model is not loaded.
  *
- * @param {string} text
- * @returns {Promise<Float64Array|null>}
+ * @param {string} text - Input text
+ * @returns {Promise<Float32Array|null>}
  */
 export async function getSentenceEmbedding(text) {
   if (!_sentenceModel) return null;
@@ -260,12 +264,17 @@ export async function getSentenceEmbedding(text) {
       pooling: 'mean',
       normalize: true,
     });
-    return output.data;
+    // output is a Tensor with .data (Float32Array-like) and .dims
+    return new Float32Array(output.data);
   } catch {
     return null;
   }
 }
 
+/**
+ * Check if the sentence model is loaded and ready.
+ * @returns {boolean}
+ */
 export function isSentenceModelAvailable() {
   return _sentenceModel !== null;
 }

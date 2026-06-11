@@ -964,3 +964,172 @@ Layer 3 ─ TTL Expiration + Keep Override
 | **Session Continuity 框架** | 太模糊，被 Auto Memory Injection (10.5) 涵蓋 |
 | **全自動 agent loop** | 這是 OpenCode 的責任，Smart MCP 是工具層 |
 | **多模態/視覺理解** | Provider 層次，MCP 無法控制 |
+
+---
+
+## Phase 11：記憶系統升級 — Semantic Memory Engine（已重新設計）
+
+> 2026-06-11 規劃 → 2026-06-11 基於 SOTA 研究重新設計。
+> **研究結論**：業界對「輕量記憶系統」已收斂到可複製的模式。
+> Scope 不變：**只做 Phase 11.1 Semantic Embedding**。
+> KG (11.2) 和 Consolidation (11.3) 維持擱置。
+
+### 研究發現：業界 SOTA 模式
+
+| 我的原始設計 | 業界 SOTA（agentmemory / sqlite-vec 等） | 改變 |
+|-------------|-----------------------------------------|------|
+| 自實作 TF-IDF | **SQLite FTS5 (BM25)** — 內建、零依賴、數學正確 | ✅ 改採 FTS5 |
+| 應用層 cosine similarity (O(n)) | **sqlite-vec ANN** — SQLite extension，native KNN | ✅ 新增，有 fallback |
+| 加權和 (0.7\*semantic + 0.3\*fuzzy) | **RRF** (Reciprocal Rank Fusion, k=60) — rank-based，無需正規化 | ✅ 改採 RRF |
+| onnxruntime-node | **@huggingface/transformers** — 單一 npm install，ONNX-based | ✅ 改採 |
+| 單一 BM25 | **Triple-stream recall** — BM25 + Vector + KG（未來） | ✅ 架構預留 |
+| JSON file | **SQLite 單 DB** — FTS5 + vec0 + entries 在同一檔案 | ✅ 合併 |
+
+#### 關鍵 benchmark（agentmemory 數據）
+
+| Query 難度 | 純 BM25 recall@10 | BM25 + Vector (RRF) | 改善 |
+|-----------|-------------------|--------------------|:----:|
+| 最簡單 | 77.8% | **91.7%** | +13.9pp |
+| 最難 | 0.0% | **40.0%** | +40pp |
+| **整體** | 58.7% | **67.3%** | **+8.6pp** |
+
+- **結論**：對自然語言 query（無 keyword overlap），vector recall > BM25。RRF 融合後兩者兼具。
+- 對 Smart MCP 真實場景：error message 搜尋 BM25 就夠好。但 Auto Memory Injection、skill_patch 搜尋是自然語言 → 需要 vector。
+
+### 新做法
+
+#### 技術架構
+
+```
+                    ┌──────────────────────┐
+                    │   @huggingface/       │
+                    │   transformers        │
+                    │   (all-MiniLM-L6-v2)  │
+                    └───────┬──────────────┘
+                            │ 384-dim embedding
+                            ▼
+┌─────────────────────────────────────────────┐
+│              memory.db (SQLite)              │
+│                                              │
+│  entries: id, hash, type, error_message,     │
+│           resolution, hit_count, ...         │
+│  entries_fts: FTS5 full-text index (BM25)    │
+│  entries_vec: sqlite-vec vec0 (float32[384]) │
+└──────────────┬──────────────────────────────┘
+               │
+               ▼
+          RRF Fusion (k=60)
+          BM25 rank + Vector rank + (future) KG rank
+               │
+               ▼
+          Unified search results
+```
+
+#### 儲存層：SQLite + FTS5 + sqlite-vec
+
+```
+memory.db（單一檔案，三重索引）：
+
+  entries (
+    id TEXT PRIMARY KEY,
+    hash TEXT UNIQUE,
+    type TEXT, category TEXT, status TEXT,
+    error_message TEXT, resolution TEXT,
+    behavior_change TEXT, target_skill TEXT,
+    tools_used TEXT, files_changed TEXT,
+    success INTEGER, hit_count INTEGER DEFAULT 1,
+    keep TEXT, expires_at TEXT, confirmed_at TEXT,
+    created_at TEXT, last_seen TEXT,
+    -- 不自帶 embedding BLOB（sqlite-vec 的 vec0 管理）
+    -- FTS5 和 vec0 在各自的 virtual table 中
+  )
+
+  -- FTS5 for BM25 search
+  CREATE VIRTUAL TABLE entries_fts USING fts5(
+    error_message, resolution, behavior_change,
+    content='entries', content_rowid='rowid'
+  );
+
+  -- sqlite-vec vec0 for ANN (approximate nearest neighbor)
+  -- 384-dim float32 vectors, 自動內部存儲
+  CREATE VIRTUAL TABLE entries_vec USING vec0(
+    embedding float[384] distance_metric=cosine
+  );
+```
+
+**sqlite-vec vs 應用層 cosine 的取捨**：
+
+| 層面 | sqlite-vec（主路徑） | 應用層 cosine（備援） |
+|------|-------------------|--------------------|
+| 依賴 | Native C extension (npm install sqlite-vec) | 純 JS，無 native dep |
+| 效能 | O(log n) ANN via IVF | O(n) 全掃 (n < 10K 可接受) |
+| 安裝 | +1 npm dep，需 compile native addon | 無 |
+| 精確度 | ANN (approximate) | 精確 cosine |
+
+**決策**：主路徑 sqlite-vec。若 native compile 失敗 → 自動降級應用層 cosine（embedding 存 BLOB）。
+
+#### 搜尋流程：三重串流 + RRF
+
+```
+query "找出之前那個 memory leak 的解法"
+    │
+    ├─ Stream 1: FTS5 BM25 ──────→ rank_1
+    │    SELECT rank FROM entries_fts WHERE entries_fts MATCH ?
+    │
+    ├─ Stream 2: Vector ANN ─────→ rank_2
+    │    embed(query) → SELECT rowid, distance FROM entries_vec WHERE embedding MATCH ?
+    │    (sqlite-vec 自動 ANN，或應用層 cosine)
+    │
+    └─ Stream 3: KG (future) ────→ rank_3 (shelved)
+    
+    │
+    ▼
+RRF(k=60):
+  score(id) = Σ( 1 / (k + rank_s(id)) ) for each stream s
+  └── rank-based, 不需 score 正規化, 各 stream 權重自然平衡
+    
+    │
+    ▼
+Unified results (score desc)
+```
+
+**降級路徑**：
+```
+@huggingface/transformers 載入失敗 → embeddings disabled
+  └── sqlite-vec not available → application cosine on BLOB
+    └── FTS5 不存在 → LIKE fallback (Phase 5 style)
+```
+
+**無縫降級**：任何一層失敗不 crash，靜默走下一層。
+
+### 交付狀態
+
+| 項目 | 狀態 | 工時 | 說明 |
+|------|------|:----:|------|
+| 安裝依賴：better-sqlite3 + sqlite-vec + @huggingface/transformers | ✅ | 0.5 天 | 3 個 npm install，verified native compile |
+| memory-db.mjs：SQLite 層（schema + FTS5 + vec0 + CRUD + 遷移 + RRF） | ✅ | 2 天 | 784 行，21/21 tests，含 migrateFromJSON |
+| embedding.mjs 升級：@huggingface/transformers Layer 2 | ✅ | 1 天 | 三層降級架構：TF-IDF → transformers → hybrid |
+| memory-store.mjs CLI → SQLite 後端 (--db flag) | ✅ | 1 天 | 8 命令 SQLite 實作，FTS5 BM25 取代 fuzzy，JSON 向後相容 |
+| compaction-fix.js 策略修正 | ✅ | 0.5 天 | 不再依賴 messages.transform（compaction 後不觸發），改嵌入 compacting context |
+| 搜尋升級：BM25 + Vector + RRF fusion 整合 CLI | ⏳ 部分 | — | memory-db.mjs 已完整實作；CLI 僅 FTS5（async embedding 需 await 改造） |
+| Auto-embedding on store (async) | ⏳ 部分 | — | code 已寫（cmdStoreDB 含 getSentenceEmbedding call），但 CLI sync 無法 await |
+| **總計** | **~80%** | **~5 天** | 核心重構完成，CLI async 改造為剩餘工作 |
+
+### 不上什麼（維持）
+
+| 項目 | 原因 |
+|------|------|
+| Phase 11.2 Knowledge Graph | LLM 不會主動查圖，ROI 低 |
+| Phase 11.3 Consolidation/Clustering | entry 數量 < 5000，不值得 |
+| 外部分數資料庫（Milvus/Chroma） | sqlite-vec 已足夠，不可增加外部依賴 |
+| 自動 LLM embedding（用 LLM 當 embedder） | @huggingface/transformers 更快、離線、免費 |
+| 多語言模型（intfloat/multilingual-e5） | Smart MCP 以英文為主，中文 error message 用 BM25 就夠 |
+
+### 與既有系統關係
+
+| 既有功能 | 關係 |
+|---------|------|
+| Auto Memory Injection (10.5) | 注入品質因 semantic search 提升（自然語言 query 更準） |
+| Skill-level Learning (10.6) | skill_patch 搜尋從 keyword BM25 → semantic RRF（8.6pp recall 提升） |
+| Memory Lifecycle (10.8) | 不變，SQLite 版本維持相同 lifecycle 邏輯 |
+| Document Registry (Phase 4b) | 使用 node:sqlite，memory-db.mjs 使用 better-sqlite3 — 兩者獨立，無衝突 |
