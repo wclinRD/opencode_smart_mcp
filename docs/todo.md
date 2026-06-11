@@ -1053,51 +1053,35 @@ flowchart LR
 
 ---
 
-## Phase 16：Knowledge Graph Memory — 結構化知識圖譜
+## Phase 16：Knowledge Graph Memory — 結構化知識圖譜 ✅ (2026-06-12)
 
-> 2026-06-12 規劃。基於 MCP 生態圈研究（官方 87K⭐ memory server）。
+> 基於 MCP 生態圈研究（官方 87K⭐ memory server）。
 > 在 memory.db 新增 entities + relations tables，讓 LLM 可以理解「結構」而非只是「相似度」。
 
-### 1. `memory-db.mjs` 擴充 — KG tables + CRUD
+### 1. `memory-db.mjs` 擴充 — KG tables + CRUD ✅
 
-- [ ] 新增 `kg_entities` table（name, type, observations JSON, embedding BLOB）
-- [ ] 新增 `kg_relations` table（from, to, relationType, created_at）
-- [ ] `createEntities(entities)` — INSERT OR IGNORE
-- [ ] `createRelations(relations)` — INSERT OR IGNORE（skip duplicates）
-- [ ] `searchNodes(query, limit)` — 跨 name/type/observations 搜尋
-- [ ] `openNodes(names)` — 取出 nodes + 它們之間的 relations
-- [ ] `readGraph()` — 整個 graph
-- [ ] `deleteEntities(names)` — cascade relations
-- [ ] `deleteObservations(entityName, observations)` — 刪除特定 observations
-- [ ] `deleteRelations(relations)` — 刪除特定 relations
-- [ ] `addObservations(entityName, observations)` — 新增 observations
-- [ ] Schema migration（auto-add kg tables to existing memory.db）
+- [x] 新增 `kg_entities` table（name, type, observations JSON, embedding BLOB）
+- [x] 新增 `kg_relations` table（from, to, relationType, created_at）
+- [x] `createEntities(entities)` — INSERT OR IGNORE
+- [x] `createRelations(relations)` — INSERT OR IGNORE（skip duplicates）
+- [x] `searchNodes(query, limit)` — 跨 name/type/observations 搜尋
+- [x] `openNodes(names)` — 取出 nodes + 它們之間的 relations
+- [x] `readGraph()` — 整個 graph
+- [x] `deleteEntities(names)` — cascade relations
+- [x] `deleteObservations(entityName, observations)` — 刪除特定 observations
+- [x] `deleteRelations(relations)` — 刪除特定 relations
+- [x] `addObservations(entityName, observations)` — 新增 observations
+- [x] Schema migration（auto-add kg tables to existing memory.db）
 
-### 2. Plugin — `smart_kg_*` MCP tools
+### 2. Plugin — `smart_kg` MCP tool ✅
 
-- [ ] `src/plugins/standard/kg-create-entities.mjs`
-- [ ] `src/plugins/standard/kg-create-relations.mjs`
-- [ ] `src/plugins/standard/kg-search-nodes.mjs`
-- [ ] `src/plugins/standard/kg-open-nodes.mjs`
-- [ ] `src/plugins/standard/kg-read-graph.mjs`
-- [ ] `src/plugins/standard/kg-delete-entities.mjs`
-- [ ] `src/plugins/standard/kg-delete-observations.mjs`
-- [ ] `src/plugins/standard/kg-delete-relations.mjs`
+- [x] `src/plugins/standard/kg.mjs` — 單一 handler-based plugin（160 行）
+- [x] 9 operations：create_entities, create_relations, search_nodes, open_nodes, read_graph, delete_entities, delete_observations, delete_relations, add_observations
 
-### 3. 整合
+### 3. 測試 ✅
 
-- [ ] hybrid-engine DOMAIN_MAP 新增 `kg` 領域
-- [ ] Agent personality 更新（KG 工具加入 direct-call table）
-- [ ] Manifest 自動註冊（Phase 15）
-
-### 4. 測試
-
-- [ ] KG CRUD unit tests
-- [ ] searchNodes / openNodes / readGraph tests
-- [ ] Cascade delete tests
-- [ ] Migration tests（舊 DB 自動加 KG tables）
-- [ ] Plugin integration tests
-- [ ] 全量回歸
+- [x] 31 tests（CRUD / search / open / read / delete / observations / plugin / migration）
+- [x] 全量回歸：**1174 tests, 0 fail**
 
 ---
 

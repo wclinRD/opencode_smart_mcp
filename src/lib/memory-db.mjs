@@ -3,6 +3,8 @@
 // Triple-index: entries (row data) + entries_fts (FTS5 BM25) + entries_vec (sqlite-vec ANN)
 // Search: BM25 + Vector → RRF(k=60) fusion
 // Degradation: sqlite-vec unavailable → app-level cosine; FTS5 unavailable → LIKE
+//
+// Phase 16: Knowledge Graph — kg_entities + kg_relations tables for structured memory
 
 import Database from 'better-sqlite3';
 import * as sqliteVec from 'sqlite-vec';
@@ -63,6 +65,37 @@ const VEC0_SQL = `
 `;
 
 // ---------------------------------------------------------------------------
+// Phase 16: Knowledge Graph schema
+// ---------------------------------------------------------------------------
+
+const KG_SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS kg_entities (
+    name TEXT PRIMARY KEY,
+    type TEXT NOT NULL DEFAULT 'unknown',
+    observations TEXT NOT NULL DEFAULT '[]',
+    embedding BLOB,
+    created_at TEXT DEFAULT (datetime('now')),
+    last_seen TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_kg_entities_type ON kg_entities(type);
+
+  CREATE TABLE IF NOT EXISTS kg_relations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_entity TEXT NOT NULL,
+    to_entity TEXT NOT NULL,
+    relation_type TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(from_entity, to_entity, relation_type),
+    FOREIGN KEY(from_entity) REFERENCES kg_entities(name) ON DELETE CASCADE,
+    FOREIGN KEY(to_entity) REFERENCES kg_entities(name) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_kg_relations_from ON kg_relations(from_entity);
+  CREATE INDEX IF NOT EXISTS idx_kg_relations_to ON kg_relations(to_entity);
+`;
+
+// ---------------------------------------------------------------------------
 // MemoryDB class
 // ---------------------------------------------------------------------------
 
@@ -99,6 +132,9 @@ export class MemoryDB {
 
     // Initialize schema
     this.#db.exec(SCHEMA_SQL);
+
+    // Phase 16: Knowledge Graph schema
+    this.#db.exec(KG_SCHEMA_SQL);
 
     // Rebuild FTS5 index on startup (handles any out-of-sync state)
     this.rebuildFTS();
@@ -750,6 +786,263 @@ export class MemoryDB {
     }
     const denom = Math.sqrt(magA) * Math.sqrt(magB);
     return denom === 0 ? 0 : dot / denom;
+  }
+
+  // -----------------------------------------------------------------------
+  // Phase 16: Knowledge Graph
+  // -----------------------------------------------------------------------
+
+  /**
+   * Create multiple entities. Skips entities with existing names.
+   * @param {Array<{name:string, type:string, observations:string[]}>} entities
+   * @returns {{ created: number, skipped: number }}
+   */
+  createEntities(entities) {
+    this.#ensureOpen();
+    let created = 0, skipped = 0;
+    const stmt = this.#db.prepare(`
+      INSERT OR IGNORE INTO kg_entities (name, type, observations)
+      VALUES (?, ?, ?)
+    `);
+    const insertMany = this.#db.transaction((items) => {
+      for (const e of items) {
+        const obs = JSON.stringify(e.observations || []);
+        const result = stmt.run(e.name, e.type || 'unknown', obs);
+        if (result.changes > 0) created++;
+        else skipped++;
+      }
+    });
+    insertMany(entities);
+    return { created, skipped };
+  }
+
+  /**
+   * Create multiple relations. Skips duplicate relations.
+   * @param {Array<{from:string, to:string, relationType:string}>} relations
+   * @returns {{ created: number, skipped: number }}
+   */
+  createRelations(relations) {
+    this.#ensureOpen();
+    let created = 0, skipped = 0;
+    const stmt = this.#db.prepare(`
+      INSERT OR IGNORE INTO kg_relations (from_entity, to_entity, relation_type)
+      VALUES (?, ?, ?)
+    `);
+    const insertMany = this.#db.transaction((items) => {
+      for (const r of items) {
+        const result = stmt.run(r.from, r.to, r.relationType);
+        if (result.changes > 0) created++;
+        else skipped++;
+      }
+    });
+    insertMany(relations);
+    return { created, skipped };
+  }
+
+  /**
+   * Search nodes by query across name, type, and observations.
+   * @param {string} query
+   * @param {number} [limit=20]
+   * @returns {Array<{name, type, observations, relations}>}
+   */
+  searchNodes(query, limit = 20) {
+    this.#ensureOpen();
+    const likeQuery = `%${query}%`;
+    const rows = this.#db.prepare(`
+      SELECT DISTINCT e.name, e.type, e.observations, e.created_at
+      FROM kg_entities e
+      WHERE e.name LIKE ? OR e.type LIKE ? OR e.observations LIKE ?
+      ORDER BY e.last_seen DESC
+      LIMIT ?
+    `).all(likeQuery, likeQuery, likeQuery, limit);
+
+    return rows.map(r => ({
+      name: r.name,
+      type: r.type,
+      observations: JSON.parse(r.observations || '[]'),
+      relations: this.#getRelationsFor(r.name),
+    }));
+  }
+
+  /**
+   * Open specific nodes by name and return them with their inter-relations.
+   * @param {string[]} names
+   * @returns {{ entities: Array, relations: Array }}
+   */
+  openNodes(names) {
+    this.#ensureOpen();
+    if (!names || names.length === 0) return { entities: [], relations: [] };
+
+    const placeholders = names.map(() => '?').join(',');
+    const entities = this.#db.prepare(`
+      SELECT name, type, observations, created_at
+      FROM kg_entities
+      WHERE name IN (${placeholders})
+    `).all(...names).map(r => ({
+      name: r.name,
+      type: r.type,
+      observations: JSON.parse(r.observations || '[]'),
+    }));
+
+    const relations = this.#db.prepare(`
+      SELECT from_entity, to_entity, relation_type
+      FROM kg_relations
+      WHERE from_entity IN (${placeholders}) AND to_entity IN (${placeholders})
+    `).all(...names.concat(names)).map(r => ({
+      from: r.from_entity,
+      to: r.to_entity,
+      relationType: r.relation_type,
+    }));
+
+    return { entities, relations };
+  }
+
+  /**
+   * Read the entire knowledge graph.
+   * @returns {{ entities: Array, relations: Array }}
+   */
+  readGraph() {
+    this.#ensureOpen();
+    const entities = this.#db.prepare(`
+      SELECT name, type, observations, created_at
+      FROM kg_entities ORDER BY last_seen DESC
+    `).all().map(r => ({
+      name: r.name,
+      type: r.type,
+      observations: JSON.parse(r.observations || '[]'),
+    }));
+
+    const relations = this.#db.prepare(`
+      SELECT from_entity, to_entity, relation_type
+      FROM kg_relations ORDER BY created_at DESC
+    `).all().map(r => ({
+      from: r.from_entity,
+      to: r.to_entity,
+      relationType: r.relation_type,
+    }));
+
+    return { entities, relations };
+  }
+
+  /**
+   * Delete entities and their relations (cascade).
+   * @param {string[]} names
+   * @returns {{ deleted: number }}
+   */
+  deleteEntities(names) {
+    this.#ensureOpen();
+    if (!names || names.length === 0) return { deleted: 0 };
+    const placeholders = names.map(() => '?').join(',');
+    const result = this.#db.prepare(`
+      DELETE FROM kg_entities WHERE name IN (${placeholders})
+    `).run(...names);
+    return { deleted: result.changes };
+  }
+
+  /**
+   * Delete specific observations from an entity.
+   * @param {string} entityName
+   * @param {string[]} observations
+   * @returns {{ removed: number }}
+   */
+  deleteObservations(entityName, observations) {
+    this.#ensureOpen();
+    const entity = this.#db.prepare('SELECT observations FROM kg_entities WHERE name = ?').get(entityName);
+    if (!entity) return { removed: 0 };
+
+    const current = JSON.parse(entity.observations || '[]');
+    const toRemove = new Set(observations);
+    const filtered = current.filter(o => !toRemove.has(o));
+    const removed = current.length - filtered.length;
+
+    this.#db.prepare('UPDATE kg_entities SET observations = ?, last_seen = datetime(\'now\') WHERE name = ?')
+      .run(JSON.stringify(filtered), entityName);
+
+    return { removed };
+  }
+
+  /**
+   * Add observations to an existing entity.
+   * @param {string} entityName
+   * @param {string[]} observations
+   * @returns {{ added: number }}
+   */
+  addObservations(entityName, observations) {
+    this.#ensureOpen();
+    const entity = this.#db.prepare('SELECT observations FROM kg_entities WHERE name = ?').get(entityName);
+    if (!entity) return { added: 0 };
+
+    const current = JSON.parse(entity.observations || '[]');
+    const existing = new Set(current);
+    let added = 0;
+    for (const o of observations) {
+      if (!existing.has(o)) {
+        current.push(o);
+        existing.add(o);
+        added++;
+      }
+    }
+
+    this.#db.prepare('UPDATE kg_entities SET observations = ?, last_seen = datetime(\'now\') WHERE name = ?')
+      .run(JSON.stringify(current), entityName);
+
+    return { added };
+  }
+
+  /**
+   * Delete specific relations.
+   * @param {Array<{from:string, to:string, relationType:string}>} relations
+   * @returns {{ deleted: number }}
+   */
+  deleteRelations(relations) {
+    this.#ensureOpen();
+    let deleted = 0;
+    const stmt = this.#db.prepare(`
+      DELETE FROM kg_relations
+      WHERE from_entity = ? AND to_entity = ? AND relation_type = ?
+    `);
+    const deleteMany = this.#db.transaction((items) => {
+      for (const r of items) {
+        const result = stmt.run(r.from, r.to, r.relationType);
+        deleted += result.changes;
+      }
+    });
+    deleteMany(relations);
+    return { deleted };
+  }
+
+  /**
+   * Get entity count in KG.
+   * @returns {number}
+   */
+  countEntities() {
+    this.#ensureOpen();
+    return this.#db.prepare('SELECT COUNT(*) as cnt FROM kg_entities').get().cnt;
+  }
+
+  /**
+   * Get relation count in KG.
+   * @returns {number}
+   */
+  countRelations() {
+    this.#ensureOpen();
+    return this.#db.prepare('SELECT COUNT(*) as cnt FROM kg_relations').get().cnt;
+  }
+
+  /**
+   * Get all relations for a specific entity.
+   * @private
+   */
+  #getRelationsFor(entityName) {
+    return this.#db.prepare(`
+      SELECT from_entity, to_entity, relation_type
+      FROM kg_relations
+      WHERE from_entity = ? OR to_entity = ?
+    `).all(entityName, entityName).map(r => ({
+      from: r.from_entity,
+      to: r.to_entity,
+      relationType: r.relation_type,
+    }));
   }
 }
 

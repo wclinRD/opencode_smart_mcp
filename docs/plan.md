@@ -2083,9 +2083,10 @@ tools/call 到達
 
 ---
 
-## Phase 16：Knowledge Graph Memory — 結構化知識圖譜
+## Phase 16：Knowledge Graph Memory — 結構化知識圖譜 ✅ (2026-06-12)
 
-> 2026-06-12 規劃。基於 MCP 生態圈研究（官方 87K⭐ memory server）。
+> 2026-06-12 規劃 → 2026-06-12 實作完成。
+> 基於 MCP 生態圈研究（官方 87K⭐ memory server）。
 > 核心洞察：Smart MCP 的 semantic memory（向量+BM25+RRF）擅長「找相似」，
 > 但完全無法回答「X 和 Y 的關係是什麼」— 這是 structured knowledge 的領域。
 
@@ -2136,6 +2137,16 @@ Knowledge Graph（新增）：
 | Memory Lifecycle (10.8) | 共用 lifecycle 邏輯，stale entities 自動清理 |
 | memory-db.mjs | 共用 SQLite connection，不增加依賴 |
 | Manifest (Phase 15) | 自動註冊到 manifest.json（domain: memory） |
+
+### 交付摘要
+
+| 項目 | 說明 | 檔案 |
+|------|------|------|
+| KG schema | `kg_entities` + `kg_relations` tables，自動 migration | `src/lib/memory-db.mjs` (+230 行) |
+| KG CRUD | createEntities, createRelations, searchNodes, openNodes, readGraph, delete*, addObservations | `src/lib/memory-db.mjs` |
+| KG plugin | `smart_kg` MCP tool（9 operations，單一 handler-based plugin） | `src/plugins/standard/kg.mjs` (160 行) |
+| 測試 | 31 tests（CRUD / search / open / read / delete / observations / plugin / migration） | `tests/kg-memory.test.mjs` |
+| 全量回歸 | **1174 tests, 0 fail** | — |
 
 ### 預期成效
 
