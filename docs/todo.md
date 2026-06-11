@@ -791,7 +791,7 @@ flowchart LR
 
 ---
 
-## Phase 13：專案穩固 & 可發布性強化 🔄 (進行中)
+## Phase 13：專案穩固 & 可發布性強化 ✅ (2026-06-12)
 
 > 目標：補測試缺口 + CLI 可發布 + 程式碼品質提升
 
@@ -800,11 +800,8 @@ flowchart LR
 - [x] `package.json` 加入 `bin.smart-memory` → `./src/cli/memory-store.mjs`
 - [x] CLI 已有 `#!/usr/bin/env node` shebang（沿用）
 - [x] `npm link` 驗證：`smart-memory --help` 正常運作
-
-### 進行中
-
-- [ ] `tests/embedding.test.mjs` — 30 tests（tokenize / vectorizer / cosineSimilarity / addDocument / hybridSearch / sentence bridge）✅ 已測試
-- [ ] `tests/apply-engine.test.mjs` — apply-engine.mjs 關鍵路徑測試（進行中）
+- [x] `tests/embedding.test.mjs` — 30 tests（tokenize / vectorizer / cosineSimilarity / addDocument / hybridSearch / sentence bridge）
+- [x] `tests/apply-engine.test.mjs` — 49 tests（parsers / fuzzyMatch / detectMultiOccurrence / applySearchReplace / applyHashline / applyAtomic / checkBalance / checkFileAccess / suggestNearest / computeLineFingerprints / fuzzy mode）
 
 ### 待辦
 

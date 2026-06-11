@@ -1169,7 +1169,7 @@ Unified results (score desc)
 
 ---
 
-## Phase 13：專案穩固 & 可發布性強化 🔄 (2026-06-12)
+## Phase 13：專案穩固 & 可發布性強化 ✅ (2026-06-12)
 
 ### 動機
 
@@ -1201,6 +1201,16 @@ Phase 11 和 12 建立了強大的記憶與 embedding 基礎，但：
 | 🥉 | `refactor-planner.mjs` | 280 | 重構規劃 |
 | 🥉 | `safe-handler.mjs` | 124 | 安全處理 |
 | 🥉 | `utils.mjs` | 164 | 共用工具 |
+
+### 成果
+
+| 項目 | 數字 |
+|------|------|
+| 新增測試檔案 | 2（`embedding.test.mjs`, `apply-engine.test.mjs`） |
+| 新增測試數 | **79**（30 + 49） |
+| 總測試數 | **867**（↑ 10% from 788） |
+| 回歸 | **0**（所有舊測試維持綠燈） |
+| CLI 發布 | `smart-memory` via `npm link` / `npx` 可用 |
 
 ### 學習
 
