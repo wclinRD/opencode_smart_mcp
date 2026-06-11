@@ -1085,27 +1085,25 @@ flowchart LR
 
 ---
 
-## Phase 17：Database Query — 資料庫查詢
+## Phase 17：Database Query — 資料庫查詢 ✅ (2026-06-12)
 
-> 2026-06-12 規劃。補 Smart MCP 完全沒有的 DB 能力。
+> 補 Smart MCP 完全沒有的 DB 能力。
 
-### 1. `src/lib/db-query.mjs` — SQL 查詢引擎
+### 1. `src/lib/db-query.mjs` — SQL 查詢引擎 ✅
 
-- [ ] SQLite 支援（better-sqlite3，已安裝）
-- [ ] PostgreSQL 支援（可選，pg npm）
-- [ ] Schema introspection（列出 tables + columns + types）
-- [ ] 安全：唯讀、timeout 10s、row limit 1000、禁止 DDL/DML
+- [x] SQLite 支援（better-sqlite3，已安裝）
+- [x] PostgreSQL 支援（可選，pg npm）
+- [x] Schema introspection（列出 tables + columns + types + row counts）
+- [x] 安全：唯讀、timeout 10s、row limit 1000、14 種 DDL/DML 關鍵字阻擋
 
-### 2. Plugin
+### 2. Plugin ✅
 
-- [ ] `src/plugins/standard/db-introspect.mjs` — `smart_db_introspect`
-- [ ] `src/plugins/standard/db-query.mjs` — `smart_db_query`
+- [x] `src/plugins/standard/db-query.mjs` — `smart_db`（introspect + query，100 行）
 
-### 3. 整合 + 測試
+### 3. 測試 ✅
 
-- [ ] hybrid-engine DOMAIN_MAP 新增 `database` 領域
-- [ ] Agent personality 更新
-- [ ] 測試 + 全量回歸
+- [x] 28 tests（isSafeQuery 14 種 / introspect / query / plugin / safety）
+- [x] 全量回歸：**1202 tests, 0 fail**
 
 ---
 

@@ -2158,10 +2158,20 @@ Knowledge Graph（新增）：
 
 ---
 
-## Phase 17：Database Query — 資料庫查詢
+## Phase 17：Database Query — 資料庫查詢 ✅ (2026-06-12)
 
-> 2026-06-12 規劃。補 Smart MCP 完全沒有的 DB 能力。
-> 官方 MCP 有 PostgreSQL/SQLite reference servers。
+> 2026-06-12 規劃 → 2026-06-12 實作完成。
+> 補 Smart MCP 完全沒有的 DB 能力。官方 MCP 有 PostgreSQL/SQLite reference servers。
+
+### 交付摘要
+
+| 項目 | 說明 | 檔案 |
+|------|------|------|
+| DB query engine | isSafeQuery, introspectSQLite, querySQLite, introspectPostgres, queryPostgres | `src/lib/db-query.mjs` (230 行) |
+| DB plugin | `smart_db` MCP tool（introspect + query，SQLite + PostgreSQL） | `src/plugins/standard/db-query.mjs` (100 行) |
+| 安全機制 | 唯讀、timeout 10s、row limit 1000、14 種 DDL/DML 關鍵字阻擋 | — |
+| 測試 | 28 tests（isSafeQuery 14 種 / introspect / query / plugin / safety） | `tests/db-query.test.mjs` |
+| 全量回歸 | **1202 tests, 0 fail** | — |
 
 ### 設計
 
