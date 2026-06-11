@@ -1166,3 +1166,44 @@ Unified results (score desc)
 | `config/seed-memory.json` | ✅ | 初始含 1 筆 LSP timeout skill_patch（keep=always） |
 | `openDB()` auto-seed | ✅ | 空 DB 自動匯入 + 訊息提示 |
 | 保護層級 | **Layer 1** `config/agents/smart-mcp.md`（git）→ **Layer 2** memory keep=always（seed）→ 雙重保險 |
+
+---
+
+## Phase 13：專案穩固 & 可發布性強化 🔄 (2026-06-12)
+
+### 動機
+
+```
+Phase 11 (Semantic Memory) ──→ Phase 12 (Cross-machine) ──→ Phase 13 (Polish)
+    核心功能完成              跨機器可用               可發布、可測試、可維護
+```
+
+Phase 11 和 12 建立了強大的記憶與 embedding 基礎，但：
+- 核心 module `embedding.mjs`、`apply-engine.mjs` 完全沒有專屬測試
+- CLI 無法 `npm link` / `npx` 使用（缺 `bin` entry）
+- 測試覆蓋率缺口是 tech debt 的主要來源
+
+### 目標
+
+1. **補測試缺口** — 優先測試近期修改的 module（embedding）和風險最高的 module（apply-engine）
+2. **CLI 可發布** — `package.json` 加 `bin` + 驗證 `npm link` 工作
+3. **建立測試 culture** — 新 module 或重大修改附帶測試為門檻
+
+### 測試優先順序
+
+| 優先 | Module | 行數 | 理由 |
+|------|--------|------|------|
+| 🥇 | `embedding.mjs` | 329 | 最近被 CLI async 改造影響，vectorizer + hybridSearch + sentence bridge |
+| 🥇 | `apply-engine.mjs` | 1303 | 最大檔，patch 套用核心邏輯，無任何測試 |
+| 🥈 | `memory-db.mjs` | 784 | SQLite/sqlite-vec 整合，現有 21 測試靠 CLI 間接驗證 |
+| 🥉 | `cache-manager.mjs` | 387 | 快取邏輯 |
+| 🥉 | `compose-engine.mjs` | 264 | 組合引擎 |
+| 🥉 | `refactor-planner.mjs` | 280 | 重構規劃 |
+| 🥉 | `safe-handler.mjs` | 124 | 安全處理 |
+| 🥉 | `utils.mjs` | 164 | 共用工具 |
+
+### 學習
+
+- `embedding.mjs` 的 `STOP_WORDS` 不包含 "and" — 這是設計取捨（常見但保留以涵蓋搜尋意圖），非 bug
+- IEEE 754 浮點運算 → cosineSimilarity 測試用 `Math.abs(x - 1) < 1e-10` 取代 `assert.equal(x, 1.0)`
+- 單字元 token 被 `t.length > 1` 過濾 → corpus 測試資料用 ≥2 字母詞避免誤判

@@ -789,3 +789,35 @@ flowchart LR
 |-------------|------|--------|
 | LSP timeout → retry 一次，仍 timeout 才 fallback grep | always | self-reflection |
 
+---
+
+## Phase 13：專案穩固 & 可發布性強化 🔄 (進行中)
+
+> 目標：補測試缺口 + CLI 可發布 + 程式碼品質提升
+
+### 已完成
+
+- [x] `package.json` 加入 `bin.smart-memory` → `./src/cli/memory-store.mjs`
+- [x] CLI 已有 `#!/usr/bin/env node` shebang（沿用）
+- [x] `npm link` 驗證：`smart-memory --help` 正常運作
+
+### 進行中
+
+- [ ] `tests/embedding.test.mjs` — 30 tests（tokenize / vectorizer / cosineSimilarity / addDocument / hybridSearch / sentence bridge）✅ 已測試
+- [ ] `tests/apply-engine.test.mjs` — apply-engine.mjs 關鍵路徑測試（進行中）
+
+### 待辦
+
+- [ ] `tests/memory-db.test.mjs` — memory-db 專屬測試（目前靠 CLI 間接驗證）
+- [ ] `tests/cache-manager.test.mjs` — cache 核心邏輯測試
+- [ ] `tests/compose-engine.test.mjs` — 組合引擎測試
+- [ ] `tests/refactor-planner.test.mjs` — 重構規劃測試
+- [ ] `tests/safe-handler.test.mjs` — 安全處理測試
+- [ ] `tests/utils.test.mjs` — 共用工具測試
+
+### 學習
+
+- `getVector('the of an')` 仍回傳非空 → 發現 "and" 不在 `STOP_WORDS` 集合中（設計取捨，非 bug）
+- `cosineSimilarity(v, v)` 回傳 `1.0000000000000002`（IEEE 754）→ 改用 `Math.abs(x - 1) < 1e-10` 比對
+- 單字元 token 如 `'b'` 被 `t.length > 1` 過濾 → corpus 設計需用 ≥2 字母詞
+

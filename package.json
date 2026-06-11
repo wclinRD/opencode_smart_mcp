@@ -4,6 +4,9 @@
   "description": "Agent intelligence layer for opencode — tool strategies, workflow automation, memory integration, and planner orchestration on top of smart-mcp",
   "type": "module",
   "main": "src/index.mjs",
+  "bin": {
+    "smart-memory": "./src/cli/memory-store.mjs"
+  },
   "exports": {
     ".": "./src/index.mjs",
     "./system-prompt": "./src/agent/system-prompt.mjs",
