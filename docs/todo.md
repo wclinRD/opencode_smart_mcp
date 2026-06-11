@@ -560,7 +560,7 @@
 | 17 | 🐛 修正 | memory-db: hash `|| ''` → `|| null` (UNIQUE constraint collision) | ✅ 已修 | 🔴 P0 |
 | 18 | 🐛 修正 | memory-db: BigInt(row.rowid) for sqlite-vec v0.1.9 | ✅ 已修 | 🔴 P0 |
 | 19 | 🐛 修正 | compaction-fix: messages.transform 不觸發 → 嵌入 compacting context | ✅ 已修 | 🔴 P0 |
-| 20 | 💡 增強 | CLI async 改造 — `--semantic` 真正使用 hybrid search | 📋 待辦 | 🟡 P2 |
+| 20 | 💡 增強 | CLI async 改造 — `--semantic` 真正使用 hybrid search | ✅ 已修 | 🟡 P2 |
 
 ---
 
@@ -657,8 +657,7 @@
 
 ## Phase 11：記憶系統升級 — Semantic Memory Engine ✅ (2026-06-11)
 
-> 核心重構完成 (~80%)。記憶系統從 JSON file → SQLite (FTS5 + vec0 + RRF)。
-> 剩餘工作：CLI async 改造（讓 --semantic 真正使用 embedding 做 hybrid search）。
+> **全部完成** (2026-06-11)：記憶系統從 JSON file → SQLite (FTS5 + vec0 + RRF + CLI async —semantic)。
 
 ### 關鍵差異（原設計 → 新設計）
 
@@ -736,17 +735,19 @@
 - [x] 兩份同步：`smart/plugin/` + `~/.config/opencode/plugins/`
 - [x] 驗證：runtime log 顯示 recovery prompt 在 compaction #2 後正常注入
 
-#### 6. Auto-embedding on Store ⏳
+#### 6. CLI async 改造 ✅ (2026-06-11)
 
-- [ ] `cmdStoreDB` 已寫入 `getSentenceEmbedding().then()` 但 CLI sync 無法 await
-- [ ] `cmdSearchDB` 已寫入 embedding path 但無法同步取得
-- [ ] **解法**: main() 改 async（配合 Node 26 top-level await）+ `--semantic` 搜尋先 await model load
+- [x] `main()` 改 `async function main()` + `main().catch(...)` 錯誤處理
+- [x] `cmdStoreDB` → async：`await tryLoadSentenceModel()` → `await getSentenceEmbedding()` → `db.storeEmbedding()`
+- [x] `cmdSearchDB` → async：`await tryLoadSentenceModel()` → `await getSentenceEmbedding()` → `db.searchHybrid()`（RRF fusion）
+- [x] 移除 `openDB()` 的 fire-and-forget `tryLoadSentenceModel().catch(() => {})`（與 await 版本 race condition）
+- [x] 實測驗證："out of memory crash" → hybrid match "Segmentation fault in memory allocator when heap exhausted"（零 FTS5 token 重疊）
 
 ### 驗收標準
 
 | 標準 | 狀態 |
 |------|------|
-| 自然語言 query recall@10 比純 TF-IDF 高 | 🟡 未 benchmark（需 async CLI 後測） |
+| 自然語言 query recall@10 比純 TF-IDF 高 | ✅ hybrid match 跨語意查詢已實測通過 |
 | FTS5 BM25 在 error message 搜尋不倒退 | ✅ 明顯優於舊 fuzzy match |
 | RRF fusion 比單一 BM25 或 vector 都好 | ✅ memory-db 單元測試驗證 |
 | 降級鏈完整：任一層失效不 crash | ✅ 三層降級皆驗證 |

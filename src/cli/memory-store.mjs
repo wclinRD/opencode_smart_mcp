@@ -953,15 +953,10 @@ function openDB(dataDir, semantic) {
     migration = db.migrateFromJSON(jsonPath);
   }
 
-  // Pre-load sentence model if semantic search requested
-  if (semantic) {
-    tryLoadSentenceModel().catch(() => {});
-  }
-
   return { db, migration };
 }
 
-function cmdStoreDB(db, errorMsg, opts) {
+async function cmdStoreDB(db, errorMsg, opts) {
   const hash = hashError(errorMsg);
 
   const existing = db.getEntryByHash(hash);
@@ -997,18 +992,22 @@ function cmdStoreDB(db, errorMsg, opts) {
 
   const inserted = db.insertEntry(entry);
 
-  // Auto-embed if --semantic
+  // Auto-embed if --semantic (ensure model loaded first)
   if (opts.semantic) {
-    getSentenceEmbedding(errorMsg).then(emb => {
-      if (emb) db.storeEmbedding(inserted.id, emb);
-    }).catch(() => {});
+    if (!isSentenceModelAvailable()) {
+      await tryLoadSentenceModel().catch(() => {});
+    }
+    const emb = await getSentenceEmbedding(errorMsg).catch(() => null);
+    if (emb) {
+      db.storeEmbedding(inserted.id, emb);
+    }
   }
 
   const lifecycle = db.runLifecycle();
   return { stored: true, updated: false, id: inserted.id, hash, category: entry.category, lifecycle };
 }
 
-function cmdSearchDB(db, query, opts) {
+async function cmdSearchDB(db, query, opts) {
   const lifecycle = db.runLifecycle();
 
   const total = db.countEntries();
@@ -1027,36 +1026,39 @@ function cmdSearchDB(db, query, opts) {
 
   const limit = opts.limit || 10;
 
-  // 2. Try hybrid search (FTS5 + optional vector via RRF)
-  //    Uses FTS5 BM25 sync (always available).
-  //    If --semantic and model loaded, fire-and-forget embedding for
-  //    hybrid enhancement (logged to stderr, doesn't block output).
-  let embeddingPromise = null;
-  if ((opts.semantic || opts.vector) && isSentenceModelAvailable()) {
-    embeddingPromise = getSentenceEmbedding(query).catch(() => null);
-  }
-
-  if (embeddingPromise) {
-    // Attempt hybrid inline via synchronous check (rare — model loads async)
-    // For immediate CLI output, FTS5 gives great results already
-    const hybridResults = db.searchFTS(query, limit * 2);
-    if (hybridResults.length > 0) {
-      const entries = hybridResults.slice(0, limit).map(e => {
-        const norm = normalizeDBEntry(e);
-        norm.similarity = Math.round((1 - (hybridResults.indexOf(e) / limit) * 0.4) * 100) / 100;
-        norm.matchType = 'fts';
-        return norm;
-      });
-      return { found: true, count: entries.length, entries, matchType: 'fts', lifecycle };
+  // 2. Hybrid search via RRF (FTS5 BM25 + vector ANN)
+  //    Only runs when --semantic is set with a loaded sentence model.
+  //    Falls through to FTS5-only if model/embedding unavailable.
+  if (opts.semantic) {
+    // Ensure model is loaded (tryLoadSentenceModel may still be warming up
+    // from openDB's fire-and-forget; await explicitly here)
+    if (!isSentenceModelAvailable()) {
+      await tryLoadSentenceModel().catch(() => null);
     }
+    if (isSentenceModelAvailable()) {
+      const emb = await getSentenceEmbedding(query).catch(() => null);
+      if (emb) {
+        const hybridResults = db.searchHybrid(query, emb, { limit });
+        if (hybridResults.length > 0) {
+          const entries = hybridResults.map(r => {
+            const norm = normalizeDBEntry(r);
+            norm.similarity = r._rrfScore;
+            norm.matchType = 'hybrid';
+            return norm;
+          });
+          return { found: true, count: entries.length, entries, matchType: 'hybrid', lifecycle };
+        }
+      }
+    }
+    // Embedding unavailable → fall through to FTS5 BM25
   }
 
-  // 3. FTS5 BM25 search (best quality, always synchronous)
+  // 3. FTS5 BM25 search (always synchronous, great quality even alone)
   const ftsResults = db.searchFTS(query, limit * 2);
   if (ftsResults.length > 0) {
-    const entries = ftsResults.slice(0, limit).map(e => {
+    const entries = ftsResults.slice(0, limit).map((e, i) => {
       const norm = normalizeDBEntry(e);
-      norm.similarity = Math.round((1 - (ftsResults.indexOf(e) / limit) * 0.4) * 100) / 100;
+      norm.similarity = Math.round((1 - (i / limit) * 0.4) * 100) / 100;
       norm.matchType = 'fts';
       return norm;
     });
@@ -1353,7 +1355,7 @@ function parseArgs() {
 // Main
 // ---------------------------------------------------------------------------
 
-function main() {
+async function main() {
   const opts = parseArgs();
   const dataDir = getDataDir(opts.dataDir);
   const useDB = opts.db || opts.semantic;
@@ -1370,13 +1372,13 @@ function main() {
       case 'store': {
         const errorMsg = opts.commandArgs.join(' ');
         if (!errorMsg) { console.error('Error message required for store command'); process.exit(1); }
-        result = cmdStoreDB(db, errorMsg, opts);
+        result = await cmdStoreDB(db, errorMsg, opts);
         break;
       }
       case 'search': {
         const query = opts.commandArgs.join(' ');
         if (!query) { console.error('Search query required for search command'); process.exit(1); }
-        result = cmdSearchDB(db, query, opts);
+        result = await cmdSearchDB(db, query, opts);
         break;
       }
       case 'list':  result = cmdListDB(db, opts); break;
@@ -1448,4 +1450,4 @@ function readFindings(opts) {
   return stdin ? JSON.parse(stdin) : [];
 }
 
-main();
+main().catch(err => { console.error(err.message); process.exit(1); });

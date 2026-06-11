@@ -1111,9 +1111,9 @@ Unified results (score desc)
 | embedding.mjs 升級：@huggingface/transformers Layer 2 | ✅ | 1 天 | 三層降級架構：TF-IDF → transformers → hybrid |
 | memory-store.mjs CLI → SQLite 後端 (--db flag) | ✅ | 1 天 | 8 命令 SQLite 實作，FTS5 BM25 取代 fuzzy，JSON 向後相容 |
 | compaction-fix.js 策略修正 | ✅ | 0.5 天 | 不再依賴 messages.transform（compaction 後不觸發），改嵌入 compacting context |
-| 搜尋升級：BM25 + Vector + RRF fusion 整合 CLI | ⏳ 部分 | — | memory-db.mjs 已完整實作；CLI 僅 FTS5（async embedding 需 await 改造） |
-| Auto-embedding on store (async) | ⏳ 部分 | — | code 已寫（cmdStoreDB 含 getSentenceEmbedding call），但 CLI sync 無法 await |
-| **總計** | **~80%** | **~5 天** | 核心重構完成，CLI async 改造為剩餘工作 |
+| 搜尋升級：BM25 + Vector + RRF fusion 整合 CLI | ✅ | — | main() async + await cmdSearchDB 呼叫 db.searchHybrid()（RRF fusion 含 vector ANN） |
+| Auto-embedding on store (async) | ✅ | — | cmdStoreDB async，await tryLoadSentenceModel + getSentenceEmbedding 確保 embedding 寫入 |
+| **總計** | **~100%** | **~5.5 天** | 全部 Phase 11 項目完成 |
 
 ### 不上什麼（維持）
 
