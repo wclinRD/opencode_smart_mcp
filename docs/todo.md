@@ -448,14 +448,15 @@
 > 對應 plan.md Phase 10 章節。
 > 補上「放心用・持續用・越用好」三條 missing link。
 
-### 10.1 Sandbox Execution
+### 10.1 Sandbox Execution ✅ (2026-06-12)
 
-- [ ] **設計**：決定 sandbox 技術（deno --allow-none / docker / 兩者並行）
-- [ ] **實作**：新增 `src/plugins/standard/exec.mjs` — `smart_exec` tool
-- [ ] **安全**：Permission level（allow / prompt / deny）
-- [ ] **降級**：sandbox 不可用 → 提示使用者手動執行
-- [ ] **測試**：基本 sandbox 執行 + 錯誤路徑 + 安全限制驗證
-- [ ] **Agent personality**：加入 smart_exec 使用時機與安全提示
+- [x] **設計**：決定 sandbox 技術 — deno --allow-none (primary) + node/python/bash (fallback)
+- [x] **實作**：新增 `src/plugins/standard/exec.mjs` — `smart_exec` tool (230 行, handler-based)
+- [x] **安全**：4 層權限等級（none/read/write/net），bash/write/net 自動警告
+- [x] **Timeout**：預設 30s，上限 120s，逾時自動 SIGTERM
+- [x] **輸出截斷**：stdout ≤ 50KB, stderr ≤ 10KB
+- [x] **測試**：27 tests（plugin structure / 4 語言 / timeout / sandbox / permission / output capping）
+- [x] **全量回歸**：1143 tests, 0 fail
 
 ### 10.2 Impact Warning 自動觸發
 

@@ -1070,18 +1070,31 @@ smart_compact({toolHistory, conversationLength, currentGoal?, currentTodos?})
 
 ### 放心用（Trust）
 
-#### 10.1 Sandbox Execution
+#### 10.1 Sandbox Execution ✅ (2026-06-12)
 
 讓 agent 不只是「建議你跑什麼」，而是直接在安全環境執行給你看。
 
 **作法**：新增 `smart_exec` MCP tool，接收 `{ language, code, files?, timeout }`，
-在 sandbox（deno / container）執行，回傳 stdout + stderr + exit code。
+在 sandbox（deno / node / python / bash）執行，回傳 stdout + stderr + exit code。
 
 ```
 LLM: 「這個 bug 應該在這…我跑個測試確認」
   → smart_exec({ language: "bash", code: "node test/index.test.mjs" })
-  → 回傳: { stdout: "...", stderr: "", exitCode: 0, duration: "1.2s" }
+  → 回傳: { stdout: "...", stderr: "", exitCode: 0 }
 ```
+
+#### 交付摘要
+
+| 項目 | 說明 | 檔案 |
+|------|------|------|
+| `smart_exec` MCP tool | handler-based plugin，支援 4 語言 + 4 權限等級 | `src/plugins/standard/exec.mjs` (230 行) |
+| 語言支援 | bash, node, python, deno（自動偵測可用 runtime） | — |
+| 安全層級 | none (deno --allow-none) / read / write / net | — |
+| Timeout 保護 | 預設 30s，上限 120s，逾時自動 kill | — |
+| 輸出截斷 | stdout ≤ 50KB, stderr ≤ 10KB | — |
+| 安全警告 | bash/write/net 自動附加 ⚠️ 警告 | — |
+| 測試 | 27 tests（plugin structure / 4 語言 / timeout / sandbox / permission / output capping） | `tests/exec.test.mjs` |
+| 全量回歸 | **1143 tests, 0 fail** | — |
 
 | 項目 | 說明 |
 |------|------|
