@@ -1,0 +1,17 @@
+[
+  {
+    "id": "seed_lsp_timeout_001",
+    "hash": "24dc26cb9ad055d7",
+    "type": "skill_patch",
+    "category": "skill_patch",
+    "status": "active",
+    "error_message": "LSP timeout 不該直接 fallback 到 grep/read — 應 retry 或縮小 scope（單一 symbol hover）後才退守 grep",
+    "behavior_change": "smart_lsp timeout → retry 一次或縮小 scope（從整份 symbols 改單一 hover）; 仍 timeout 才用 smart_grep context=5 替代",
+    "target_skill": "self-reflection",
+    "keep": "always",
+    "success": true,
+    "hit_count": 1,
+    "created_at": "2026-06-11T00:00:00.000Z",
+    "last_seen": "2026-06-11T00:00:00.000Z"
+  }
+]

@@ -47,11 +47,16 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { createVectorizer, hybridSearch, getSentenceEmbedding, tryLoadSentenceModel, isSentenceModelAvailable } from '../lib/embedding.mjs';
 import { MemoryDB, getMemoryDB } from '../lib/memory-db.mjs';
 
 const HOME = process.env.HOME || process.env.USERPROFILE || '/tmp';
+
+// Project root (for seed-memory discovery)
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = resolve(__dirname, '../..');
 
 // ---------------------------------------------------------------------------
 // Config
@@ -951,6 +956,18 @@ function openDB(dataDir, semantic) {
   let migration = null;
   if (existsSync(jsonPath)) {
     migration = db.migrateFromJSON(jsonPath);
+  }
+
+  // Auto-seed project knowledge base on first (empty) DB
+  // This ensures critical skill_patches survive across machine setups
+  if (db.countEntries() === 0) {
+    const seedPath = resolve(PROJECT_ROOT, 'config', 'seed-memory.json');
+    if (existsSync(seedPath)) {
+      const seed = db.migrateFromJSON(seedPath);
+      if (seed && seed.migrated > 0) {
+        console.error(`📚 Seeded ${seed.migrated} knowledge entry/ies from config/seed-memory.json`);
+      }
+    }
   }
 
   return { db, migration };
