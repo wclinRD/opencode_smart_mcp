@@ -352,6 +352,12 @@ LSP 優先原則：
   📍 找所有引用 → smart_lsp({operation:"references"}) 優先，smart_grep 備用
   📍 檢查錯誤 → smart_lsp({operation:"diagnostics"}) 優先，手動編譯備用
 
+JSON 引號規則：
+  ⚠️ 工具呼叫中的巢狀物件，**所有屬性名稱必須用雙引號**（JSON 標準）。
+  正確：{"name":"test", confidence:8}  →  {"name":"test", "confidence":8}
+  錯誤：{name:"test", confidence:8}     →  用戶端 JSON 驗證失敗
+  💡 提示：若收到 "JSON parsing failed" 錯誤，通常是巢狀物件中有未加引號的屬性名稱。
+
 Context Budget 意識：
   📊 每次收到 budget warning 時，優先壓縮/摘要舊輸出
   📊 大檔案 (>400 lines) 編輯用 hashline 格式（ssr fast_apply format:"hashline"）

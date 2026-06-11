@@ -36,6 +36,7 @@ import { getDefaultCache } from '../lib/cache-manager.mjs';
 import { createPipeline, optimizeOutput as pipelineOptimize } from '../lib/output-pipeline.mjs';
 import { isStructuredError } from '../lib/safe-handler.mjs';
 import { getContextBudget, resetContextBudget } from '../lib/context-budget.mjs';
+import { parseJson as lenientParseJson } from '../lib/lenient-json.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -1403,8 +1404,9 @@ rl.on('line', (line) => {
   if (!trimmed) return;
   let req;
   try {
-    req = JSON.parse(trimmed);
+    req = lenientParseJson(trimmed);
   } catch {
+    // Fallback: try strict JSON for error response (shouldn't get here)
     try { const fb = JSON.parse(trimmed); if (fb && typeof fb.id !== 'undefined') respondError(fb.id, -32700, 'Parse error'); } catch { /* ignore */ }
     return;
   }
