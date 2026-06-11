@@ -45,6 +45,7 @@
     "@playwright/mcp": "0.0.75",
     "better-sqlite3": "12.10.0",
     "crawlee": "3.17.0",
+    "docx": "9.7.1",
     "file-type": "22.0.1",
     "html-to-text": "10.0.0",
     "impers": "0.0.7",
