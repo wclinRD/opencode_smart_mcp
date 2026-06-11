@@ -805,12 +805,16 @@ flowchart LR
 
 ### 待辦
 
-- [ ] `tests/memory-db.test.mjs` — memory-db 專屬測試（目前靠 CLI 間接驗證）
-- [ ] `tests/cache-manager.test.mjs` — cache 核心邏輯測試
-- [ ] `tests/compose-engine.test.mjs` — 組合引擎測試
-- [ ] `tests/refactor-planner.test.mjs` — 重構規劃測試
-- [ ] `tests/safe-handler.test.mjs` — 安全處理測試
-- [ ] `tests/utils.test.mjs` — 共用工具測試
+- [x] `tests/memory-db.test.mjs` — 28 tests（open/close, CRUD, list/count, stats, searchFTS, storeEmbedding/getEmbedding, touchEntry, runLifecycle, migrateFromJSON, rebuildFTS）
+- [x] `tests/cache-manager.test.mjs` — 19 tests（set/get/has/delete/clear/size/stats/getOrSet/makeKey/persist/shutdown）
+- [x] `tests/compose-engine.test.mjs` — 11 tests（executePipeline: empty, seq, par, cond, unknown tool, unknown mode）
+- [x] `tests/refactor-planner.test.mjs` — 19 tests（estimateDifficulty, generateMigrationPlan）
+- [x] `tests/safe-handler.test.mjs` — 17 tests（wrapHandler, isStructuredError, retryable detection）
+- [x] `tests/utils.test.mjs` — 24 tests（COLORS, useColor, globToRegex, matchGlob, findFiles, readFileSafe, formatDuration）
+
+### Bug fix
+
+- [x] `compose-engine.mjs` cond branch bug：`for (const br of branchResults)` → `for (const br of branchResults.results)`（executePipeline 回傳 `{ok, results}` 非陣列）
 
 ### 學習
 

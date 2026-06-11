@@ -228,7 +228,7 @@ async function executePipeline(pipeline, opts = {}) {
       const branchSteps = matches ? (cond.then || []) : (cond.else || []);
       if (branchSteps.length > 0) {
         const branchResults = await executePipeline(branchSteps, opts);
-        for (const br of branchResults) {
+        for (const br of branchResults.results) {
           br.step = i;
           results.push(br);
         }

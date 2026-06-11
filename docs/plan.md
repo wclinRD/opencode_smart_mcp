@@ -1206,11 +1206,12 @@ Phase 11 和 12 建立了強大的記憶與 embedding 基礎，但：
 
 | 項目 | 數字 |
 |------|------|
-| 新增測試檔案 | 2（`embedding.test.mjs`, `apply-engine.test.mjs`） |
-| 新增測試數 | **79**（30 + 49） |
-| 總測試數 | **867**（↑ 10% from 788） |
+| 新增測試檔案 | **8**（embedding, apply-engine, utils, safe-handler, compose-engine, refactor-planner, cache-manager, memory-db） |
+| 新增測試數 | **197**（30 + 49 + 24 + 17 + 11 + 19 + 19 + 28） |
+| 總測試數 | **985**（↑ 25% from 788） |
 | 回歸 | **0**（所有舊測試維持綠燈） |
 | CLI 發布 | `smart-memory` via `npm link` / `npx` 可用 |
+| Bug fix | `compose-engine.mjs` cond branch iterable 修復 |
 
 ### 學習
 
