@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://smart-mcp.dev/manifest.schema.json",
+  "title": "Smart MCP Tool Manifest",
+  "description": "Single source of truth for all Smart MCP tool metadata, routing rules, and safety levels.",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "integer",
+      "description": "Manifest format version (currently 1)"
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO timestamp of manifest generation"
+    },
+    "tools": {
+      "type": "array",
+      "description": "All registered tools with metadata",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Tool name as registered in MCP (e.g. smart_grep)"
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable tool description"
+          },
+          "category": {
+            "type": "string",
+            "enum": ["core", "standard"],
+            "description": "core = always visible to LLM, standard = routed via smart_run"
+          },
+          "domain": {
+            "type": "string",
+            "description": "Functional domain: search, security, test, debug, edit, analyze, git, document, etc."
+          },
+          "safetyLevel": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "critical"],
+            "description": "Safety classification for interceptor and quality gates"
+          },
+          "routingRules": {
+            "type": "object",
+            "properties": {
+              "autoRoute": {
+                "type": "boolean",
+                "description": "Can smart_auto automatically select this tool?"
+              },
+              "interceptorRequired": {
+                "type": "boolean",
+                "description": "Must interceptor check before execution? (P2, default false)"
+              },
+              "directCall": {
+                "type": "boolean",
+                "description": "Can LLM call this tool directly without router?"
+              },
+              "triggerKeywords": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Keywords that trigger this tool via hybrid_router"
+              }
+            }
+          },
+          "interceptorRules": {
+            "type": "array",
+            "description": "P2: Interceptor rules for this tool",
+            "items": {
+              "type": "object",
+              "properties": {
+                "condition": { "type": "string" },
+                "action": { "type": "string", "enum": ["allow", "warn", "block", "modify"] },
+                "message": { "type": "string" }
+              }
+            }
+          },
+          "qualityGates": {
+            "type": "array",
+            "description": "Pre-execution quality gate requirements",
+            "items": {
+              "type": "object",
+              "properties": {
+                "prerequisite": { "type": "string", "description": "Tool that must be called before this one" },
+                "condition": { "type": "string", "description": "Additional condition (e.g. 'mode:beam')" },
+                "message": { "type": "string" }
+              }
+            }
+          },
+          "responsePolicy": {
+            "type": "object",
+            "properties": {
+              "maxLevel": { "type": "integer", "minimum": 0, "maximum": 2 }
+            }
+          },
+          "inputSchema": {
+            "type": "object",
+            "description": "JSON Schema for tool parameters"
+          }
+        },
+        "required": ["name", "category"]
+      }
+    },
+    "autoRoute": {
+      "type": "object",
+      "description": "Global smart_auto (Path B) settings",
+      "properties": {
+        "enabled": { "type": "boolean", "default": true }
+      }
+    },
+    "interceptor": {
+      "type": "object",
+      "description": "Global interceptor (Path C) settings — P2, default OFF",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "defaultAction": { "type": "string", "enum": ["allow", "warn"], "default": "allow" }
+      }
+    }
+  },
+  "required": ["version", "tools"]
+}

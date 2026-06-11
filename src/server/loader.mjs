@@ -19,15 +19,19 @@ import { readdirSync, statSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { wrapHandler } from '../lib/safe-handler.mjs';
+import { generateManifest } from '../lib/manifest-loader.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOOLS_DIR = join(__dirname, '../plugins');
 const CLI_DIR = resolve(__dirname, '../cli');
+const PROJECT_ROOT = resolve(__dirname, '../..');
+const MANIFEST_PATH = join(PROJECT_ROOT, 'config/tools/manifest.json');
 
 // Exported structures (filled via top-level await below)
 export const toolMap = new Map();
 export const nativeTools = [];
 export const routerTools = [];
+export let toolManifest = null;
 
 // ---------------------------------------------------------------------------
 // Load all tool plugins
@@ -98,6 +102,17 @@ for (const cat of CATEGORY_DIRS) {
       console.error(`[smart-loader] Error loading ${file}:`, err.message);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 15 P1: Generate tool manifest from loaded plugins
+// ---------------------------------------------------------------------------
+try {
+  toolManifest = generateManifest({ toolMap, outputPath: MANIFEST_PATH });
+  console.error(`[smart-loader] Manifest generated: ${toolManifest.tools.length} tools → ${MANIFEST_PATH}`);
+} catch (err) {
+  console.error(`[smart-loader] Manifest generation failed: ${err.message}`);
+  toolManifest = { version: 1, tools: [], error: err.message };
 }
 
 // ---------------------------------------------------------------------------

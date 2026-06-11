@@ -96,7 +96,7 @@ function formatPlan(plan) {
 // ---------------------------------------------------------------------------
 
 export default {
-  tool: 'refactor-plan',
+  name: 'smart_refactor_plan',
   description: `CKG-based refactoring assistant.
 
 Analyzes API usage patterns across the codebase and generates a structured,

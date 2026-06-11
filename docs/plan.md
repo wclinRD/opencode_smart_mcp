@@ -999,14 +999,13 @@ smart_compact({toolHistory, conversationLength, currentGoal?, currentTodos?})
 
 **結論**：compaction-fix.js **不升級**。14.1 和 14.2 的功能走 proactive 路徑（budget threshold 觸發 + LLM 主動呼叫），不依賴 compaction hook。
 
-#### 14.3 API Server-Side Compaction（調查）
+#### 14.3 API Server-Side Compaction（調查）🔍 已調查 — 不適用
 
-| 項目 | 作法 |
+| 項目 | 結果 |
 |------|------|
-| 檢查 zen-claude-proxy 原始碼 | 是否轉發 `anthropic-beta` header？ |
-| 模型相容性 | big-pickle（Opus）是否支援 server-side compaction beta？ |
-| 支援 → | `smart_context({command:"enable_compaction"})` 切換 |
-| 不支援 → | 記錄為已知限制 |
+| 架構 | OpenCode → @ai-sdk/openai-compatible → 9Router (port 20128) → providers |
+| `anthropic-beta` header | OpenAI-compatible protocol 不支援 Anthropic 原生 beta headers |
+| **結論** | **不適用** — 需直接 Anthropic API 才能使用 server-side compaction。記錄為已知限制。 |
 
 **不上什麼**：不做 proxy 修改（超出 MCP server 範圍）。
 
@@ -1020,13 +1019,13 @@ smart_compact({toolHistory, conversationLength, currentGoal?, currentTodos?})
 | 70-90% | `⚡ Context budget low` | `⚡ Budget ${usedPct}。建議 clear_tool_results 或呼叫 smart_compact` |
 | > 90% | `⚠️ Budget critical` | `⚠️ Budget 剩 ${remainingPct}。強烈建議 run smart_compact 或開新 session` |
 
-#### 14.5 Prompt Caching（調查）
+#### 14.5 Prompt Caching（調查）🔍 已調查 — 不適用
 
-| 檢查項目 | 作法 |
-|---------|------|
-| zen-claude-proxy | 是否傳遞 `cache_control` breakpoints？ |
-| API response | 觀察 `cache_creation_input_tokens` / `cache_read_input_tokens` |
-| 未啟用 → | 方案 A：改 proxy；方案 B：Smart MCP 在 call API 時加入 cache_control |
+| 項目 | 結果 |
+|------|------|
+| `cache_control` breakpoints | Anthropic 原生 API 功能，OpenAI-compatible protocol 不支援 |
+| 9Router 是否傳遞 | OpenAI-compatible 格式無此概念 |
+| **結論** | **不適用** — 需直接 Anthropic API。記錄為已知限制。 |
 
 **不上什麼**：不在 Phase 14 實作 cache_control 注入（需認清這是 provider 層問題）。
 
@@ -1901,7 +1900,7 @@ tools/call 到達
 
 | 優先級 | 內容 | 狀態 |
 |--------|------|------|
-| **P1** | Manifest 基礎建設 — 工具描述 schema + manifest 檔案格式 + loader 支援 | ⏳ 待實作 |
+| **P1** | Manifest 基礎建設 — 工具描述 schema + manifest 檔案格式 + loader 支援 | ✅ 已完成 (2026-06-12) |
 | **P2** | Interceptor 保護網 — manifest-driven tools/call 攔截器 | 📋 規劃中 |
 | **P2** | Smart Auto — `smart_auto` 備用路由工具 | 📋 規劃中 |
 
@@ -1910,43 +1909,56 @@ tools/call 到達
 2. Interceptor 對現有架構無 immediate benefit（LLM 直接呼叫目前運作良好）
 3. 先做 manifest 才有 infrastructure 做 interceptor — 不可跳過
 
-### Manifest 基礎建設（P1）
+### Manifest 基礎建設（P1）✅ (2026-06-12)
 
 什麼是 manifest：**工具規格宣告檔**。描述工具的名稱、用途、參數、類別、安全等級、路由規則。
 
-```jsonc
-// manifest.json（預期格式，設計中）
+#### 交付摘要
+
+| 交付項目 | 說明 | 檔案 |
+|---------|------|------|
+| Manifest JSON Schema | JSON Schema 定義 manifest.json 格式 | `config/tools/manifest.schema.json` |
+| Manifest loader | 自動從 plugin 定義生成 manifest.json + 載入/驗證/查詢 API | `src/lib/manifest-loader.mjs` (210 行) |
+| Loader 整合 | `src/server/loader.mjs` 載入 plugin 後自動生成 manifest | `src/server/loader.mjs` (+8 行) |
+| Manifest 生成 CLI | 獨立 script 可手動重新生成 manifest | `src/cli/manifest-gen.mjs` |
+| 自動推論 | safetyLevel (low/medium/high/critical) + domain (21 領域) + qualityGates | manifest-loader 內建 |
+| Bug fix | `refactor-plan.mjs` 修正 `tool` → `name`（plugin contract） | `src/plugins/standard/refactor-plan.mjs` |
+| 測試 | 34 tests（generate/validate/load/find/domain/autoRoute/integration） | `tests/manifest-loader.test.mjs` |
+
+#### 實際 manifest.json 內容
+
+```json
 {
   "version": 1,
+  "generatedAt": "2026-06-12T...",
   "tools": [
     {
-      "name": "smart_security",
+      "name": "smart_compact",
       "category": "core",
-      "safetyLevel": "high",
-      "routingRules": {
-        "autoRoute": true,        // 路徑 B 可自動選擇
-        "interceptorRequired": false,  // 路徑 C 是否需攔截 (P2)
-      },
-      "interceptorRules": [],     // P2 攔截規則
-    }
+      "domain": "context",
+      "safetyLevel": "medium",
+      "routingRules": { "autoRoute": false, "interceptorRequired": false, "directCall": true },
+      "qualityGates": [],
+      "responsePolicy": { "maxLevel": 0 }
+    },
+    // ... 61 tools total
   ],
-  "autoRoute": {
-    "enabled": true               // 路徑 B 全域開關
-  },
-  "interceptor": {
-    "enabled": false,             // P2 保護網，預設關閉
-    "defaultAction": "allow",
-    "rules": []
-  }
+  "autoRoute": { "enabled": true },
+  "interceptor": { "enabled": false, "defaultAction": "allow" }
 }
 ```
 
-| 交付項目 | 說明 |
-|---------|------|
-| Manifest schema | JSON Schema 定義 manifest.json 格式 |
-| Manifest loader | `src/server/loader.mjs` 讀取 `config/tools/manifest.json` |
-| 工具元資料擴充 | Plugin 定義新增 `routingRules`、`safetyLevel` 等 manifest 字段 |
-| Agent personality | 更新路由原則，加入三路徑說明 |
+**統計**：61 tools（9 core + 52 standard），safety: low:17 / medium:36 / high:7 / critical:1，21 domains
+
+#### 設計決策
+
+| 決策 | 原因 |
+|------|------|
+| **自動生成，非手寫** | 61 個 tool 手寫 manifest 不可維護。loader 啟動時自動從 plugin 定義生成 |
+| **推論 safetyLevel** | 從 tool name pattern 推論（grep→low, fast_apply→high, exec→critical），不需 plugin 改寫 |
+| **推論 domain** | 21 個領域 pattern matching，覆蓋所有現有工具 |
+| **qualityGates 從 HIGH_RISK_PREREQUISITES 同步** | 不重複定義，manifest 反映 server 端實際強制規則 |
+| **interceptor 預設關閉** | 不改變現有行為，P2 時 opt-in |
 
 ### 不上什麼
 

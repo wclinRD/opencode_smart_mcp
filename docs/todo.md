@@ -939,19 +939,17 @@ flowchart LR
 - [x] **決定**：compaction-fix.js **不新增任何 IPC call**，維持現有輕量 recovery context 注入行為
 - [x] **smart_compact 改用 proactive 路徑**：由 budget warning 引導 LLM 主動呼叫，或 respond() 自動觸發 clear_tool_results
 
-### 14.3 API Server-Side Compaction 驗證（調查）
+### 14.3 API Server-Side Compaction 驗證（調查）🔍 已調查 — 不適用
 
-- [ ] **檢查 zen-claude-proxy**：原始碼是否轉發 `anthropic-beta` header
-- [ ] **模型相容性確認**：big-pickle（Opus）是否支援 server-side compaction beta
-- [ ] **若支援**：在 `smart_context` 新增 `{command:"enable_compaction"}` 切換
-- [ ] **若不支援**：記錄為已知限制到 `docs/known-limitations.md`
-- [ ] **不上什麼**：不做 proxy 修改（超出 MCP server 範圍）
+- [x] **架構確認**：OpenCode → @ai-sdk/openai-compatible → 9Router → providers
+- [x] **結論**：`anthropic-beta` header 是 Anthropic 原生 API 功能，OpenAI-compatible protocol 不支援
+- [x] **決策**：不適用，記錄為已知限制。不做 proxy 修改（超出 MCP server 範圍）
 
-### 14.5 Prompt Caching 驗證（調查）
+### 14.5 Prompt Caching 驗證（調查）🔍 已調查 — 不適用
 
-- [ ] **檢查 zen-claude-proxy**：是否傳遞 `cache_control` breakpoints
-- [ ] **測試 API call**：觀察 response 是否有 `cache_creation_input_tokens` / `cache_read_input_tokens`
-- [ ] **記錄結果**：`docs/prompt-caching-report.md`
+- [x] **架構確認**：`cache_control` breakpoints 是 Anthropic 原生 API 功能
+- [x] **結論**：OpenAI-compatible protocol 無此概念，9Router 不傳遞
+- [x] **決策**：不適用，記錄為已知限制
 
 ### 文件
 
@@ -978,4 +976,77 @@ flowchart LR
 | 🥈 | **14.3 API Compaction 驗證** | 0.5 天 | 無 | 🔍 待驗證 |
 | 🥉 | **14.5 Prompt Caching 驗證** | 0.5 天 | 無 | 🔍 待驗證 |
 | 🟢 | **compaction-fix.js 維持現狀** | 0 天 | 設計決策（已確認） | ✅ 已決定 |
+
+---
+
+## Phase 15：Auto-intercept 三路徑並存架構
+
+> 2026-06-12 設計決策。工具呼叫的三路徑架構：Path A (LLM 直接呼叫) 永不消失為主路徑，
+> Path B (smart_auto) 為備用路由，保護網 (interceptor) 為 P2 可選 manifest 驅動。
+> interceptor 預設關閉。Auto-intercept 從 P0 降為 P2，先做 P1 manifest 基礎建設。
+> 對應 plan.md Phase 15 章節。
+
+### 三路徑一覽
+
+| 路徑 | 名稱 | 觸發方式 | 狀態 | 優先級 |
+|------|------|---------|------|--------|
+| **A** | LLM 直接呼叫 | `tools/call` 指名工具 | ✅ 永不消失 | P0 永遠 |
+| **B** | Smart Auto | `smart_auto({goal:"..."})` 模糊委派 | 📋 待實作 | P2 |
+| **C** | Interceptor 保護網 | manifest 驅動，自動攔截 tools/call | 📋 待實作 | P2（預設關閉） |
+
+### P1：Manifest 基礎建設（先決條件）✅ (2026-06-12)
+
+> 路徑 B + C 的基礎設施。定義工具規格宣告格式，讓 smart_auto 知道有哪些工具可用、interceptor 知道規則。
+
+| # | 項目 | 檔案 | 估時 | 狀態 |
+|---|------|------|:----:|:----:|
+| 1 | Manifest JSON Schema 定義 | `config/tools/manifest.schema.json` | 0.5 天 | ✅ |
+| 2 | Manifest loader | `src/lib/manifest-loader.mjs` — 讀取 + 驗證 + 自動生成 manifest.json (210 行) | 0.5 天 | ✅ |
+| 3 | Plugin 新增 manifest 字段 | `src/server/loader.mjs` — 自動生成 manifest（+8 行整合） | 0.5 天 | ✅ |
+| 4 | Manifest 範例檔 | `config/tools/manifest.json` — 61 tools 自動生成 | 0.25 天 | ✅ |
+| 5 | Manifest 生成 CLI | `src/cli/manifest-gen.mjs` — 獨立重新生成 script | 0.25 天 | ✅ |
+| 6 | Bug fix | `refactor-plan.mjs` 修正 `tool` → `name`（plugin contract） | — | ✅ |
+| 7 | 測試 | 34 tests（generate/validate/load/find/domain/autoRoute/integration） | 1 天 | ✅ |
+| | **小計** | | **~3 天** | **✅ 完成** |
+
+**設計決策**：manifest 自動從 plugin 定義生成（非手寫），safetyLevel/domain 從 tool name pattern 推論，qualityGates 從 HIGH_RISK_PREREQUISITES 同步。
+
+### P2：Interceptor 保護網（manifest 完成後）
+
+| # | 項目 | 檔案 | 估時 | 狀態 |
+|---|------|------|:----:|:----:|
+| 1 | Interceptor 引擎 | `src/lib/interceptor.mjs` — tools/call 攔截 + manifest 規則比對 | 1.5 天 | 📋 待辦 |
+| 2 | Server 整合 | `src/server/index.mjs` — invokeTool 前加入 interceptor 路徑 | 0.5 天 | 📋 待辦 |
+| 3 | 攔截規則範例 | 高風險工具強制確認 / 參數修正 / 白名單 | 0.5 天 | 📋 待辦 |
+| 4 | 測試 | 放行 / 修正 / 阻擋 / 預設關閉 / 無 manifest 降級 | 1 天 | 📋 待辦 |
+| | **小計** | | **~3.5 天** | |
+
+### P2：Smart Auto（manifest 完成後）
+
+| # | 項目 | 檔案 | 估時 | 狀態 |
+|---|------|------|:----:|:----:|
+| 1 | `smart_auto` MCP tool | `src/plugins/standard/smart-auto.mjs` — handler-based | 1 天 | 📋 待辦 |
+| 2 | 任務分類 → 工具選擇邏輯 | 依 hybrid_router 分類 → manifest 查詢 → 參數推定 → 執行 | 1 天 | 📋 待辦 |
+| 3 | 工具鏈組合 | 多步驟工作流自動拆解（如 ingest → wiki-capture） | 1 天 | 📋 待辦 |
+| 4 | Agent personality 更新 | 加入 smart_auto 使用時機 | 0.25 天 | 📋 待辦 |
+| 5 | 測試 | 分類正確性 / 工具選擇 / 參數推定 / 錯誤處理 | 1 天 | 📋 待辦 |
+| | **小計** | | **~4.25 天** | |
+
+### 優先總表
+
+| 優先 | 項目 | 估時 | 相依 | 狀態 |
+|:----:|------|:----:|:----:|:----:|
+| 🥇 | **P1 Manifest 基礎建設** | ~3 天 | 無 | 📋 待辦 |
+| 🥈 | **P2 Interceptor** | ~3.5 天 | P1 manifest | 📋 待辦 |
+| 🥈 | **P2 Smart Auto** | ~4.25 天 | P1 manifest | 📋 待辦 |
+| 🟢 | **Path A 保持現狀** | 0 天 | 設計決策（永不消失） | ✅ 已確認 |
+
+### 不上什麼
+
+| 項目 | 原因 |
+|------|------|
+| Interceptor 預設開啟 | 不改變現有行為，避免 LLM friction |
+| Path A 降級機制 | 永不降級，LLM 直接呼叫永遠是主路徑 |
+| 管理 UI | CLI json 編輯即可 |
+| 路徑 A/B/C 互斥 | 三路徑可並存 |
 

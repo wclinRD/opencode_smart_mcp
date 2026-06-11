@@ -1,0 +1,4016 @@
+{
+  "version": 1,
+  "generatedAt": "2026-06-11T22:20:24.808Z",
+  "tools": [
+    {
+      "name": "smart_compact",
+      "description": "[compact] Use when: need to analyze tool history and identify which outputs can be safely dropped or summarized to free context budget. Rules-based (zero LLM cost). Returns droppable indices, summarizable entries, recovery context, and estimated token savings.",
+      "category": "core",
+      "domain": "context",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": true,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "toolHistory": {
+            "type": "array",
+            "description": "Array of tool call entries: [{ tool, ok, result?, error?, timestamp? }]"
+          },
+          "conversationLength": {
+            "type": "number",
+            "description": "Total conversation turns (for context, optional)"
+          },
+          "currentGoal": {
+            "type": "string",
+            "description": "Current task goal for recovery context"
+          },
+          "currentTodos": {
+            "type": "array",
+            "description": "Current TODO items for recovery context"
+          }
+        },
+        "required": [
+          "toolHistory"
+        ]
+      }
+    },
+    {
+      "name": "smart_rules",
+      "description": "Use when: need to check project rules (AGENTS.md, .cursorrules, etc.) before editing. Discovers and reads project-level rule files. Use before any edit to ensure compliance with project conventions.",
+      "category": "core",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": true,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 1
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Target file path — returns rules applicable to this file"
+          },
+          "rule": {
+            "type": "string",
+            "description": "Rule category to search for (e.g., \"naming\", \"style\", \"testing\")"
+          },
+          "list": {
+            "type": "boolean",
+            "description": "List all discovered rule files"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: cwd)"
+          },
+          "inject": {
+            "type": "boolean",
+            "description": "Inject matching rules as context (default: true)"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_think",
+      "description": "Conversational reasoning engine — surpasses sequential-thinking.\n\nDefault mode: mode:\"cit\" (BN-DP auto-branch). Only branches when uncertain — saves ~70% tokens on routine tasks.\n  mode:\"beam\" → explore 2-3 alternative paths with confidence scoring. Use for high-risk decisions.\n  mode:\"forest\" → multi-tree reasoning with consensus voting. Use for complex multi-angle problems.\n\nCore workflow:\n  thought + nextThoughtNeeded=true → hypothesis → verification → repeat → nextThoughtNeeded=false\n\nSupports: template guidance (debug/refactor/architecture...), branchFromThought, isRevision,\nneedsMoreThoughts (beyond initial plan), adjustTotalThoughts (mid-stream expansion).\nReturns done flag + optional updated totalThoughts.",
+      "category": "core",
+      "domain": "reasoning",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": true,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "thought": {
+            "type": "string",
+            "description": "Current thinking step content"
+          },
+          "nextThoughtNeeded": {
+            "type": "boolean",
+            "description": "Whether more reasoning steps are needed"
+          },
+          "thoughtNumber": {
+            "type": "number",
+            "description": "Current thought number in sequence (default: 1)"
+          },
+          "totalThoughts": {
+            "type": "number",
+            "description": "Total estimated thoughts needed (default: 1)"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "beam",
+              "cit",
+              "forest"
+            ],
+            "description": "Reasoning mode (default: \"cit\" — BN-DP auto-branch, only branches when uncertain). \"beam\" for high-risk multi-path exploration. \"forest\" for multi-angle consensus voting."
+          },
+          "beams": {
+            "type": "array",
+            "description": "Pre-defined beam paths for multi-path reasoning. Each beam: {name, content, confidence}. Used with mode:\"beam\" or mode:\"cit\" when branchingNeeded=true.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Path name (e.g. \"Path A\")"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "The reasoning content for this path"
+                },
+                "confidence": {
+                  "type": "number",
+                  "description": "Confidence score 1-10"
+                }
+              }
+            }
+          },
+          "selectedBeam": {
+            "type": "string",
+            "description": "Name of the selected/correct beam path (e.g. \"Path C\"). Used with mode:\"beam\" or mode:\"cit\" when branchingNeeded=true."
+          },
+          "branchingNeeded": {
+            "type": "boolean",
+            "description": "CiT BN-DP assessment result. true = branching needed (explore multiple paths). false = chain mode (single path sufficient). Used with mode:\"cit\" only."
+          },
+          "branchReasoning": {
+            "type": "string",
+            "description": "CiT BN-DP reasoning: why branching is or is not needed at this step. Used with mode:\"cit\" only."
+          },
+          "trees": {
+            "type": "array",
+            "description": "Forest-of-Thought trees. Each: {name:string, branches:[{name,content,confidence}], selectedBranch:string}. Used with mode:\"forest\".",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Tree name (e.g. \"Static Analysis\", \"Dynamic Analysis\")"
+                },
+                "branches": {
+                  "type": "array",
+                  "description": "Reasoning branches within this tree",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "description": "Branch name"
+                      },
+                      "content": {
+                        "type": "string",
+                        "description": "Branch reasoning content"
+                      },
+                      "confidence": {
+                        "type": "number",
+                        "description": "Confidence score 1-10"
+                      }
+                    }
+                  }
+                },
+                "selectedBranch": {
+                  "type": "string",
+                  "description": "Name of the best branch in this tree"
+                }
+              }
+            }
+          },
+          "consensus": {
+            "type": "object",
+            "description": "Forest-of-Thought consensus result — cross-tree voting. Used with mode:\"forest\".",
+            "properties": {
+              "conclusion": {
+                "type": "string",
+                "description": "Winning conclusion from across all trees"
+              },
+              "agreeingTrees": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Tree names that agree on the conclusion"
+              },
+              "totalTrees": {
+                "type": "number",
+                "description": "Total number of trees"
+              },
+              "confidence": {
+                "type": "number",
+                "description": "Overall confidence 1-10"
+              },
+              "primaryTree": {
+                "type": "string",
+                "description": "Tree name with strongest evidence"
+              }
+            }
+          },
+          "hypothesis": {
+            "type": "string",
+            "description": "Generate a testable hypothesis. Triggers structured hypothesis output section."
+          },
+          "verification": {
+            "type": "string",
+            "description": "Verify a previous hypothesis. Auto-detects pass/fail from content (confirm/reject). Triggers structured verification output section with verdict icon."
+          },
+          "needsMoreThoughts": {
+            "type": "boolean",
+            "description": "Signal that more reasoning steps are needed beyond initial totalThoughts plan. Shows adjusted total in output."
+          },
+          "adjustTotalThoughts": {
+            "type": "number",
+            "description": "Adjust totalThoughts upward mid-stream (e.g. when new sub-problems discovered). Overrides totalThoughts for display."
+          },
+          "isRevision": {
+            "type": "boolean",
+            "description": "Whether this revises previous thinking"
+          },
+          "revisesThought": {
+            "type": "number",
+            "description": "Which thought number is being revised"
+          },
+          "branchFromThought": {
+            "type": "number",
+            "description": "Branching point thought number"
+          },
+          "branchId": {
+            "type": "string",
+            "description": "Branch identifier name"
+          },
+          "template": {
+            "type": "string",
+            "enum": [
+              "debug",
+              "refactor",
+              "feature",
+              "research",
+              "decision",
+              "analyze",
+              "plan_execute",
+              "retrospect",
+              "architecture"
+            ],
+            "description": "Optional template for structured reasoning guidance"
+          }
+        },
+        "required": [
+          "thought",
+          "nextThoughtNeeded"
+        ]
+      }
+    },
+    {
+      "name": "smart_grep",
+      "description": "Use when: need to search codebase by regex. Returns function/class scope context + import graph for matched code. Avoid when: matching exact filename (use glob instead).",
+      "category": "search",
+      "domain": "search",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Regex pattern to search"
+          },
+          "root": {
+            "type": "string",
+            "description": "Root dir (default: .)"
+          },
+          "include": {
+            "type": "string",
+            "description": "Glob include (default: **/*.{js,ts,py,...})"
+          },
+          "exclude": {
+            "type": "string",
+            "description": "Glob exclude"
+          },
+          "context": {
+            "type": "number",
+            "description": "Context lines (default: 3)"
+          },
+          "withScope": {
+            "type": "boolean",
+            "description": "Show function/class scope"
+          },
+          "withImports": {
+            "type": "boolean",
+            "description": "Show import graph"
+          },
+          "ignoreCase": {
+            "type": "boolean",
+            "description": "Case-insensitive"
+          },
+          "filesOnly": {
+            "type": "boolean",
+            "description": "List files only"
+          },
+          "maxMatches": {
+            "type": "number",
+            "description": "Max matches per file (default: 100)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format"
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      }
+    },
+    {
+      "name": "smart_learn",
+      "description": "Use when: need to understand project structure, tech stack, deps, coding style. Runs full analysis pipeline including AST parsing. Start here when entering a new codebase. Avoid when: just searching for code (use grep instead).",
+      "category": "analyze",
+      "domain": "analyze",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "extract"
+            ],
+            "description": "extract = full analysis pipeline (default)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: .)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_lsp",
+      "description": "[lsp] Use when: need type-aware code understanding — find definitions, references, hover types, symbols, or diagnostics. Auto-detects language from file extension. Supports TypeScript/JS, Python, Rust, Swift, PHP. Avoid when: searching by text pattern (use smart_grep instead).",
+      "category": "code",
+      "domain": "lsp",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "symbols",
+              "references",
+              "hover",
+              "definition",
+              "diagnostics"
+            ],
+            "description": "LSP operation: symbols (list all), references (find usages), hover (type info), definition (jump to def), diagnostics (errors/warnings)"
+          },
+          "file": {
+            "type": "string",
+            "description": "File path relative to project root (e.g. \"src/auth.ts\")"
+          },
+          "line": {
+            "type": "number",
+            "description": "Line number (1-indexed). Required for references, hover, definition."
+          },
+          "character": {
+            "type": "number",
+            "description": "Character offset (0-indexed). Required for references, hover, definition."
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: current working directory)"
+          }
+        },
+        "required": [
+          "operation",
+          "file"
+        ]
+      }
+    },
+    {
+      "name": "smart_security",
+      "description": "Use when: need to scan project for credentials leaks, injection flaws, path traversal, or dependency vulnerabilities. Run before committing or before CI. Avoid when: looking for general code quality issues (use lint instead).",
+      "category": "security",
+      "domain": "security",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 2
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string",
+            "description": "Root dir (default: .)"
+          },
+          "scan": {
+            "type": "string",
+            "enum": [
+              "credentials",
+              "injection",
+              "dependencies",
+              "all"
+            ],
+            "description": "Scan type (default: all)"
+          },
+          "include": {
+            "type": "string",
+            "description": "Glob include"
+          },
+          "exclude": {
+            "type": "string",
+            "description": "Glob exclude"
+          },
+          "failOn": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "description": "Fail if finding at severity >= this"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_test",
+      "description": "Use when: need to discover or run project tests. Auto-detects vitest/jest/mocha/ava/node:test. Supports watch mode for iterative development. Avoid when: checking test coverage (use coverage instead).",
+      "category": "test",
+      "domain": "test",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: .)"
+          },
+          "include": {
+            "type": "string",
+            "description": "Test file glob pattern to include"
+          },
+          "watch": {
+            "type": "boolean",
+            "description": "Run tests in watch mode"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_deep_think",
+      "description": "Use when: need structured reasoning — analyzing complex problems, debugging, making decisions, researching, or planning. Supports 10 templates (debug/refactor/feature/research/decision/analyze/plan_execute/retrospect/architecture/peer_review) + 3 modes (static/iterative/dynamic). Avoid when: need quick answer to simple question (use quick-think instead).",
+      "category": "think",
+      "domain": "reasoning",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "description": "Topic/question to analyze (required for static/dynamic modes)"
+          },
+          "template": {
+            "type": "string",
+            "enum": [
+              "debug",
+              "refactor",
+              "feature",
+              "research",
+              "decision",
+              "analyze",
+              "plan_execute",
+              "retrospect",
+              "architecture",
+              "peer_review"
+            ],
+            "description": "Thinking template (default: analyze)"
+          },
+          "steps": {
+            "type": "number",
+            "description": "Steps (default: 5)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format for static mode (default: text)"
+          },
+          "plan": {
+            "type": "string",
+            "description": "JSON plan string (from planner) for plan_execute context"
+          },
+          "planStep": {
+            "type": "number",
+            "description": "Focus on specific plan step (1-indexed)"
+          },
+          "iterative": {
+            "type": "boolean",
+            "description": "Interactive mode: one step at a time with prompts"
+          },
+          "dynamic": {
+            "type": "boolean",
+            "description": "Start dynamic reasoning session (state-file based multi-round). Use with topic + optional template."
+          },
+          "state": {
+            "type": "string",
+            "description": "State file path for dynamic mode (default: ~/.smart/thinking-state.json)"
+          },
+          "record": {
+            "type": "string",
+            "description": "Record result for step: \"idx:result\" format, e.g. \"2:The error is TypeError\""
+          },
+          "advance": {
+            "type": "boolean",
+            "description": "Advance to next thinking step after recording result"
+          },
+          "branch": {
+            "type": "string",
+            "description": "Select branch path by name after completing a step (e.g. \"hypothesis-confirmed\", \"needs-deeper\")"
+          },
+          "finish": {
+            "type": "boolean",
+            "description": "Mark thinking session complete, show full summary"
+          },
+          "status": {
+            "type": "boolean",
+            "description": "Show current thinking state without advancing"
+          },
+          "cancel": {
+            "type": "boolean",
+            "description": "Cancel the thinking session"
+          },
+          "restore": {
+            "type": "string",
+            "description": "Load and display saved state file (shorthand for status)"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "smart_academic_review",
+      "description": "Academic peer review using the Remi 10-point framework (Nature/Science level).\n\nEvaluates manuscripts across 10 dimensions:\n  1. Scientific quality and novelty\n  2. Methodology and assumptions\n  3. Consistency and coherence\n  4. Results and interpretation\n  5. Figures, tables, and presentation\n  6. Literature review\n  7. Impact and relevance\n  8. Meta-commentary & Tone (AI fluff detection)\n  9. Major and minor issues\n  10. Final recommendation (Accept/Minor/Major/Reject)\n\nAlso checks for banned AI vocabulary: delve, tapestry, crucial, testament, realm, fosters, underscores, moreover.\n\nModes:\n  - mode:\"prompt\" → Returns the review prompt for LLM to execute (default)\n  - mode:\"template\" → Returns a structured fill-in template\n  - mode:\"framework\" → Returns just the 10-point framework definition\n\nExamples:\n  { text: \"Full manuscript text...\", mode: \"prompt\" }\n  { text: \"Methods section...\", section: \"methods\", mode: \"template\" }",
+      "category": "standard",
+      "domain": "academic",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "The manuscript text to review (required)"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "prompt",
+              "template",
+              "framework"
+            ],
+            "description": "Output mode: prompt (review prompt for LLM), template (structured fill-in), framework (definition only). Default: prompt."
+          },
+          "section": {
+            "type": "string",
+            "description": "Focus review on a specific section (e.g., \"methods\", \"results\", \"introduction\")"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format (default: markdown)"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    },
+    {
+      "name": "smart_academic_search",
+      "description": "Search academic literature across free databases: OpenAlex, Crossref, Semantic Scholar, and Unpaywall.\n\nSources:\n  - openalex: Full-text search with abstracts, MDPI filtering, OA detection\n  - crossref: Broad metadata search with DOI resolution\n  - semantic_scholar: AI-powered search with citation counts and OA PDF links\n  - unpaywall: Check if a specific DOI has an Open Access version available\n\nOperations:\n  - source:\"openalex\" → Search papers by keyword (supports year range, MDPI filter)\n  - source:\"crossref\" → Search papers by keyword or resolve a single DOI\n  - source:\"semantic_scholar\" → AI-powered paper search with citation data\n  - source:\"unpaywall\" → Check OA availability for a specific DOI\n\nExamples:\n  { query: \"urban heat island vegetation\", source: \"openalex\", yearFrom: 2020 }\n  { doi: \"10.1038/ncomms14196\", source: \"crossref\" }\n  { doi: \"10.1038/ncomms14196\", source: \"unpaywall\", email: \"user@example.com\" }\n  { query: \"climate policy acceptance\", source: \"semantic_scholar\", limit: 5 }",
+      "category": "standard",
+      "domain": "search",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "openalex",
+              "crossref",
+              "semantic_scholar",
+              "unpaywall"
+            ],
+            "description": "Academic database to query (required)"
+          },
+          "query": {
+            "type": "string",
+            "description": "Search query string (required for openalex, crossref, semantic_scholar)"
+          },
+          "doi": {
+            "type": "string",
+            "description": "DOI to resolve or check OA status (for crossref single lookup or unpaywall)"
+          },
+          "email": {
+            "type": "string",
+            "description": "Email for Unpaywall polite pool (recommended)"
+          },
+          "yearFrom": {
+            "type": "number",
+            "description": "Filter papers from this year (inclusive)"
+          },
+          "yearTo": {
+            "type": "number",
+            "description": "Filter papers up to this year (inclusive)"
+          },
+          "perPage": {
+            "type": "number",
+            "description": "Results per page (default: 10, max: 50)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Alias for perPage (Semantic Scholar)"
+          },
+          "rows": {
+            "type": "number",
+            "description": "Alias for perPage (Crossref)"
+          },
+          "filterMDPI": {
+            "type": "boolean",
+            "description": "Filter out MDPI publications (default: true for OpenAlex)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format (default: markdown)"
+          }
+        },
+        "required": [
+          "source"
+        ]
+      }
+    },
+    {
+      "name": "smart_agent_execute",
+      "description": "Use when: the task requires 5+ tools and you want a complete workflow automation plan. Especially useful for small/weak models. Generates the full workflow lifecycle: template selection → create command → dispatch → replan → summary. Avoid when: the task is simple (1-2 tools).",
+      "category": "meta",
+      "domain": "general",
+      "safetyLevel": "critical",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": true,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "string",
+            "description": "Task description for workflow automation (e.g. \"debug login error\", \"refactor user authentication\")"
+          },
+          "template": {
+            "type": "string",
+            "enum": [
+              "debug-flow",
+              "refactor-flow",
+              "security-flow",
+              "research-flow",
+              "git-flow",
+              "default-flow"
+            ],
+            "description": "Workflow template (auto-detected if not specified)"
+          },
+          "state": {
+            "type": "string",
+            "description": "Custom state file path (default: .workflow-state.json)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "goal"
+        ]
+      }
+    },
+    {
+      "name": "smart_agent_plan",
+      "description": "Use when: the goal is complex, ambiguous, or requires 5+ steps — delegate decomposition to the planner engine. Especially useful for small/weak models. Returns a structured plan with DAG dependencies and parallel hints. Avoid when: the goal is simple and already clear.",
+      "category": "meta",
+      "domain": "plan",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "string",
+            "description": "Complex task description to decompose (e.g. \"find and fix all security vulnerabilities\")"
+          },
+          "steps": {
+            "type": "number",
+            "description": "Maximum steps in the plan (default: auto)"
+          },
+          "strict": {
+            "type": "boolean",
+            "description": "Strict mode — only use explicitly matching templates (default: false)"
+          },
+          "state": {
+            "type": "string",
+            "description": "State file path for tracking plan execution"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "goal"
+        ]
+      }
+    },
+    {
+      "name": "smart_agent_recommend",
+      "description": "Use when: the LLM is unsure which smart-mcp tool to use for a given goal, or wants a deterministic tool recommendation. Analyzes the goal and returns the optimal tool chain. Now powered by the same unified classifier as hybrid_router. Also useful for small/weak models that benefit from code-driven tool selection. Avoid when: you already know which tool to use.",
+      "category": "meta",
+      "domain": "routing",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "string",
+            "description": "Task description to analyze (e.g. \"debug login error\", \"refactor auth module\")"
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional context about what has been done already (e.g. \"already used smart_grep\") — appended to goal for richer matching"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "goal"
+        ]
+      }
+    },
+    {
+      "name": "smart_arch_overview",
+      "description": "Use when: need to understand project architecture in one shot. Returns structured JSON with layers, dependencies, violations, critical functions, and unused exports. LLM should call this first when entering a new codebase.",
+      "category": "analyze",
+      "domain": "analyze",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: current dir)"
+          },
+          "build": {
+            "type": "boolean",
+            "description": "Force CKG build if not built yet (default: true)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "description": "Output format (default: json — LLM-friendly)"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_code_ast",
+      "description": "Query code structure via AST. Use when: need to find function/class/interface/type/variable definitions, inspect file structure, or understand symbol locations WITHOUT guessing.\n\nSupports filtering by symbol name and kind (function, class, interface, type, variable). Output includes line numbers, column positions, and recursive children.\n\nPhase 10: LSP-based code intelligence tool.",
+      "category": "standard",
+      "domain": "analyze",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Target file path (relative to project root)"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Optional symbol name to filter"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "function",
+              "class",
+              "interface",
+              "type",
+              "variable",
+              "method",
+              "property",
+              "enum"
+            ],
+            "description": "Optional kind filter"
+          },
+          "recursive": {
+            "type": "boolean",
+            "description": "Include child symbols recursively (default: true)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: .)"
+          }
+        },
+        "required": [
+          "file"
+        ]
+      }
+    },
+    {
+      "name": "smart_code_call_graph",
+      "description": "Trace function call relationships across your codebase. Use when: need to understand who calls a function (callers) or what a function calls (callees), before refactoring or debugging.\n\nSupports configurable depth (1-3 levels) and cross-file tracking. Cannot determine callees precisely without AST parsing (Phase 10/Tree-sitter upgrade planned).",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "File containing the target symbol"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Function/class name to trace"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "callers",
+              "callees"
+            ],
+            "description": "Trace direction: callers (who calls it) or callees (what it calls). Default: callers"
+          },
+          "depth": {
+            "type": "number",
+            "description": "Recursion depth (1-3, default: 1)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: .)"
+          }
+        },
+        "required": [
+          "file",
+          "symbol"
+        ]
+      }
+    },
+    {
+      "name": "smart_code_impact",
+      "description": "Analyze impact radius of code changes. Use when: planning a refactor, need to know what depends on a function/module, or want to assess risk before making changes.\n\nSupports both git-diff input and direct file+symbol queries. Uses LSP references + call-graph to trace transitive impact. Conservative over-approximation for dynamic languages.",
+      "category": "standard",
+      "domain": "analyze",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of file paths to analyze impact for (alternative to diff)"
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Symbol names to trace (default: all exported symbols in files)"
+          },
+          "diff": {
+            "type": "string",
+            "description": "Git diff text to parse for changes"
+          },
+          "depth": {
+            "type": "number",
+            "description": "Impact depth (1-3, default: 1). depth=1=direct, depth=2=transitive"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: .)"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "smart_code_query",
+      "description": "Query Code Knowledge Graph (CKG) — persistent project-wide code analysis.\n\nQueries:\n  build            — Full project scan (creates CKG database)\n  update           — Incremental update for a single file\n  callers          — Who calls a symbol (with depth control)\n  callees          — What a symbol calls\n  dependencies     — Import structure of a file\n  unused-exports   — Find exported symbols not imported by other files\n  symbol           — Look up symbol definitions\n  stats            — CKG statistics\n\nPhase 11: Builds on LSP bridge to create a persistent SQLite-based knowledge graph.\nCKG is stored at ~/.smart/ckg/ and persists across sessions.\n\nPhase C.2: Test Coverage Map — CKG records which tests cover which functions.\n  - test-coverage         — Query which tests cover a specific source function\n  - test-coverage-file    — Query coverage map for an entire source file\n  - build-coverage        — Build/rebuild test coverage map (call after build)\n\nExamples:\n  { query: \"build\", root: \".\" }\n  { query: \"callers\", symbol: \"foo\", file: \"src/foo.ts\", depth: 2 }\n  { query: \"unused-exports\", root: \".\" }\n  { query: \"dependencies\", file: \"src/bar.ts\" }\n  { query: \"test-coverage\", symbol: \"add\", file: \"src/math.ts\" }\n  { query: \"build-coverage\", root: \".\" }",
+      "category": "standard",
+      "domain": "analyze",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "enum": [
+              "build",
+              "update",
+              "callers",
+              "callees",
+              "usage-patterns",
+              "strategy-patterns",
+              "dependencies",
+              "unused-exports",
+              "symbol",
+              "stats",
+              "test-coverage",
+              "test-coverage-file",
+              "build-coverage"
+            ],
+            "description": "Query type"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Symbol name (for callers/callees/symbol queries)"
+          },
+          "file": {
+            "type": "string",
+            "description": "File path (for update/callers/callees/dependencies/symbol)"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Symbol kind filter (for symbol query): function, class, interface, type, variable, etc."
+          },
+          "depth": {
+            "type": "number",
+            "description": "Recursion depth 1-3 (default: 2, for callers/callees)"
+          },
+          "includeStale": {
+            "type": "boolean",
+            "description": "Include stale/outdated nodes (default: false)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: .)"
+          },
+          "onProgress": {
+            "type": "boolean",
+            "description": "Show build progress (default: false)"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "smart_code_type_infer",
+      "description": "Infer type information at a specific code location. Use when: need to know the exact type of a variable/expression, understand complex generic types, or verify type contracts across files.\n\nUses LSP hover capability. Requires a running TypeScript LSP server.",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Target file path"
+          },
+          "line": {
+            "type": "number",
+            "description": "Line number (1-indexed)"
+          },
+          "col": {
+            "type": "number",
+            "description": "Column offset (0-indexed, default: 0)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: .)"
+          }
+        },
+        "required": [
+          "file",
+          "line"
+        ]
+      }
+    },
+    {
+      "name": "smart_compose",
+      "description": "Use when: need to compose multiple tool calls into a pipeline — sequential (pipe), parallel (fan-out), or conditional branching. Accepts a JSON pipeline definition and executes all steps. Avoid when: running a single tool (use the direct tool instead), or executing a workflow (use smart_workflow instead which has state persistence).",
+      "category": "plan",
+      "domain": "workflow",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pipeline": {
+            "type": "string",
+            "description": "JSON array of pipeline steps. Each step: { tool, args, mode: \"seq\"|\"par\"|\"cond\", condition?: { onField, match, then, else } }"
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Per-step timeout in ms (default: 30000)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "pipeline"
+        ]
+      }
+    },
+    {
+      "name": "smart_coverage",
+      "description": "Use when: need to find untested code paths — uncovered branches, conditions, edge cases in if/else, switch, loops, ternaries. Call after writing new code to identify gaps. Avoid when: looking for test suggestions (use test_suggest instead).",
+      "category": "analyze",
+      "domain": "test",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Source file path (positional)"
+          },
+          "threshold": {
+            "type": "number",
+            "description": "Coverage threshold % (default: 80)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_cross_file_edit",
+      "description": "Use when: need to apply the same pattern change across multiple related files. Uses import graph to find all affected files. Dry-run by default. Avoid when: editing a single file (use standard edit tool instead).",
+      "category": "edit",
+      "domain": "edit",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [
+        {
+          "prerequisite": "smart_import_graph",
+          "condition": "import_graph called in this session",
+          "message": "Cross-file edit requires import dependency analysis first. Run ssr({tool:\"import_graph\"})."
+        }
+      ],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Source file path (positional)"
+          },
+          "pattern": {
+            "type": "string",
+            "description": "Old text to find"
+          },
+          "replacement": {
+            "type": "string",
+            "description": "New text to apply"
+          },
+          "root": {
+            "type": "string",
+            "description": "Root dir (default: .)"
+          },
+          "include": {
+            "type": "string",
+            "description": "Glob include"
+          },
+          "exclude": {
+            "type": "string",
+            "description": "Glob exclude"
+          },
+          "signature": {
+            "type": "string",
+            "enum": [
+              "rename",
+              "signature",
+              "auto"
+            ],
+            "description": "Change type (default: auto)"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Preview only (default: true)"
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Actually apply (default: false)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "diff"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "file"
+        ]
+      }
+    },
+    {
+      "name": "smart_debug",
+      "description": "Use when: need to understand an error or stack trace — classifies error type, identifies root cause, suggests fixes. Paste the full error message. Avoid when: error is straightforward and known (use basic reasoning instead).",
+      "category": "debug",
+      "domain": "debug",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error message to analyze"
+          },
+          "file": {
+            "type": "string",
+            "description": "File path with error/stacktrace"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: .)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_diagram",
+      "description": "Use when: need to visualize architecture, workflow, or data flow as Mermaid.js diagram. Supports flowchart, sequence, class, ER. Can convert import-graph output to visual. Useful for documentation or design discussions.",
+      "category": "report",
+      "domain": "report",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "flowchart",
+              "sequence",
+              "class",
+              "er"
+            ],
+            "description": "Diagram type"
+          },
+          "title": {
+            "type": "string",
+            "description": "Diagram title"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "TB",
+              "BT",
+              "LR",
+              "RL"
+            ],
+            "description": "Flowchart direction (default: TB)"
+          },
+          "input": {
+            "type": "string",
+            "description": "Input JSON file path"
+          },
+          "fromImportGraph": {
+            "type": "boolean",
+            "description": "Read import-graph JSON from stdin/file"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format (default: text)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Root directory (default: .)"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "smart_diff_view",
+      "description": "Use when: need to visually compare files or preview changes before applying. Generates terminal-friendly unified or side-by-side diffs. Solves the \"no visual diff\" weakness — use before fast_apply to verify changes.",
+      "category": "report",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file1": {
+            "type": "string",
+            "description": "First file path (or base file)"
+          },
+          "file2": {
+            "type": "string",
+            "description": "Second file path (optional — compare file1 vs file2)"
+          },
+          "content": {
+            "type": "string",
+            "description": "New content to compare against file1 (for previewing proposed changes)"
+          },
+          "git": {
+            "type": "boolean",
+            "description": "Show git diff (working tree vs HEAD) for file1"
+          },
+          "staged": {
+            "type": "boolean",
+            "description": "Show staged git diff (with --git, shows staged changes)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "unified",
+              "side-by-side",
+              "stats"
+            ],
+            "description": "Output format (default: unified)"
+          },
+          "color": {
+            "type": "boolean",
+            "description": "Use ANSI color codes (default: true for terminal)"
+          },
+          "context": {
+            "type": "number",
+            "description": "Context lines around changes (default: 3)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: cwd)"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_docx_generate",
+      "description": "Generate APA 7th formatted Microsoft Word (.docx) documents programmatically.\n\nCreates professional academic documents with:\n  - Title page with centered title\n  - Abstract section\n  - Numbered body sections with proper heading hierarchy\n  - Data tables with header rows\n  - APA 7th reference list with hanging indents (0.5 inch)\n  - Times New Roman 12pt, double-spaced\n\nInput structure:\n  { title, abstract?, sections: [{heading, content}], references: [...], tables: [{title, data}], outputPath? }\n\nExamples:\n  { title: \"My Research\", abstract: \"This paper...\", sections: [{heading:\"Introduction\", content:\"...\"}], references: [\"Smith, J. (2024)...\"], outputPath: \"/tmp/paper.docx\" }",
+      "category": "standard",
+      "domain": "document",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Document title (required)"
+          },
+          "abstract": {
+            "type": "string",
+            "description": "Abstract text"
+          },
+          "sections": {
+            "type": "array",
+            "description": "Body sections. Each: { heading: string, content: string|string[], level?: number }. Or plain strings for simple paragraphs.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "heading": {
+                  "type": "string"
+                },
+                "content": {
+                  "description": "String (split by double newlines) or array of paragraph strings"
+                },
+                "level": {
+                  "type": "number",
+                  "description": "Heading level 1-5 (default: auto)"
+                }
+              }
+            }
+          },
+          "references": {
+            "type": "array",
+            "description": "APA 7th formatted reference strings",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tables": {
+            "type": "array",
+            "description": "Tables. Each: { title?: string, data: string[][], columnWidths?: number[] }",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "data": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "columnWidths": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          },
+          "outputPath": {
+            "type": "string",
+            "description": "Output file path (default: ./<title>.docx in current directory)"
+          },
+          "author": {
+            "type": "string",
+            "description": "Document author metadata (default: \"Smart MCP\")"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "smart_error_diagnose",
+      "description": "Use when: getting an error and need root cause analysis. Cross-references against known error KB + memory store (auto-searched). Covers build/runtime/test/permission/path/network. Supports auto-store successful diagnoses for future reuse.",
+      "category": "debug",
+      "domain": "debug",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error msg to analyze (positional)"
+          },
+          "file": {
+            "type": "string",
+            "description": "File with error/stacktrace"
+          },
+          "list": {
+            "type": "boolean",
+            "description": "List all known patterns"
+          },
+          "noMemory": {
+            "type": "boolean",
+            "description": "Skip memory store search (memory search is ON by default)"
+          },
+          "store": {
+            "type": "boolean",
+            "description": "Store diagnosis result to memory"
+          },
+          "memoryResolution": {
+            "type": "string",
+            "description": "Resolution text for store (defaults to KB fix)"
+          },
+          "memoryTools": {
+            "type": "string",
+            "description": "Comma-separated tools used (for store)"
+          },
+          "memoryThreshold": {
+            "type": "number",
+            "description": "Fuzzy match threshold 0-1 (default: 0.6)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format (default: text)"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_exa_crawl",
+      "description": "Crawl web pages and extract their content. Auto-detects static vs JS sites (no need to specify renderer).\n\nUse with options for better results:\n  - clean: (recommended) For news, blogs, articles — removes nav/ads/footer, saves 40-60% tokens\n  - markdown: For LLM-friendly output — converts to Markdown, preserves structure\n  - chunk: For long articles with 5+ sections — splits by heading, saves LLM context\n  - crawlee: (advanced) For complex sites — auto-detects static vs JS, retries on failure\n  - render: For JS-heavy sites with no visible content — uses Playwright rendering\n\nDo NOT use for: searching the web (use smart_exa_search). Operating a browser (use smart_pw_browser).",
+      "category": "search",
+      "domain": "crawl",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "urls": {
+            "type": "string",
+            "description": "URLs to crawl, comma-separated (required)"
+          },
+          "clean": {
+            "type": "boolean",
+            "description": "Article extraction: removes nav/ads/footer. Use for news, blogs, tutorials. (recommended)"
+          },
+          "markdown": {
+            "type": "boolean",
+            "description": "Convert to Markdown. Use when the result feeds into an LLM. Saves ~60% tokens vs raw HTML."
+          },
+          "chunk": {
+            "type": "boolean",
+            "description": "Split long content by heading. Use when article has 5+ sections. Saves LLM context window."
+          },
+          "maxChunkSize": {
+            "type": "number",
+            "description": "Max chars per chunk when --chunk is used (default: 2000)"
+          },
+          "crawlee": {
+            "type": "boolean",
+            "description": "Adaptive crawl: auto-detects static vs JS-heavy sites. Use for complex sites that might need JS rendering. Requires npm install crawlee."
+          },
+          "render": {
+            "type": "boolean",
+            "description": "Render JS-heavy pages with Playwright. Use when content is empty/missing without JS."
+          },
+          "extended": {
+            "type": "boolean",
+            "description": "Extended mode — up to 30,000 chars per result. Use for very long documents."
+          },
+          "maxChars": {
+            "type": "number",
+            "description": "Max chars per result (crawl default: 8000)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "urls"
+        ]
+      }
+    },
+    {
+      "name": "smart_exa_search",
+      "description": "Search the web or code/documentation with natural language queries. Returns structured results with URLs and summaries.\n\nUse for:\n  - Web search: finding recent articles, docs, news (command: \"search\")\n  - Code search: finding code examples, API usage patterns (command: \"code\")\n\nDo NOT use for: crawling a specific URL (use smart_exa_crawl). Operating a browser (use smart_pw_browser).",
+      "category": "search",
+      "domain": "search",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "search",
+              "code"
+            ],
+            "description": "search: web search for information. code: find code examples and docs."
+          },
+          "query": {
+            "type": "string",
+            "description": "Search query (required for search/code)"
+          },
+          "numResults": {
+            "type": "number",
+            "description": "Number of results (default: 10)"
+          },
+          "maxChars": {
+            "type": "number",
+            "description": "Max chars per result (search/code default: 3000)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
+      "name": "smart_fast_apply",
+      "description": "Use when: need to apply LLM-suggested code edits faster and more accurately.\nSupports 6 input formats (ordered by token efficiency):\n  - unified-diff: git diff format — MOST token-efficient (40-60% savings). Use +/- lines only, no unchanged lines needed.\n  - lazy: SEARCH/REPLACE with // ... existing code ... markers (80-98% savings for large files)\n  - hashline: line-number + content-hash addressing — MOST ROBUST for large files (>400 lines). Specify line range directly. No fuzzy match ambiguity.\n  - partial: abbreviated SEARCH context (fewer lines, L5 fuzzy matching)\n  - search-replace: standard SEARCH/REPLACE blocks (Aider-compatible)\n  - whole-file: full file replacement (most tokens)\n💡 Tip: prefer unified-diff for small edits, hashline for >400 line files, lazy for large files with few changes.\nFeatures: 6-level fuzzy matching (L6 = gap-tolerant subsequence), hashline addressing with content verification, atomic multi-file apply, undo snapshots, binary/access checks.\nDry-run by default — safe to use without side effects.",
+      "category": "edit",
+      "domain": "edit",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [
+        {
+          "prerequisite": "smart_security",
+          "condition": "smart_think mode:beam after security scan",
+          "message": "Security fix requires multi-path analysis first. Run smart_think({mode:\"beam\"}) before applying fixes."
+        }
+      ],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "search-replace",
+              "lazy",
+              "partial",
+              "unified-diff",
+              "whole-file",
+              "hashline"
+            ],
+            "description": "Input format (default: search-replace). Token efficiency: unified-diff (best, +/- only) > lazy > hashline > partial > search-replace > whole-file. Use hashline for large files (>400 lines) where SEARCH/REPLACE matching is unreliable."
+          },
+          "blocks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string",
+                  "description": "Target file path"
+                },
+                "search": {
+                  "type": "string",
+                  "description": "Text to search (multi-line). For lazy format: use // ... markers to skip unchanged code. For partial format: abbreviated context lines."
+                },
+                "replace": {
+                  "type": "string",
+                  "description": "Replacement text (multi-line)"
+                }
+              },
+              "required": [
+                "file",
+                "search",
+                "replace"
+              ]
+            },
+            "description": "SEARCH/REPLACE blocks (for format=search-replace, lazy, or partial)"
+          },
+          "text": {
+            "type": "string",
+            "description": "Raw text containing SEARCH/REPLACE blocks or unified diff (auto-parsed)"
+          },
+          "diff": {
+            "type": "string",
+            "description": "Unified diff string (format=unified-diff). Token-efficient: only +/- lines needed, omit unchanged context."
+          },
+          "whole": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              }
+            },
+            "description": "Whole file replacement (for format=whole-file)"
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string",
+                  "description": "Target file path"
+                },
+                "startLine": {
+                  "type": "number",
+                  "description": "Start line (1-indexed)"
+                },
+                "endLine": {
+                  "type": "number",
+                  "description": "End line (1-indexed, inclusive)"
+                },
+                "oldContent": {
+                  "type": "string",
+                  "description": "Expected content of the line range (for verification)"
+                },
+                "newContent": {
+                  "type": "string",
+                  "description": "Replacement content"
+                }
+              },
+              "required": [
+                "file",
+                "startLine",
+                "endLine",
+                "newContent"
+              ]
+            },
+            "description": "Hashline edit changes (for format=hashline). Specify line range directly with content verification — most robust for large files."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Restrict changes to these files only"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: .)"
+          },
+          "fuzzy": {
+            "type": "boolean",
+            "description": "Enable 4-level fuzzy matching (default: true)"
+          },
+          "validate": {
+            "type": "boolean",
+            "description": "Check brace/bracket balance after apply (default: false)"
+          },
+          "undo": {
+            "type": "boolean",
+            "description": "Create .apply.bak snapshots for rollback (default: true)"
+          },
+          "atomic": {
+            "type": "boolean",
+            "description": "Apply all changes atomically with rollback on failure (default: false)"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Preview only — show changes without applying (default: true)"
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Actually apply changes (default: false, explicit opt-in for 3+ files)"
+          },
+          "output": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "diff"
+            ],
+            "description": "Output format (default: text)"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_git_commit",
+      "description": "Use when: you need to commit changes with an auto-generated conventional commit message. Analyzes staged diff, generates type (feat/fix/refactor/etc.) and scope, then optionally executes the commit. Supports --dry-run preview, --amend, --all auto-stage, and custom --type/--scope overrides.",
+      "category": "git",
+      "domain": "git",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string",
+            "description": "Git repo root (default: .)"
+          },
+          "message": {
+            "type": "string",
+            "description": "Use this message instead of auto-generating (e.g., \"feat: add login\")"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "feat",
+              "fix",
+              "refactor",
+              "docs",
+              "test",
+              "chore",
+              "style",
+              "perf"
+            ],
+            "description": "Force conventional commit type (default: auto-detect from diff)"
+          },
+          "scope": {
+            "type": "string",
+            "description": "Add scope to commit message (e.g., \"auth\"). Empty string to force no scope."
+          },
+          "all": {
+            "type": "boolean",
+            "description": "Auto-stage all tracked files before committing"
+          },
+          "amend": {
+            "type": "boolean",
+            "description": "Amend the last commit instead of creating a new one"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Preview the commit without actually committing"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format (default: text)"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_git_context",
+      "description": "Use when: need to understand current git state — staged/unstaged changes, commit diffs, and their impact scope via import graph. Run before committing or generating PR descriptions.",
+      "category": "meta",
+      "domain": "git",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string",
+            "description": "Git repo root (default: .)"
+          },
+          "staged": {
+            "type": "boolean",
+            "description": "Staged only"
+          },
+          "all": {
+            "type": "boolean",
+            "description": "Staged + unstaged"
+          },
+          "commit": {
+            "type": "string",
+            "description": "Commit ref (e.g., HEAD~1)"
+          },
+          "range": {
+            "type": "string",
+            "description": "Commit range"
+          },
+          "impact": {
+            "type": "boolean",
+            "description": "Import-graph impact analysis"
+          },
+          "context": {
+            "type": "number",
+            "description": "Diff context lines (default: 3)"
+          },
+          "statOnly": {
+            "type": "boolean",
+            "description": "File stats only"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format (default: text)"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_git_pr",
+      "description": "Use when: you need to create a Pull Request with an auto-generated description. Analyzes commits between head and base branches, generates a structured PR title and body, then optionally creates the PR via gh CLI. Supports --draft, --no-publish preview, and manual --title/--body overrides.",
+      "category": "git",
+      "domain": "git",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string",
+            "description": "Git repo root (default: .)"
+          },
+          "base": {
+            "type": "string",
+            "description": "Base branch (default: auto-detect: main/master/develop)"
+          },
+          "head": {
+            "type": "string",
+            "description": "Head branch (default: current branch)"
+          },
+          "title": {
+            "type": "string",
+            "description": "PR title (default: auto-generated from commits)"
+          },
+          "body": {
+            "type": "string",
+            "description": "PR body text (default: auto-generated with commit list + file list)"
+          },
+          "draft": {
+            "type": "boolean",
+            "description": "Create as a draft PR"
+          },
+          "noPublish": {
+            "type": "boolean",
+            "description": "Don't create the PR, just show the preview"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format (default: text)"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_git_review",
+      "description": "Use when: you need a code review of working tree changes, a specific commit, or a remote PR. Analyzes diffs with heuristic checks (security, performance, correctness, style) and produces structured per-file comments with severity levels. Can also fetch and review PRs from GitHub.",
+      "category": "git",
+      "domain": "git",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string",
+            "description": "Git repo root (default: .)"
+          },
+          "commit": {
+            "type": "string",
+            "description": "Review a specific commit (e.g., HEAD, HEAD~1)"
+          },
+          "range": {
+            "type": "string",
+            "description": "Review a commit range (e.g., HEAD~3..HEAD)"
+          },
+          "pr": {
+            "type": "string",
+            "description": "Review an existing PR by URL (e.g., https://github.com/user/repo/pull/123)"
+          },
+          "staged": {
+            "type": "boolean",
+            "description": "Review staged changes only"
+          },
+          "all": {
+            "type": "boolean",
+            "description": "Review staged + unstaged changes"
+          },
+          "focus": {
+            "type": "string",
+            "enum": [
+              "security",
+              "performance",
+              "correctness",
+              "style",
+              "all"
+            ],
+            "description": "Review focus area (default: all)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format (default: text)"
+          },
+          "output": {
+            "type": "string",
+            "description": "Write review report to file path"
+          },
+          "maxComments": {
+            "type": "number",
+            "description": "Max review comments per file (default: 5)"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_github_search",
+      "description": "Use when: need to find real-world code examples from public GitHub repos. Filter by repo, path, language, case. Best for: seeing how others use an API, finding production patterns. Avoid when: need to search your own codebase (use grep instead).",
+      "category": "search",
+      "domain": "search",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Code pattern (supports regex)"
+          },
+          "repo": {
+            "type": "string",
+            "description": "Filter repo (e.g., facebook/react)"
+          },
+          "path": {
+            "type": "string",
+            "description": "Filter path (e.g., src/)**"
+          },
+          "language": {
+            "type": "string",
+            "description": "Filter langs, comma-separated"
+          },
+          "matchCase": {
+            "type": "boolean",
+            "description": "Case-sensitive"
+          },
+          "matchWholeWords": {
+            "type": "boolean",
+            "description": "Whole words only"
+          },
+          "maxResults": {
+            "type": "number",
+            "description": "Max results (default: 10, max: 100)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "smart_hallucination_check",
+      "description": "Check LLM output for hallucinations (fabrication, misattribution, unfaithful, self-contradiction, off-topic, confident-refusal).\n\nRuns 5 structural checks:\n  1. Factual — are mentioned identifiers present in context?\n  2. Consistency — are there internal contradictions?\n  3. Groundedness — can conclusions be traced to context?\n  4. Off-topic — does output address the query?\n  5. Confidence — overconfident language without evidence?\n\nDOI Verification mode (mode:\"doi\"):\n  Extracts all DOIs from the output and verifies each via doi.org liveness check.\n  Dead DOIs (404) = likely fabricated. Restricted (403) = paywalled but may exist.\n\nReturns: { overallScore: 1-10, verdict: \"pass\"|\"warn\"|\"fail\", issues[], summary }\n\nExamples:\n  { output: \"The bug is in parser.js...\", context: \"Error at parser.js:42\" }\n  { output: \"...\", query: \"Why does the parser crash?\", strictness: 7 }\n  { output: \"Smith (2024, doi:10.1234/fake) found...\", mode: \"doi\" }",
+      "category": "standard",
+      "domain": "quality",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "output": {
+            "type": "string",
+            "description": "LLM output text to check for hallucinations (required)"
+          },
+          "context": {
+            "type": "string",
+            "description": "Original tool output or context to verify against"
+          },
+          "query": {
+            "type": "string",
+            "description": "Original user question for off-topic detection"
+          },
+          "toolName": {
+            "type": "string",
+            "description": "Tool that produced the output (for context)"
+          },
+          "strictness": {
+            "type": "number",
+            "description": "Strictness 1-10, higher = more sensitive (default: 5)"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "default",
+              "doi"
+            ],
+            "description": "Check mode: \"default\" (5 structural checks) or \"doi\" (DOI liveness verification). Default: \"default\"."
+          }
+        },
+        "required": [
+          "output"
+        ]
+      }
+    },
+    {
+      "name": "smart_hybrid_router",
+      "description": "Universal Task Router — single entry point for ALL tasks. Just describe what you need.\n\nPhase 3: LLM only describes the task. Router handles classification + routing.\n  code tasks (structure/debug/search/change-impact/semantic)\n    → deterministic CKG/LSP/grep execution\n  general tasks (crawl/refactor/git/security/test/report/lang/search/edit/plan/office/wiki/analyze)\n    → structured tool/skill recommendation + workflow\n\nFeatures:\n- Universal Classifier: categorizes into 6 code types + 13 general domains\n- Code tasks: automatic CKG/LSP/grep execution with confidence scoring\n- General tasks: returns best-matching skill/tools/workflow recommendation\n- Hybrid fallback: uncertain questions gather context from both paths\n\nExamples:\n  { question: \"who calls authenticate() in src/auth.ts\", root: \".\" }\n    → code structure: CKG callers query + LSP type info\n\n  { question: \"幫我爬 iyf.tv 的 API\", root: \".\" }\n    → general crawl: recommends skill(\"smart-mcp-crawl\") + workflow\n\n  { question: \"explain the architecture of this module\", files: [\"src/lib/hybrid-engine.mjs\"] }\n    → semantic: AST + deps + file content for LLM synthesis\n\n  { question: \"掃描這個專案的漏洞\", root: \".\" }\n    → general security: recommends skill(\"smart-mcp-security\") + tools",
+      "category": "standard",
+      "domain": "routing",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "The question about the codebase"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: cwd)"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Relevant file paths to focus analysis"
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Symbol names to focus analysis (auto-extracted from question if not provided)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "question"
+        ]
+      }
+    },
+    {
+      "name": "smart_impact_flow",
+      "description": "Full change-impact analysis pipeline. Use when: planning a refactor, reviewing a PR diff, need to know what depends on your changes, or want to predict which tests might break. Builds on CKG + LSP call graph + test file heuristics.\n\nThree input modes:\n  1. diff (git diff text) → auto-detect changed symbols → CKG propagation → test prediction\n  2. files + symbols → skip diff parsing, directly trace symbols through call graph\n  3. files only → auto-detect symbols in files → propagate → test prediction\n\nOutput: structured JSON with direct/transitive impacts, affected test files, confidence score, human-readable summary.",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "diff": {
+            "type": "string",
+            "description": "git diff text to analyze (alternative to files+symbols)"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Array of file paths to analyze (alternative to diff)"
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Specific symbol names to trace (used with files)"
+          },
+          "depth": {
+            "type": "number",
+            "description": "Impact propagation depth (1-3, default: 2). depth=1=direct only, depth=2=direct+transitive"
+          },
+          "predictTests": {
+            "type": "boolean",
+            "description": "Whether to predict affected test files (default: true)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: .)"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "smart_import_graph",
+      "description": "Use when: need to understand cross-file import dependencies before refactoring. Supports JS/TS, Python, Ruby, Rust, Go. Configure depth for shallow or deep analysis. Use focus to zoom in on specific files.",
+      "category": "analyze",
+      "domain": "analyze",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string",
+            "description": "Root dir (default: .)"
+          },
+          "include": {
+            "type": "string",
+            "description": "Glob include"
+          },
+          "exclude": {
+            "type": "string",
+            "description": "Glob exclude"
+          },
+          "depth": {
+            "type": "number",
+            "description": "Max depth (unlimited by default)"
+          },
+          "focus": {
+            "type": "string",
+            "description": "Focus on one file"
+          },
+          "noExternals": {
+            "type": "boolean",
+            "description": "Skip external deps"
+          },
+          "reverse": {
+            "type": "boolean",
+            "description": "Reverse deps (who imports)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "dot",
+              "markdown"
+            ],
+            "description": "Output format (default: text)"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_ingest_document",
+      "description": "Convert binary documents (PDF, DOCX, XLSX, HTML, RTF, PPTX, etc.) to Markdown text that the LLM can read and analyze.\n\nSupports:\n  - PDF: full text extraction + auto-OCR fallback for scanned PDFs\n  - DOCX: converts to Markdown preserving headings, lists, emphasis\n  - HTML: strips markup, preserves links and structure\n  - XLSX/XLS: converts sheet data to Markdown tables\n  - RTF: macOS textutil-based conversion\n  - PPTX: slide text extraction (requires python-pptx or pptx2md)\n  - Plain text: Markdown, CSV, JSON, YAML, XML — reads directly\n\nOCR (for scanned/image-only PDFs):\n  - Auto-detects scanned PDFs when text extraction yields no content\n  - Uses pdftoppm + tesseract for OCR\n  - Force OCR mode: ocr: true (skip text extraction)\n  - Custom language: ocrLang: \"chi_tra+eng\" (tesseract language pack required)\n\nAuto-registers in document registry for cross-session lookup.\nUse smart_list_documents to search previously ingested documents.\n\nFor large PDFs (>100 pages), use offset/limit to read in chunks.\n  Example: { path: \"spec.pdf\" }                  → first 100 pages\n           { path: \"spec.pdf\", limit: 50 }       → first 50 pages\n           { path: \"spec.pdf\", offset: 50, limit: 50 } → pages 51-100\n           { path: \"scan.pdf\", ocr: true }       → force OCR mode\n           { path: \"scan.pdf\", ocr: true, ocrLang: \"chi_tra+eng\" } → OCR with Chinese",
+      "category": "standard",
+      "domain": "document",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the document file"
+          },
+          "offset": {
+            "type": "number",
+            "description": "Page offset for paginated formats (default: 0, PDF only)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max pages to return (default: all, PDF only)"
+          },
+          "summary": {
+            "type": "string",
+            "description": "Optional short summary of the document content (saved in registry for later search)"
+          },
+          "ocr": {
+            "type": "boolean",
+            "description": "Force OCR mode for PDF (skip text extraction, default: false)"
+          },
+          "ocrLang": {
+            "type": "string",
+            "description": "Tesseract language(s) for OCR (default: \"eng\"). Multiple: \"eng+chi_tra\""
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "smart_integrate",
+      "description": "Use when: need meta-operations on smart itself — list available tools, suggest commit scope, generate PR descriptions, diagnose terminal errors, or manage MCP servers. Start here when unsure which tool to use (command:\"list\") or before committing (command:\"suggest-commit\").",
+      "category": "meta",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "list",
+              "suggest-commit",
+              "generate-pr",
+              "diagnose",
+              "mcp"
+            ],
+            "description": "list/suggest-commit/generate-pr/diagnose/mcp"
+          },
+          "root": {
+            "type": "string",
+            "description": "Root directory (default: .)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
+      "name": "smart_list_documents",
+      "description": "Search and list previously ingested documents (cross-session persistent index).\n\nDocuments are auto-registered when read via smart_ingest_document.\nThe index persists across sessions at ~/.smart/cache/documents.db.\n\nUse cases:\n  - \"What documents did I read last time?\"\n  - \"Find that contract I read yesterday\"\n  - \"Show me all PDFs I've analyzed\"\n  - \"Search documents about protocol specs\"",
+      "category": "standard",
+      "domain": "document",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Optional search term — matches title, path, and summary (case-insensitive)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results to return (default: 20)"
+          },
+          "format": {
+            "type": "string",
+            "description": "Filter by format (pdf, docx, xlsx, html, etc.)"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_memory_store",
+      "description": "Use when: need to store or retrieve past error resolutions, patterns, and learnings across sessions. Supports fuzzy matching + vector search (TF-IDF hybrid) — use vector=true for semantic matching across similar error messages. Use search first, add if not found. Also supports type:\"skill_patch\" for storing reusable behavior patterns (trigger_conditions + behavior_change + target_skill).",
+      "category": "plan",
+      "domain": "memory",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "store",
+              "search",
+              "list",
+              "get",
+              "confirm",
+              "delete",
+              "stats",
+              "export",
+              "extract"
+            ],
+            "description": "store/search/list/get/confirm/delete/stats/export/extract — extract auto-generates skill_patches from findings (pipe JSON via stdin)"
+          },
+          "query": {
+            "type": "string",
+            "description": "Error message or trigger description to search or store (positional for store/search)"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "error",
+              "skill_patch"
+            ],
+            "description": "Entry type: \"error\" (default) for error resolutions, \"skill_patch\" for reusable behavior patterns"
+          },
+          "targetSkill": {
+            "type": "string",
+            "description": "Target skill name this skill_patch applies to (for type:skill_patch)"
+          },
+          "behaviorChange": {
+            "type": "string",
+            "description": "What to do differently — the behavior improvement (for type:skill_patch)"
+          },
+          "resolution": {
+            "type": "string",
+            "description": "How the error was fixed (for store)"
+          },
+          "tools": {
+            "type": "string",
+            "description": "Comma-separated tool names used (for store)"
+          },
+          "files": {
+            "type": "string",
+            "description": "Comma-separated file paths changed (for store)"
+          },
+          "category": {
+            "type": "string",
+            "description": "Filter by category (for list): build/runtime/test/permission/path/network/lint/git/unknown/skill_patch"
+          },
+          "success": {
+            "type": "boolean",
+            "description": "Whether resolution was successful (default: true)"
+          },
+          "id": {
+            "type": "string",
+            "description": "Entry ID (for get/delete)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default: 10 for search, 50 for list)"
+          },
+          "threshold": {
+            "type": "number",
+            "description": "Fuzzy match threshold 0-1 (default: 0.4)"
+          },
+          "vector": {
+            "type": "boolean",
+            "description": "Enable hybrid vector search (TF-IDF + fuzzy) for better semantic matching"
+          },
+          "vectorThreshold": {
+            "type": "number",
+            "description": "Vector match threshold 0-1 (default: 0.1)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          },
+          "findingsFile": {
+            "type": "string",
+            "description": "Path to findings JSON file (for extract command)"
+          },
+          "minFrequency": {
+            "type": "number",
+            "description": "Minimum occurrences to trigger skill_patch (default: 2, for extract command)"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Preview without storing (for extract command)"
+          },
+          "ttl": {
+            "type": "string",
+            "description": "Auto-expire after duration (e.g. \"7d\", \"30d\", \"1h\") — for store command"
+          },
+          "keep": {
+            "type": "string",
+            "enum": [
+              "always"
+            ],
+            "description": "Prevent auto-cleanup for this entry — for store command"
+          },
+          "includeArchived": {
+            "type": "boolean",
+            "description": "Include archived entries in search/list results"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
+      "name": "smart_model_router",
+      "description": "Multi-Model Orchestration — routes tasks to optimal cost/tier.\n\nPhase 14: Dynamic tier selection for token efficiency and cost optimization.\nClassifies tasks into 4 tiers and routes accordingly:\n\n  Tier 1 (deterministic, $0)    — CKG, LSP, grep: \"who calls foo()\"\n  Tier 2 (local small, $0.001)  — Local model: \"what does this do?\"\n  Tier 3 (medium API, $0.01)    — Medium model: \"debug this error\"\n  Tier 4 (strong API, $0.05)    — Strongest model: \"refactor this module\"\n\nCommands:\n  route   → classify a task and estimate cost\n  report  → show cost tracking report\n  suggest → suggest optimal tier + tool from a natural language question\n  savings → estimate savings vs all-T4 baseline\n  tool    → suggest tier for a specific tool name\n  tiers   → list all defined tiers\n  reset   → reset cost tracking counters",
+      "category": "standard",
+      "domain": "routing",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "route",
+              "report",
+              "suggest",
+              "savings",
+              "tool",
+              "tiers",
+              "reset"
+            ],
+            "description": "Command: route (classify), report (cost), suggest (question→tier), savings (estimate), tool (tier for tool), tiers (list), reset (counters)"
+          },
+          "task": {
+            "type": "string",
+            "description": "Task description or type (for \"route\" command)"
+          },
+          "tier": {
+            "type": "string",
+            "description": "Target tier: \"auto\" (default), \"T1\"-\"T4\", or tier ID 1-4 (for \"route\" command)"
+          },
+          "question": {
+            "type": "string",
+            "description": "Natural language question (for \"suggest\" command)"
+          },
+          "tool": {
+            "type": "string",
+            "description": "Tool name to suggest tier for (for \"tool\" command, e.g. \"smart_grep\")"
+          },
+          "callPattern": {
+            "type": "object",
+            "description": "Call pattern for savings estimation (for \"savings\" command, e.g. {\"t1\": 100, \"t2\": 50, \"t3\": 20, \"t4\": 5})"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
+      "name": "smart_naming",
+      "description": "Use when: need to audit naming conventions across the codebase (kebab-case, camelCase, PascalCase, UPPER_CASE). Run to detect violations before code review or to enforce team naming standards.",
+      "category": "analyze",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string",
+            "description": "Root dir (default: .)"
+          },
+          "include": {
+            "type": "string",
+            "description": "Glob include"
+          },
+          "exclude": {
+            "type": "string",
+            "description": "Glob exclude"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_obsidian_write",
+      "description": "Write a note directly to an Obsidian vault with YAML frontmatter.\n\nAuto-detects vault location from:\n  1. OBSIDIAN_VAULT_PATH environment variable\n  2. Common macOS locations (~/Documents/Obsidian Vault, etc.)\n\nFeatures:\n  - YAML frontmatter with title, date, tags, category\n  - Auto-placement in vault subfolders\n  - Sanitized filenames from titles\n  - Overwrite protection\n\nExamples:\n  { title: \"My Research Note\", content: \"Findings...\", tags: [\"research\", \"ai\"] }\n  { title: \"Meeting Notes\", content: \"...\", folder: \"meetings\", vault: \"/path/to/vault\" }\n  { title: \"Update\", content: \"...\", overwrite: true }",
+      "category": "standard",
+      "domain": "wiki",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Note title (required, used as filename)"
+          },
+          "content": {
+            "type": "string",
+            "description": "Note content in Markdown (required)"
+          },
+          "vault": {
+            "type": "string",
+            "description": "Obsidian vault path (auto-detected if not provided)"
+          },
+          "folder": {
+            "type": "string",
+            "description": "Subfolder within vault (created if not exists)"
+          },
+          "tags": {
+            "type": "array",
+            "description": "Tags for YAML frontmatter",
+            "items": {
+              "type": "string"
+            }
+          },
+          "category": {
+            "type": "string",
+            "description": "Category for YAML frontmatter"
+          },
+          "overwrite": {
+            "type": "boolean",
+            "description": "Overwrite existing file (default: false)"
+          }
+        },
+        "required": [
+          "title",
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "smart_patch_gen",
+      "description": "Generate edit patches from analysis tool output.\n\nBridges the gap between analysis (error_diagnose/debug/thinking) and action (cross_file_edit).\n\nInput: analysis output text from any smart-mcp tool.\nOutput: structured patch plan with file paths, line numbers, and change descriptions.\n\nSafety:\n  - preview=true (default): shows changes without applying\n  - 3+ files require explicit apply=true to proceed\n\nIntegration:\n  error_diagnose → patch_gen(preview) → review → cross_file_edit(apply)\n\nExamples:\n  { source: \"error_diagnose\", content: \"...\" }\n  { source: \"debug\", content: \"Fix: rename foo to bar in src/app.js\", file: \"src/app.js\" }\n  { source: \"thinking\", content: \"...\", preview: false, apply: true }\n\nPhase 8: Completes the \"analyze → fix\" loop.",
+      "category": "standard",
+      "domain": "edit",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "Analysis output text to extract patches from (required)"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "error_diagnose",
+              "debug",
+              "thinking",
+              "manual",
+              "auto"
+            ],
+            "description": "Source tool hint — improves parsing accuracy (default: auto)"
+          },
+          "file": {
+            "type": "string",
+            "description": "Optional explicit target file (when content lacks file paths)"
+          },
+          "line": {
+            "type": "number",
+            "description": "Optional explicit line number"
+          },
+          "pattern": {
+            "type": "string",
+            "description": "Optional explicit target text pattern to replace"
+          },
+          "replacement": {
+            "type": "string",
+            "description": "Optional explicit replacement text"
+          },
+          "preview": {
+            "type": "boolean",
+            "description": "Preview mode (default: true). Shows patch plan without applying."
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Actually apply changes via cross_file_edit (default: false, requires explicit opt-in for 3+ files)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "diff"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      }
+    },
+    {
+      "name": "smart_planner",
+      "description": "Use when: need to decompose a goal into steps, track execution state, or re-plan on failure. Supports plan generation + execution state (execute/next/report/replan commands). Use its output as input for smart_deep_think plan_execute template. For full lifecycle: execute → next → report (repeats) → done. On step failure, auto-replans remaining steps.",
+      "category": "plan",
+      "domain": "plan",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "string",
+            "description": "Natural language goal/description"
+          },
+          "command": {
+            "type": "string",
+            "enum": [
+              "plan",
+              "execute",
+              "next",
+              "report",
+              "replan",
+              "analyze",
+              "list-tasks"
+            ],
+            "description": "plan (default, generate plan only) | execute (plan + state file) | next (get next step) | report (record result) | replan (force re-plan) | analyze (tool sequence) | list-tasks (show templates)"
+          },
+          "tools": {
+            "type": "string",
+            "description": "Comma-separated tool names (for analyze)"
+          },
+          "context": {
+            "type": "string",
+            "description": "Additional context (e.g. file=src/index.js) for plan/execute/replan"
+          },
+          "steps": {
+            "type": "number",
+            "description": "Max steps in plan (default: 10)"
+          },
+          "strict": {
+            "type": "boolean",
+            "description": "Only use tools that exist in registry"
+          },
+          "state": {
+            "type": "string",
+            "description": "Path to plan state file (for next/report/replan)"
+          },
+          "step": {
+            "type": "number",
+            "description": "Step number being reported (for report)"
+          },
+          "stepStatus": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "fail",
+              "skip"
+            ],
+            "description": "Step execution status (for report, default: ok)"
+          },
+          "result": {
+            "type": "string",
+            "description": "Step result as JSON string (for report)"
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message if step failed (for report)"
+          },
+          "duration": {
+            "type": "number",
+            "description": "Step execution duration in ms (for report)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_pw_browser",
+      "description": "Control a web browser — navigate, click, fill forms, screenshot, execute JavaScript.\n\nCommands:\n  navigate(url):   Browse to a URL\n  snapshot():      Get page text + links\n  click(selector): Click element (text or CSS selector)\n  fill(selector, value): Fill a form field\n  screenshot():    Capture page as PNG (base64)\n  run_code(code):  Execute JavaScript in the page\n\nNOT for: reading article content (use smart_exa_crawl with --clean).\nNOT for: searching the web (use smart_exa_search).",
+      "category": "standard",
+      "domain": "browser",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "navigate",
+              "snapshot",
+              "click",
+              "fill",
+              "screenshot",
+              "run_code"
+            ],
+            "description": "Browser action to perform"
+          },
+          "url": {
+            "type": "string",
+            "description": "URL to navigate to (required for navigate)"
+          },
+          "selector": {
+            "type": "string",
+            "description": "CSS selector or text content for click/fill"
+          },
+          "value": {
+            "type": "string",
+            "description": "Value to fill in form field (required for fill)"
+          },
+          "code": {
+            "type": "string",
+            "description": "JavaScript code to execute in page context (required for run_code)"
+          },
+          "fullPage": {
+            "type": "boolean",
+            "description": "Capture full page screenshot (default: true, screenshot only)"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
+      "name": "smart_py_helper",
+      "description": "Use when: need to analyze Python project health — detect venv status, check dependency consistency, run mypy type checking, get modernization recommendations. Run when setting up new Python project or before migration.",
+      "category": "code",
+      "domain": "lang",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "check-env",
+              "check-deps",
+              "typecheck",
+              "analyze"
+            ],
+            "description": "Analysis command"
+          },
+          "root": {
+            "type": "string",
+            "description": "Root dir (default: .)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
+      "name": "smart_refactor_plan",
+      "description": "CKG-based refactoring assistant.\n\nAnalyzes API usage patterns across the codebase and generates a structured,\nordered migration plan with safety gates.\n\nSteps:\n1. Queries CKG for all callers of the given API symbol\n2. Classifies each usage into patterns (direct-call, class-method, event-handler, module-init, factory)\n3. Generates an ordered migration plan grouped by file and risk level\n4. Applies safety gates for high-impact migrations\n\nOutput includes:\n- Usage pattern breakdown with counts\n- File-by-file migration steps (ordered by dependency)\n- Risk assessment per step (low/medium/high)\n- Overall difficulty score (1-10)\n\nExamples:\n  { symbol: \"oldApi\", file: \"src/utils.ts\" }\n  { symbol: \"deprecatedFunc\", file: \"src/helpers.ts\", newApi: \"newFunc\", goal: \"Replace legacy helper\" }\n  { symbol: \"OldComponent\", file: \"src/components/old.tsx\", plan: false, format: \"json\" }",
+      "category": "standard",
+      "domain": "plan",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "API symbol name to analyze"
+          },
+          "file": {
+            "type": "string",
+            "description": "File containing the API definition"
+          },
+          "newApi": {
+            "type": "string",
+            "description": "New API name (for migration plan)"
+          },
+          "newSignature": {
+            "type": "string",
+            "description": "New API signature/usage pattern"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Migration goal description"
+          },
+          "plan": {
+            "type": "boolean",
+            "description": "Generate full migration plan (default: true)"
+          },
+          "safetyThreshold": {
+            "type": "number",
+            "description": "Warn if more than N files affected (default: 5)"
+          },
+          "excludeFiles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Files to exclude from migration plan"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: .)"
+          }
+        },
+        "required": [
+          "symbol",
+          "file"
+        ]
+      }
+    },
+    {
+      "name": "smart_rename_safety",
+      "description": "Use when: need to rename a function/variable/file across the codebase and want to detect naming conflicts, shadowing, or incomplete renames before applying. Dry-run by default — safe to use without side effects.",
+      "category": "edit",
+      "domain": "edit",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Old symbol name (positional)"
+          },
+          "newName": {
+            "type": "string",
+            "description": "New symbol name (positional)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Root dir (default: .)"
+          },
+          "include": {
+            "type": "string",
+            "description": "Glob include"
+          },
+          "exclude": {
+            "type": "string",
+            "description": "Glob exclude"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Preview only (default: true)"
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Actually apply (default: false)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "name",
+          "newName"
+        ]
+      }
+    },
+    {
+      "name": "smart_report",
+      "description": "Use when: need to generate a self-contained HTML report from test results, security scan data, or coverage analysis. Best for sharing results with team or archiving. Call after running smart_test, smart_security, or coverage.",
+      "category": "report",
+      "domain": "report",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "test",
+              "security",
+              "coverage",
+              "custom"
+            ],
+            "description": "Report type"
+          },
+          "title": {
+            "type": "string",
+            "description": "Report title"
+          },
+          "input": {
+            "type": "string",
+            "description": "Input JSON file path"
+          },
+          "output": {
+            "type": "string",
+            "description": "Output HTML path"
+          },
+          "theme": {
+            "type": "string",
+            "enum": [
+              "light",
+              "dark"
+            ],
+            "description": "Light/dark (default: light)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Root dir (default: .)"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      }
+    },
+    {
+      "name": "smart_edit",
+      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
+      "category": "standard",
+      "domain": "edit",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "File path to edit (required)"
+          },
+          "oldString": {
+            "type": "string",
+            "description": "Text to find and replace (exact match by default, regex if regex=true)"
+          },
+          "newString": {
+            "type": "string",
+            "description": "Replacement text"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Multiple files to edit (alternative to file)"
+          },
+          "regex": {
+            "type": "boolean",
+            "description": "Use regex matching instead of exact (default: false)"
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Apply changes (default: false — dry run)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: current dir)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "description": "Output format (default: json — includes nextCommand)"
+          }
+        },
+        "required": [
+          "oldString",
+          "newString"
+        ]
+      }
+    },
+    {
+      "name": "smart_research",
+      "description": "Research a URL end-to-end. No need to worry about crawl parameters — just pick depth.\n\n  depth=quick:      Fetch + clean + markdown (~2s, most pages)\n  depth=deep:       Same + quality analysis with tips (~3s)\n  depth=exhaustive: Same + chunk by heading (~5s, long articles)\n\nDo NOT use for: searching (use smart_exa_search). Crawling without processing (use smart_exa_crawl).",
+      "category": "standard",
+      "domain": "search",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "URL to research (required)"
+          },
+          "depth": {
+            "type": "string",
+            "enum": [
+              "quick",
+              "deep",
+              "exhaustive"
+            ],
+            "description": "Research depth. quick: basic fetch (~2s). deep: fetch + quality analysis (~3s). exhaustive: fetch + chunk for long articles (~5s)."
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "smart_rs_helper",
+      "description": "Use when: need to analyze Rust project health — run cargo check for compilation errors, cargo clippy for lint warnings, analyze Cargo.toml dependencies, check formatting. Run after modifying Rust code or before committing.",
+      "category": "code",
+      "domain": "lang",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "check",
+              "clippy",
+              "analyze",
+              "fmt"
+            ],
+            "description": "check (cargo check), clippy (cargo clippy), analyze (project analysis), fmt (format check)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Root dir (default: .)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
+      "name": "smart_search_docs",
+      "description": "Full-text search within previously ingested document content.\n\nSearches the content, title, and summary of documents you've previously\nread with smart_ingest_document. Multiple search terms are combined with AND.\n\nExamples:\n  { query: \"timing constraints\" }          → find docs mentioning both terms\n  { query: \"Q&A bridge mode\", limit: 5 }  → top 5 results\n  { query: \"contract termination\" }        → find contract clauses\n\nUse smart_list_documents to browse by metadata instead.",
+      "category": "standard",
+      "domain": "search",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search terms (space-separated = AND, searches content + title + summary)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default: 10)"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "smart_test_suggest",
+      "description": "Use when: need to find missing test coverage for a file or git diff. Analyzes code to suggest edge cases, error paths, and main flows. Useful before committing new or modified code.",
+      "category": "test",
+      "domain": "test",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Source file path (positional)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Root dir (default: .)"
+          },
+          "diff": {
+            "type": "boolean",
+            "description": "Analyze git diff?"
+          },
+          "all": {
+            "type": "boolean",
+            "description": "Analyze all files?"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "file"
+        ]
+      }
+    },
+    {
+      "name": "smart_tool_stats",
+      "description": "Use when: need to review smart usage patterns — which tools are used most, error rates, trends. Also provides recommendations for stale tools. Run \"patterns\" to discover best tool combos and task-type effectiveness. Run periodically to identify overused or underused tools.",
+      "category": "plan",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "record",
+              "report",
+              "trends",
+              "recommendations",
+              "patterns"
+            ],
+            "description": "record/report/trends/recommendations/patterns (patterns=task breakdown + best combos + worst tools)"
+          },
+          "name": {
+            "type": "string",
+            "description": "Tool name (for record)"
+          },
+          "duration": {
+            "type": "number",
+            "description": "Duration ms (for record)"
+          },
+          "success": {
+            "type": "boolean",
+            "description": "Call succeeded?"
+          },
+          "days": {
+            "type": "number",
+            "description": "Last N days (default: 30)"
+          },
+          "top": {
+            "type": "number",
+            "description": "Top N (default: 10)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Root dir (default: .)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
+      "name": "smart_ts_helper",
+      "description": "Use when: need to analyze TypeScript project health — tsconfig strictness recommendations, detect unused exports, check ESM/CJS compatibility. Run after adding new TS files or before switching to strict mode.",
+      "category": "code",
+      "domain": "lang",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "check-config",
+              "check-unused",
+              "analyze"
+            ],
+            "description": "check-config/check-unused/analyze"
+          },
+          "root": {
+            "type": "string",
+            "description": "Root dir (default: .)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
+      "name": "smart_workflow",
+      "description": "Use when: need to run a multi-tool workflow (debug/refactor/security/research), track step execution, report results, dispatch tool execution, or re-plan after failure. Supports composite templates that orchestrate multiple tools in dependency order. Commands: create (from template) | report (step result) | dispatch (execute step/group) | replan (after failure) | summary (state) | list-templates.",
+      "category": "standard",
+      "domain": "workflow",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "create",
+              "report",
+              "dispatch",
+              "replan",
+              "summary",
+              "list-templates"
+            ],
+            "description": "create (start new workflow from template) | report (record step result) | dispatch (execute steps by spawning CLI tools) | replan (re-plan after failure) | summary (show workflow state) | list-templates (show available templates)"
+          },
+          "goal": {
+            "type": "string",
+            "description": "Goal description (for create)"
+          },
+          "template": {
+            "type": "string",
+            "description": "Workflow template name: debug-flow, refactor-flow, refactor-safe-flow, security-flow, research-flow, default-flow, git-flow (for create)"
+          },
+          "state": {
+            "type": "string",
+            "description": "Path to workflow state file (for dispatch/report/replan/summary)"
+          },
+          "step": {
+            "type": "number",
+            "description": "Step number to dispatch or report (for dispatch/report)"
+          },
+          "stepStatus": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "fail",
+              "skip"
+            ],
+            "description": "Step execution status (for report, default: ok)"
+          },
+          "result": {
+            "type": "string",
+            "description": "Step result as JSON string (for report)"
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message if step failed (for report)"
+          },
+          "duration": {
+            "type": "number",
+            "description": "Step execution duration in ms (for report)"
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Per-tool timeout in ms (for dispatch, default: 30000)"
+          },
+          "context": {
+            "type": "string",
+            "description": "Additional context for plan generation (for create/replan)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          }
+        }
+      }
+    }
+  ],
+  "autoRoute": {
+    "enabled": true
+  },
+  "interceptor": {
+    "enabled": false,
+    "defaultAction": "allow"
+  }
+}
