@@ -1133,3 +1133,36 @@ Unified results (score desc)
 | Skill-level Learning (10.6) | skill_patch 搜尋從 keyword BM25 → semantic RRF（8.6pp recall 提升） |
 | Memory Lifecycle (10.8) | 不變，SQLite 版本維持相同 lifecycle 邏輯 |
 | Document Registry (Phase 4b) | 使用 node:sqlite，memory-db.mjs 使用 better-sqlite3 — 兩者獨立，無衝突 |
+
+---
+
+## Phase 12：跨機器知識延續 — Auto-Seed ✅ (2026-06-11)
+
+**問題**：`~/.smart/memory/memory.db` 是本機 SQLite，不在 git 中。新 clone 的專案缺少 Layer 2 保護（`keep=always` 的 skill_patch）。
+
+**解法**：`config/seed-memory.json` + `openDB()` 自動匯入。
+
+### 設計
+
+```
+新機器第一次跑 --db
+  → memory.db 不存在（或空的）
+  → openDB() 偵測 db.countEntries() === 0
+  → 檢查 config/seed-memory.json 存在
+  → 有 → migrateFromJSON() 匯入（INSERT OR IGNORE，hash dedup）
+  → 輸出 "📚 Seeded N knowledge entry/ies"
+```
+
+### 防呆
+
+- **不重複**：`INSERT OR IGNORE` + hash 比對，只會 seed 一次
+- **非破壞**：只寫入空的 DB。已有資料的 DB 完全不受影響
+- **可擴充**：seed 陣列可持續累積新 skill_patch，新安裝一次補齊
+
+### 交付
+
+| 項目 | 狀態 | 說明 |
+|------|------|------|
+| `config/seed-memory.json` | ✅ | 初始含 1 筆 LSP timeout skill_patch（keep=always） |
+| `openDB()` auto-seed | ✅ | 空 DB 自動匯入 + 訊息提示 |
+| 保護層級 | **Layer 1** `config/agents/smart-mcp.md`（git）→ **Layer 2** memory keep=always（seed）→ 雙重保險 |

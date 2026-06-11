@@ -754,3 +754,38 @@
 | sqlite-vec fail → 應用層 cosine 正確 | ✅ 內建 fallback |
 | 全量回歸測試通過 | ✅ |
 
+---
+
+## Phase 12：跨機器知識延續 — Auto-Seed ✅ (2026-06-11)
+
+### 問題
+
+- `~/.smart/memory/memory.db` 是**本機 SQLite**，不在 git
+- 新 clone 的人 memory store 空的，沒有 `keep=always` 的 skill_patch
+- 僅有 system prompt（Layer 1）不夠 — 缺雙重保險
+
+### 解法
+
+```mermaid
+flowchart LR
+  A[新機器 --db] --> B{memory.db 是空的？}
+  B -->|是| C[config/seed-memory.json]
+  C --> D[migrateFromJSON<br/>INSERT OR IGNORE]
+  B -->|否| E[跳過]
+  D --> F[📚 Seeded N entries]
+```
+
+### 實作
+
+- [x] `config/seed-memory.json` — 初始含 LSP timeout skill_patch（keep=always）
+- [x] `openDB()` 新增 empty-DB 偵測 + auto-seed 邏輯
+- [x] 防呆：`INSERT OR IGNORE` + hash dedup，不重複寫入
+- [x] 非破壞：已有資料的 DB 跳過
+- [x] 驗證：CLI `--stats --data-dir /tmp` 顯示 📚 Seeded 1 entry
+
+### 目前 seed 內容
+
+| skill_patch | keep | target |
+|-------------|------|--------|
+| LSP timeout → retry 一次，仍 timeout 才 fallback grep | always | self-reflection |
+
