@@ -51,13 +51,16 @@ permission:
 | `smart_grep({pattern})` | 搜尋程式碼（附 scope/import context） |
 | `smart_learn({root})` | 新專案 onboarding |
 | `smart_think({mode, thought, nextThoughtNeeded})` | **快思**（🥇 預設 `mode:"cit"` — BN-DP 自動判斷分支）。`"beam"`=高風險多路徑。`"forest"`=多樹 consensus 投票 |
-| `smart_deep_think({topic, template})` | **慢想** — 深度分析（9 模板）。一次完整輸出 |
+| `smart_deep_think({topic, template})` | **慢想** — 深度分析（10 模板含 `peer_review`）。一次完整輸出 |
 | `smart_security({scan})` | 安全掃描 |
 | `smart_test({root})` | 執行測試 |
 | `smart_context({command})` | Session 管理（含 context budget 查詢：`smart_context({command:"budget"})`） |
 | `smart_rules({file})` | 查詢專案規則（AGENTS.md / .cursorrules 等）— **編輯前必查** |
 | `smart_lsp({operation, file, line, character})` | **Type-aware 程式碼理解** — 找定義、查引用、看型別、診斷錯誤。支援 TS/JS/Python/Rust/Swift/PHP |
-| `smart_hallucination_check({output, context?, query?})` | **輸出真實性驗證** — 檢查 LLM 輸出是否有幻覺（編造/錯誤歸因/偏離/矛盾/離題/過度自信） |
+| `smart_hallucination_check({output, context?, query?})` | **輸出真實性驗證** — 檢查 LLM 輸出是否有幻覺（編造/錯誤歸因/偏離/矛盾/離題/過度自信）。`mode:"doi"` 可驗證文中 DOI 是否真實存在 |
+| `smart_academic_search({source, query?, doi?})` | **學術文獻搜尋** — OpenAlex/Crossref/Semantic Scholar/Unpaywall。支援 DOI 解析、OA 檢查、MDPI 過濾 |
+| `smart_academic_review({text, mode?})` | **學術同儕審查** — Remi 10-point framework（Nature/Science 等級）。`mode:"prompt"` 回傳審查提示，`mode:"template"` 回傳填空模板 |
+| `smart_docx_generate({title, sections?, references?})` | **DOCX 生成** — APA 7th 格式化 Word 文件。含 hanging indent 參考文獻、標題階層、表格 |
 
 > **💡 快思 vs 慢想**：`smart_think`（🥇 預設 `mode:"cit"`）是來回對話式推理。`smart_deep_think`（慢想 + 模板）是單次完整深度分析。不確定 root cause 或有多種可能 → `think`。需要系統性完整評估 → `deep_think`。
 
@@ -90,6 +93,10 @@ permission:
 | 規劃 | `planner` | 分解目標為步驟 |
 | 規劃 | `memory_store` | 記憶錯誤解法（跨 session） |
 | 瀏覽器 | `pw_browser` | 控制瀏覽器（navigate/click/fill/screenshot） |
+| 學術 | `academic_search` | 🥇 學術文獻搜尋（OpenAlex/Crossref/Semantic Scholar/Unpaywall） |
+| 學術 | `academic_review` | 🥇 學術同儕審查（Remi 10-point，Nature/Science 等級） |
+| 學術 | `docx_generate` | 🥈 APA 7th DOCX 文件生成（含 hanging indent 參考文獻） |
+| 知識庫 | `obsidian_write` | 寫入 Obsidian vault（含 YAML frontmatter + tags） |
 
 > 不確定用哪個 sub-tool？→ `ssr({tool:"hybrid_router", args:{question:"描述你的任務"}})`
 
@@ -162,6 +169,9 @@ permission:
 | 理解程式碼 | `smart_lsp({operation:"hover", file, line, character}) → 看型別 → smart_lsp({operation:"definition"}) → 追程式碼` |
 | 重構前檢查 | `smart_lsp({operation:"references", file, line, character}) → 找所有引用 → ssr(rename_safety)` |
 | 型別錯誤 | `smart_lsp({operation:"diagnostics", file}) → 定位錯誤 → ssr(fast_apply)` |
+| 學術研究 | `skill("deep-research")` 或手動：`smart_academic_search → smart_academic_search(unpaywall) → ssr(ingest_document) → smart_hallucination_check(mode:"doi") → smart_academic_review → smart_docx_generate` |
+| DOI 驗證 | `smart_hallucination_check({output, mode:"doi"}) → 檢查 dead links → 修正或刪除` |
+| 同儕審查 | `smart_academic_review({text, mode:"prompt"})` 或 `smart_deep_think({template:"peer_review"})` |
 
 ---
 

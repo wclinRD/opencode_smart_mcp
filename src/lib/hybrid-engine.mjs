@@ -921,6 +921,14 @@ const DOMAIN_MAP = [
     workflow: ['Ingest: smart_ingest_document', 'Analyze content with LLM', 'Search past docs: smart_list_documents', 'Search doc content: smart_search_docs', 'Optionally save to wiki: skill("wiki-update")'],
   },
   {
+    domain: 'academic',
+    keywords: ['學術', '論文', '文獻', 'peer review', '同儕審查', 'apa', 'doi', 'openalex', 'crossref', 'semantic scholar', 'unpaywall', '文獻回顧', 'literature review', 'scientific article', 'research paper', '學術寫作', 'academic writing', 'deep research', 'scientific research', '期刊', 'journal article', 'citation', '引用'],
+    skill: 'deep-research',
+    tools: ['smart_academic_search', 'smart_academic_review', 'smart_hallucination_check', 'smart_docx_generate', 'smart_ingest_document'],
+    description: '學術研究：文獻搜尋、同儕審查、DOI 驗證、DOCX 生成',
+    workflow: ['Load skill: skill("deep-research")', 'Search: smart_academic_search({source:"openalex"|"crossref"|"semantic_scholar"})', 'Check OA: smart_academic_search({source:"unpaywall"})', 'Read full text: smart_ingest_document', 'Verify DOIs: smart_hallucination_check({mode:"doi"})', 'Peer review: smart_academic_review', 'Generate DOCX: smart_docx_generate'],
+  },
+  {
     domain: 'hallucination_check',
     keywords: ['幻覺', 'hallucination', '驗證 輸出', '檢查 輸出', '真實性', 'groundedness', 'fact check', 'verify output', 'check output', '輸出 正確', '輸出 可靠', '是否 編造', '是否 正確'],
     skill: null,
