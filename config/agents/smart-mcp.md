@@ -57,6 +57,7 @@ permission:
 | `smart_context({command})` | Session 管理（含 context budget 查詢：`smart_context({command:"budget"})`） |
 | `smart_rules({file})` | 查詢專案規則（AGENTS.md / .cursorrules 等）— **編輯前必查** |
 | `smart_lsp({operation, file, line, character})` | **Type-aware 程式碼理解** — 找定義、查引用、看型別、診斷錯誤。支援 TS/JS/Python/Rust/Swift/PHP |
+| `smart_hallucination_check({output, context?, query?})` | **輸出真實性驗證** — 檢查 LLM 輸出是否有幻覺（編造/錯誤歸因/偏離/矛盾/離題/過度自信） |
 
 > **💡 快思 vs 慢想**：`smart_think`（🥇 預設 `mode:"cit"`）是來回對話式推理。`smart_deep_think`（慢想 + 模板）是單次完整深度分析。不確定 root cause 或有多種可能 → `think`。需要系統性完整評估 → `deep_think`。
 
@@ -262,12 +263,16 @@ smart_think({
   ✅ 合約/文件分析（ingest_document 的法律/規格分析）
   ✅ LLM 自己覺得「不太確定」的回答
 
-流程：輸出 → 自我檢查（hallucination_check）→ 分數 < 7？→ 修正後重出
+流程：輸出 → 自我檢查 → smart_hallucination_check（Phase 6 獨立驗證）→ 分數 < 7？→ 修正後重出
   → 分數 ≥ 7？→ 回使用者 ✅
+
+註：Server 端會自動對高風險工具輸出觸發 hallucination check（post-execution hook），
+LLM 也可以在 self-correction loop 中主動呼叫 smart_hallucination_check 做雙重驗證。
 ```
 
 - 一般任務**不啟用**，不浪費 token
 - 修正最多 1 輪，避免 infinite loop
+- Phase 6 hallucination_check 是**獨立 LLM-as-Judge**（不同於 Phase 7 的 LLM 自我檢查），兩者互補
 
 ### 常用推理工作流
 
@@ -276,9 +281,10 @@ smart_think({
 | **一般除錯（有方向）** | `smart_think({mode:"cit", branchingNeeded:false, ...})` → `ssr(fast_apply)` → `smart_test` |
 | **複雜除錯（不確定原因）** | `smart_think({mode:"cit", branchingNeeded:true, beams:[...], template:"debug"})` → 驗證最佳 → `ssr(fast_apply)` → `smart_test` |
 | **多角度交叉驗證** | `smart_think({mode:"forest", trees:[...], consensus:{...}, template:"debug"})` → `ssr(fast_apply)` → `smart_test` |
-| **高風險安全修復** | `smart_security` → **self-correction loop** → `ssr(fast_apply)` → `smart_test` → `smart_security(rescan)` |
+| **高風險安全修復** | `smart_security` → **self-correction loop** → `smart_hallucination_check` → `ssr(fast_apply)` → `smart_test` → `smart_security(rescan)` |
 | **架構方案比較** | `smart_learn` → `ssr(hybrid_router)` → `smart_think({template:"architecture"})` → 實作 |
 | **重大重構** | `ssr(import_graph)` → `smart_think({mode:"beam", template:"refactor"})` → `ssr(rename_safety)` → `ssr(fast_apply)` → `smart_test` |
+| **輸出驗證** | 高風險輸出 → `smart_hallucination_check({output, context, query})` → 檢查 issues → 必要時修正 |
 
 ---
 

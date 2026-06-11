@@ -392,9 +392,9 @@ Ingest 流程：
 
 ---
 
-## Phase 6：Hallucination Detection — 輸出真實性驗證層
+## Phase 6：Hallucination Detection — 輸出真實性驗證層 ✅
 
-> 2026-06-10 誠實盤點 → 2026-06-12 完整規劃。
+> 2026-06-10 誠實盤點 → 2026-06-12 完整規劃 → 2026-06-12 實作完成。
 > 原始 12 項 research 清單中，11 項已被現有功能覆蓋或價值不足 — 僅保留 1 項真正有 incremental value 的項目。
 
 ### 核心定位
@@ -490,17 +490,17 @@ if (result._pendingHallucination) {
 
 ### 交付清單
 
-| # | 項目 | 檔案 | 預計工時 |
-|---|------|------|---------|
-| 1 | 6 種幻覺類型評分 prompt + 定義 | `src/lib/hallucination-judge.mjs` | 0.5 天 |
-| 2 | Hallucination Judge 引擎 | `src/lib/hallucination-judge.mjs` | 1 天 |
-| 3 | MCP Plugin + schema | `src/plugins/standard/hallucination-check.mjs` | 0.5 天 |
-| 4 | Server 端 post-execution hook | `src/server/index.mjs` | 0.5 天 |
-| 5 | hybrid-router DOMAIN_MAP 整合 | `src/lib/hybrid-engine.mjs` | 0.25 天 |
-| 6 | Agent personality 更新 | `config/agents/smart-mcp.md` | 0.25 天 |
-| 7 | 測試：6 類型幻覺驗證 | `tests/hallucination-judge.test.mjs` | 1 天 |
-| 8 | 測試：server 整合 + regression | `tests/hallucination-integration.test.mjs` | 0.5 天 |
-| | **總計** | | **~4.5 天** |
+| # | 項目 | 檔案 | 預計工時 | 狀態 |
+|---|------|------|---------|------|
+| 1 | 6 種幻覺類型評分 prompt + 定義 | `src/lib/hallucination-judge.mjs` | 0.5 天 | ✅ |
+| 2 | Hallucination Judge 引擎 | `src/lib/hallucination-judge.mjs` | 1 天 | ✅ |
+| 3 | MCP Plugin + schema | `src/plugins/standard/hallucination-check.mjs` | 0.5 天 | ✅ |
+| 4 | Server 端 post-execution hook | `src/server/index.mjs` | 0.5 天 | ✅ |
+| 5 | hybrid-router DOMAIN_MAP 整合 | `src/lib/hybrid-engine.mjs` | 0.25 天 | ✅ |
+| 6 | Agent personality 更新 | `config/agents/smart-mcp.md` | 0.25 天 | ✅ |
+| 7 | 測試：6 類型幻覺驗證 | `tests/hallucination-judge.test.mjs` | 1 天 | ✅ 29 tests |
+| 8 | 測試：server 整合 + regression | `tests/hallucination-integration.test.mjs` | 0.5 天 | ✅ 15 tests |
+| | **總計** | | **~4.5 天** | **1029 tests, 0 fail** |
 
 ### 整合架構
 
@@ -682,7 +682,7 @@ Token 成本僅多 2-3 倍（僅在複雜任務啟用，一般任務不受影響
 
 ### 整合架構：Quality Layer + Reasoning Layer + Verification Layer
 
-Phase 6（Hallucination Detection）、Phase 7（Reasoning Quality）、Phase 10（Error Recovery）合併為統一 pipeline：
+Phase 6（Hallucination Detection ✅）、Phase 7（Reasoning Quality ✅）、Phase 10（Error Recovery ✅）合併為統一 pipeline：
 
 ```
 Pre-call 層     │ Quality Gate (HIGH_RISK_PREREQUISITES) + Error Recovery (retry)
@@ -869,12 +869,12 @@ opencode + Smart MCP   vs    Claude Code
 | Self-Correction Loop | Phase 7 ✅ 已實作 | 高風險任務的輸出可靠度提升 |
 | LSP Bridge | Phase 8 ✅ 已完成 | Type-aware 程式碼理解，比 grep 精準且省 token |
 | Full-text Search | Phase 5 ✅ 已完成 | 文件內容搜尋，跨 session 找到關鍵資訊 |
-| Hallucination Detection | Phase 6 📋 規劃完成 | 輸出真實性檢查，生產級門檻。4 項交付：judge engine + plugin + server hook + tests |
+| Hallucination Detection | Phase 6 ✅ 已完成 | 輸出真實性檢查，生產級門檻。judge engine + plugin + server hook + 44 tests |
 | Error Recovery / Benchmark / Sandbox / Auto Memory | Phase 10 📋 規劃中 | 讓人敢放手、持續用、越用越好 |
 
 ### 結論
 
-Phase 6 + 7 + 8 走方向是對的。Phase 10 補上「信任 + 持續用 + 越用越好」這條 missing link。**不需要為了追上 Claude Code 而做功能複製 — Smart MCP + OpenCode 的武器是工具深度，不是 agent loop。**
+Phase 6 + 7 + 8 走方向是對的。Phase 10 補上「信任 + 持續用 + 越用越好」這條 missing link。Phase 6 已完成（2026-06-12），補上最後一塊拼圖：輸出真實性驗證。**不需要為了追上 Claude Code 而做功能複製 — Smart MCP + OpenCode 的武器是工具深度，不是 agent loop。**
 
 ---
 

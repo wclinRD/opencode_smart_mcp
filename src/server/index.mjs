@@ -37,6 +37,7 @@ import { createPipeline, optimizeOutput as pipelineOptimize } from '../lib/outpu
 import { isStructuredError } from '../lib/safe-handler.mjs';
 import { getContextBudget, resetContextBudget } from '../lib/context-budget.mjs';
 import { parseJson as lenientParseJson } from '../lib/lenient-json.mjs';
+import { judgeHallucination, isHighRiskOutput } from '../lib/hallucination-judge.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -778,6 +779,10 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
   if (success && toolName === 'smart_fast_apply' && result.output) {
     result._pendingImpact = triggerImpactWarning(args);
   }
+  // Phase 6: Hallucination Detection — auto-trigger for high-risk tool outputs
+  if (success && isHighRiskOutput(toolName) && result.output) {
+    result._pendingHallucination = triggerHallucinationCheck(toolName, args, result);
+  }
   // Attach responsePolicy + responsePipeline for output optimization downstream
   if (def?.responsePolicy) {
     result._responsePolicy = def.responsePolicy;
@@ -866,6 +871,55 @@ async function triggerImpactWarning(args) {
     return '';
   } catch (e) {
     debugLog('Impact warning error:', e.message);
+    return '';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6: Hallucination Detection — post-execution output verification
+// ---------------------------------------------------------------------------
+
+/**
+ * Fire-and-forget: run hallucination check on high-risk tool outputs.
+ * Appends structured warning to result output if issues found.
+ */
+async function triggerHallucinationCheck(toolName, args, result) {
+  try {
+    if (!isHighRiskOutput(toolName)) return '';
+
+    const output = typeof result.output === 'string' ? result.output : '';
+    if (!output || output.length < 50) return '';
+
+    // Extract context from recent tool history
+    let context = '';
+    ensureContext();
+    const ctx = contextManager.get();
+    if (ctx && Array.isArray(ctx.toolHistory)) {
+      const recent = ctx.toolHistory.slice(-3);
+      context = recent
+        .filter(h => h.ok && h.output)
+        .map(h => `[${h.tool}]: ${String(h.output).slice(0, 500)}`)
+        .join('\n');
+    }
+
+    const hcResult = judgeHallucination({
+      output,
+      context,
+      query: args.query || '',
+      toolName,
+      strictness: 5,
+    });
+
+    if (hcResult.verdict === 'fail' || hcResult.verdict === 'warn') {
+      const failedChecks = hcResult.checks.filter(c => !c.passed).map(c => c.type).join(', ');
+      debugLog(`Hallucination check: ${hcResult.verdict} (${hcResult.overallScore}/10) — ${failedChecks}`);
+      return `\n\n---\n🛡️ Hallucination Check: ${hcResult.verdict.toUpperCase()} (${hcResult.overallScore}/10)\n${hcResult.summary}\n---`;
+    }
+
+    debugLog(`Hallucination check: pass (${hcResult.overallScore}/10)`);
+    return '';
+  } catch (e) {
+    debugLog('Hallucination check error:', e.message);
     return '';
   }
 }
@@ -1177,6 +1231,14 @@ function respond(id, result, opts = {}) {
       delete result._pendingImpact;
       if (impactText && result?.content?.[0]?.type === 'text') {
         result.content[0].text += impactText;
+      }
+    }
+    // Phase 6: Await hallucination check result
+    if (result._pendingHallucination) {
+      const hcText = await result._pendingHallucination;
+      delete result._pendingHallucination;
+      if (hcText && result?.content?.[0]?.type === 'text') {
+        result.content[0].text += hcText;
       }
     }
     writeMsg({ jsonrpc: '2.0', id, result });

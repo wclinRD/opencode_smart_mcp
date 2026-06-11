@@ -921,6 +921,14 @@ const DOMAIN_MAP = [
     workflow: ['Ingest: smart_ingest_document', 'Analyze content with LLM', 'Search past docs: smart_list_documents', 'Search doc content: smart_search_docs', 'Optionally save to wiki: skill("wiki-update")'],
   },
   {
+    domain: 'hallucination_check',
+    keywords: ['幻覺', 'hallucination', '驗證 輸出', '檢查 輸出', '真實性', 'groundedness', 'fact check', 'verify output', 'check output', '輸出 正確', '輸出 可靠', '是否 編造', '是否 正確'],
+    skill: null,
+    tools: ['smart_hallucination_check'],
+    description: 'LLM 輸出真實性驗證（6 種幻覺類型檢測）',
+    workflow: ['Check output: smart_hallucination_check({output, context, query})', 'Review issues', 'Correct if needed'],
+  },
+  {
     domain: 'wiki',
     keywords: ['wiki', '知識庫', 'obsidian', 'vault', '筆記', 'ingest', '攝取', 'distill', 'query wiki'],
     skill: null,
