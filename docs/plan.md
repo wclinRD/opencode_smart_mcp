@@ -789,14 +789,16 @@ LLM: 「這個 bug 應該在這…我跑個測試確認」
 | 網路存取 | 預設阻擋，白名單開啟 |
 | Persistent filesystem | 暫存目錄用完即焚 |
 
-#### 10.2 Impact Warning 自動觸發
+#### 10.2 Impact Warning 自動觸發 ✅ (2026-06-11)
 
 `code_impact` 已存在（Phase 4），但需要 LLM 主動呼叫才會跑。
-改為在高風險編輯（cross_file_edit / fast_apply 影響 > 2 檔案）時自動觸發。
+改為在高風險編輯（fast_apply 影響 > 2 檔案）時自動觸發。
 
-**作法**：擴充 Server 端 quality gate，類似 HIGH_RISK_PREREQUISITES：
-- `smart_fast_apply` 偵測影響檔案數 > 2 → 自動叫 code_impact
-- 回傳結果讓 LLM 知道「這個修改會影響 5 個模組，是否繼續？」
+**作法**：`captureAndReturn()` 在 `smart_fast_apply` 成功執行後自動觸發：
+- `triggerImpactWarning()` — 解析 blocks/changes/text/whole 四種輸入格式
+- 3+ 檔案編輯 → 非同步跑 `code_impact` → 結果追加到輸出
+- 採 `_pendingImpact` promise 模式，`_respondChain` 在 `writeMsg` 前 await 並 append
+- 修復字串拷貝 bug：原本 `triggerImpactWarning` 修改 `result.output` 但 response 已拷貝舊值
 
 | 不上什麼 | 原因 |
 |---------|------|
@@ -823,19 +825,23 @@ LLM: 「這個 bug 應該在這…我跑個測試確認」
 | Retry 條件 | Network error / timeout / transient error |
 | Fallback 定義 | 每個 plugin 可選宣告 `fallbackTool` |
 
-#### 10.4 Context Budget 主動管理
+#### 10.4 Context Budget 主動管理 ✅ (2026-06-11)
 
-目前 context budget 只報 warning（現在 121%），不會自動反應。
-改為 Server 端監控累積輸出大小，在 threshold 自動升壓縮層級。
+Server 端監控累積輸出大小，在 threshold 自動升壓縮層級，並注入 budget warning。
 
-**作法**：在 output-optimizer 加入 budget-aware mode：
-- `cumulativeOutput > 80% threshold` → 從 L0 自降為 L1
-- `> 90%` → 自降為 L2（強制摘要）
-- `> 100%` → 只回傳 metadata，內容存檔讓 LLM 可 `smart_context get` 取回
+**作法**：
+- `ContextBudget` 類別（`src/lib/context-budget.mjs`）追蹤累積輸出 + 呼叫次數
+- `respond()` 每次輸出前呼叫 `decideCompression()`：
+  - Critical (≤20%) → 強制 L2
+  - Low (≤50%) → 強制 L1
+  - Warning (≤70%) → 大輸出強制 L1
+- budget status 注入輸出尾部供 LLM 參考
+- `smart_context({command:"budget"})` 可查即時 budget
+- **Tests**: 17 tests（tracking/compression decisions/status/singleton）
 
 | 項目 | 說明 |
 |------|------|
-| 實作位置 | `src/lib/output-optimizer.mjs` + `src/lib/output-pipeline.mjs` |
+| 實作位置 | `src/lib/context-budget.mjs` + `src/server/index.mjs` respond() |
 | 累積計算 | 追蹤 respond() 總輸出 bytes |
 | 限制 | Server 只能控制自身輸出，client side context 由 OpenCode 管理 |
 
@@ -883,10 +889,10 @@ LLM: 「這個 bug 應該在這…我跑個測試確認」
 |------|------|------|------|------|------|
 | 🥇 | Error Recovery (10.3) | 持續用 | 🟢 低 | 1-2 天 | 無 |
 | 🥇 | Benchmark 擴充 (10.7) | 越用好 | 🟢 低 | 1-2 天 | 無 |
-| 🥇 | Impact Warning (10.2) | 放心用 | 🟢 低 | 1 天 | code_impact 已存在 |
+| 🥇 | Impact Warning (10.2) | 放心用 | 🟢 ✅ 已實作 | — | code_impact 已存在 |
 | 🥇 | Sandbox Execution (10.1) | 放心用 | 🟡 中 | 3-5 天 | 無 |
 | 🥇 | Auto Memory Injection (10.5) | 越用好 | 🟡 中 | 3-5 天 | memory_store 已存在 |
-| 🥈 | Context Budget (10.4) | 持續用 | 🟡 中 | 2-3 天 | output-optimizer 已存在 |
+| 🥈 | Context Budget (10.4) | 持續用 | 🟢 ✅ 已實作 | — | output-optimizer 已存在 |
 | 🥈 | Skill-level Learning (10.6) | 越用好 | 🟢 已完成 | — | 從 Phase 7 搬入 |
 
 ### 不上什麼
