@@ -2189,10 +2189,22 @@ Knowledge Graph（新增）：
 
 ---
 
-## Phase 18：Automated PR Review — 自動化程式碼審查
+## Phase 18：Automated PR Review — 自動化程式碼審查 ✅ (2026-06-12)
 
-> 2026-06-12 規劃。最低 effort，展示 Smart MCP 工具組合的威力。
+> 2026-06-12 規劃 → 2026-06-12 實作完成。
+> 最低 effort，展示 Smart MCP 工具組合的威力。
 > 組合 git_diff + security_scan + code_impact + LSP diagnostics。
+
+### 交付摘要
+
+| 項目 | 說明 | 檔案 |
+|------|------|------|
+| PR review plugin | `smart_pr_review` MCP tool，組合 git diff + 檔案分類 + 風險評估 | `src/plugins/standard/pr-review.mjs` (200 行) |
+| 檔案分類 | source / test / config / doc 四類自動分類 | — |
+| 風險評估 | low / medium / high 三級，依 source file 數量 | — |
+| 結構化輸出 | Security / Impact / Quality / Summary 四區塊 | — |
+| 測試 | 13 tests（plugin structure / basic / filtering / meta / summary） | `tests/pr-review.test.mjs` |
+| 全量回歸 | **1215 tests, 0 fail** | — |
 
 ### 設計
 

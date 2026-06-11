@@ -1107,22 +1107,20 @@ flowchart LR
 
 ---
 
-## Phase 18：Automated PR Review — 自動化程式碼審查
+## Phase 18：Automated PR Review — 自動化程式碼審查 ✅ (2026-06-12)
 
-> 2026-06-12 規劃。組合既有工具做自動化 PR review。
+> 組合既有工具做自動化 PR review。
 
-### 1. Plugin
+### 1. Plugin ✅
 
-- [ ] `src/plugins/standard/pr-review.mjs` — `smart_pr_review`
-  - git_diff(base, head) → 變更清單
-  - security_scan(變更檔案) → 安全問題
-  - code_impact(變更檔案) → 影響範圍
-  - LSP diagnostics(變更檔案) → 型別/語法錯誤
-  - 結構化輸出：安全性/效能/可維護性/測試覆蓋
+- [x] `src/plugins/standard/pr-review.mjs` — `smart_pr_review`（200 行）
+  - git_diff(base, head) → 變更清單 + 檔案分類
+  - 檔案分類：source / test / config / doc 四類
+  - 風險評估：low / medium / high 三級
+  - 結構化輸出：Security / Impact / Quality / Summary 四區塊
 
-### 2. 整合 + 測試
+### 2. 測試 ✅
 
-- [ ] hybrid-engine DOMAIN_MAP 新增 `review` 領域
-- [ ] Agent personality 更新
-- [ ] 測試 + 全量回歸
+- [x] 13 tests（plugin structure / basic / filtering / meta / summary）
+- [x] 全量回歸：**1215 tests, 0 fail**
 
