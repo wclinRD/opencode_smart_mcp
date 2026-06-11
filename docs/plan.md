@@ -1801,3 +1801,257 @@ Context Budget（現有 Phase 10.4）→ 提供觸發時機：
 | FIFO conversation management | OpenCode client 層責任 |
 | 多 session context merge | 無明確使用場景 |
 | 自建 prompt cache 基礎設施 | provider/API 層功能 |
+
+---
+
+## Phase 15：Auto-intercept 三路徑並存架構
+
+> 2026-06-12 設計決策。基於路由（Phase 3）與執行管線（Phase 1-2）的營運經驗，提出工具呼叫的三路徑架構。
+
+### 核心洞察：LLM 直接呼叫永不消失
+
+現有架構中，所有工具呼叫均由 LLM 發起，經由 MCP protocol 到達 Smart MCP Server。LLM 對工具名稱、參數、時機的選擇完全自主 — 這是 **MCP 協議的本質**，不是 bug。
+
+```
+LLM ──tools/call──→ Smart MCP Server ──handler/cli──→ 結果
+         ↑ 單一路徑，完全由 LLM 決策
+```
+
+這產生兩組矛盾需求：
+
+| 矛盾 | LLM 自主 | 系統保護 |
+|------|---------|---------|
+| 工具選擇 | LLM 選正確工具 | 不確定時自動走 hybrid_router |
+| 參數品質 | LLM 給正確參數 | 缺參數時自動補/提醒 |
+| 安全防護 | LLM 知道風險 | Server 強制高風險前置檢查 |
+| 執行時機 | LLM 決定何時執行 | 緊急情況自動觸發（如 security scan 發現漏洞） |
+
+**解決方案不是取代 LLM 決策，而是在不干擾主路徑的前提下，提供智慧備援與保護網。**
+
+### 三路徑架構
+
+```
+                     ┌──────────────────────────────────────────────────────┐
+ 路徑 A (主) ←────── │  LLM → tools/call → Server → handler → 結果         │ ← 永不消失
+   LLM 直接呼叫       │  LLM 全權決定工具、參數、時機                         │
+                     └──────────────────────────────────────────────────────┘
+                                    ↑
+                     ┌──────────────┴──────────────────────────────────────┐
+ 路徑 B (備用) ←─── │  LLM → smart_auto → Server 自動分析 → 推薦/執行      │ ← P1
+   Smart Auto        │  LLM 說「幫我做 X」→ server 選工具、填參數、執行       │
+                     │  適用：LLM 不確定用哪個工具、忘記參數格式               │
+                     └──────────────────────────────────────────────────────┘
+                                    ↑
+                     ┌──────────────┴──────────────────────────────────────┐
+ 保護網 (可選) ←─── │  Interceptor Layer → 攔截 tools/call → 檢查 → 放行/    │ ← P2
+   Interceptor       │  修正/阻擋                                              │
+                     │  manifest 驅動，預設關閉（opt-in）                       │
+                     │  適用：高安全環境、敏感檔案操作、合規場景                 │
+                     └──────────────────────────────────────────────────────┘
+```
+
+#### 路徑 A：LLM 直接呼叫（主路徑）
+
+- **狀態**：✅ 現有，永不消失
+- **觸發**：LLM 直接發起 `tools/call`，指名道姓呼叫工具
+- **Server 處理**：現有 invokeTool → handler/cli → captureAndReturn → respond
+- **保護**：僅 HIGH_RISK_PREREQUISITES（Phase 7）強制前置檢查
+- **定位**：在所有路徑中優先級最高，永不降級為備用
+
+#### 路徑 B：Smart Auto（備用路由）
+
+- **狀態**：📋 P1 — 需 manifest 基礎建設完成後實作
+- **觸發**：LLM 呼叫 `smart_auto({goal: "描述任務"})`，不指定工具
+- **Server 處理**：hybrid_router 分類 → 自動選工具 → 填入推定參數 → 執行 → 回傳
+- **定位**：LLM 不確定工具名稱/參數時的救援路徑。不是取代，是互補
+
+| 場景 | 路徑 A 問題 | 路徑 B 解法 |
+|------|-----------|-----------|
+| 「幫我掃這個專案的安全性」 | LLM 要記 `smart_security` 名稱 + 參數 | `smart_auto({goal:"掃安全性"})` 自動完成 |
+| 「分析這段程式碼的錯誤」 | LLM 要自己選 grep/LSP/diagnose | `smart_auto({goal:"分析錯誤"})` 選最佳工具鏈 |
+| 「把這份文件存到 wiki」 | LLM 要串 ingest → wiki-capture | `smart_auto({goal:"存到 wiki"})` 自動組合工作流 |
+
+#### 保護網：Interceptor Layer（可選保護）
+
+- **狀態**：📋 P2 — 預設關閉，manifest 驅動
+- **觸發**：由 manifest 聲明的規則決定是否在 `tools/call` 路徑上插入攔截點
+- **Server 處理**：攔截 tools/call → 比對 manifest 規則 → 放行 / 修正參數 / 阻擋
+- **定位**：安全監護，不干擾正常開發流程
+
+```
+tools/call 到達
+  ├─ manifest 無對應規則 → 放行（快速路徑，零開銷）
+  ├─ manifest 規則通過 → 放行
+  ├─ manifest 規則警告 → 修正參數 + 放行（附註說明）
+  └─ manifest 規則禁止 → 阻擋 + 回傳原因 + 建議替代方案
+                                                            ↑ 預設關閉，opt-in
+```
+
+### 設計原則
+
+| 原則 | 說明 |
+|------|------|
+| **Path A 優先** | LLM 直接呼叫永不繞過。Interceptor 永遠可被 LLM 覆寫（override） |
+| **Interceptor 預設關閉** | 不改變現有行為，不增加 LLM friction。opt-in 啟用 |
+| **Manifest 驅動** | 攔截規則宣告在 manifest 檔案中，非 hardcode |
+| **三路徑可並存** | 不是互斥選擇。同一 session 可混用三種路徑 |
+| **降級不當機** | Interceptor 不可用 → 退回路徑 A（不 crash，不提示） |
+
+### Priorities（從 P0 降為 P2）
+
+| 優先級 | 內容 | 狀態 |
+|--------|------|------|
+| **P1** | Manifest 基礎建設 — 工具描述 schema + manifest 檔案格式 + loader 支援 | ⏳ 待實作 |
+| **P2** | Interceptor 保護網 — manifest-driven tools/call 攔截器 | 📋 規劃中 |
+| **P2** | Smart Auto — `smart_auto` 備用路由工具 | 📋 規劃中 |
+
+**降級理由**：Auto-intercept 從原始 P0 降為 P2 是因為：
+1. 現有 HIGH_RISK_PREREQUISITES（Phase 7）已覆蓋最重要的安全防護場景
+2. Interceptor 對現有架構無 immediate benefit（LLM 直接呼叫目前運作良好）
+3. 先做 manifest 才有 infrastructure 做 interceptor — 不可跳過
+
+### Manifest 基礎建設（P1）
+
+什麼是 manifest：**工具規格宣告檔**。描述工具的名稱、用途、參數、類別、安全等級、路由規則。
+
+```jsonc
+// manifest.json（預期格式，設計中）
+{
+  "version": 1,
+  "tools": [
+    {
+      "name": "smart_security",
+      "category": "core",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": true,        // 路徑 B 可自動選擇
+        "interceptorRequired": false,  // 路徑 C 是否需攔截 (P2)
+      },
+      "interceptorRules": [],     // P2 攔截規則
+    }
+  ],
+  "autoRoute": {
+    "enabled": true               // 路徑 B 全域開關
+  },
+  "interceptor": {
+    "enabled": false,             // P2 保護網，預設關閉
+    "defaultAction": "allow",
+    "rules": []
+  }
+}
+```
+
+| 交付項目 | 說明 |
+|---------|------|
+| Manifest schema | JSON Schema 定義 manifest.json 格式 |
+| Manifest loader | `src/server/loader.mjs` 讀取 `config/tools/manifest.json` |
+| 工具元資料擴充 | Plugin 定義新增 `routingRules`、`safetyLevel` 等 manifest 字段 |
+| Agent personality | 更新路由原則，加入三路徑說明 |
+
+### 不上什麼
+
+| 項目 | 原因 |
+|------|------|
+| **Interceptor 自動啟用** | 預設關閉是設計 choice — 不改變現有行為，避免 LLM friction |
+| **Path A 降級機制** | Path A 永不降級，永遠是 LLM 直接呼叫的主路徑 |
+| **管理 UI** | CLI json 編輯即可，不需 web dashboard |
+| **Interceptor 即時規則更新** | hardcode + reload 就夠，不需 runtime rule engine |
+| **路徑 A/B/C 互斥** | 三路徑可並存，不是選擇題 |
+
+### 與現有系統關係
+
+| Phase | 關係 |
+|-------|------|
+| Phase 3 (Universal Task Router) | Path B smart_auto 依賴 hybrid_router 的分類能力；hybrid_router 作為 smart_auto 的底層引擎 |
+| Phase 7 (Quality Gate) | HIGH_RISK_PREREQUISITES 是精簡版 interceptor（硬編碼規則 vs manifest 驅動）。兩者互補：Quality Gate 強制、Interceptor 可選 |
+| Phase 1-2 (Output Pipeline) | Interceptor 不影響輸出管線，攔截後仍走現有 output-optimizer |
+| loader.mjs | Manifest 基礎建設會擴充 loader 的 plugin 合約，現有 plugin 不須改寫 |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| LLM 工具呼叫失敗率 | 約 5-10%（名稱/參數錯誤） | 可經 smart_auto 降低至 <1% |
+| 安全防護場景 | 僅 HIGH_RISK_PREREQUISITES 強制規則 | + opt-in manifest 驅動保護網 |
+| 架構彈性 | 單一路徑（LLM 必須精確指名） | 三路徑並存（LLM 可選擇精準呼叫或模糊委派） |
+| 新工具加入成本 | 需改 agent personality 路由規則 | manifest 宣告即可自動被 smart_auto 發現 |
+
+---
+
+## Phase 15：Deep Research Agent 整合 ✅ (2026-06-12)
+
+> 基於 [CYC2002tommy/Deep-Research-Agent](https://github.com/CYC2002tommy/Deep-Research-Agent) (MIT) 的選擇性整合。
+> 填補 Smart MCP 在「學術研究」垂直領域的三個關鍵缺口：同儕審查、學術文獻搜尋、DOI 驗證。
+
+### 整合價值
+
+| 缺口 | DRA 貢獻 | Smart MCP 現狀 |
+|------|---------|---------------|
+| 學術同儕審查 | Remi 10-point framework | 完全沒有 |
+| 學術文獻搜尋 | OpenAlex/Crossref/Semantic Scholar 整合 | 只有通用 exa_search |
+| DOI 驗證 | 自動 DOI liveness check | hallucination-check 無此能力 |
+
+### 交付項目
+
+#### Phase 15.1: academic-review.mjs
+- Remi 10-point peer review plugin（Nature/Science 等級）
+- 3 modes: `prompt`（審查提示）、`template`（填空模板）、`framework`（定義）
+- 內建 banned AI vocabulary 檢測
+- 同步新增 `peer_review` 為 smart_deep_think 第 10 個 template
+
+#### Phase 15.2: academic-search.mjs
+- 多來源學術文獻搜尋：OpenAlex、Crossref、Semantic Scholar、Unpaywall
+- OpenAlex：全文搜尋 + MDPI 自動過濾 + abstract_inverted_index 解碼
+- Crossref：metadata 搜尋 + 單一 DOI 解析
+- Semantic Scholar：AI 驅動搜尋 + citation count + OA PDF 連結
+- Unpaywall：OA 可用性檢查
+- 全部免費 API，無需 API key
+
+#### Phase 15.3: hallucination-check.mjs DOI 模式
+- 新增 `mode: "doi"` — 自動提取文中所有 DOI
+- 逐一透過 doi.org HEAD request 驗證 liveness
+- 分類：alive / dead (404) / restricted (403) / error
+- Dead DOI = 可能偽造的引用
+
+#### Phase 15.4: deep-research skill
+- 完整 7-phase 學術研究 pipeline（SKILL.md）
+- 全部使用 Smart MCP 原生工具（academic_search → ingest_document → hallucination_check → academic_review → docx_generate）
+- 同步至 `.opencode/skills/` 和 `config/skills/`
+- 附參考文件：academic-api-patterns.md、python-docx-manipulation.md
+
+#### Phase 15.5: docx-generate.mjs
+- APA 7th 格式化 DOCX 生成（`docx` npm library）
+- Times New Roman 12pt、double-spaced、hanging indent 參考文獻
+- 支援：title、abstract、sections（含 heading hierarchy）、tables、references
+
+#### Phase 15.6: obsidian-write.mjs + 生態整合
+- Obsidian vault 寫入（自動偵測 vault 路徑）
+- YAML frontmatter（title、date、tags、category）
+- hybrid-engine DOMAIN_MAP 新增 `academic` 領域
+- Agent personality 更新：4 個 direct-call tools + 3 個 sub-tools + 3 個 workflow patterns
+
+### 不整合的部分
+
+| 項目 | 原因 |
+|------|------|
+| CloakBrowser | Smart MCP 已有 playwright_mcp |
+| Scopus MCP | 需 API key，非通用 |
+| Google Science Skills | 需 API key |
+| NotebookLM MCP | 需 Google auth |
+| 直接依賴 DRA repo | 維護風險，改為提取核心邏輯內嵌 |
+
+### 檔案清單
+
+| 檔案 | 行數 | 說明 |
+|------|------|------|
+| `src/plugins/standard/academic-review.mjs` | 196 | Remi 10-point review plugin |
+| `src/plugins/standard/academic-search.mjs` | 378 | Multi-source academic search |
+| `src/plugins/standard/docx-generate.mjs` | 280 | APA 7th DOCX generation |
+| `src/plugins/standard/obsidian-write.mjs` | 196 | Obsidian vault writer |
+| `src/plugins/standard/hallucination-check.mjs` | +130 | DOI verification mode |
+| `src/plugins/core/thinking.mjs` | +2 | peer_review template enum |
+| `src/cli/thinking.mjs` | +12 | peer_review template definition |
+| `src/lib/hybrid-engine.mjs` | +8 | academic domain in DOMAIN_MAP |
+| `config/agents/smart-mcp.md` | +12 | Agent personality updates |
+| `.opencode/skills/deep-research/SKILL.md` | 180 | 7-phase research pipeline |
+| `config/skills/deep-research/SKILL.md` | 180 | Synced copy |
