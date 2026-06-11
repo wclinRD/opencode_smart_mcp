@@ -191,6 +191,44 @@ export class ContextManager {
     this._context = null;
   }
 
+  /**
+   * Phase 14.1: Clear old tool results from history.
+   * Removes entries older than `olderThan` turns, with a safety floor of `keepLatest`.
+   * Only operates on toolHistory — system prompt / thinking blocks are not stored here.
+   *
+   * @param {object} [opts]
+   * @param {number} [opts.olderThan=10] - Keep only the last N turns, remove everything older
+   * @param {number} [opts.keepLatest=2] - Safety floor: always keep at least this many recent entries
+   * @returns {{ removed: number, kept: number }}
+   */
+  clearToolResults({ olderThan = 10, keepLatest = 2 } = {}) {
+    if (!this._context || !this._context.toolHistory.length) {
+      return { removed: 0, kept: 0 };
+    }
+
+    const history = this._context.toolHistory;
+    const total = history.length;
+
+    // Calculate how many entries to keep
+    // olderThan: keep the last N entries (cap at total — if olderThan >= total, keep all)
+    let keepCount = Math.min(olderThan, total);
+    // keepLatest: safety floor — at minimum keep this many
+    keepCount = Math.max(keepCount, Math.min(keepLatest, total));
+
+    const removeCount = total - keepCount;
+
+    if (removeCount <= 0) {
+      return { removed: 0, kept: total };
+    }
+
+    // Remove oldest entries (slice from the front)
+    this._context.toolHistory = history.slice(-keepCount);
+    this._context.metadata.updatedAt = nowISO();
+    if (this._autoSave) this._save();
+
+    return { removed: removeCount, kept: keepCount };
+  }
+
   /** Get env vars for CLI tool context injection. */
   getEnv() {
     if (!this._context) return {};

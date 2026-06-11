@@ -873,43 +873,44 @@ flowchart LR
 > compact-fix.js **維持現狀**（不新增 IPC call），14.1/14.2 走 proactive 路徑。
 > 對應 plan.md Phase 14 章節。
 
-### 14.4 Context Rot Warning 強化（先做，獨立無相依）— 2 檔案
+### 14.4 Context Rot Warning 強化（先做，獨立無相依）— 2 檔案 ✅
 
-- [ ] **`src/lib/context-budget.mjs`** `getStatus()` 強化 threshold 分級 actionable 建議：
+- [x] **`src/lib/context-budget.mjs`** `getStatus()` 強化 threshold 分級 actionable 建議：
   - 50-70%：`💡 Budget ${usedPct}。可考慮 smart_context({command:"clear_tool_results", olderThan:10})`
   - 70-90%：`⚡ Budget ${usedPct}。建議 clear_tool_results 或呼叫 smart_compact`
   - > 90%：`⚠️ Budget 剩 ${remainingPct}。強烈建議 smart_compact 或開新 session`
-- [ ] **`src/server/index.mjs`** `respond()`：使用 threshold 分級文字取代單一 `status.recommendation`
+- [x] **`src/server/index.mjs`** `respond()`：使用 threshold 分級文字取代單一 `status.recommendation`
   - 現有 budget.isLow() 檢查 → 改為分級文字
   - 大於 70% 時注入 actionable 建議（不是只有 warning 數字）
+- [x] **測試**：`tests/context-budget.test.mjs` — 9 rot warning tests（boundary + content verification）
 
-### 14.1 Proactive Cleanup（Tool Result Clearing）— 2 檔案
+### 14.1 Proactive Cleanup（Tool Result Clearing）— 2 檔案 ✅
 
-- [ ] **`src/lib/context-manager.mjs`**：新增 `clearToolResults({olderThan, keepLatest})` 方法
+- [x] **`src/lib/context-manager.mjs`**：新增 `clearToolResults({olderThan, keepLatest})` 方法
   - 依 turn index 過濾工具結果（保留後 N 輪）
   - 安全機制：不清除 system prompt / thinking blocks / keepLatest 保護
   - 回傳 `{ removed: number, kept: number }`
-- [ ] **邊界情況**：
+- [x] **邊界情況**：
   - 空 context → 回傳 removed:0
-  - olderThan > 總輪數 → 全部清除（保留 keepLatest）
-  - keepLatest = 0 → 清除所有符合條件的（需 warning）
-- [ ] **`src/server/index.mjs`**：`handleSmartContext()` 新增 `clear_tool_results` command
+  - olderThan > 總輪數 → 保留全部（不夠清除）
+  - olderThan: 0 + keepLatest: N → 清除全部只留 N
+  - keepLatest = 0 → 清除所有符合條件的
+- [x] **`src/server/index.mjs`**：`handleSmartContext()` 新增 `clear_tool_results` command
   - 註冊到 `command` enum + schema
   - 回傳 `{ removed, kept }`
-- [ ] **自動觸發（非同步，不堵塞）**：
+- [x] **自動觸發（非同步，不堵塞）**：
   - `respond()` 在 context budget ≥ 70% 時 fire-and-forget 自動清除舊 tool results
   - 條件：只執行一次（autoCleared flag 避免重複 trigger）
   - 不堵塞 respond() 回應
-- [ ] **測試**：`tests/context-clear.test.mjs`
+- [x] **測試**：`tests/context-manager.test.mjs` — 12 clearToolResults tests
   - 清除特定輪數的 tool results
   - keepLatest 保護機制驗證
-  - system prompt 保護驗證
-  - 邊界情況（空 context、全部清除）
+  - 邊界情況（空 context、全部清除、olderThan:0）
   - auto-trigger 邏輯
 
-### 14.2 Smart Compact Tool（規則 based，handler-based，零 LLM cost）— 2 檔案
+### 14.2 Smart Compact Tool（規則 based，handler-based，零 LLM cost）— 2 檔案 ✅
 
-- [ ] **`src/plugins/core/compact.mjs`** — `smart_compact` MCP tool（handler-based，比照 lsp.mjs）
+- [x] **`src/plugins/core/compact.mjs`** — `smart_compact` MCP tool（handler-based，比照 lsp.mjs）
   - 輸入：`{ toolHistory, conversationLength, currentGoal?, currentTodos? }`
   - 輸出：`{ toolCallsToDrop, toolOutputsToSummarize, recoveryContext, estimatedTokensSaved }`
   - 規則 based 分類（零 LLM cost）：
@@ -917,19 +918,19 @@ flowchart LR
     - `smart_security` / `smart_ingest_document` / `git_*` → **KEEP SUMMARY**
     - `smart_think` / `smart_deep_think` / `smart_fast_apply` / `edit` / `error_diagnose` / `debug` → **KEEP**
     - 未知 → **KEEP**（保守策略）
-  - 最近 3 輪保護（不分析近期工具）
+  - 最近 3 輪保護（僅 history > 3 時啟用）
   - recoveryContext 含 goal/todo/keyFindings/openQuestions（從 KEEP 和 KEEP SUMMARY 的工具中萃取）
-- [ ] **安全機制**：
+- [x] **安全機制**：
   - 不分析/不觸碰 user messages
   - 不觸碰 system prompt / thinking blocks
   - 未知 tool type → KEEP（保守策略）
-- [ ] **`src/server/index.mjs`** `tools/list`：註冊 `smart_compact` 為 native tool（與 lsp.mjs 同等級）
+- [x] **`src/server/index.mjs`** `tools/list`：註冊 `smart_compact` 為 native tool（與 lsp.mjs 同等級）
   - 自動由 loader.mjs 載入（在 core/ 目錄就自動註冊）
-- [ ] **測試**：`tests/smart-compact.test.mjs`
-  - 各 tool type 分類正確（8+ 類型逐一驗證）
+- [x] **測試**：`tests/smart-compact.test.mjs` — 32 tests
+  - 各 tool type 分類正確（17 類型逐一驗證）
   - recoveryContext 正確性（goal/todo/keyFindings 萃取）
   - token 估算合理性
-  - 安全機制（不碰 user messages / system prompt）
+  - 安全機制（last 3 turns protection）
   - 空輸入 / 邊界情況
 
 ### compaction-fix.js 維持現狀（不升級）
@@ -971,9 +972,9 @@ flowchart LR
 
 | 優先 | 項目 | 估時 | 相依 | 狀態 |
 |:----:|------|:----:|:----:|:----:|
-| 🥇 | **14.4 Context Rot Warning 強化** | 0.5 天 | 無（強化 Phase 10.4） | 📋 待辦 |
-| 🥇 | **14.1 Proactive Cleanup** | 1-2 天 | 14.4（70% auto-trigger） | 📋 待辦 |
-| 🥇 | **14.2 Smart Compact Tool** | 2-3 天 | 14.1（依賴 clear_tool_results） | 📋 待辦 |
+| 🥇 | **14.4 Context Rot Warning 強化** | 0.5 天 | 無（強化 Phase 10.4） | ✅ 已完成 |
+| 🥇 | **14.1 Proactive Cleanup** | 1-2 天 | 14.4（70% auto-trigger） | ✅ 已完成 |
+| 🥇 | **14.2 Smart Compact Tool** | 2-3 天 | 14.1（依賴 clear_tool_results） | ✅ 已完成 |
 | 🥈 | **14.3 API Compaction 驗證** | 0.5 天 | 無 | 🔍 待驗證 |
 | 🥉 | **14.5 Prompt Caching 驗證** | 0.5 天 | 無 | 🔍 待驗證 |
 | 🟢 | **compaction-fix.js 維持現狀** | 0 天 | 設計決策（已確認） | ✅ 已決定 |

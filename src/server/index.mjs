@@ -1177,6 +1177,7 @@ const PROTOCOL_VERSION = '2024-11-05';
 function writeMsg(msg) { stdout.write(JSON.stringify(msg) + '\n'); }
 
 let _respondChain = Promise.resolve();
+let _autoCleared = false; // Phase 14.1: fire-once flag for auto clear_tool_results
 
 function respond(id, result, opts = {}) {
   // Phase 2: Apply output optimization BEFORE writing via pipeline
@@ -1216,6 +1217,18 @@ function respond(id, result, opts = {}) {
     if (rotWarning) {
       const status = budget.getStatus();
       result.content[0].text += `\n\n---\n📊 Context Budget: ${status.usedPct} used (${status.remainingPct} remaining) — ${rotWarning}\n---`;
+    }
+
+    // Phase 14.1: Auto-trigger clear_tool_results at 70% budget (fire-and-forget, once per session)
+    if (budget.usedFraction >= 0.7 && !_autoCleared) {
+      _autoCleared = true;
+      try {
+        ensureContext();
+        const cleared = contextManager.clearToolResults({ olderThan: 10, keepLatest: 2 });
+        debugLog(`Auto clear_tool_results: removed ${cleared.removed}, kept ${cleared.kept} (budget=${(budget.usedFraction * 100).toFixed(0)}%)`);
+      } catch (e) {
+        debugLog('Auto clear_tool_results error:', e.message);
+      }
     }
   } else if (result?.content?.[0]?.type === 'text' && typeof result.content[0].text === 'string') {
     // Track even non-optimized outputs
@@ -1259,8 +1272,9 @@ function respondError(id, code, message, data) {
 
 const CONTEXT_TOOL_DESCRIPTION =
   'Query or manage session context. Use this to see what tools have been called, what findings accumulated, or to reset/list sessions.\n' +
-  '  command: "get" (default) | "summary" | "history" | "findings" | "reset" | "sessions" | "delete" | "inject" | "workflow-stats" | "merge" | "budget"\n' +
-  '  sessionId: optional, for resume/delete operations';
+  '  command: "get" (default) | "summary" | "history" | "findings" | "reset" | "sessions" | "delete" | "inject" | "workflow-stats" | "merge" | "budget" | "clear_tool_results"\n' +
+  '  sessionId: optional, for resume/delete operations\n' +
+  '  clear_tool_results args: olderThan (number, default 10), keepLatest (number, default 2)';
 
 /**
  * Handle smart_context tool call.
@@ -1321,6 +1335,7 @@ function handleSmartContext(id, args) {
       case 'reset': {
         contextManager.reset();
         resetContextBudget();
+        _autoCleared = false;
         result = `Session reset. SessionId: ${contextManager.get()?.sessionId}\nContext budget also reset.`;
         break;
       }
@@ -1374,8 +1389,17 @@ function handleSmartContext(id, args) {
         break;
       }
 
+      case 'clear_tool_results': {
+        const olderThan = typeof args.olderThan === 'number' ? args.olderThan : 10;
+        const keepLatest = typeof args.keepLatest === 'number' ? args.keepLatest : 2;
+        const cleared = contextManager.clearToolResults({ olderThan, keepLatest });
+        result = JSON.stringify(cleared, null, 2);
+        debugLog(`clear_tool_results: removed ${cleared.removed}, kept ${cleared.kept} (olderThan=${olderThan}, keepLatest=${keepLatest})`);
+        break;
+      }
+
       default:
-        result = `Unknown command: ${cmd}. Available: get, summary, history, findings, reset, sessions, delete, inject, workflow-stats, merge, budget`;
+        result = `Unknown command: ${cmd}. Available: get, summary, history, findings, reset, sessions, delete, inject, workflow-stats, merge, budget, clear_tool_results`;
     }
 
     respond(id, { content: [{ type: 'text', text: result }] }, { optimize: false });
@@ -1437,11 +1461,13 @@ function handleRequest(req) {
         inputSchema: {
           type: 'object',
           properties: {
-            command: { type: 'string', description: 'Command: get (default), summary, history, findings, reset, sessions, delete, inject, workflow-stats, merge, budget', enum: ['get', 'summary', 'history', 'findings', 'reset', 'sessions', 'delete', 'inject', 'workflow-stats', 'merge', 'budget'] },
+            command: { type: 'string', description: 'Command: get (default), summary, history, findings, reset, sessions, delete, inject, workflow-stats, merge, budget, clear_tool_results', enum: ['get', 'summary', 'history', 'findings', 'reset', 'sessions', 'delete', 'inject', 'workflow-stats', 'merge', 'budget', 'clear_tool_results'] },
             sessionId: { type: 'string', description: 'Session ID (for resume/delete/merge)' },
             sessionIds: { type: 'array', items: { type: 'string' }, description: 'Session IDs array (for merge)' },
             workflowId: { type: 'string', description: 'Workflow ID (for workflow-stats)' },
             projectRoot: { type: 'string', description: 'Project root path' },
+            olderThan: { type: 'number', description: 'Keep only the last N turns (for clear_tool_results). Default: 10' },
+            keepLatest: { type: 'number', description: 'Safety floor: always keep at least N recent entries (for clear_tool_results). Default: 2' },
           },
         },
       });

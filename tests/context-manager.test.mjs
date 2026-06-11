@@ -502,10 +502,214 @@ describe('ContextManager API contract', () => {
   it('all required methods exist', () => {
     const cm = freshManager({ autoSave: false });
     const methods = ['init', 'get', 'getSummary', 'getEnv', 'inject', 'capture',
-      'save', 'reset', 'clear', 'listSessions', 'deleteSession', 'listSessionsSummary'];
+      'save', 'reset', 'clear', 'listSessions', 'deleteSession', 'listSessionsSummary',
+      'clearToolResults'];
     for (const m of methods) {
       assert.equal(typeof cm[m], 'function', `method ${m} should exist`);
     }
+    cleanup();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 14.1: clearToolResults
+// ---------------------------------------------------------------------------
+
+describe('ContextManager — clearToolResults', () => {
+  after(cleanup);
+
+  it('removes entries older than N turns', () => {
+    const cm = freshManager({ autoSave: false });
+    cm.init();
+    for (let i = 0; i < 10; i++) {
+      cm.capture(`tool_${i}`, {}, { ok: true, output: `result ${i}` }, 10);
+    }
+
+    const result = cm.clearToolResults({ olderThan: 5, keepLatest: 0 });
+    assert.equal(result.removed, 5);
+    assert.equal(result.kept, 5);
+
+    const ctx = cm.get();
+    assert.equal(ctx.toolHistory.length, 5);
+    assert.equal(ctx.toolHistory[0].tool, 'tool_5');
+    assert.equal(ctx.toolHistory[4].tool, 'tool_9');
+    cleanup();
+  });
+
+  it('returns { removed: 0, kept: 0 } for empty context', () => {
+    const cm = freshManager({ autoSave: false });
+    cm.init();
+    const result = cm.clearToolResults({ olderThan: 10 });
+    assert.equal(result.removed, 0);
+    assert.equal(result.kept, 0);
+    cleanup();
+  });
+
+  it('returns { removed: 0, kept: 0 } when context is null', () => {
+    const cm = freshManager({ autoSave: false });
+    // Don't init — context is null
+    const result = cm.clearToolResults({ olderThan: 10 });
+    assert.equal(result.removed, 0);
+    assert.equal(result.kept, 0);
+    cleanup();
+  });
+
+  it('keepLatest safety floor protects recent entries', () => {
+    const cm = freshManager({ autoSave: false });
+    cm.init();
+    for (let i = 0; i < 10; i++) {
+      cm.capture(`tool_${i}`, {}, { ok: true, output: `result ${i}` }, 10);
+    }
+
+    // olderThan: 3 would keep only 3, but keepLatest: 5 keeps 5
+    const result = cm.clearToolResults({ olderThan: 3, keepLatest: 5 });
+    assert.equal(result.removed, 5);
+    assert.equal(result.kept, 5);
+
+    const ctx = cm.get();
+    assert.equal(ctx.toolHistory.length, 5);
+    assert.equal(ctx.toolHistory[0].tool, 'tool_5');
+    cleanup();
+  });
+
+  it('olderThan > total turns keeps everything (not enough entries)', () => {
+    const cm = freshManager({ autoSave: false });
+    cm.init();
+    for (let i = 0; i < 5; i++) {
+      cm.capture(`tool_${i}`, {}, { ok: true, output: `result ${i}` }, 10);
+    }
+
+    // olderThan: 100 > 5 total — keep all entries since there aren't enough to clear
+    const result = cm.clearToolResults({ olderThan: 100, keepLatest: 2 });
+    assert.equal(result.removed, 0);
+    assert.equal(result.kept, 5);
+
+    const ctx = cm.get();
+    assert.equal(ctx.toolHistory.length, 5);
+    cleanup();
+  });
+
+  it('olderThan: 0 clears all except keepLatest', () => {
+    const cm = freshManager({ autoSave: false });
+    cm.init();
+    for (let i = 0; i < 5; i++) {
+      cm.capture(`tool_${i}`, {}, { ok: true, output: `result ${i}` }, 10);
+    }
+
+    // olderThan: 0 + keepLatest: 2 → clear all except last 2
+    const result = cm.clearToolResults({ olderThan: 0, keepLatest: 2 });
+    assert.equal(result.removed, 3);
+    assert.equal(result.kept, 2);
+
+    const ctx = cm.get();
+    assert.equal(ctx.toolHistory.length, 2);
+    assert.equal(ctx.toolHistory[0].tool, 'tool_3');
+    assert.equal(ctx.toolHistory[1].tool, 'tool_4');
+    cleanup();
+  });
+
+  it('keepLatest: 0 removes all matching entries', () => {
+    const cm = freshManager({ autoSave: false });
+    cm.init();
+    for (let i = 0; i < 5; i++) {
+      cm.capture(`tool_${i}`, {}, { ok: true, output: `result ${i}` }, 10);
+    }
+
+    const result = cm.clearToolResults({ olderThan: 2, keepLatest: 0 });
+    assert.equal(result.removed, 3);
+    assert.equal(result.kept, 2);
+
+    const ctx = cm.get();
+    assert.equal(ctx.toolHistory.length, 2);
+    assert.equal(ctx.toolHistory[0].tool, 'tool_3');
+    cleanup();
+  });
+
+  it('default parameters: olderThan=10, keepLatest=2', () => {
+    const cm = freshManager({ autoSave: false, maxHistory: 20 });
+    cm.init();
+    for (let i = 0; i < 15; i++) {
+      cm.capture(`tool_${i}`, {}, { ok: true, output: `result ${i}` }, 10);
+    }
+
+    const result = cm.clearToolResults(); // defaults
+    assert.equal(result.removed, 5);
+    assert.equal(result.kept, 10);
+
+    const ctx = cm.get();
+    assert.equal(ctx.toolHistory.length, 10);
+    assert.equal(ctx.toolHistory[0].tool, 'tool_5');
+    assert.equal(ctx.toolHistory[9].tool, 'tool_14');
+    cleanup();
+  });
+
+  it('no-op when history is already within limit', () => {
+    const cm = freshManager({ autoSave: false });
+    cm.init();
+    for (let i = 0; i < 3; i++) {
+      cm.capture(`tool_${i}`, {}, { ok: true, output: `result ${i}` }, 10);
+    }
+
+    const result = cm.clearToolResults({ olderThan: 10 });
+    assert.equal(result.removed, 0);
+    assert.equal(result.kept, 3);
+
+    const ctx = cm.get();
+    assert.equal(ctx.toolHistory.length, 3);
+    cleanup();
+  });
+
+  it('persists after clear (autoSave)', () => {
+    const cm = freshManager({ autoSave: true });
+    const ctx = cm.init();
+    for (let i = 0; i < 10; i++) {
+      cm.capture(`tool_${i}`, {}, { ok: true, output: `result ${i}` }, 10);
+    }
+
+    cm.clearToolResults({ olderThan: 3, keepLatest: 0 });
+
+    // Verify on disk
+    const filePath = resolve(testDir, `${ctx.sessionId}.json`);
+    assert.ok(existsSync(filePath));
+    const raw = JSON.parse(readFileSync(filePath, 'utf-8'));
+    assert.equal(raw.toolHistory.length, 3);
+    assert.equal(raw.toolHistory[0].tool, 'tool_7');
+    assert.equal(raw.toolHistory[2].tool, 'tool_9');
+    cleanup();
+  });
+
+  it('does not affect accumulatedFindings', () => {
+    const cm = freshManager({ autoSave: false, extractFindings: true });
+    cm.init();
+    for (let i = 0; i < 10; i++) {
+      cm.capture(`tool_${i}`, {},
+        { ok: true, output: 'TypeError: something went wrong' },
+        10
+      );
+    }
+
+    const findingsBefore = cm.get().accumulatedFindings.length;
+    cm.clearToolResults({ olderThan: 3, keepLatest: 0 });
+    const ctx = cm.get();
+
+    assert.equal(ctx.toolHistory.length, 3);
+    assert.equal(ctx.accumulatedFindings.length, findingsBefore);
+    cleanup();
+  });
+
+  it('does not affect metadata.toolCount', () => {
+    const cm = freshManager({ autoSave: false });
+    cm.init();
+    for (let i = 0; i < 10; i++) {
+      cm.capture(`tool_${i}`, {}, { ok: true, output: `result ${i}` }, 10);
+    }
+
+    cm.clearToolResults({ olderThan: 3, keepLatest: 0 });
+    const ctx = cm.get();
+
+    // toolCount reflects total calls, not current history length
+    assert.equal(ctx.metadata.toolCount, 10);
+    assert.equal(ctx.toolHistory.length, 3);
     cleanup();
   });
 });
