@@ -21,9 +21,9 @@
 // Adding a new tool: create tools/standard/xxx.mjs → restart → done
 
 import { spawnSync, spawn } from 'node:child_process';
-import { existsSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
@@ -81,12 +81,60 @@ const stats = { startTime: Date.now(), totalCalls: 0, totalErrors: 0, totalDurat
 // ---------------------------------------------------------------------------
 const contextManager = new ContextManager({ autoSave: true, extractFindings: true });
 let contextInitialized = false;
+let memoryInjected = false; // Phase 10.5: auto-inject once per session
+
+const MEMORY_PATH = env.SMART_MEMORY_PATH || join(homedir(), '.smart', 'memory', 'resolutions.json');
+
+/**
+ * Phase 10.5: Auto Memory Injection.
+ * Reads memory store JSON directly and injects top entries (skill_patches
+ * first, then by hitCount + recency) as accumulated findings.
+ * Fire-and-forget: called once after first context init, non-blocking.
+ */
+function autoInjectMemory() {
+  if (memoryInjected) return;
+  try {
+    if (!existsSync(MEMORY_PATH)) return;
+    const raw = readFileSync(MEMORY_PATH, 'utf-8');
+    const memory = JSON.parse(raw);
+    if (!Array.isArray(memory.entries) || memory.entries.length === 0) return;
+
+    // Score: skill_patches always first, then by hitCount + recency
+    const now = Date.now();
+    const scored = memory.entries.map(e => {
+      const ts = e.timestamp ? new Date(e.timestamp).getTime() : 0;
+      const recencyScore = ts > 0 ? Math.max(0, 1 - (now - ts) / 864000000) : 0; // decay over 10 days
+      const typeBonus = e.type === 'skill_patch' ? 100 : 0;
+      const hitScore = (e.hitCount || 1) * 10;
+      return { ...e, score: typeBonus + hitScore + recencyScore * 20 };
+    });
+    scored.sort((a, b) => b.score - a.score);
+
+    const topEntries = scored.slice(0, 3);
+    const findings = topEntries.map(e => ({
+      source: 'memory',
+      finding: e.type === 'skill_patch'
+        ? `🧠 ${e.targetSkill || 'general'}: ${(e.behaviorChange || e.errorMessage || '').slice(0, 200)}`
+        : `🧠 ${e.category}: ${(e.errorMessage || '').slice(0, 100)} → ${(e.resolution || '').slice(0, 100)}`,
+      category: 'memory',
+      severity: 'low',
+    }));
+
+    contextManager.addFindings(findings);
+    memoryInjected = true;
+    debugLog(`Auto-injected ${findings.length} memory entries`);
+  } catch (e) {
+    debugLog('Auto memory injection:', e.message);
+  }
+}
 
 function ensureContext() {
   if (!contextInitialized) {
     contextManager.init({ projectRoot: env.PWD || env.CWD || process.cwd() });
     contextInitialized = true;
     debugLog('Context initialized:', contextManager.get()?.sessionId);
+    // Phase 10.5: inject past learnings into new session
+    autoInjectMemory();
   }
 }
 
@@ -697,9 +745,9 @@ function handleDevtoolRun(id, params, signal, callerArgs) {
     });
   }
 
-  // Execute — invokeTool captures internally via captureAndReturn
+  // Execute — invokeToolWithRetry captures internally via captureAndReturn
   debugLog('Router dispatch:', subTool, 'args:', JSON.stringify(subArgs));
-  const result = invokeTool(def, subArgs, timeout || null, signal);
+  const result = invokeToolWithRetry(def, subArgs, timeout || null, signal);
   return result;
 }
 
@@ -736,15 +784,124 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// Phase 10.3: Error Recovery — Retry + Fallback
+// ---------------------------------------------------------------------------
+
+const RETRY_MAX_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 500;  // 0.5s → 1s → 2s
+const RETRY_MAX_DELAY_MS = 4000;
+
+/**
+ * Transient errors that warrant a retry:
+ *   - timeout / ETIMEDOUT
+ *   - spawn error (process couldn't launch)
+ *   - non-zero exit with empty stdout (process crashed before producing output)
+ * Non-transient (won't retry):
+ *   - quality enforcement block
+ *   - handler error (in-process, deterministic)
+ *   - pre-check memory hit (success)
+ *   - non-zero exit with output (tool ran but logical failure)
+ *   - user cancellation (ABORT_ERR)
+ */
+function isTransientError(result) {
+  if (result == null || result.ok === true) return false;
+  const err = result.error || '';
+  if (err.includes('timed out') || err.includes('ETIMEDOUT')) return true;
+  if (err.includes('Failed to spawn')) return true;
+  // Non-zero exit with empty stdout → process crashed (potentially transient)
+  // Pattern from invokeTool: "failed: exit <code>[: stderr]"
+  if (err.includes('failed: exit ') && !err.includes('cancelled')) return true;
+  return false;
+}
+
+/**
+ * Fallback map: when a CLI tool exhausts retries, try an alternative tool.
+ * Key = tool name, Value = { tool: fallbackToolName, argsTransform: (origArgs) => newArgs }
+ *   or simple string = fallbackToolName (args passed through as-is).
+ */
+const FALLBACK_MAP = {
+  smart_import_graph: {
+    tool: 'smart_grep',
+    argsTransform: (args) => ({ pattern: 'import|from|require', root: args.root || '.' }),
+  },
+  smart_arch_overview: {
+    tool: 'smart_learn',
+    argsTransform: (args) => ({ root: args.root || '.' }),
+  },
+};
+
+/**
+ * Retry wrapper: invoke tool → on transient error → backoff → retry (max 3)
+ * → if exhausted → try fallback from FALLBACK_MAP.
+ * @param {import('./tool-loader.mjs').default} def
+ * @param {Record<string, unknown>} args
+ * @param {number|null} timeoutOverride
+ * @param {AbortSignal} [signal]
+ */
+function invokeToolWithRetry(def, args, timeoutOverride, signal) {
+  let lastResult;
+  for (let attempt = 1; attempt <= RETRY_MAX_ATTEMPTS; attempt++) {
+    // Increase timeout on retry (longer wait for transient issues)
+    const retryTimeout = attempt > 1 && timeoutOverride
+      ? Math.min(timeoutOverride * attempt, 60000)
+      : timeoutOverride;
+    // Skip capture on retry attempts only — first attempt always captures
+    const skipCapture = attempt > 1;
+    lastResult = invokeTool(def, args, retryTimeout, signal, { skipCapture });
+    if (!isTransientError(lastResult)) return lastResult;
+    if (attempt < RETRY_MAX_ATTEMPTS) {
+      const delay = Math.min(RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1), RETRY_MAX_DELAY_MS);
+      debugLog(`Retry ${attempt}/${RETRY_MAX_ATTEMPTS - 1} for ${def.name} in ${delay}ms`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delay);
+      if (signal?.aborted) {
+        return { ok: false, error: `Tool ${def.name} was cancelled during retry` };
+      }
+    }
+  }
+
+  // All retries exhausted — try fallback
+  const fallback = FALLBACK_MAP[def.name];
+  if (fallback) {
+    const fbDef = toolMap.get(fallback.tool || fallback);
+    if (fbDef) {
+      const fbArgs = typeof fallback === 'object' && fallback.argsTransform
+        ? fallback.argsTransform(args)
+        : args;
+      debugLog(`Fallback: ${def.name} → ${fbDef.name}`);
+      const fbResult = invokeTool(fbDef, fbArgs, timeoutOverride, signal);
+      // Annotate the result so LLM knows it's from fallback
+      if (!fbResult.ok) {
+        return lastResult; // return original error if fallback also fails
+      }
+      return {
+        ...fbResult,
+        output: `[Fallback after ${RETRY_MAX_ATTEMPTS}× retry — using ${fbDef.name}]\n${fbResult.output || ''}`,
+      };
+    }
+  }
+
+  return lastResult;
+}
+
 /**
  * Invoke a tool — either via direct handler (no spawn) or via `node <cli>.mjs <args>`.
  * @param {import('./tool-loader.mjs').default} def - tool definition
  * @param {Record<string, unknown>} args
  * @param {number|null} timeoutOverride
  * @param {AbortSignal} [signal]
+ * @param {{ skipCapture?: boolean }} [opts] - internal options (skipCapture for retry attempts)
  */
-function invokeTool(def, args, timeoutOverride, signal) {
+function invokeTool(def, args, timeoutOverride, signal, opts = {}) {
+  const finalAttempt = !opts.skipCapture;
   const startTime = process.hrtime.bigint();
+
+  // Helper: on retry attempts (skipCapture=true), skip captureAndReturn
+  // to avoid polluting stats/context with transient failures.
+  const emit = (result, elapsedMs) => {
+    if (!finalAttempt) return result;
+    return captureAndReturn(def.name, args, result, elapsedMs, def);
+  };
 
   // D.2 Pre-Check: before executing, check memory for known resolution
   // Applies to diagnostic/fix tools where user provides an error description
@@ -753,7 +910,7 @@ function invokeTool(def, args, timeoutOverride, signal) {
     const precheck = preCheckMemory(def.name, args);
     if (precheck) {
       const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
-      return captureAndReturn(def.name, args, { ok: true, output: precheck.output }, elapsedMs, def);
+      return emit({ ok: true, output: precheck.output }, elapsedMs);
     }
   }
 
@@ -762,7 +919,7 @@ function invokeTool(def, args, timeoutOverride, signal) {
   const enforcement = checkHighRiskPrerequisites(def.name, args);
   if (enforcement) {
     const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
-    return captureAndReturn(def.name, args, { ok: false, error: enforcement.message }, elapsedMs, def);
+    return emit({ ok: false, error: enforcement.message }, elapsedMs);
   }
 
   // Direct handler path — no process spawn overhead
@@ -792,23 +949,23 @@ function invokeTool(def, args, timeoutOverride, signal) {
         const output = String(handlerOutput ?? '');
         const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
         if (signal?.aborted) {
-          return captureAndReturn(def.name, args, { ok: false, error: `Tool ${def.name} was cancelled` }, elapsedMs, def);
+          return emit({ ok: false, error: `Tool ${def.name} was cancelled` }, elapsedMs);
         }
         // Structured error from safe-handler wrapper → route through isError path
         if (isStructuredError(output)) {
-          return captureAndReturn(def.name, args, { ok: false, error: output }, elapsedMs, def);
+          return emit({ ok: false, error: output }, elapsedMs);
         }
-        return captureAndReturn(def.name, args, { ok: true, output }, elapsedMs, def);
+        return emit({ ok: true, output }, elapsedMs);
       }
     } catch (err) {
       const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
       const fix = getErrorFix(def.name, 'generic', err.message);
-      return captureAndReturn(def.name, args, { ok: false, error: `Handler error in ${def.name}: ${err.message}\nFix: ${fix}` }, elapsedMs, def);
+      return emit({ ok: false, error: `Handler error in ${def.name}: ${err.message}\nFix: ${fix}` }, elapsedMs);
     }
   }
 
   const cliPath = def._cliPath;
-  if (!cliPath) return captureAndReturn(def.name, args, { ok: false, error: `No CLI path or handler for ${def.name}` }, 0, def);
+  if (!cliPath) return emit({ ok: false, error: `No CLI path or handler for ${def.name}` }, 0);
 
   const cliArgs = def.mapArgs(args);
   const allArgs = [cliPath, ...cliArgs];
@@ -838,7 +995,7 @@ function invokeTool(def, args, timeoutOverride, signal) {
   // Check abort
   if (signal?.aborted) {
     debugLog('Cancelled:', def.name);
-    return captureAndReturn(def.name, args, { ok: false, error: `Tool ${def.name} was cancelled` }, elapsedMs, def);
+    return emit({ ok: false, error: `Tool ${def.name} was cancelled` }, elapsedMs);
   }
 
   if (result.error) {
@@ -848,7 +1005,7 @@ function invokeTool(def, args, timeoutOverride, signal) {
     else { errMsg = `Failed to spawn ${def.name}: ${result.error.message}`; errorType = 'generic'; }
     const fix = getErrorFix(def.name.replace('smart_', ''), errorType, errMsg);
     debugLog('Error:', errMsg);
-    return captureAndReturn(def.name, args, { ok: false, error: `${errMsg}\nFix: ${fix}` }, elapsedMs, def);
+    return emit({ ok: false, error: `${errMsg}\nFix: ${fix}` }, elapsedMs);
   }
 
   const capturedStderr = (result.stderr || '').trim();
@@ -865,11 +1022,11 @@ function invokeTool(def, args, timeoutOverride, signal) {
     const errMsg = `Tool ${def.name} failed: exit ${result.status}${capturedStderr ? ': ' + capturedStderr : ''}`;
     const fix = getErrorFix(def.name.replace('smart_', ''), 'exit', errMsg);
     debugLog('Error:', errMsg);
-    return captureAndReturn(def.name, args, { ok: false, error: `${errMsg}\nFix: ${fix}` }, elapsedMs, def);
+    return emit({ ok: false, error: `${errMsg}\nFix: ${fix}` }, elapsedMs);
   }
 
   if (elapsedMs > 5000) output = output.trimEnd() + `\n\n[Completed in ${(elapsedMs / 1000).toFixed(1)}s]`;
-  return captureAndReturn(def.name, args, { ok: true, output }, elapsedMs, def);
+  return emit({ ok: true, output }, elapsedMs);
 }
 
 // ---------------------------------------------------------------------------
@@ -1213,7 +1370,7 @@ function handleRequest(req) {
       const controller = new AbortController();
       if (id != null) pendingCalls.set(String(id), controller);
       try {
-        const result = invokeTool(def, args, null, controller.signal);
+        const result = invokeToolWithRetry(def, args, null, controller.signal);
 
         // Async handler — resolve Promise and respond
         if (result && result.__async) {

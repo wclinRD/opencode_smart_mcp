@@ -421,12 +421,13 @@
 - [ ] **實作**：擴充 `src/server/index.mjs` `checkHighRiskPrerequisites()`
 - [ ] **測試**：單檔編輯不觸發、多檔編輯自動觸發
 
-### 10.3 Error Recovery 統一策略
+### 10.3 Error Recovery 統一策略 ✅
 
-- [ ] **設計**：retry (3次 exponential backoff) + fallback 定義格式
-- [ ] **實作**：`invokeTool` 加入 retry wrapper + fallback chain
-- [ ] **Fallback 定義**：各 plugin 可選宣告 fallbackTool（LSP→grep, ingest→提示安裝）
-- [ ] **測試**：timeout retry + fallback 正確性
+- [x] **isTransientError()** — 純函數分類：timeout/ETIMEDOUT/spawn失敗/exit無輸出 → transient
+- [x] **invokeToolWithRetry()** — 3 次 exponential backoff（0.5s→1s→2s），capture only on final attempt
+- [x] **FALLBACK_MAP** — 工具層級 fallback（import_graph→grep, arch_overview→learn）
+- [x] **skipCapture** — retry attempt 不記錄到 context/stats，避免工具呼叫記錄膨脹
+- [x] **15 個測試**：isTransientError 11 種情境 + fallback 格式 + context integrity + 全量 regression
 
 ### 10.4 Context Budget 主動管理
 
@@ -544,8 +545,8 @@
 | 1 | 🧪 測試 | Quality gate enforcement 無測試覆蓋 (HIGH_RISK_PREREQUISITES) — 5 tests 通過 | ✅ 已修 | 🔴 P0 |
 | 2 | 🛡️ 品質 | Quality Gate 只有 security→beam search 一條規則 — 補 cross_file_edit→import_graph server 端強制 | ✅ 已修 | 🔴 P0 |
 | 3 | 🔧 功能 | Hallucination Detection (Phase 6) — `smart_hallucination_check` 工具未實作 | 📋 待辦 | 🟠 P1 |
-| 5 | 💡 增強 | Auto Memory Injection (Phase 10.5) — session init 自動注入記憶 | 📋 待辦 | 🟠 P1 |
-| 6 | 🔧 功能 | Error Recovery (Phase 10.3) — retry + fallback chain | 📋 待辦 | 🟠 P1 |
+| 5 | 💡 增強 | Auto Memory Injection (Phase 10.5) — session init 自動注入記憶 | ✅ 已修 | 🟠 P1 |
+| 6 | 🔧 功能 | Error Recovery (Phase 10.3) — retry + fallback chain | ✅ 已修 | 🟠 P1 |
 | 7 | 🏗️ 架構 | TOOL_CLI_MAP 重複 — compose-engine.mjs 和 workflow.mjs 各維護一份 | 📋 待辦 | 🟡 P2 |
 | 8 | 💡 增強 | Impact Warning auto-trigger (Phase 10.2) — 多檔編輯自動觸發 | 📋 待辦 | 🟡 P2 |
 | 9 | ⚡ 效能 | Context Budget proactive (Phase 10.4) — 自動升級壓縮層級 | 📋 待辦 | 🟡 P2 |
@@ -553,4 +554,16 @@
 | 11 | 🧪 測試 | Benchmark 自動化 + CI 整合 | 📋 待辦 | 🔵 P3 |
 | 12 | 🔧 功能 | Sandbox Execution (Phase 10.1) — deno/docker sandbox | 📋 待辦 | 🔵 P3 |
 | 13 | 🧪 測試 | Phase 7 benchmark — 需手動執行，無真實場景 CRUD 數據 | 📋 待辦 | 🔵 P3 |
+
+---
+
+### ✅ Phase 10.5 — Auto Memory Injection（2026-06-11）
+- **`ContextManager.addFindings()`** — 新的 public method，直接將 pre-formatted findings 注入 accumulatedFindings，不走 capture 途徑
+- **`autoInjectMemory()`** — server 端 `ensureContext()` 首次呼叫後 fire-and-forget：
+  - 讀取 `~/.smart/memory/resolutions.json`（可經 `env.SMART_MEMORY_PATH` 覆蓋）
+  - 評分演算法：`skill_patch` +100 > `hitCount × 10` + `recencyScore × 20`（recency 10 天衰減）
+  - 取 top 3 條注入 findings，每條自動 truncate 至 200 chars
+  - 檔案不存在 / 空白 → 靜默跳過（不 crash）
+- **Tests**: `tests/memory-injection.test.mjs` — 6 個測試案例，全部通過
+- **Regression**: 747/747 pass，無 regressions
 

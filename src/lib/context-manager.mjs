@@ -201,6 +201,31 @@ export class ContextManager {
     };
   }
 
+  /**
+   * Add pre-formatted findings directly to accumulated findings.
+   * Used by auto memory injection to surface past learnings without a tool call.
+   * @param {Array<{source:string, finding:string, category:string, severity:string}>} findings
+   */
+  addFindings(findings) {
+    if (!this._context || !Array.isArray(findings)) return;
+    let changed = false;
+    for (const f of findings) {
+      if (!f || !f.finding) continue;
+      this._context.accumulatedFindings.push({
+        source: f.source || 'system',
+        finding: typeof f.finding === 'string' ? f.finding.slice(0, 300) : String(f.finding).slice(0, 300),
+        category: f.category || 'memory',
+        severity: f.severity || 'low',
+        timestamp: nowISO(),
+      });
+      changed = true;
+      if (this._context.accumulatedFindings.length > this._maxFindings) {
+        this._context.accumulatedFindings.shift();
+      }
+    }
+    if (changed && this._autoSave) this._save();
+  }
+
   // -----------------------------------------------------------------------
   // Context injection
   // -----------------------------------------------------------------------
