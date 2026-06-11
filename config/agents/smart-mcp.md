@@ -351,6 +351,7 @@ LSP 優先原則：
   📍 看變數型別 → smart_lsp({operation:"hover"})（~50 tokens vs 讀整個檔案）
   📍 找所有引用 → smart_lsp({operation:"references"}) 優先，smart_grep 備用
   📍 檢查錯誤 → smart_lsp({operation:"diagnostics"}) 優先，手動編譯備用
+  📍 LSP timeout → 先 retry 一次（縮小 scope，從整份 symbols 改單一 hover），仍 timeout 才用 smart_grep context=5
 
 JSON 引號規則：
   ⚠️ 工具呼叫中的巢狀物件，**所有屬性名稱必須用雙引號**（JSON 標準）。
