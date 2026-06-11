@@ -142,6 +142,25 @@ export class ContextBudget {
   }
 
   /**
+   * Phase 14.4: Context Rot Warning — threshold-specific actionable advice.
+   * Returns null when budget is healthy (≥ 50% remaining).
+   * @returns {string|null} e.g. "💡 Budget 65.2%。可考慮 smart_context({command:'clear_tool_results', olderThan:10})"
+   */
+  getRotWarning() {
+    const used = this.usedFraction;
+    if (used >= 0.9) {
+      return `⚠️ Budget 剩 ${(this.remainingFraction * 100).toFixed(0)}%。強烈建議執行 smart_compact 或開始新的 session`;
+    }
+    if (used >= 0.7) {
+      return `⚡ Budget ${(used * 100).toFixed(1)}%。建議執行 smart_context({command:"clear_tool_results", olderThan:10}) 或 smart_compact`;
+    }
+    if (used >= 0.5) {
+      return `💡 Budget ${(used * 100).toFixed(1)}%。可考慮 smart_context({command:"clear_tool_results", olderThan:10}) 釋放 context 空間`;
+    }
+    return null;
+  }
+
+  /**
    * Get budget status for LLM consumption.
    * @returns {object}
    */
@@ -184,6 +203,7 @@ export class ContextBudget {
         ? (this._savingsChars / (this._totalChars + this._savingsChars) * 100).toFixed(1) + '%'
         : '0%',
       toolBreakdown,
+      rotWarning: this.getRotWarning(),
       recommendation: status === 'critical'
         ? '⚠️ Context budget critical. Use format:"full" sparingly. Prefer smart_grep over read for large files. Use hashline for edits.'
         : status === 'low'

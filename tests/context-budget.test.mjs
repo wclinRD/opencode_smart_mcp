@@ -186,3 +186,82 @@ describe('ContextBudget — singleton', () => {
     assert.equal(b.totalChars, 0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Test: Phase 14.4 Context Rot Warning
+// ---------------------------------------------------------------------------
+
+describe('ContextBudget — rot warning', () => {
+  it('returns null when budget is healthy (< 50% used)', () => {
+    const b = new ContextBudget({ maxChars: 10000 });
+    b.track('tool', 4000);  // 40% used → healthy
+    assert.equal(b.getRotWarning(), null);
+  });
+
+  it('returns 💡 tip at 50-70% used', () => {
+    const b = new ContextBudget({ maxChars: 10000 });
+    b.track('tool', 6000);  // 60% used
+    const w = b.getRotWarning();
+    assert.ok(w.includes('💡'));
+    assert.ok(w.includes('clear_tool_results'));
+    assert.ok(!w.includes('smart_compact'));  // 50-70%: only clear_tool_results
+  });
+
+  it('returns ⚡ warning at 70-90% used', () => {
+    const b = new ContextBudget({ maxChars: 10000 });
+    b.track('tool', 8000);  // 80% used
+    const w = b.getRotWarning();
+    assert.ok(w.includes('⚡'));
+    assert.ok(w.includes('clear_tool_results'));
+    assert.ok(w.includes('smart_compact'));
+  });
+
+  it('returns ⚠️ critical at > 90% used', () => {
+    const b = new ContextBudget({ maxChars: 10000 });
+    b.track('tool', 9500);  // 95% used
+    const w = b.getRotWarning();
+    assert.ok(w.includes('⚠️'));
+    assert.ok(w.includes('smart_compact'));
+  });
+
+  it('included as rotWarning field in getStatus()', () => {
+    const b = new ContextBudget({ maxChars: 10000 });
+    b.track('tool', 6000);  // 60% used
+    const s = b.getStatus();
+    assert.ok(s.rotWarning);
+    assert.ok(typeof s.rotWarning === 'string');
+    assert.ok(s.rotWarning.includes('💡'));
+  });
+
+  it('rotWarning is null in getStatus() when healthy', () => {
+    const b = new ContextBudget({ maxChars: 10000 });
+    b.track('tool', 1000);  // 10% used
+    const s = b.getStatus();
+    assert.equal(s.rotWarning, null);
+  });
+
+  it('boundary: exactly 50% used triggers 💡 (start of warning range)', () => {
+    const b = new ContextBudget({ maxChars: 10000 });
+    b.track('tool', 5000);  // 50% used = 50% remaining, at the warning boundary
+    const w = b.getRotWarning();
+    assert.ok(w);
+    assert.ok(w.includes('💡'));
+  });
+
+  it('boundary: exactly 70% used triggers warning', () => {
+    const b = new ContextBudget({ maxChars: 10000 });
+    b.track('tool', 7000);  // 70% used
+    const w = b.getRotWarning();
+    assert.ok(w.includes('⚡'));
+    assert.ok(w.includes('clear_tool_results'));
+    assert.ok(w.includes('smart_compact'));
+  });
+
+  it('boundary: exactly 90% used triggers critical', () => {
+    const b = new ContextBudget({ maxChars: 10000 });
+    b.track('tool', 9000);  // 90% used
+    const w = b.getRotWarning();
+    assert.ok(w.includes('⚠️'));
+    assert.ok(w.includes('smart_compact'));
+  });
+});

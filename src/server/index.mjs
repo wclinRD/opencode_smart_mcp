@@ -1211,10 +1211,11 @@ function respond(id, result, opts = {}) {
       originalSize
     );
 
-    // Budget warning: inject budget status into output when low
-    if (budget.isLow()) {
+    // Phase 14.4: Context Rot Warning — inject threshold-specific actionable advice
+    const rotWarning = budget.getRotWarning();
+    if (rotWarning) {
       const status = budget.getStatus();
-      result.content[0].text += `\n\n---\n📊 Context Budget: ${status.usedPct} used (${status.remainingPct} remaining) — ${status.recommendation}\n---`;
+      result.content[0].text += `\n\n---\n📊 Context Budget: ${status.usedPct} used (${status.remainingPct} remaining) — ${rotWarning}\n---`;
     }
   } else if (result?.content?.[0]?.type === 'text' && typeof result.content[0].text === 'string') {
     // Track even non-optimized outputs
