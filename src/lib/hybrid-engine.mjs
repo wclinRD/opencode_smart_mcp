@@ -868,9 +868,9 @@ const DOMAIN_MAP = [
     domain: 'report',
     keywords: ['報告', '報表', '圖表', '簡報', 'report', 'diagram', 'chart', 'mermaid', 'flowchart', 'sequence diagram', 'html report', 'dashboard'],
     skill: 'smart-mcp-report',
-    tools: ['diagram', 'report', 'toonify'],
+    tools: ['diagram', 'report'],
     description: '圖表與 HTML 報告產出',
-    workflow: ['Load skill: skill("smart-mcp-report")', 'Create diagram: diagram', 'Generate report: report', 'Optimize: toonify'],
+    workflow: ['Load skill: skill("smart-mcp-report")', 'Create diagram: diagram', 'Generate report: report'],
   },
   {
     domain: 'lang',

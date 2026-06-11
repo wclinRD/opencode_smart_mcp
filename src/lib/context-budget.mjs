@@ -19,7 +19,7 @@
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_MAX_CHARS = 40_000;    // ~10k tokens (4 chars/token avg)
+const DEFAULT_MAX_CHARS = 200_000;   // ~50k tokens (4 chars/token avg)
 const LOW_THRESHOLD = 0.5;           // 50% remaining = "low"
 const CRITICAL_THRESHOLD = 0.2;      // 20% remaining = "critical"
 const WARN_THRESHOLD = 0.7;          // 70% remaining = "warning"
@@ -156,6 +156,17 @@ export class ContextBudget {
     const maxTokens = Math.round(this._maxChars / 4);
     const remainingTokens = Math.round(this.remaining / 4);
 
+    // Per-tool breakdown: aggregate savings by tool name
+    const toolBreakdown = {};
+    for (const entry of this._history) {
+      if (!toolBreakdown[entry.tool]) {
+        toolBreakdown[entry.tool] = { calls: 0, totalChars: 0, compressed: 0 };
+      }
+      toolBreakdown[entry.tool].calls++;
+      toolBreakdown[entry.tool].totalChars += entry.chars;
+      if (entry.compressed) toolBreakdown[entry.tool].compressed++;
+    }
+
     return {
       status,
       totalChars: this._totalChars,
@@ -172,6 +183,7 @@ export class ContextBudget {
       savingsPct: this._totalChars > 0
         ? (this._savingsChars / (this._totalChars + this._savingsChars) * 100).toFixed(1) + '%'
         : '0%',
+      toolBreakdown,
       recommendation: status === 'critical'
         ? '⚠️ Context budget critical. Use format:"full" sparingly. Prefer smart_grep over read for large files. Use hashline for edits.'
         : status === 'low'

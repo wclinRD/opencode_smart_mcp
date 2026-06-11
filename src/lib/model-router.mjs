@@ -186,7 +186,7 @@ export function suggestTierForTool(toolName) {
   // Tier 3: medium complexity
   const t3Tools = [
     'error_diagnose', 'debug', 'diagram', 'report',
-    'exa_search', 'exa_crawl', 'github_search', 'toonify',
+    'exa_search', 'exa_crawl', 'github_search',
   ];
   if (t3Tools.some(t => name.includes(t) || name === t)) return 3;
 

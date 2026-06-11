@@ -121,8 +121,7 @@ function passThrough(text) {
 
 /**
  * Compress JSON by abbreviating common keys and removing whitespace.
- * This is intentionally simpler than full Toonify — it runs synchronously
- * and covers the common case without loading the external toonify-mcp package.
+ * This runs synchronously and covers the common compression case.
  */
 function compressJSON(text) {
   try {

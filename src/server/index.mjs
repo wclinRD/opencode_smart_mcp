@@ -288,9 +288,6 @@ const ERROR_FIXES = {
   tool_stats: {
     missing:   'command is required (stats/report). Usage: smart_run(tool:"tool_stats", args:{command:"stats"})',
   },
-  toonify: {
-    missing:   'command is required. Usage: smart_run(tool:"toonify", args:{command:"stats"})',
-  },
   py_helper: {
     missing:   'command is required (lint/typecheck/test). Usage: smart_run(tool:"py_helper", args:{command:"lint", file:"src/foo.py"})',
   },
@@ -573,7 +570,7 @@ const ROUTER_DESCRIPTION =
   '  [search]  exa_search(query), github_search(query,language)\n' +
   '  [plan]    planner(goal), memory_store(command,query), tool_stats(command)\n' +
   '  [debug]   error_diagnose(error), test_suggest(file,diff)\n' +
-  '  [report]  diagram(type,title), report(type,title), toonify(command,content)\n' +
+  '  [report]  diagram(type,title), report(type,title)\n' +
   '  [code]    py_helper(command), ts_helper(command)\n' +
   '  [meta]    integrate(command), git_context(root)\n' +
   'Reserved: help (list all), describe(name), warmUp(tools[]).\n' +
@@ -870,42 +867,7 @@ const PROTOCOL_VERSION = '2024-11-05';
 
 function writeMsg(msg) { stdout.write(JSON.stringify(msg) + '\n'); }
 
-// --- Toonify auto-optimization ---
-const TOONIFY_ENABLED = env.SMART_TOONIFY !== '0' && env.SMART_TOONIFY !== 'false';
-const TOONIFY_PATH = env.TOONIFY_PATH || resolve(env.HOME || '~', 'toonify-mcp');
-let _optimizer = null;
 let _respondChain = Promise.resolve();
-
-async function getOptimizer() {
-  if (_optimizer) return _optimizer;
-  if (!TOONIFY_ENABLED) return null;
-  try {
-    const { TokenOptimizer } = await import(resolve(TOONIFY_PATH, 'dist/optimizer/token-optimizer.js'));
-    _optimizer = new TokenOptimizer({
-      minTokensThreshold: 50, minSavingsThreshold: 10, maxProcessingTime: 20,
-    });
-    return _optimizer;
-  } catch (err) {
-    debugLog('Toonify unavailable:', err.message);
-    return null;
-  }
-}
-
-async function tryOptimizeOutput(text) {
-  if (!text || text.length < 500) return text;
-  const t = text.trim();
-  if (t[0] !== '{' && t[0] !== '[' && t[0] !== '"') return text;
-  const opt = await getOptimizer();
-  if (!opt) return text;
-  try {
-    const r = await opt.optimize(text, { toolName: 'auto' });
-    if (r.optimized) {
-      debugLog('Toonify:', r.savings?.tokens || 0, 'tokens saved');
-      return r.optimizedContent;
-    }
-  } catch { /* best-effort */ }
-  return text;
-}
 
 function respond(id, result, opts = {}) {
   // Phase 2: Apply output optimization BEFORE writing via pipeline
@@ -951,15 +913,6 @@ function respond(id, result, opts = {}) {
     budget.track(result._toolName || 'unknown', result.content[0].text.length);
   }
 
-  // Legacy Toonify background optimization (fire-and-forget, kept for compat)
-  if (opts.optimize !== false && result?.content?.[0]?.type === 'text' && typeof result.content[0].text === 'string') {
-    const originalText = result.content[0].text;
-    tryOptimizeOutput(originalText).then(optimized => {
-      if (optimized !== originalText) {
-        debugLog(`Toonify: background opt saved ${((originalText.length - optimized.length) / originalText.length * 100).toFixed(1)}%`);
-      }
-    }).catch(() => {});
-  }
   // Write chain — only serializes writes, no await on async operations
   _respondChain = _respondChain.then(() => {
     writeMsg({ jsonrpc: '2.0', id, result });
@@ -1157,7 +1110,7 @@ function handleRequest(req) {
         inputSchema: {
           type: 'object',
           properties: {
-            command: { type: 'string', description: 'Command: get (default), summary, history, findings, reset, sessions, delete, inject, workflow-stats, merge', enum: ['get', 'summary', 'history', 'findings', 'reset', 'sessions', 'delete', 'inject', 'workflow-stats', 'merge'] },
+            command: { type: 'string', description: 'Command: get (default), summary, history, findings, reset, sessions, delete, inject, workflow-stats, merge, budget', enum: ['get', 'summary', 'history', 'findings', 'reset', 'sessions', 'delete', 'inject', 'workflow-stats', 'merge', 'budget'] },
             sessionId: { type: 'string', description: 'Session ID (for resume/delete/merge)' },
             sessionIds: { type: 'array', items: { type: 'string' }, description: 'Session IDs array (for merge)' },
             workflowId: { type: 'string', description: 'Workflow ID (for workflow-stats)' },

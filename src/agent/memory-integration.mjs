@@ -72,15 +72,6 @@ const MEMORY_RULES = [
     score: 0.6,
     reason: 'Test suite failure: remember failing test patterns',
   },
-  // Successful TOON optimization
-  {
-    test: (toolName, args, result) =>
-      toolName === 'smart_toonify' &&
-      result.ok !== false,
-    type: 'optimization',
-    score: 0.5,
-    reason: 'Successful token optimization: store pattern for similar optimization tasks',
-  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -172,7 +163,7 @@ function inferCategory(toolName, args) {
     smart_security: 'security',
     smart_debug: 'runtime',
     smart_test: 'test',
-    smart_toonify: 'optimization',
+
     smart_grep: 'search',
     smart_learn: 'build',
     smart_git_commit: 'git',

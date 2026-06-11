@@ -49,7 +49,7 @@ const TOOL_CLI_MAP = {
   smart_test_suggest: 'test-suggest.mjs',
   smart_integrate: 'tool-integrate.mjs',
   smart_tool_stats: 'tool-stats.mjs',
-  smart_toonify: 'toonify.mjs',
+
   smart_py_helper: 'py-helper.mjs',
   smart_ts_helper: 'ts-helper.mjs',
   smart_rs_helper: 'rs-helper.mjs',
