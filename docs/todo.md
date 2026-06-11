@@ -863,3 +863,111 @@ flowchart LR
 - `cosineSimilarity(v, v)` 回傳 `1.0000000000000002`（IEEE 754）→ 改用 `Math.abs(x - 1) < 1e-10` 比對
 - 單字元 token 如 `'b'` 被 `t.length > 1` 過濾 → corpus 設計需用 ≥2 字母詞
 
+---
+
+## Phase 14：取代 OpenCode Compaction — Smart MCP 智慧壓縮層
+
+> 2026-06-12 基於 Anthropic 2026 研究 + OpenCode 現有 compaction 機制分析。
+> 對應 plan.md Phase 14 章節。
+>
+> 三層取代策略：Proactive Cleanup → Smart Compact → API Compaction
+> compact-fix.js 從「補丁」升級為「閘道器」。
+
+### 14.1 Layer 1: Proactive Cleanup（Tool Result Clearing）
+
+- [ ] **`src/lib/context-manager.mjs`**：新增 `clearToolResults({olderThan, keepLatest})` 方法
+  - 依 turn index 過濾工具結果
+  - 保留最近 N 輪（keepLatest 保護）
+  - 回傳 `{ removed: number, kept: number }`
+- [ ] **`src/server/index.mjs`**：`smart_context` handler 新增 `clear_tool_results` 路由
+- [ ] **安全機制**：
+  - 不清除 system prompt
+  - 不清除 thinking blocks
+  - 不清除最近 keepLatest 輪
+- [ ] **邊界情況**：
+  - 空 context → 回傳 removed:0
+  - olderThan > 總輪數 → 全部清除（保留 keepLatest）
+  - keepLatest = 0 → 清除所有符合條件的（需 warning）
+- [ ] **測試**：`tests/context-clear.test.mjs`
+  - 清除特定輪數的 tool results
+  - keepLatest 保護機制驗證
+  - system prompt 保護驗證
+  - 邊界情況（空 context、全部清除）
+
+### 14.2 Layer 2: Smart Compact Tool 🆕
+
+#### Plugin 實作
+
+- [ ] **`src/plugins/core/compact.mjs`** — `smart_compact` MCP tool（handler-based）
+  - 輸入：`{ toolHistory, conversationLength, currentGoal?, currentTodos? }`
+  - 輸出：`{ toolCallsToDrop, toolOutputsToSummarize, conversationSummary, recoveryContext, estimatedTokensSaved }`
+- [ ] **工具類型壓縮規則**（規則 based，不需 LLM call）：
+  - tool type 判別邏輯（從 toolHistory 取出每次 call 的 toolName）
+  - 各類型預設處置（DROP / KEEP SUMMARY / KEEP / 見 plan.md 表格）
+  - 最近 N 輪保護（不影響近期的 tool calls）
+- [ ] **recoveryContext 產生邏輯**：
+  - goal 提取：從最後幾輪 user message 中萃取
+  - todo 提取：若有傳入 currentTodos 則沿用
+  - keyFindings 提取：從 KEEP 和 KEEP SUMMARY 的 tool 中萃取關鍵資訊
+  - openQuestions 提取：從 unresolved errors / warnings 中判斷
+- [ ] **token 估算**：粗略估算可節省和剩餘 token 量
+- [ ] **安全機制**：
+  - 不分析/不觸碰 user messages
+  - 不觸碰 system prompt
+  - 不觸碰 thinking blocks
+  - 未知 tool type → KEEP（保守策略）
+
+#### compaction-fix.js 閘道器升級
+
+- [ ] **`plugin/compaction-fix.js` `onCompacting` hook 增強**：
+  - Step 1: 呼叫 clear_tool_results（Layer 1）
+  - Step 2: 呼叫 smart_compact（Layer 2）
+  - Step 3: 用 smart_compact 回傳的 recoveryContext 取代自製注入
+  - 向後相容：無 smart_compact → 維持原行為
+- [ ] **`plugin/compaction-fix.js` `messages.transform` hook 增強**：
+  - 用 smart_compact 的 recoveryContext 取代自製 recoveryPrompt
+- [ ] **測試**：`tests/compact-integration.test.mjs`
+  - 各工具類型的壓縮規則正確性（grep→DROP, security→KEEP SUMMARY, 等）
+  - recoveryContext 正確性（goal/todo/keyFindings 萃取）
+  - token 估算合理性
+  - compaction-fix.js 整合（clear_tool_results + smart_compact 串接）
+  - 向後相容（無 smart_compact 時原行為維持）
+
+### 14.3 Layer 3: API Server-Side Compaction 驗證
+
+- [ ] **檢查 zen-claude-proxy**：原始碼是否轉發 `anthropic-beta` header
+- [ ] **模型相容性確認**：big-pickle（Opus）是否支援 server-side compaction beta
+- [ ] **若支援**：在 `smart_context` 新增 `{command:"enable_compaction"}` 切換
+- [ ] **若不支援**：記錄為已知限制到 `docs/known-limitations.md`
+- [ ] **文件**：在 `docs/` 新增 `compaction-usage.md`
+
+### 14.4 Context Rot 預警
+
+- [ ] **`src/lib/context-budget.mjs`**：`formatBudgetStatus()` 依 threshold 加入預警
+  - 50-70%：一般提醒
+  - 70-90%：建議 `clear_tool_results` 或 `smart_compact`
+  - > 90%：強烈建議清理或開新 session
+- [ ] **`src/server/index.mjs`** `respond()`：確保預警文字在輸出尾部注入
+- [ ] **整合**：預警文字包含具體 actionable 建議（不是只說「注意」）
+- [ ] **測試**：各 threshold 預警文字正確產生
+
+### 14.5 Prompt Caching 驗證
+
+- [ ] **檢查 zen-claude-proxy**：是否傳遞 `cache_control` breakpoints
+- [ ] **測試 API call**：觀察 response 是否有 `cache_creation_input_tokens` / `cache_read_input_tokens`
+- [ ] **若未啟用**：
+  - 方案 A：修改 proxy 加入 cache_control
+  - 方案 B：Smart MCP 層在 call API 時加入 cache_control breakpoints
+- [ ] **記錄結果**：`docs/prompt-caching-report.md`
+
+### 優先級
+
+| 優先 | 項目 | 估時 | 狀態 |
+|------|------|------|------|
+| 🥇 | **14.1 Proactive Cleanup**（先決條件） | 1-2 天 | 📋 待辦 |
+| 🥇 | **14.2 Smart Compact Tool**（核心取代） | 2-3 天 | 📋 待辦 |
+| 🥇 | **compaction-fix.js 閘道器升級** | 0.5 天 | 📋 待辦 |
+| 🥈 | **14.4 Context Rot 預警** | 0.5 天 | 📋 待辦 |
+| 🥉 | **14.3 API Compaction 驗證** | 0.5 天 | 🔍 待驗證 |
+| 🥉 | **14.5 Prompt Caching 驗證** | 0.5 天 | 🔍 待驗證 |
+

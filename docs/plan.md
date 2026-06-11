@@ -1340,3 +1340,279 @@ Phase 11 和 12 建立了強大的記憶與 embedding 基礎，但：
 - `embedding.mjs` 的 `STOP_WORDS` 不包含 "and" — 這是設計取捨（常見但保留以涵蓋搜尋意圖），非 bug
 - IEEE 754 浮點運算 → cosineSimilarity 測試用 `Math.abs(x - 1) < 1e-10` 取代 `assert.equal(x, 1.0)`
 - 單字元 token 被 `t.length > 1` 過濾 → corpus 測試資料用 ≥2 字母詞避免誤判
+
+---
+
+## Phase 14：取代 OpenCode Compaction — Smart MCP 智慧壓縮層
+
+> 2026-06-12 基於 Anthropic 官方 2026 上下文處理研究 + OpenCode 現有 compaction 機制分析。
+>
+> **關鍵洞察**：OpenCode 原生 compaction 是**無差別壓縮** — 把所有對話內容平等送進 LLM 摘要。
+> Smart MCP 身為工具層，知道每個 tool output 的語義，可以做得更聰明。
+>
+> **取代策略**：三層架構，從被動壓縮變主動管理。
+
+### 現狀分析
+
+```
+OpenCode 現有機制：
+
+opencode.json { compaction: { auto: true, prune: true, reserved: 20000 } }
+  └─ 對話變長 → 全部送 LLM → 平等壓縮 → auto-continue
+  └─ 沒有工具感知，grep/test/security/think 全部一樣對待
+
+compaction-fix.js plugin（5 hooks）：
+  ├─ event                          → 追蹤 todo + compaction 事件
+  ├─ chat.message                   → 追蹤使用者目標
+  ├─ experimental.session.compacting → compaction 前注入 TODO/goal 到 prompt
+  ├─ experimental.compaction.autocontinue → 確保 auto-continue 啟用
+  └─ experimental.chat.messages.transform → 把 "continue" 換成恢復指令
+
+問題：compaction-fix.js 是繞著 compaction 機制打補丁，無法讓 compaction 本身變聰明。
+```
+
+### 三層取代策略
+
+```
+取代前 (OpenCode 原生)：
+  對話增長 → 全部送 LLM → 平等壓縮 → continue（30-50% token 節省）
+
+取代後 (Smart MCP 主導)：
+  Layer 1: Proactive Cleanup ── 先清掉可丟的 tool results
+  Layer 2: Smart Compact ────── 工具感知的結構化壓縮 🆕
+  Layer 3: API Compaction ───── 最後防線，Anthropic server-side
+                              （60-80% token 節省）
+```
+
+---
+
+### Layer 1：Proactive Cleanup（14.1）
+
+**現狀**：長 session 中工具輸出堆積不減。沒有機制清理舊的 tool result。
+
+**作法**：新增 `smart_context` 指令，在 compaction 觸發「之前」先清理：
+
+```
+smart_context({command:"clear_tool_results", olderThan:5, keepLatest:3})
+  → 清除第 5 輪之前的 tool results
+  → 保留最近 3 輪的結果（避免中斷上下文）
+  → 不影響 user/assistant messages
+  → 回傳 { removed: 12, kept: 3 }
+```
+
+**實作位置**：
+| 檔案 | 修改內容 |
+|------|---------|
+| `src/lib/context-manager.mjs` | 新增 `clearToolResults({olderThan, keepLatest})` 方法 |
+| `src/server/index.mjs` | `smart_context` handler 中新增指令路由 |
+
+**安全機制**：
+- 不清除 system prompt
+- 不清除最近 N 輪（受 `keepLatest` 保護）
+- 不清除 thinking blocks（API 自動管理）
+
+**整合 compaction-fix.js**：`onCompacting` hook 在 compaction 前自動呼叫 clear_tool_results：
+```
+compaction 觸發
+  → onCompacting hook
+    → smart_context({command:"clear_tool_results", keepLatest:3})
+    → 釋放 30-60% tool result token
+  → 剩下的內容才進 compaction
+  → compaction 頻率降低一半
+```
+
+---
+
+### Layer 2：Smart Compact Tool（14.2）🆕
+
+**核心取代策略**。新增 `smart_compact` MCP tool，作為 compaction 的智慧大腦：
+
+```
+compaction-fix.js
+  │ 不再自己拼湊 recovery context
+  │ 改呼叫 smart_compact
+  ▼
+Smart MCP
+  │ 分析每筆 tool call 的語義：
+  │   grep 結果 → 已用在後續編輯？→ DROP
+  │   security 掃描 → 高風險已修？→ KEEP SUMMARY, DROP RAW
+  │   deep_think → 保留結論，DROP 推理鏈
+  │   LSP hover → 已用於編輯？→ DROP
+  │   test 輸出 → 全過？→ KEEP SUMMARY, DROP RAW
+  │   error_diagnose → 保留 root cause + fix
+  ▼
+  回傳結構化壓縮計畫：
+  {
+    "toolCallsToDrop": ["grep_3", "test_2", ...],      // 可直接刪除的整筆 tool call
+    "toolOutputsToSummarize": {                          // 需摘要的
+      "security_4": "3 high risks, 2 fixed, 1 mitigated",
+      "deep_think_2": "Root cause: null pointer in parser.parse()"
+    },
+    "conversationSummary": "Debugging session: ...",     // 對話層摘要（OpenCode 原本做的）
+    "recoveryContext": {                                  // 恢復上下文
+      "goal": "Fix crash in parser",
+      "todos": [{"status":"in_progress", "content":"..."}],
+      "keyFindings": ["Null pointer at line 42"],
+      "openQuestions": ["Why does input X trigger this?"]
+    },
+    "estimatedTokensSaved": 35000,
+    "estimatedTokensRemaining": 15000
+  }
+```
+
+**設計**：
+
+| 層面 | 作法 |
+|------|------|
+| Plugin 位置 | `src/plugins/core/compact.mjs`，handler-based |
+| 輸入 | `{ toolHistory, conversationLength, currentGoal?, currentTodos? }` |
+| 輸出 | 結構化壓縮計畫（見上方） |
+| 分析邏輯 | 不需要 LLM call — 規則 based 判斷各 tool type 的處置方式 |
+| 安全性 | 不碰 user messages、不碰 system prompt、不碰 thinking blocks |
+| 向後相容 | compaction-fix.js 可逐步採用：先加 call，再取代自製注入 |
+
+**各工具類型的壓縮規則**：
+
+| 工具類型 | 預設處置 | 條件 |
+|---------|---------|------|
+| `smart_grep` | DROP（匹配行已存於後續 context） | 除非是最後 2 輪內 |
+| `smart_lsp` (hover) | DROP（型別資訊已用於編輯） | 除非是最後 1 輪 |
+| `smart_lsp` (definition) | DROP | 除非是最後 1 輪 |
+| `smart_lsp` (diagnostics) | KEEP SUMMARY（錯誤數 + 類型） | — |
+| `smart_test` | KEEP SUMMARY（pass/fail 統計 + 失敗訊息） | 全部 pass → 更簡短 |
+| `smart_security` | KEEP SUMMARY（高/中/低風險數 + 關鍵發現） | — |
+| `smart_deep_think` | KEEP SUMMARY（結論 + 關鍵論證） | — |
+| `smart_think` | KEEP SUMMARY（結論） | beam mode 保留 selectedBeam |
+| `ssr(error_diagnose)` | KEEP（root cause + fix） | 完整保留，不壓縮 |
+| `ssr(fast_apply)` | KEEP（改變了哪些檔案） | 保留檔案列表 |
+| `ssr(import_graph)` | DROP（圖已 merge 到 context） | 除非是最後 2 輪 |
+| `ssr(code_impact)` | KEEP SUMMARY（受影響檔案數 + 風險） | — |
+| `smart_grep` (file search) | DROP | 總是 safe |
+| Unknown tool | KEEP（保守 — 不認識就不壓） | — |
+
+---
+
+### Layer 3：API Server-Side Compaction（14.3）
+
+最後一道防線。如果 Layer 1+2 還是不夠：
+
+```
+anthropic-beta: server-side-compaction-2026-02-15
+```
+
+**作法**：
+1. 驗證 zen-claude-proxy 是否傳遞 `anthropic-beta` headers
+2. 若支援 → `smart_context({command:"enable_compaction"})` 切換
+3. 若不支援 → 記錄為已知限制
+
+**與 Phase 9 的關係**：
+- Phase 9 拒絕的是「自己實作 compaction pipeline」（Server 端工程，與 opencode 重疊）
+- Layer 3 是「啟用 API 內建 compaction」（API 參數層）— 兩者不衝突
+
+---
+
+### 14.4 Context Rot 預警
+
+**問題**：Anthropic 反覆強調 context rot（token 數↑→準確度↓），但 Smart MCP 的 budget 輸出只有用量 %。
+
+**作法**：在 budget 輸出附加 context rot 預警 + 具體行動建議：
+
+```
+📊 Context Budget: 72% used (28% remaining)
+⚠️ 用量 > 70%，context rot 風險增加（準確度可能下降）
+   建議：smart_context({command:"clear_tool_results"}) 或 smart_compact
+```
+
+**Threshold 設計**：
+
+| 用量 | 層級 | 輸出訊息 |
+|------|------|---------|
+| < 50% | ✅ 正常 | 僅顯示用量 |
+| 50-70% | ⚠️ 注意 | 加入一般提醒 |
+| 70-90% | ⚠️ 建議清理 | 加入具體建議（clear_tool_results / smart_compact） |
+| > 90% | 🔴 高風險 | 強烈建議清理或開新 session |
+
+**實作修改**：
+| 檔案 | 修改內容 |
+|------|---------|
+| `src/lib/context-budget.mjs` | `formatBudgetStatus()` 依 threshold 加入預警文字 |
+| `src/server/index.mjs` | 確保預警文字在 respond() 時注入 |
+
+---
+
+### 14.5 Prompt Caching 驗證
+
+**問題**：claude() 走 zen-claude-proxy，無法確認是否享受 prompt caching 的 90% 折扣。
+
+**作法**：
+
+| 步驟 | 內容 |
+|------|------|
+| 1 | 檢查 zen-claude-proxy 原始碼：是否傳遞 `cache_control` breakpoints |
+| 2 | 測試 call：觀察 API response 是否有 `cache_creation_input_tokens` / `cache_read_input_tokens` |
+| 3 | 若無 → 決定在 proxy 層或 Smart MCP 層加入 `cache_control` |
+| 4 | 記錄結果到 `docs/prompt-caching-report.md` |
+
+---
+
+### 整合後完整流程
+
+```
+對話增長
+  │
+  ├─ 14.4 Context Budget 監控
+  │   └─ > 70% → 自動建議清理
+  │
+  ├─ 14.1 Proactive Cleanup
+  │   └─ compaction-fix.js onCompacting 時自動呼叫 clear_tool_results
+  │   └─ 釋放 30-60% token
+  │
+  ├─ 仍超過 threshold？
+  │   └─ 14.2 Smart Compact 🆕
+  │   └─ compaction-fix.js 呼叫 smart_compact
+  │   └─ 結構化壓縮計畫 → OpenCode 執行
+  │
+  └─ 還是不夠？
+      └─ 14.3 API Server-Side Compaction
+      └─ anthropic-beta header
+```
+
+### 與現有系統的關係
+
+```
+compaction-fix.js（現有）→ 增強為 Smart Compaction 的閘道器：
+  ├─ onCompacting → 先呼叫 clear_tool_results（Layer 1）
+  │               → 再呼叫 smart_compact 取得壓縮計畫（Layer 2）
+  │               → 用 smart_compact 的 recoveryContext 取代自製注入
+  ├─ messages.transform → 用 smart_compact 的 recoveryContext 取代自製恢復指令
+  └─ 向後相容：沒有 smart_compact 時維持原行為
+
+output-optimizer（現有 L0/L1/L2）→ 獨立運作，不受影響：
+  └─ 壓縮單筆 tool output 的顯示大小
+  └─ smart_compact 決定的是「哪些整筆 tool call 可以消失」
+
+Context Budget（現有 Phase 10.4）→ 提供觸發時機：
+  └─ budget threshold → 觸發 compaction
+  └─ budget output → 加入 context rot 預警（14.4）
+```
+
+### 優先級
+
+| 優先 | 項目 | 難度 | 估時 | 類型 |
+|------|------|------|------|------|
+| 🥇 | **14.2 Smart Compact Tool**（核心取代） | 🟡 中 | 2-3 天 | MCP Plugin |
+| 🥇 | **14.1 Proactive Cleanup**（先決條件） | 🟡 中 | 1-2 天 | context-manager |
+| 🥇 | **compaction-fix.js 整合**（閘道器升級） | 🟢 低 | 0.5 天 | Plugin |
+| 🥈 | **14.4 Context Rot 預警** | 🟢 低 | 0.5 天 | Budget 增強 |
+| 🥉 | **14.3 API Compaction 驗證** | 🟢 低 | 0.5 天 | 驗證 |
+| 🥉 | **14.5 Prompt Caching 驗證** | 🟢 低 | 0.5 天 | 驗證 |
+
+### 不上什麼
+
+| 項目 | 原因 |
+|------|------|
+| 自己實作 conversation compaction pipeline | Phase 9 已決定 — opencode client 負責 |
+| Thinking block clearing | Anthropic API 對 extended thinking 自動 strip |
+| FIFO conversation management | OpenCode client 層責任 |
+| 多 session context merge | 無明確使用場景 |
+| 自建 prompt cache 基礎設施 | provider/API 層功能 |
