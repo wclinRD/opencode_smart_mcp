@@ -773,6 +773,11 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
   if (success && toolName !== 'smart_memory_store') {
     autoExtractSkillPatches(false);
   }
+  // Phase 10.2: Impact Warning — auto-trigger code_impact for multi-file edits
+  // Stores promise resolving to impact text (or empty string) so respond() can append it.
+  if (success && toolName === 'smart_fast_apply' && result.output) {
+    result._pendingImpact = triggerImpactWarning(args);
+  }
   // Attach responsePolicy + responsePipeline for output optimization downstream
   if (def?.responsePolicy) {
     result._responsePolicy = def.responsePolicy;
@@ -782,6 +787,87 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
     }
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 10.2: Impact Warning helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract unique file paths from smart_fast_apply args.
+ * Supports all input formats: blocks, changes (hashline), text (unified diff / SEARCH/REPLACE).
+ */
+function extractFilesFromFastApplyArgs(args) {
+  const files = new Set();
+
+  // blocks format (SEARCH/REPLACE, lazy, partial)
+  if (Array.isArray(args.blocks)) {
+    for (const b of args.blocks) {
+      if (b.file) files.add(b.file);
+    }
+  }
+
+  // changes format (hashline)
+  if (Array.isArray(args.changes)) {
+    for (const c of args.changes) {
+      if (c.file) files.add(c.file);
+    }
+  }
+
+  // whole-file format
+  if (args.whole && args.whole.file) {
+    files.add(args.whole.file);
+  }
+
+  // text format — try unified diff headers (+++ b/...)
+  if (args.text && typeof args.text === 'string') {
+    const diffFiles = args.text.match(/^\+\+\+ b\/(.+)$/gm);
+    if (diffFiles) {
+      for (const line of diffFiles) {
+        const f = line.replace(/^\+\+\+ b\//, '').trim();
+        if (f) files.add(f);
+      }
+    }
+    // Try SEARCH/REPLACE text format (file: path)
+    const srFiles = args.text.match(/^file:\s*(.+)$/gm);
+    if (srFiles) {
+      for (const line of srFiles) {
+        const f = line.replace(/^file:\s*/, '').trim();
+        if (f) files.add(f);
+      }
+    }
+  }
+
+  return [...files];
+}
+
+/**
+ * Fire-and-forget: run code_impact analysis when fast_apply touches >2 files.
+ * Appends structured impact warning to result output.
+ */
+async function triggerImpactWarning(args) {
+  try {
+    const files = extractFilesFromFastApplyArgs(args);
+    if (files.length <= 2) return '';
+
+    const { default: codeImpact } = await import('../plugins/standard/code-impact.mjs');
+    if (typeof codeImpact?.handler !== 'function') return '';
+
+    let root = args.root || process.cwd();
+    const impactOutput = await codeImpact.handler({ files, root, format: 'text', depth: 1 });
+
+    if (typeof impactOutput === 'string' && impactOutput.length > 0) {
+      const impactLines = impactOutput.split('\n').filter(l => l.trim()).length;
+      if (impactLines > 1) {
+        debugLog(`Impact warning appended (${files.length} files, ${impactLines} lines)`);
+        return `\n\n---\n🧩 Impact Warning: ${files.length} files changed. Auto-triggered impact analysis:\n${impactOutput}\n---`;
+      }
+    }
+    return '';
+  } catch (e) {
+    debugLog('Impact warning error:', e.message);
+    return '';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1082,8 +1168,17 @@ function respond(id, result, opts = {}) {
     budget.track(result._toolName || 'unknown', result.content[0].text.length);
   }
 
-  // Write chain — only serializes writes, no await on async operations
-  _respondChain = _respondChain.then(() => {
+  // Write chain — awaits pending async work (e.g. Phase 10.2 impact warning),
+  // then serializes writes to maintain MCP JSON-RPC ordering.
+  _respondChain = _respondChain.then(async () => {
+    // Await any pending async post-processing before writing
+    if (result._pendingImpact) {
+      const impactText = await result._pendingImpact;
+      delete result._pendingImpact;
+      if (impactText && result?.content?.[0]?.type === 'text') {
+        result.content[0].text += impactText;
+      }
+    }
     writeMsg({ jsonrpc: '2.0', id, result });
   }).catch(() => {
     writeMsg({ jsonrpc: '2.0', id, result });
@@ -1332,6 +1427,7 @@ function handleRequest(req) {
                 const resp1 = { content: [{ type: 'text', text: cr.output }] };
                 const rp = cr._responsePolicy || _responsePolicy;
                 if (rp) resp1._responsePolicy = rp;
+                if (cr._pendingImpact) resp1._pendingImpact = cr._pendingImpact;
                 respond(id, resp1);
               })
               .catch(err => {
@@ -1345,6 +1441,7 @@ function handleRequest(req) {
           } else if (result.ok) {
             const resp2 = { content: [{ type: 'text', text: result.output }] };
             if (result._responsePolicy) resp2._responsePolicy = result._responsePolicy;
+            if (result._pendingImpact) resp2._pendingImpact = result._pendingImpact;
             respond(id, resp2);
           } else {
             respond(id, {
@@ -1394,6 +1491,7 @@ function handleRequest(req) {
               const resp3 = { content: [{ type: 'text', text: cr.output }] };
               const rp = cr._responsePolicy || _responsePolicy;
               if (rp) resp3._responsePolicy = rp;
+              if (cr._pendingImpact) resp3._pendingImpact = cr._pendingImpact;
               respond(id, resp3);
             })
             .catch(err => {
@@ -1410,6 +1508,7 @@ function handleRequest(req) {
         if (result.ok) {
           const resp4 = { content: [{ type: 'text', text: result.output }] };
           if (result._responsePolicy) resp4._responsePolicy = result._responsePolicy;
+          if (result._pendingImpact) resp4._pendingImpact = result._pendingImpact;
           respond(id, resp4);
         } else {
           respond(id, {

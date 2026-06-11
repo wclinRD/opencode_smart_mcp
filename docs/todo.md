@@ -548,14 +548,33 @@
 | 5 | 💡 增強 | Auto Memory Injection (Phase 10.5) — session init 自動注入記憶 | ✅ 已修 | 🟠 P1 |
 | 6 | 🔧 功能 | Error Recovery (Phase 10.3) — retry + fallback chain | ✅ 已修 | 🟠 P1 |
 | 7 | 🏗️ 架構 | TOOL_CLI_MAP 重複 — compose-engine.mjs 和 workflow.mjs 各維護一份 | 📋 待辦 | 🟡 P2 |
-| 8 | 💡 增強 | Impact Warning auto-trigger (Phase 10.2) — 多檔編輯自動觸發 | 📋 待辦 | 🟡 P2 |
-| 9 | ⚡ 效能 | Context Budget proactive (Phase 10.4) — 自動升級壓縮層級 | 📋 待辦 | 🟡 P2 |
+| 8 | 💡 增強 | Impact Warning auto-trigger (Phase 10.2) — fast_apply >2 檔自動跑 code_impact | ✅ 已修 | 🟡 P2 |
+| 9 | ⚡ 效能 | Context Budget proactive (Phase 10.4) — 自動升級壓縮層級 | ✅ 已修 | 🟡 P2 |
 | 10 | 🔧 功能 | LSP startup 降級指引 — 未安裝時給安裝指令 + grep fallback | 📋 待辦 | 🟡 P2 |
 | 11 | 🧪 測試 | Benchmark 自動化 + CI 整合 | 📋 待辦 | 🔵 P3 |
 | 12 | 🔧 功能 | Sandbox Execution (Phase 10.1) — deno/docker sandbox | 📋 待辦 | 🔵 P3 |
 | 13 | 🧪 測試 | Phase 7 benchmark — 需手動執行，無真實場景 CRUD 數據 | 📋 待辦 | 🔵 P3 |
 
 ---
+
+### ✅ Phase 10.4 — Context Budget 主動管理（2026-06-11）
+- **`src/lib/context-budget.mjs`** — `ContextBudget` class：累積輸出追蹤、threshold 自動升級、budget warning 注入
+- **`src/server/index.mjs` `respond()`** — 每次輸出前呼叫 `decideCompression()`：
+  - Critical (≤20%) → 強制 L2
+  - Low (≤50%) → 強制 L1
+  - Warning (≤70%) → 大輸出強制 L1
+  - 注入 budget status 到輸出尾部供 LLM 參考
+- **`smart_context({command:"budget"})`** — 可查即時 budget 狀態
+- **Tests**: `tests/context-budget.test.mjs` — 17 個測試案例（tracking/compression decisions/status/singleton）
+- **Regression**: 779/779 pass，無 regressions
+
+### ✅ Phase 10.2 — Impact Warning 自動觸發（2026-06-11）
+- **`captureAndReturn()`** — smart_fast_apply 成功執行後自動觸發 code_impact：
+  - `extractFilesFromFastApplyArgs()` — 支援 blocks/changes/text/whole 四種輸入格式
+  - `triggerImpactWarning()` — fire-and-forget 非同步執行，不阻塞回應
+  - 3+ 檔案編輯自動附加 impact analysis 到輸出
+- **之前已完成的**：`cross_file_edit` → 強制 `import_graph`（HIGH_RISK_PREREQUISITES）
+- **Regression**: 779/779 pass，無 regressions
 
 ### ✅ Phase 10.5 — Auto Memory Injection（2026-06-11）
 - **`ContextManager.addFindings()`** — 新的 public method，直接將 pre-formatted findings 注入 accumulatedFindings，不走 capture 途徑
