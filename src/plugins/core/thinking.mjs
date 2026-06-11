@@ -10,12 +10,12 @@ export default {
   name: 'smart_deep_think',
   category: 'think',
   responsePolicy: { maxLevel: 0 }, // Structured reasoning; keep raw
-  description: 'Use when: need structured reasoning — analyzing complex problems, debugging, making decisions, researching, or planning. Supports 9 templates (debug/refactor/feature/research/decision/analyze/plan_execute/retrospect/architecture) + 3 modes (static/iterative/dynamic). Avoid when: need quick answer to simple question (use quick-think instead).',
+  description: 'Use when: need structured reasoning — analyzing complex problems, debugging, making decisions, researching, or planning. Supports 10 templates (debug/refactor/feature/research/decision/analyze/plan_execute/retrospect/architecture/peer_review) + 3 modes (static/iterative/dynamic). Avoid when: need quick answer to simple question (use quick-think instead).',
   inputSchema: {
     type: 'object',
     properties: {
       topic: { type: 'string', description: 'Topic/question to analyze (required for static/dynamic modes)' },
-      template: { type: 'string', enum: ['debug', 'refactor', 'feature', 'research', 'decision', 'analyze', 'plan_execute', 'retrospect', 'architecture'], description: 'Thinking template (default: analyze)' },
+      template: { type: 'string', enum: ['debug', 'refactor', 'feature', 'research', 'decision', 'analyze', 'plan_execute', 'retrospect', 'architecture', 'peer_review'], description: 'Thinking template (default: analyze)' },
       steps: { type: 'number', description: 'Steps (default: 5)' },
       format: { type: 'string', enum: ['text', 'json', 'markdown'], description: 'Output format for static mode (default: text)' },
       plan: { type: 'string', description: 'JSON plan string (from planner) for plan_execute context' },

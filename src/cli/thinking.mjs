@@ -189,6 +189,19 @@ const TEMPLATES = {
       { name: 'Implementation Guidance', icon: '5', prompt: 'First steps to implement. What to build first? What to defer? Key design decisions within the chosen arch.' },
     ],
   },
+
+  // Peer Review — academic manuscript review (Remi 10-point framework)
+  peer_review: {
+    name: 'Peer Review (Remi)',
+    description: 'Nature/Science-level academic peer review: 10-point framework covering quality, methodology, consistency, results, presentation, literature, impact, tone, issues, and recommendation.',
+    steps: [
+      { name: 'Quality & Novelty', icon: '1', prompt: 'Is the research question important and clearly defined? Is the contribution novel or incremental? Does it advance the field meaningfully?' },
+      { name: 'Methodology & Assumptions', icon: '2', prompt: 'Are the methods appropriate and well-justified? Identify hidden assumptions, unrealistic simplifications, methodological gaps, missing controls, or biases. Is the data sufficient and reliable?' },
+      { name: 'Consistency & Coherence', icon: '3', prompt: 'Identify inconsistencies between sections (abstract, methods, results, conclusions). Check logical flow and internal contradictions.' },
+      { name: 'Results & Interpretation', icon: '4', prompt: 'Are results correctly interpreted or overstated? Are claims supported by data? Any overfitting, selective reporting, or exaggeration?' },
+      { name: 'Presentation & Tone', icon: '5', prompt: 'Are figures clear and publication-ready? Flag AI vocabulary (delve, tapestry, crucial, etc.). Strip meta-commentary and self-referential writing. Final recommendation: Accept/Minor/Major/Reject.' },
+    ],
+  },
 };
 
 // ---------------------------------------------------------------------------
