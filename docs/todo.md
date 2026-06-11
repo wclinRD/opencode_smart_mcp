@@ -601,3 +601,48 @@
 - **Tests**: `tests/lsp-degradation.test.mjs` — 9 tests（unsupported ext / missing params / file not found / suggestion format）
 - **Regression**: 788/788 pass，無 regressions
 
+---
+
+## Phase 10.8：Memory Lifecycle Management ✅ (2026-06-11)
+
+> 記憶體自動生命週期管理 — 三層架構，解決「已解決的 bug fix 永久佔據記憶體」問題。
+> 對應 plan.md Phase 10.8 章節。
+
+### Layer 1：Auto-cleanup Stale Bug Fixes ✅
+
+- [x] `runLifecycle()` — 核心生命週期函數（`src/cli/memory-store.mjs`）
+- [x] `filesChanged` mtime 檢查：所有檔案 mtime > entry.timestamp → 自動 delete
+- [x] 例外保護：`confirmedAt` 不為空 / `keep=always` / `success=false` → 不刪除
+- [x] 整合點：`cmdStore` / `cmdSearch` / `cmdList` 呼叫前自動執行
+
+### Layer 2：Hit Count Decay + Auto-archive ✅
+
+- [x] 指數衰減：hitCount ≤ 2 且 lastSeen > 30 天 → 每 30 天 ×0.5
+- [x] 自動歸檔：hitCount < 1 且 lastSeen > 90 天 → `status: "archived"`
+- [x] 搜尋/列表預設排除 archived（`--include-archived` 可恢復）
+- [x] `cmdStats` 新增 `archivedCount` / `temporaryCount` 統計
+
+### Layer 3：TTL + Keep Override ✅
+
+- [x] `--ttl 7d/30d/1h` → `expiresAt` 自動設定，過期後自動清除
+- [x] `--keep always` → 永不自動清除（`keep: "always"`）
+- [x] `parseTTL()` — 支援 d/h/m 單位解析
+- [x] 顯示標記：📦 archived / ⏳ temporary / (kept)
+
+### Plugin + Mapper 更新 ✅
+
+- [x] `src/plugins/standard/memory_store.mjs` — schema 新增 `ttl`/`keep`/`includeArchived`
+- [x] `src/cli/workflow.mjs` — mapper 傳遞新參數
+- [x] `src/lib/compose-engine.mjs` — mapper 傳遞新參數
+- [x] `printHelp()` — 更新說明文件
+
+### 測試 ✅
+
+- [x] 既有測試：memory-store.test.mjs 10/10 pass
+- [x] 既有測試：memory-injection.test.mjs 6/6 pass
+- [x] 手動測試：Layer 1 stale fix auto-cleaned ✅
+- [x] 手動測試：Layer 2 archived + decayed ✅
+- [x] 手動測試：Layer 3 TTL expired + keep preserved ✅
+- [x] 手動測試：`--include-archived` 正確顯示/隱藏 ✅
+- [x] 全量回歸：hybrid-engine/fast-apply/quality-gate/error-recovery 全部通過
+

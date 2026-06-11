@@ -24,6 +24,9 @@ export default {
       findingsFile: { type: 'string', description: 'Path to findings JSON file (for extract command)' },
       minFrequency: { type: 'number', description: 'Minimum occurrences to trigger skill_patch (default: 2, for extract command)' },
       dryRun: { type: 'boolean', description: 'Preview without storing (for extract command)' },
+      ttl: { type: 'string', description: 'Auto-expire after duration (e.g. "7d", "30d", "1h") — for store command' },
+      keep: { type: 'string', enum: ['always'], description: 'Prevent auto-cleanup for this entry — for store command' },
+      includeArchived: { type: 'boolean', description: 'Include archived entries in search/list results' },
     },
     required: ['command'],
   },
@@ -49,6 +52,9 @@ export default {
     if (a.findingsFile) cli.push('--findings-file', String(a.findingsFile));
     if (a.minFrequency) cli.push('--min-frequency', String(a.minFrequency));
     if (a.dryRun) cli.push('--dry-run');
+    if (a.ttl) cli.push('--ttl', String(a.ttl));
+    if (a.keep) cli.push('--keep', String(a.keep));
+    if (a.includeArchived) cli.push('--include-archived');
     return cli;
   },
 };

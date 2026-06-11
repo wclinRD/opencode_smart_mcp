@@ -45,7 +45,7 @@
 //   --threshold <N>       Fuzzy match threshold 0-1 (default: 0.4)
 //   -h, --help            Show help
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createVectorizer, hybridSearch } from '../lib/embedding.mjs';
@@ -58,6 +58,12 @@ const HOME = process.env.HOME || process.env.USERPROFILE || '/tmp';
 const DEFAULT_DATA_DIR = join(HOME, '.smart', 'memory');
 const MEMORY_FILE = 'resolutions.json';
 const MAX_ENTRIES = 5000;
+
+// Lifecycle management constants (Layers 1-3)
+const HIT_DECAY_DAYS = 30;        // Layer 2: days without hits before hitCount decays
+const HIT_DECAY_RATE = 0.5;       // Layer 2: hitCount multiplier per decay period
+const ARCHIVE_DAYS = 90;          // Layer 2: auto-archive after this many idle days
+const ARCHIVE_HIT_THRESHOLD = 1;  // Layer 2: max hitCount for auto-archive
 
 // ---------------------------------------------------------------------------
 // Data management
@@ -89,6 +95,86 @@ function loadMemory(dir) {
 function saveMemory(dir, memory) {
   ensureDataDir(dir);
   writeFileSync(getMemoryPath(dir), JSON.stringify(memory, null, 2), 'utf-8');
+}
+
+/**
+ * Run memory lifecycle management (Layers 1-3) before returning results.
+ *
+ * Layer 1 — Auto-cleanup stale bug fixes:
+ *   Entries with filesChanged[] get each file's mtime checked. If ALL files
+ *   were modified AFTER the entry was created (fix applied), the entry is stale
+ *   and auto-removed. Skipped for confirmedAt entries and keep=always.
+ *
+ * Layer 2 — Hit count decay + auto-archive:
+ *   hitCount decays exponentially after HIT_DECAY_DAYS of inactivity (×0.5 per
+ *   period). Entries idle > ARCHIVE_DAYS with hitCount < ARCHIVE_HIT_THRESHOLD
+ *   are tagged status:"archived" — excluded from default search/list.
+ *
+ * Layer 3 — TTL expiration:
+ *   Entries with expiresAt past current time are removed.
+ *
+ * @param {object} memory — The memory store object (mutated in place)
+ * @returns {{staleRemoved:number, archived:number, expiredRemoved:number, hitCountDecayed:number}}
+ */
+function runLifecycle(memory) {
+  const result = { staleRemoved: 0, archived: 0, expiredRemoved: 0, hitCountDecayed: 0 };
+  const now = Date.now();
+
+  // ── Layer 1 & 3: Remove stale bug fixes and expired entries ──────────
+  memory.entries = memory.entries.filter(entry => {
+    // Layer 3: TTL expiration
+    if (entry.expiresAt && new Date(entry.expiresAt).getTime() <= now) {
+      result.expiredRemoved++;
+      return false;
+    }
+
+    // Layer 1: Stale bug fix detection (filesChanged mtime check)
+    if (entry.filesChanged && entry.filesChanged.length > 0 && entry.success !== false) {
+      if (entry.confirmedAt && entry.confirmedAt.length > 0) return true; // user confirmed → keep
+      if (entry.keep === 'always') return true;
+
+      const entryTime = new Date(entry.timestamp).getTime();
+      let allChanged = true;
+
+      for (const filePath of entry.filesChanged) {
+        try {
+          const s = statSync(filePath);
+          if (s.mtimeMs <= entryTime) { allChanged = false; break; }
+        } catch {
+          // File deleted or moved — counts as "resolved", continue checking
+          continue;
+        }
+      }
+
+      if (allChanged) { result.staleRemoved++; return false; }
+    }
+
+    return true;
+  });
+
+  // ── Layer 2: Decay hitCount + auto-archive ───────────────────────────
+  for (const entry of memory.entries) {
+    if (entry.keep === 'always') continue;
+
+    const lastSeen = new Date(entry.lastSeen || entry.timestamp).getTime();
+    const daysSince = (now - lastSeen) / (1000 * 60 * 60 * 24);
+
+    // Decay hitCount after prolonged inactivity
+    if (daysSince > HIT_DECAY_DAYS && (entry.hitCount || 1) <= 2) {
+      const periods = Math.floor(daysSince / HIT_DECAY_DAYS);
+      const decayed = (entry.hitCount || 1) * Math.pow(HIT_DECAY_RATE, periods);
+      entry.hitCount = Math.max(Math.round(decayed * 10) / 10, 0.1);
+      result.hitCountDecayed++;
+    }
+
+    // Auto-archive old low-value entries
+    if (entry.status !== 'archived' && daysSince > ARCHIVE_DAYS && (entry.hitCount || 1) < ARCHIVE_HIT_THRESHOLD) {
+      entry.status = 'archived';
+      result.archived++;
+    }
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -217,8 +303,22 @@ function categorizeError(msg) {
 // Commands
 // ---------------------------------------------------------------------------
 
+function parseTTL(ttlStr) {
+  if (!ttlStr) return null;
+  const match = ttlStr.match(/^(\d+)\s*(d|day|days|h|hour|hours|m|min|mins|minute|minutes)?$/i);
+  if (!match) return null;
+  const num = parseInt(match[1], 10);
+  const unit = (match[2] || 'd').toLowerCase()[0];
+  const multipliers = { d: 86400000, h: 3600000, m: 60000 };
+  return Date.now() + num * (multipliers[unit] || 86400000);
+}
+
 function cmdStore(dataDir, errorMsg, options) {
   const memory = loadMemory(dataDir);
+  
+  // Run lifecycle before storing (clean up stale entries)
+  const lifecycle = runLifecycle(memory);
+  
   const hash = hashError(errorMsg);
   
   // Check if exact hash exists — update hitCount instead of duplicate
@@ -228,8 +328,14 @@ function cmdStore(dataDir, errorMsg, options) {
     existing.lastSeen = new Date().toISOString();
     if (options.resolution) existing.resolution = options.resolution;
     if (options.success !== undefined) existing.success = options.success;
+    // Layer 3: update keep if provided
+    if (options.keep) existing.keep = options.keep;
+    // Update TTL: only if explicitly provided (don't clear existing TTL)
+    if (options.ttl) {
+      existing.expiresAt = new Date(parseTTL(options.ttl)).toISOString();
+    }
     saveMemory(dataDir, memory);
-    return { stored: true, updated: true, id: existing.id, hash, hitCount: existing.hitCount };
+    return { stored: true, updated: true, id: existing.id, hash, hitCount: existing.hitCount, lifecycle };
   }
   
   // Enforce max entries — remove oldest low-value entries
@@ -259,11 +365,23 @@ function cmdStore(dataDir, errorMsg, options) {
     entry.targetSkill = options.targetSkill || null;
     entry.behaviorChange = options.behaviorChange || null;
   }
+
+  // Layer 3: Manual lifecycle override
+  if (options.keep === 'always') {
+    entry.keep = 'always';
+  }
+  if (options.ttl) {
+    const expiresAt = parseTTL(options.ttl);
+    if (expiresAt) {
+      entry.expiresAt = new Date(expiresAt).toISOString();
+      entry.status = 'temporary';
+    }
+  }
   
   memory.entries.push(entry);
   saveMemory(dataDir, memory);
   
-  return { stored: true, updated: false, id: entry.id, hash, category: entry.category };
+  return { stored: true, updated: false, id: entry.id, hash, category: entry.category, lifecycle };
 }
 
 // ---------------------------------------------------------------------------
@@ -429,50 +547,72 @@ function cmdExtractSkillPatches(dataDir, findings, options = {}) {
 
 function cmdSearch(dataDir, query, options) {
   const memory = loadMemory(dataDir);
+  
+  // Run lifecycle before search (return clean results)
+  const lifecycle = runLifecycle(memory);
+  
   const threshold = options.threshold != null ? options.threshold : 0.4;
   const limit = options.limit || 10;
   
   if (memory.entries.length === 0) {
-    return { found: false, count: 0, entries: [], note: 'Memory store is empty. No past resolutions available.' };
+    return { found: false, count: 0, entries: [], note: 'Memory store is empty. No past resolutions available.', lifecycle };
+  }
+  
+  // Filter out archived entries by default (Layer 2)
+  const searchPool = options.includeArchived
+    ? memory.entries
+    : memory.entries.filter(e => e.status !== 'archived');
+  
+  if (searchPool.length === 0) {
+    return { found: false, count: 0, entries: [], note: 'No active entries found. Use --include-archived to search archived entries.', lifecycle };
   }
   
   // 1. Exact hash match (fast path)
   const hash = hashError(query);
-  const exact = exactHashMatch(memory, hash);
+  const exact = exactHashMatch({ entries: searchPool }, hash);
   if (exact) {
     // Bump hitCount
     exact.hitCount = (exact.hitCount || 1) + 1;
     exact.lastSeen = new Date().toISOString();
     saveMemory(dataDir, memory);
-    return { found: true, count: 1, entries: [{ ...exact, similarity: 1.0, matchType: 'exact' }], matchType: 'exact' };
+    return { found: true, count: 1, entries: [{ ...exact, similarity: 1.0, matchType: 'exact' }], matchType: 'exact', lifecycle };
   }
   
   // 2. Vector search (if enabled) — hybrid TF-IDF + fuzzy
   if (options.vector) {
-    const vectorResults = hybridSearch(query, memory.entries, {
+    const vectorResults = hybridSearch(query, searchPool, {
       textKey: 'errorMessage',
       vectorWeight: 0.7,
       topK: limit,
       minScore: options.vectorThreshold != null ? options.vectorThreshold : 0.1,
     });
     if (vectorResults.length > 0) {
-      return { found: true, count: vectorResults.length, entries: vectorResults, matchType: 'vector' };
+      return { found: true, count: vectorResults.length, entries: vectorResults, matchType: 'vector', lifecycle };
     }
     // Vector returned nothing — fall through to fuzzy
   }
   
   // 3. Fuzzy search (default fallback)
-  const results = fuzzySearch(memory, query, threshold, limit);
+  const results = fuzzySearch({ entries: searchPool }, query, threshold, limit);
   if (results.length > 0) {
-    return { found: true, count: results.length, entries: results.map(r => ({ ...r, matchType: 'fuzzy' })), matchType: 'fuzzy' };
+    return { found: true, count: results.length, entries: results.map(r => ({ ...r, matchType: 'fuzzy' })), matchType: 'fuzzy', lifecycle };
   }
   
-  return { found: false, count: 0, entries: [], matchType: 'none', note: 'No similar past resolution found in memory.' };
+  return { found: false, count: 0, entries: [], matchType: 'none', note: 'No similar past resolution found in memory.', lifecycle };
 }
 
 function cmdList(dataDir, options) {
   const memory = loadMemory(dataDir);
+  
+  // Run lifecycle before listing
+  const lifecycle = runLifecycle(memory);
+  
   let entries = [...memory.entries];
+  
+  // Filter out archived entries by default (Layer 2)
+  if (!options.includeArchived) {
+    entries = entries.filter(e => e.status !== 'archived');
+  }
   
   if (options.category) {
     entries = entries.filter(e => e.category === options.category);
@@ -485,12 +625,13 @@ function cmdList(dataDir, options) {
   entries = entries.slice(0, limit);
   
   return { total: memory.entries.length, shown: entries.length, entries: entries.map(e => ({
-    id: e.id, type: e.type, category: e.category, errorMessage: e.errorMessage.slice(0, 120),
+    id: e.id, type: e.type, category: e.category, status: e.status || 'active',
+    errorMessage: e.errorMessage.slice(0, 120),
     resolution: e.resolution ? e.resolution.slice(0, 200) : null,
     success: e.success, hitCount: e.hitCount || 1, lastSeen: e.lastSeen, timestamp: e.timestamp,
     targetSkill: e.type === 'skill_patch' ? e.targetSkill : undefined,
     behaviorChange: e.type === 'skill_patch' ? e.behaviorChange : undefined,
-  })) };
+  })), lifecycle };
 }
 
 function cmdGet(dataDir, id) {
@@ -540,17 +681,21 @@ function cmdStats(dataDir) {
   const memory = loadMemory(dataDir);
   const entries = memory.entries;
   if (entries.length === 0) {
-    return { totalEntries: 0, byCategory: {}, successRate: 0, totalHits: 0 };
+    return { totalEntries: 0, byCategory: {}, successRate: 0, totalHits: 0, archivedCount: 0, temporaryCount: 0 };
   }
   
   const byCategory = {};
   let successes = 0;
   let totalHits = 0;
+  let archivedCount = 0;
+  let temporaryCount = 0;
   
   for (const e of entries) {
     byCategory[e.category] = (byCategory[e.category] || 0) + 1;
     if (e.success) successes++;
     totalHits += e.hitCount || 1;
+    if (e.status === 'archived') archivedCount++;
+    if (e.status === 'temporary') temporaryCount++;
   }
   
   return {
@@ -559,6 +704,8 @@ function cmdStats(dataDir) {
     successRate: Math.round((successes / entries.length) * 100),
     totalHits,
     avgHitsPerEntry: (totalHits / entries.length).toFixed(1),
+    archivedCount,
+    temporaryCount,
     oldestEntry: entries.reduce((a, b) => a.timestamp < b.timestamp ? a : b).timestamp,
     newestEntry: entries.reduce((a, b) => a.timestamp > b.timestamp ? a : b).timestamp,
   };
@@ -585,22 +732,54 @@ function formatText(command, result) {
         out.push(`  Category: ${result.category}`);
         out.push(`  Hash:     ${result.hash}`);
       }
+      // Show lifecycle summary
+      if (result.lifecycle) {
+        const L = result.lifecycle;
+        const parts = [];
+        if (L.staleRemoved > 0) parts.push(`${L.staleRemoved} stale fix(es) cleaned`);
+        if (L.archived > 0) parts.push(`${L.archived} archived`);
+        if (L.expiredRemoved > 0) parts.push(`${L.expiredRemoved} expired`);
+        if (L.hitCountDecayed > 0) parts.push(`${L.hitCountDecayed} hitCount(s) decayed`);
+        if (parts.length > 0) out.push(`♻ Lifecycle: ${parts.join(', ')}.`);
+      }
       break;
     }
     case 'search': {
       if (!result.found) {
         out.push('No matching past resolutions found.');
+        // Show lifecycle summary even on no-match
+        if (result.lifecycle) {
+          const L = result.lifecycle;
+          const parts = [];
+          if (L.staleRemoved > 0) parts.push(`${L.staleRemoved} stale fix(es) cleaned`);
+          if (L.archived > 0) parts.push(`${L.archived} archived`);
+          if (L.expiredRemoved > 0) parts.push(`${L.expiredRemoved} expired`);
+          if (L.hitCountDecayed > 0) parts.push(`${L.hitCountDecayed} hitCount(s) decayed`);
+          if (parts.length > 0) out.push(`♻ Lifecycle: ${parts.join(', ')}.`);
+        }
         return out.join('\n');
       }
       out.push(`Found ${result.count} past resolution(s) (${result.matchType} match):`);
+      // Show lifecycle summary
+      if (result.lifecycle) {
+        const L = result.lifecycle;
+        const parts = [];
+        if (L.staleRemoved > 0) parts.push(`${L.staleRemoved} stale fix(es) cleaned`);
+        if (L.archived > 0) parts.push(`${L.archived} archived`);
+        if (L.expiredRemoved > 0) parts.push(`${L.expiredRemoved} expired`);
+        if (L.hitCountDecayed > 0) parts.push(`${L.hitCountDecayed} hitCount(s) decayed`);
+        if (parts.length > 0) out.push(`♻ Lifecycle: ${parts.join(', ')}.`);
+      }
       out.push('');
       for (const e of result.entries) {
         const sim = e.similarity ? ` [${(e.similarity * 100).toFixed(0)}% match]` : '';
         const status = e.success ? '✅' : '❌';
+        const archTag = e.status === 'archived' ? ' 📦' : '';
+        const tempTag = e.status === 'temporary' ? ' ⏳' : '';
         const vecInfo = (e._vectorScore != null && e._fuzzyScore != null)
           ? ` (vector:${(e._vectorScore * 100).toFixed(0)}% fuzzy:${(e._fuzzyScore * 100).toFixed(0)}%)`
           : '';
-        out.push(`  ${status} ${e.id}${sim}${vecInfo}`);
+        out.push(`  ${status} ${e.id}${sim}${archTag}${tempTag}`);
         out.push(`     Error: ${(e.errorMessage || '').slice(0, 120)}`);
         if (e.resolution) out.push(`     Fix:   ${e.resolution.slice(0, 200)}`);
         if (e.toolsUsed && e.toolsUsed.length > 0) out.push(`     Tools: ${e.toolsUsed.join(', ')}`);
@@ -611,12 +790,27 @@ function formatText(command, result) {
     }
     case 'list': {
       out.push(`Memory entries (${result.shown}/${result.total}):`);
+      // Show lifecycle summary
+      if (result.lifecycle) {
+        const L = result.lifecycle;
+        const parts = [];
+        if (L.staleRemoved > 0) parts.push(`${L.staleRemoved} stale fix(es) cleaned`);
+        if (L.archived > 0) parts.push(`${L.archived} archived`);
+        if (L.expiredRemoved > 0) parts.push(`${L.expiredRemoved} expired`);
+        if (L.hitCountDecayed > 0) parts.push(`${L.hitCountDecayed} hitCount(s) decayed`);
+        if (parts.length > 0) out.push(`♻ Lifecycle: ${parts.join(', ')}.`);
+      }
       out.push('');
       for (const e of result.entries) {
-        const status = e.success ? '✅' : '❌';
+        const success = e.success ? '✅' : '❌';
         const typeTag = e.type === 'skill_patch' ? ' [skill_patch]' : '';
-        out.push(`  ${status} ${e.id}${typeTag}`);
+        const archTag = e.status === 'archived' ? ' 📦' : '';
+        const tempTag = e.status === 'temporary' ? ' ⏳' : '';
+        out.push(`  ${success} ${e.id}${typeTag}${archTag}${tempTag}`);
         out.push(`     ${e.category}: ${e.errorMessage.slice(0, 100)}`);
+        if (e.status && e.status !== 'active') {
+          out.push(`     Status: ${e.status}`);
+        }
         if (e.type === 'skill_patch' && e.targetSkill) {
           out.push(`     Skill: ${e.targetSkill}`);
         }
@@ -635,6 +829,7 @@ function formatText(command, result) {
       out.push(`Entry: ${e.id}${typeTag}`);
       out.push(`  Type:         ${e.type || 'error'}`);
       out.push(`  Category:     ${e.category}`);
+      out.push(`  Status:       ${e.status || 'active'}${e.keep === 'always' ? ' (kept)' : ''}`);
       out.push(`  Success:      ${e.success ? '✅ yes' : '❌ no'}`);
       out.push(`  Description:  ${e.errorMessage}`);
       out.push(`  Resolution:   ${e.resolution || '(none recorded)'}`);
@@ -644,6 +839,8 @@ function formatText(command, result) {
       }
       if (e.toolsUsed && e.toolsUsed.length > 0) out.push(`  Tools Used:   ${e.toolsUsed.join(', ')}`);
       if (e.filesChanged && e.filesChanged.length > 0) out.push(`  Files:        ${e.filesChanged.join(', ')}`);
+      if (e.expiresAt) out.push(`  Expires At:   ${e.expiresAt}`);
+      if (e.confirmedAt && e.confirmedAt.length > 0) out.push(`  Confirmed:    ${e.confirmedAt.length} time(s)`);
       out.push(`  Created:      ${e.timestamp}`);
       out.push(`  Last Seen:    ${e.lastSeen}`);
       out.push(`  Hit Count:    ${e.hitCount || 1}`);
@@ -675,6 +872,8 @@ function formatText(command, result) {
       out.push(`  Total Hits:     ${result.totalHits}`);
       out.push(`  Avg Hits/Entry: ${result.avgHitsPerEntry}`);
       out.push(`  Success Rate:   ${result.successRate}%`);
+      if (result.archivedCount > 0) out.push(`  Archived:       ${result.archivedCount}`);
+      if (result.temporaryCount > 0) out.push(`  Temporary:      ${result.temporaryCount}`);
       out.push('');
       if (result.byCategory) {
         out.push('  By Category:');
@@ -714,6 +913,8 @@ function printHelp() {
 Usage: node memory-store.mjs <command> [options]
 
 Lightweight memory store for error resolutions with fuzzy search.
+Auto-lifecycle: stale bug fixes (filesChanged mtime check), hitCount decay,
+auto-archive, and TTL expiration.
 
 Commands:
   store <error-message>      Store a new resolution or skill_patch
@@ -744,12 +945,18 @@ Options:
   --findings-file <path>     Path to findings JSON (for extract)
   --min-frequency <N>        Min occurrences to trigger patch (default: 2, for extract)
   --dry-run                  Preview without storing (for extract)
+  --ttl <duration>           Auto-expire after duration (e.g. 7d, 30d, 1h) (for store)
+  --keep always              Prevent auto-cleanup for this entry (for store)
+  --include-archived         Include archived entries in search/list results
   -h, --help                 Show this help
 
 Examples:
   node memory-store.mjs store "TypeError: Cannot read property" --resolution "Check null" --tools "grep,debug"
   node memory-store.mjs store "When JS null pointer" --type skill_patch --target-skill debug --behavior-change "Check init first"
+  node memory-store.mjs store "Temp debug note" --ttl 7d
+  node memory-store.mjs store "Permanent rule" --keep always
   node memory-store.mjs search "cannot read property"
+  node memory-store.mjs search "old fix" --include-archived
   node memory-store.mjs extract --findings-file ./findings.json --min-frequency 2 --dry-run
   echo '[{"category":"error","finding":"TypeError"}]' | node memory-store.mjs extract
   node memory-store.mjs stats
@@ -784,6 +991,9 @@ function parseArgs() {
     findingsFile: null,
     minFrequency: 2,
     dryRun: false,
+    ttl: null,
+    keep: null,
+    includeArchived: false,
   };
   
   if (!opts.command) {
@@ -830,6 +1040,9 @@ function parseArgs() {
       case '--findings-file': opts.findingsFile = args[++i]; break;
       case '--min-frequency': opts.minFrequency = parseInt(args[++i], 10); break;
       case '--dry-run': opts.dryRun = true; break;
+      case '--ttl': opts.ttl = args[++i]; break;
+      case '--keep': opts.keep = args[++i]; break;
+      case '--include-archived': opts.includeArchived = true; break;
     }
     i++;
   }
