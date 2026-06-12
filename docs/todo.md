@@ -1131,22 +1131,23 @@ flowchart LR
 > 2026-06-12 規劃。借鏡 Aider (46K⭐) 的 repo map。
 > 對應 plan.md Phase 19 章節。
 
-### 1. `src/lib/codebase-index.mjs` — SQLite 程式碼索引庫
+### 1. `src/lib/codebase-index.mjs` — SQLite 程式碼索引庫 ✅
 
-- [ ] SQLite schema：files / symbols / imports / dependencies tables
-- [ ] `buildIndex(root)` — tree-sitter 全專案掃描，提取所有 symbol
-- [ ] `updateIndex(root)` — hash 比對增量更新
-- [ ] `querySymbol(name)` — 模糊搜尋 symbol → 定義位置 + 簽名
-- [ ] `getImportGraph()` — 從 index 查詢 import 關係（取代 import_graph 掃描）
-- [ ] `getCallGraph(symbol)` — 查詢函式呼叫關係
-- [ ] `generateRepoMap()` — 產生 Aider-style repo map
-- [ ] Singleton 模式（getIndex / resetIndex）
+- [x] SQLite schema：files / symbols / imports / dependencies tables
+- [x] `buildIndex(root)` — 全專案掃描，regex-based 提取所有 symbol（JS/TS/Python/Rust）
+- [x] `updateIndex(root)` — hash 比對增量更新
+- [x] `querySymbol(name)` — 模糊搜尋 symbol → 定義位置 + 簽名 + 語言 + 檔案路徑
+- [x] `getImportGraph()` — 從 index 查詢 import 關係（取代 import_graph 掃描）
+- [x] `getCallGraph(symbol)` — 查詢函式呼叫關係
+- [x] `generateRepoMap()` — 產生 Aider-style repo map（含 exported 標記 📤）
+- [x] Singleton 模式（getCodebaseIndex / resetCodebaseIndex）
+- [x] 零外部依賴：使用 Node 內建 fs + better-sqlite3（已安裝）
 
-### 2. Plugin — `smart_codebase_index` MCP tool
+### 2. Plugin — `smart_codebase_index` MCP tool ✅
 
-- [ ] `src/plugins/standard/codebase-index.mjs` — handler-based plugin
-- [ ] 支援 commands: build / update / query / map / stats
-- [ ] responsePolicy: maxLevel 1（map 輸出可能很大）
+- [x] `src/plugins/standard/codebase-index.mjs` — handler-based plugin
+- [x] 支援 commands: build / update / query / map / stats
+- [x] responsePolicy: maxLevel 1（map 輸出可能很大）
 
 ### 3. 整合現有工具
 
@@ -1160,14 +1161,14 @@ flowchart LR
 - [ ] 常用工作流加入 codebase index 使用場景
 - [ ] `~/.config/opencode/agents/smart-mcp.md` 同步
 
-### 5. 測試
+### 5. 測試 ✅
 
-- [ ] buildIndex：symbol 提取正確性（class/function/var）
-- [ ] updateIndex：增量更新正確性（只重新索引變動檔案）
-- [ ] querySymbol：模糊搜尋正確性
-- [ ] generateRepoMap：格式正確性
-- [ ] import graph 整合：與現有 import_graph 結果一致
-- [ ] 全量回歸
+- [x] buildIndex：symbol 提取正確性（class/function/var）— 18 tests
+- [x] updateIndex：增量更新正確性（只重新索引變動檔案）
+- [x] querySymbol：模糊搜尋正確性
+- [x] generateRepoMap：格式正確性（含 📤 exported 標記）
+- [x] import graph 整合：正確回傳 import 關係
+- [x] 全量回歸：**1233 tests, 0 fail**
 
 ---
 
