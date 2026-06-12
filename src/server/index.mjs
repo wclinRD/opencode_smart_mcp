@@ -75,7 +75,7 @@ function gracefulShutdown(signal) {
 // ---------------------------------------------------------------------------
 // Usage stats
 // ---------------------------------------------------------------------------
-const stats = { startTime: Date.now(), totalCalls: 0, totalErrors: 0, totalDurationMs: 0, byTool: new Map(), memoryAutoStoreCount: 0, memoryPreCheckCount: 0, memoryPreCheckHitCount: 0, memoryPreCheckSavedMs: 0, autoExtractCount: 0 };
+const stats = { startTime: Date.now(), totalCalls: 0, totalErrors: 0, totalDurationMs: 0, byTool: new Map(), memoryAutoStoreCount: 0, memoryPreCheckCount: 0, memoryPreCheckHitCount: 0, memoryPreCheckConflictCount: 0, memoryPreCheckSavedMs: 0, autoExtractCount: 0 };
 
 // ---------------------------------------------------------------------------
 // Session context
@@ -169,6 +169,7 @@ function getStatsSummary() {
       autoExtract: stats.autoExtractCount,
       preCheckLookups: preCheckTotal,
       preCheckHits,
+      preCheckConflictCount: stats.memoryPreCheckConflictCount,
       preCheckHitRate: preCheckTotal > 0 ? (preCheckHits / preCheckTotal * 100).toFixed(1) + '%' : '0%',
       preCheckTimeSavedMs: stats.memoryPreCheckSavedMs,
       preCheckAvgSavedMs: preCheckHits > 0 ? Math.round(stats.memoryPreCheckSavedMs / preCheckHits) : 0,
@@ -186,7 +187,7 @@ function getStatsSummary() {
   };
 }
 
-function resetStats() { stats.startTime = Date.now(); stats.totalCalls = 0; stats.totalErrors = 0; stats.totalDurationMs = 0; stats.byTool.clear(); stats.memoryAutoStoreCount = 0; stats.memoryPreCheckCount = 0; stats.memoryPreCheckHitCount = 0; stats.memoryPreCheckSavedMs = 0; stats.autoExtractCount = 0; }
+function resetStats() { stats.startTime = Date.now(); stats.totalCalls = 0; stats.totalErrors = 0; stats.totalDurationMs = 0; stats.byTool.clear(); stats.memoryAutoStoreCount = 0; stats.memoryPreCheckCount = 0; stats.memoryPreCheckHitCount = 0; stats.memoryPreCheckConflictCount = 0; stats.memoryPreCheckSavedMs = 0; stats.autoExtractCount = 0; }
 
 // ---------------------------------------------------------------------------
 // Runtime config
@@ -510,9 +511,40 @@ function autoExtractSkillPatches(force = false) {
       try { child.kill(); } catch { /* ok */ }
       try { import('node:fs').then(fs => fs.rmSync(tmpDir, { recursive: true, force: true })); } catch { /* ok */ }
     }, 3000).unref();
+
+    // Every 100 tool calls (with findings), run cross-session extraction
+    if (!force) {
+      try {
+        const ctx = contextManager.get();
+        const toolCount = ctx?.metadata?.toolCount || 0;
+        if (toolCount > 0 && toolCount % 100 === 0) {
+          const child2 = spawn('node', [
+            MEMORY_CLI_PATH, 'extract',
+            '--cross-session',
+            '--min-frequency', '3',
+            '--dry-run',
+          ], { timeout: 5000, stdio: 'ignore' });
+          child2.unref();
+        }
+      } catch { /* best effort */ }
+    }
   } catch {
     // Best-effort — never throw from auto-extract
   }
+}
+
+/**
+ * Word-overlap similarity between two strings (0-1).
+ * Used for resolution conflict detection.
+ */
+function wordOverlapSimilarity(a, b) {
+  if (!a || !b) return 0;
+  const wordsA = new Set(a.toLowerCase().split(/\W+/).filter(Boolean));
+  const wordsB = new Set(b.toLowerCase().split(/\W+/).filter(Boolean));
+  if (wordsA.size === 0 && wordsB.size === 0) return 1;
+  let intersection = 0;
+  for (const w of wordsA) if (wordsB.has(w)) intersection++;
+  return intersection / Math.max(wordsA.size, wordsB.size);
 }
 
 /**
@@ -550,6 +582,37 @@ function preCheckMemory(toolName, args) {
     if (topMatch.similarity >= 0.8) {
       stats.memoryPreCheckHitCount++;
       stats.memoryPreCheckSavedMs += 1500; // rough avg saved per tool execution skipped
+
+      // Conflict detection: entries with same hash but different resolutions
+      const conflicts = parsed.entries.filter(e =>
+        e.id !== topMatch.id &&
+        e.hash && e.hash === topMatch.hash &&
+        e.resolution && topMatch.resolution &&
+        wordOverlapSimilarity(e.resolution, topMatch.resolution) < 0.6
+      );
+
+      if (conflicts.length > 0) {
+        stats.memoryPreCheckConflictCount++;
+        return {
+          found: true,
+          conflict: true,
+          id: topMatch.id,
+          score: topMatch.similarity,
+          entries: [topMatch, ...conflicts].map(e => ({
+            id: e.id,
+            resolution: e.resolution,
+            score: e.similarity,
+          })),
+          output: `[Memory Pre-Check: Multiple conflicting resolutions found (top confidence ${(topMatch.similarity * 100).toFixed(0)}%)]\n\nMultiple past resolutions conflict:\n${[topMatch, ...conflicts].map((e, i) => `${i+1}. (confidence ${(e.similarity * 100).toFixed(0)}%) ${e.resolution}`).join('\n')}\n\nPlease review and pick the correct one. Use memory_store confirm to mark your choice.`,
+        };
+      }
+
+      // Fire-and-forget increment hitCount for this match
+      try {
+        const child = spawn('node', [MEMORY_CLI_PATH, 'confirm', topMatch.id, '--auto'], { timeout: 2000, stdio: 'ignore' });
+        child.unref();
+      } catch { /* best effort */ }
+
       return {
         found: true,
         id: topMatch.id,
@@ -563,6 +626,47 @@ function preCheckMemory(toolName, args) {
   } catch {
     return null; // best-effort
   }
+}
+
+/**
+ * Track memory misses: when a tool succeeds but preCheckMemory didn't find a match,
+ * check for near-misses (0.4 ≤ similarity < 0.8) and increment their missCount.
+ * Fire-and-forget via spawn + unref.
+ */
+function trackMemoryMiss(toolName, args, result) {
+  const TRACKED_TOOLS = ['smart_error_diagnose', 'smart_debug', 'smart_test', 'smart_grep'];
+  if (!TRACKED_TOOLS.includes(toolName)) return;
+
+  let query = null;
+  if (args.error && typeof args.error === 'string') query = args.error;
+  else if (args.pattern && typeof args.pattern === 'string') query = args.pattern;
+  else if (args.query && typeof args.query === 'string') query = args.query;
+  else return;
+
+  if (!query || query.length < 10) return;
+
+  try {
+    const searchResult = spawnSync('node', [
+      MEMORY_CLI_PATH, 'search', query,
+      '--threshold', '0.4', '--limit', '3', '--format', 'json',
+    ], { encoding: 'utf-8', timeout: 3000, maxBuffer: 1024 * 10 });
+
+    if (searchResult.status !== 0 || !searchResult.stdout) return;
+    const parsed = JSON.parse(searchResult.stdout);
+    if (!parsed.found || !parsed.entries || parsed.entries.length === 0) return;
+
+    // Find near-misses: similarity between 0.4 and 0.8
+    const nearMisses = parsed.entries.filter(e =>
+      e.similarity >= 0.4 && e.similarity < 0.8 && e.id
+    );
+
+    for (const entry of nearMisses) {
+      const child = spawn('node', [MEMORY_CLI_PATH, 'confirm', entry.id, '--miss'], {
+        timeout: 2000, stdio: 'ignore',
+      });
+      child.unref();
+    }
+  } catch { /* best effort */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -773,6 +877,11 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
   // D.3 Auto-Extract: periodic skill_patch extraction from findings
   if (success && toolName !== 'smart_memory_store') {
     autoExtractSkillPatches(false);
+  }
+  // Track memory misses: for successful tools, check if preCheckMemory
+  // would have matched with low similarity (near-miss tracking)
+  if (success && toolName !== 'smart_memory_store') {
+    trackMemoryMiss(toolName, args, result);
   }
   // Phase 10.2: Impact Warning — auto-trigger code_impact for multi-file edits
   // Stores promise resolving to impact text (or empty string) so respond() can append it.

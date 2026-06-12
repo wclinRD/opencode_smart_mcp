@@ -1488,6 +1488,104 @@ Unified results (score desc)
 
 ---
 
+## Memory Feedback Loop Audit — 記憶系統品質審計與精準改進
+
+> 2026-06-12 誠實盤點。基於對 memory_store、self-reflection skill、context-manager、agent-memory-integration、server hooks (autoStore/autoExtract/preCheck)、kg-plugin 等所有記憶元件的完整原始碼審計。
+>
+> **核心問題**：現有記憶系統是 open-loop — 寫入但不知道誰用了、用了有沒有幫助、產生的 skill_patch 是否正確。
+
+### Dream/Distill 提案評估
+
+| 提案 | 審計結論 |
+|------|---------|
+| Dream 跨 session 模式挖掘 (D1) | ⚠️ 半覆蓋：`autoExtractSkillPatches` 已從 findings 提取 skill_patch，只差跨 session |
+| Dream 矛盾檢測 (D2) | 🟢 唯一真正缺口：系統不追蹤同一 error 有多 resolution |
+| Dream 信心加權 (D3) | ⚠️ 高度重疊：現有 3 層 lifecycle 已做衰退+歸檔+TTL |
+| Dream skill_patch 晉升 (D4) | 🟢 真正缺：self-reflection skill 是 **SKILL.md 說明** 無後端，`autoExtract` 只做 template 提取 |
+| Dream KG 填充 (D5) | 🔴 低價值：error message 是 stack trace 非自然語言，NER 雜訊高 |
+| Distill session→wiki (S1) | 🔴 完全重疊：3 個 wiki skill 已存在 |
+| Distill KG 提取 (S2) | 🔴 同 D5，從非自然語言提取品質差 |
+| Distill session summary (S3) | 🟡 context-manager 已追蹤 findings，隨時可查 |
+| Distill ADR 建議 (S4) | 🔴 方向錯誤：ADR 是有意識的設計決定，不是 bug fix |
+
+**結論**：Dream/Distill 是 over-engineering → 不做。改為 4 項精準改進。
+
+### 真正的缺口：Feedback Loop
+
+```
+現狀（open-loop）:
+  store → 存進去                 ← 沒人知道存了什麼好東西
+  preCheck → 查到就回傳          ← 沒人追蹤回傳有沒有被採用
+  autoExtract → 產生 skill_patch ← 沒人驗證 patch 是否正確
+  lifecycle → 衰退/歸檔           ← 沒人知道歸檔的是雜訊還是黃金
+
+改善（closed-loop）:
+  store + hitCount 回饋 →      誰用了我的記憶？
+  preCheck + missCount →       什麼 pattern 常漏掉？
+  quality dashboard →          哪些存進去的東西其實是雜訊？
+```
+
+### 4 項精準改進
+
+#### ① preCheckMemory hit/miss 回饋 (~40 lines)
+
+`preCheckMemory` 成功命中 → 該 entry `hitCount++`；miss（沒查到但使用者後續完成任務）→ `missCount++`。累積資料後可回答「哪些記憶真的有用」。
+
+```
+影響範圍：src/server/index.mjs — captureAndReturn()
+　　　　　src/lib/memory-db.mjs — entries 表新增 miss_count 欄位
+```
+
+#### ② 矛盾多 resolution 回傳 (~50 lines)
+
+`preCheckMemory` 找到同一 hash 有多筆 resolution（相似度 < 0.6）→ 全部回傳讓 LLM 選擇 → `confirm` 命令記錄選擇 → 未被選的降低 confidence。
+
+```
+影響範圍：src/server/index.mjs — preCheckMemory()
+　　　　　src/cli/memory-store.mjs — confirm 命令（已存在+2 hit，強化為選擇記錄）
+```
+
+#### ③ 品質儀表板 (~80 lines)
+
+新增 `quality` 命令，分析 memory health：
+- 命中率最低的 entries（被 preCheck 命中但 LLM 選擇其他解法）
+- 從未被 preCheck 查到的 entries（可能是雜訊）
+- conflict rate、stale rate、hit rate 分布
+- Top 5 最有價值的記憶 vs Top 5 該清理的記憶
+
+```
+影響範圍：src/cli/memory-store.mjs — 新 cmdQuality() 命令
+```
+
+#### ④ 跨 session autoExtract 強化 (~60 lines)
+
+現有 `autoExtractSkillPatches` 只限當次 session 的 findings。改為每週/每月從 entries 中跨 session 群組：`GROUP BY hash(error_message) HAVING count >= 3` → 提取為 skill_patch。
+
+不開新表，只用現有 `entries` table + `stats`。
+
+```
+影響範圍：src/cli/memory-store.mjs — cmdExtractSkillPatches() 新增跨 session 模式
+```
+
+### 不上什麼
+
+| 項目 | 原因 |
+|------|------|
+| Dream 完整架構 (D4+D5) | 功能重疊度高，實用性低，300-400 行 infrastructure 換 marginal gain |
+| Distill 管道 (S1-S4) | 已有 wiki-capture/ingest/quick-chat-capture 三個 skill |
+| 新 schema / 新 plugin | 所有改進用現有表 + 現有 CLI 命令 |
+| LLM call | 全部邏輯是純 SQL + 規則 based，零 LLM cost |
+
+### 預期成效
+
+| 指標 | 改進前 | 改進後 |
+|------|--------|--------|
+| 記憶 utility 透明度 | ❌ 不知道誰有用 | ✅ hit/miss 追蹤 + 儀表板 |
+| 多 resolution 處理 | 只回傳最高分 | ✅ 矛盾偵測 + LLM 選擇 |
+| 記憶品質可見性 | ❌ 無法回答 | ✅ quality 命令即時分析 |
+| skill_patch 跨 session | ❌ 只限當次 findings | ✅ 跨 session pattern 提取 |
+| 總程式行數 | — | **~230 lines**（無 schema/plugin） |
+
 ## Phase 13：專案穩固 & 可發布性強化 ✅ (2026-06-12)
 
 ### 動機

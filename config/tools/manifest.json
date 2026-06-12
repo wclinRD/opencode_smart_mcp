@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-11T22:20:24.808Z",
+  "generatedAt": "2026-06-12T07:53:29.013Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -795,6 +795,89 @@
       }
     },
     {
+      "name": "smart_adr",
+      "description": "Record, search, and list Architecture Decision Records. Stores why decisions were made (not just what). Complements KG memory.",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "record",
+              "search",
+              "list",
+              "get",
+              "update",
+              "delete"
+            ],
+            "description": "Command: record (create), search (find by keyword), list (all ADRs), get (by ID), update (change status), delete"
+          },
+          "title": {
+            "type": "string",
+            "description": "ADR title (required for record)"
+          },
+          "context": {
+            "type": "string",
+            "description": "Background and context for the decision"
+          },
+          "decision": {
+            "type": "string",
+            "description": "The decision that was made (required for record)"
+          },
+          "alternatives": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Alternatives that were considered"
+          },
+          "consequences": {
+            "type": "string",
+            "description": "Consequences of the decision"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "deprecated",
+              "superseded",
+              "proposed"
+            ],
+            "description": "ADR status (default: accepted)"
+          },
+          "query": {
+            "type": "string",
+            "description": "Search query (for search command)"
+          },
+          "id": {
+            "type": "number",
+            "description": "ADR ID (for get/update/delete commands)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results (default: 20)"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
       "name": "smart_agent_execute",
       "description": "Use when: the task requires 5+ tools and you want a complete workflow automation plan. Especially useful for small/weak models. Generates the full workflow lifecycle: template selection → create command → dispatch → replan → summary. Avoid when: the task is simple (1-2 tools).",
       "category": "meta",
@@ -977,6 +1060,68 @@
             "description": "Output format (default: json — LLM-friendly)"
           }
         }
+      }
+    },
+    {
+      "name": "smart_autofix",
+      "description": "Apply a code fix and automatically verify with test/lint/security. Returns pass/fail with details so LLM can retry if needed.",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 1
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fix": {
+            "type": "string",
+            "description": "The fix to apply — unified diff or SEARCH/REPLACE block"
+          },
+          "verify": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "test",
+                "lint",
+                "security",
+                "typecheck"
+              ]
+            },
+            "description": "Verification steps to run after applying the fix (default: [\"test\"])",
+            "default": [
+              "test"
+            ]
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Files affected by this fix (for targeted verification)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: current working directory)"
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Max seconds for verification (default: 60)",
+            "default": 60
+          }
+        },
+        "required": [
+          "fix"
+        ]
       }
     },
     {
@@ -1293,6 +1438,81 @@
       }
     },
     {
+      "name": "smart_codebase_index",
+      "description": "Persistent codebase symbol index — build, update, query symbols, or generate a repo map.",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 1
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "build",
+              "update",
+              "query",
+              "map",
+              "stats"
+            ],
+            "description": "Command: build (full scan), update (incremental), query (search symbols), map (repo map), stats (index statistics)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: current working directory)"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Symbol name to search for (for query command)"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "function",
+              "class",
+              "method",
+              "variable",
+              "export",
+              "interface",
+              "type",
+              "enum",
+              "trait",
+              "struct",
+              "impl",
+              "module"
+            ],
+            "description": "Filter by symbol kind (for query command)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results for query (default: 20)"
+          },
+          "include": {
+            "type": "string",
+            "description": "Glob pattern for files to include (default: **/*.{js,mjs,cjs,ts,tsx,jsx,py,pyi,rs})"
+          },
+          "exclude": {
+            "type": "string",
+            "description": "Glob pattern for files to exclude (default: **/node_modules/**)"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
       "name": "smart_compose",
       "description": "Use when: need to compose multiple tool calls into a pipeline — sequential (pipe), parallel (fan-out), or conditional branching. Accepts a JSON pipeline definition and executes all steps. Avoid when: running a single tool (use the direct tool instead), or executing a workflow (use smart_workflow instead which has state persistence).",
       "category": "plan",
@@ -1454,6 +1674,65 @@
         },
         "required": [
           "file"
+        ]
+      }
+    },
+    {
+      "name": "smart_db",
+      "description": "Database query tools — read-only SQL access.\nOperations: introspect (schema), query (SELECT only).\nSupports SQLite (built-in) and PostgreSQL (optional pg npm).\nSafety: read-only, timeout 10s, row limit 1000, DDL/DML blocked.\nUse when: need to explore database schema, verify data, or answer data questions.",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 1
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "introspect",
+              "query"
+            ],
+            "description": "introspect = show schema, query = run SELECT"
+          },
+          "connection": {
+            "type": "string",
+            "description": "SQLite: path to .db file. PostgreSQL: postgresql://user:pass@host/db"
+          },
+          "sql": {
+            "type": "string",
+            "description": "SQL query (SELECT only, required for query operation)"
+          },
+          "engine": {
+            "type": "string",
+            "enum": [
+              "sqlite",
+              "postgresql"
+            ],
+            "description": "Database engine (auto-detected if not specified)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max rows (default: 1000)"
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Query timeout in ms (default: 10000)"
+          }
+        },
+        "required": [
+          "operation",
+          "connection"
         ]
       }
     },
@@ -1915,6 +2194,67 @@
         },
         "required": [
           "command"
+        ]
+      }
+    },
+    {
+      "name": "smart_exec",
+      "description": "Execute code in a sandboxed environment. Supports bash, node, python, deno.\nSafety: deno --allow-none by default (no fs, no net). Other languages run with limited permissions.\nUse when: need to verify code works, run tests, or execute small scripts safely.\nAvoid when: running production services, long-running processes, or untrusted third-party code.",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "critical",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": true,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "language": {
+            "type": "string",
+            "enum": [
+              "bash",
+              "node",
+              "python",
+              "deno"
+            ],
+            "description": "Programming language / runtime"
+          },
+          "code": {
+            "type": "string",
+            "description": "Code to execute"
+          },
+          "permission": {
+            "type": "string",
+            "enum": [
+              "none",
+              "read",
+              "write",
+              "net"
+            ],
+            "description": "Permission level (default: none). write/net require confirmation.",
+            "default": "none"
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Timeout in milliseconds (default: 30000, max: 120000)",
+            "default": 30000
+          },
+          "workdir": {
+            "type": "string",
+            "description": "Working directory (default: current project root)"
+          }
+        },
+        "required": [
+          "language",
+          "code"
         ]
       }
     },
@@ -2416,6 +2756,72 @@
       }
     },
     {
+      "name": "smart_edit",
+      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
+      "category": "standard",
+      "domain": "edit",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "File path to edit (required)"
+          },
+          "oldString": {
+            "type": "string",
+            "description": "Text to find and replace (exact match by default, regex if regex=true)"
+          },
+          "newString": {
+            "type": "string",
+            "description": "Replacement text"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Multiple files to edit (alternative to file)"
+          },
+          "regex": {
+            "type": "boolean",
+            "description": "Use regex matching instead of exact (default: false)"
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Apply changes (default: false — dry run)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: current dir)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "description": "Output format (default: json — includes nextCommand)"
+          }
+        },
+        "required": [
+          "oldString",
+          "newString"
+        ]
+      }
+    },
+    {
       "name": "smart_hallucination_check",
       "description": "Check LLM output for hallucinations (fabrication, misattribution, unfaithful, self-contradiction, off-topic, confident-refusal).\n\nRuns 5 structural checks:\n  1. Factual — are mentioned identifiers present in context?\n  2. Consistency — are there internal contradictions?\n  3. Groundedness — can conclusions be traced to context?\n  4. Off-topic — does output address the query?\n  5. Confidence — overconfident language without evidence?\n\nDOI Verification mode (mode:\"doi\"):\n  Extracts all DOIs from the output and verifies each via doi.org liveness check.\n  Dead DOIs (404) = likely fabricated. Restricted (403) = paywalled but may exist.\n\nReturns: { overallScore: 1-10, verdict: \"pass\"|\"warn\"|\"fail\", issues[], summary }\n\nExamples:\n  { output: \"The bug is in parser.js...\", context: \"Error at parser.js:42\" }\n  { output: \"...\", query: \"Why does the parser crash?\", strictness: 7 }\n  { output: \"Smith (2024, doi:10.1234/fake) found...\", mode: \"doi\" }",
       "category": "standard",
@@ -2749,6 +3155,120 @@
       }
     },
     {
+      "name": "smart_kg",
+      "description": "Knowledge Graph memory — structured entity-relation storage.\nOperations: create_entities, create_relations, search_nodes, open_nodes, read_graph, delete_entities, delete_observations, delete_relations.\nUse when: need to remember structured relationships (who works on what, which module depends on which, etc.).\nComplements semantic memory (smart_memory_store) which is better for similarity search.",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "create_entities",
+              "create_relations",
+              "search_nodes",
+              "open_nodes",
+              "read_graph",
+              "delete_entities",
+              "delete_observations",
+              "delete_relations",
+              "add_observations"
+            ],
+            "description": "KG operation to perform"
+          },
+          "entities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "observations": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "name"
+              ]
+            },
+            "description": "Entities for create_entities"
+          },
+          "relations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                },
+                "relationType": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "from",
+                "to",
+                "relationType"
+              ]
+            },
+            "description": "Relations for create_relations / delete_relations"
+          },
+          "query": {
+            "type": "string",
+            "description": "Search query for search_nodes"
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Entity names for open_nodes / delete_entities"
+          },
+          "entityName": {
+            "type": "string",
+            "description": "Entity name for delete_observations / add_observations"
+          },
+          "observations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Observations for delete_observations / add_observations"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max results for search_nodes (default: 20)"
+          }
+        },
+        "required": [
+          "operation"
+        ]
+      }
+    },
+    {
       "name": "smart_list_documents",
       "description": "Search and list previously ingested documents (cross-session persistent index).\n\nDocuments are auto-registered when read via smart_ingest_document.\nThe index persists across sessions at ~/.smart/cache/documents.db.\n\nUse cases:\n  - \"What documents did I read last time?\"\n  - \"Find that contract I read yesterday\"\n  - \"Show me all PDFs I've analyzed\"\n  - \"Search documents about protocol specs\"",
       "category": "standard",
@@ -2814,9 +3334,10 @@
               "delete",
               "stats",
               "export",
-              "extract"
+              "extract",
+              "quality"
             ],
-            "description": "store/search/list/get/confirm/delete/stats/export/extract — extract auto-generates skill_patches from findings (pipe JSON via stdin)"
+            "description": "store/search/list/get/confirm/delete/stats/export/extract/quality — extract auto-generates skill_patches from findings (pipe JSON via stdin); quality shows memory health dashboard (requires --db)"
           },
           "query": {
             "type": "string",
@@ -3256,6 +3777,96 @@
       }
     },
     {
+      "name": "smart_pr_review",
+      "description": "Automated PR review — combines git diff, security scan, code impact, and LSP diagnostics.\nProduces structured review: Security, Impact, Code Quality, Summary.\nUse when: reviewing a PR, checking changes before merge, or analyzing branch differences.",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 1
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "base": {
+            "type": "string",
+            "description": "Base branch (default: main)",
+            "default": "main"
+          },
+          "head": {
+            "type": "string",
+            "description": "Head branch (default: current branch)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: current directory)"
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "security",
+                "impact",
+                "quality",
+                "summary",
+                "all"
+              ]
+            },
+            "description": "Review sections to include (default: all)"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "smart_progress",
+      "description": "Check progress of long-running tasks. View active tasks, their completion percentage, and recent messages.",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "status",
+              "all",
+              "clear"
+            ],
+            "description": "Command: status (check one task), all (list all tasks), clear (remove completed tasks)"
+          },
+          "taskId": {
+            "type": "string",
+            "description": "Task ID to check (for status command)"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
       "name": "smart_pw_browser",
       "description": "Control a web browser — navigate, click, fill forms, screenshot, execute JavaScript.\n\nCommands:\n  navigate(url):   Browse to a URL\n  snapshot():      Get page text + links\n  click(selector): Click element (text or CSS selector)\n  fill(selector, value): Fill a form field\n  screenshot():    Capture page as PNG (base64)\n  run_code(code):  Execute JavaScript in the page\n\nNOT for: reading article content (use smart_exa_crawl with --clean).\nNOT for: searching the web (use smart_exa_search).",
       "category": "standard",
@@ -3561,72 +4172,6 @@
       }
     },
     {
-      "name": "smart_edit",
-      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
-      "category": "standard",
-      "domain": "edit",
-      "safetyLevel": "high",
-      "routingRules": {
-        "autoRoute": true,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "file": {
-            "type": "string",
-            "description": "File path to edit (required)"
-          },
-          "oldString": {
-            "type": "string",
-            "description": "Text to find and replace (exact match by default, regex if regex=true)"
-          },
-          "newString": {
-            "type": "string",
-            "description": "Replacement text"
-          },
-          "files": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Multiple files to edit (alternative to file)"
-          },
-          "regex": {
-            "type": "boolean",
-            "description": "Use regex matching instead of exact (default: false)"
-          },
-          "apply": {
-            "type": "boolean",
-            "description": "Apply changes (default: false — dry run)"
-          },
-          "root": {
-            "type": "string",
-            "description": "Project root (default: current dir)"
-          },
-          "format": {
-            "type": "string",
-            "enum": [
-              "json",
-              "text"
-            ],
-            "description": "Output format (default: json — includes nextCommand)"
-          }
-        },
-        "required": [
-          "oldString",
-          "newString"
-        ]
-      }
-    },
-    {
       "name": "smart_research",
       "description": "Research a URL end-to-end. No need to worry about crawl parameters — just pick depth.\n\n  depth=quick:      Fetch + clean + markdown (~2s, most pages)\n  depth=deep:       Same + quality analysis with tips (~3s)\n  depth=exhaustive: Same + chunk by heading (~5s, long articles)\n\nDo NOT use for: searching (use smart_exa_search). Crawling without processing (use smart_exa_crawl).",
       "category": "standard",
@@ -3707,6 +4252,64 @@
               "markdown"
             ],
             "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
+      "name": "smart_schedule",
+      "description": "Schedule recurring background tasks with cron expressions. Tasks run automatically and results are stored in memory.",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "add",
+              "list",
+              "remove",
+              "status",
+              "run-now"
+            ],
+            "description": "Command: add (schedule), list (show all), remove (delete), status (check), run-now (execute immediately)"
+          },
+          "name": {
+            "type": "string",
+            "description": "Task name (required for add/remove/run-now)"
+          },
+          "schedule": {
+            "type": "string",
+            "description": "Cron expression: \"min hour dom month dow\" (e.g., \"0 9 * * *\" for daily at 9am)"
+          },
+          "task": {
+            "type": "string",
+            "description": "Task description — what to do when triggered (e.g., \"Run security scan\")"
+          },
+          "command_to_run": {
+            "type": "string",
+            "description": "Shell command to execute (e.g., \"npm test\")"
+          },
+          "notify": {
+            "type": "boolean",
+            "description": "Store result in memory for next session (default: true)",
+            "default": true
           }
         },
         "required": [

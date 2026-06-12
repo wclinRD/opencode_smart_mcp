@@ -186,7 +186,7 @@ const plugin = {
       log(
         `compacting: injecting context + recovery (${state.todos.length} todos, ${inProgressTodos.length} in_progress, goal: "${state.goal.slice(0, 50)}...")`
       );
-      flog("HOOK[compacting]", `injected recovery block — ${inProgressTodos.length} in_progress, ${pendingTodos.length} pending`);
+      log(`HOOK[compacting] — injected recovery block: ${inProgressTodos.length} in_progress, ${pendingTodos.length} pending`);
     }
 
     // ============================================================

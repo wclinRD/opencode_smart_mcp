@@ -431,6 +431,55 @@ const BEHAVIOR_CHANGE_TEMPLATES = {
  * @returns {object} { extracted: number, patches: Array<{skill, trigger, behavior, finding}> }
  */
 function cmdExtractSkillPatches(dataDir, findings, options = {}) {
+  // Cross-session extraction: query SQLite DB for repeated error patterns
+  if (options.crossSession) {
+    try {
+      const { db } = openDB(dataDir, false);
+      const minFreq = options.minFrequency || 3;
+
+      const patterns = db.db.prepare(`
+        SELECT error_message, resolution, COUNT(*) as cnt
+        FROM entries
+        WHERE type = 'error' AND (status IS NULL OR status = 'active')
+        GROUP BY hash
+        HAVING cnt >= ?
+        ORDER BY cnt DESC
+        LIMIT 20
+      `).all(minFreq);
+
+      const patches = [];
+      for (const p of patterns) {
+        if (!p.error_message) continue;
+        const targetSkill = FINDING_TO_SKILL[categorizeError(p.error_message)] || 'debug';
+        const query = `When ${(p.error_message || '').slice(0, 60)}`;
+        const behaviorChange = `When seeing '${(p.error_message || '').slice(0, 40)}', check known resolutions first`;
+
+        const existing = db.db.prepare(
+          "SELECT id FROM entries WHERE type = 'skill_patch' AND error_message = ?"
+        ).get(query);
+
+        if (existing) {
+          db.db.prepare("UPDATE entries SET hit_count = COALESCE(hit_count, 0) + 1, last_seen = datetime('now') WHERE id = ?").run(existing.id);
+          patches.push({ id: existing.id, trigger: p.error_message, skipped: true });
+          continue;
+        }
+
+        const id = `mem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        db.db.prepare(`
+          INSERT INTO entries (id, hash, type, category, error_message, behavior_change, target_skill, hit_count)
+          VALUES (?, ?, 'skill_patch', 'skill_patch', ?, ?, ?, 1)
+        `).run(id, hashError(query), query, behaviorChange, targetSkill);
+
+        patches.push({ id, trigger: p.error_message, skipped: false });
+      }
+
+      if (options.dryRun) return { extracted: patches.filter(p => !p.skipped).length, total: patches.length, patches, dryRun: true };
+      return { extracted: patches.filter(p => !p.skipped).length, total: patches.length, patches };
+    } catch (e) {
+      return { extracted: 0, patches: [], note: `Cross-session extraction error: ${e.message}` };
+    }
+  }
+
   if (!findings || !Array.isArray(findings) || findings.length === 0) {
     return { extracted: 0, patches: [], note: 'No findings to extract from.' };
   }
@@ -661,6 +710,22 @@ function cmdConfirm(dataDir, id, options) {
   const entry = memory.entries.find(e => e.id === id);
   if (!entry) return { confirmed: false, error: `No entry with id '${id}'` };
 
+  // --miss: increment missCount (near-miss tracking, no hit boost)
+  if (options.miss) {
+    entry.missCount = (entry.missCount || 0) + 1;
+    entry.lastSeen = new Date().toISOString();
+    saveMemory(dataDir, memory);
+    return { confirmed: true, id: entry.id, miss: true, missCount: entry.missCount, errorMessage: entry.errorMessage };
+  }
+
+  // --auto: lightweight touch (skip +2 boost, just +1 and update lastSeen)
+  if (options.auto) {
+    entry.hitCount = (entry.hitCount || 1) + 1;
+    entry.lastSeen = new Date().toISOString();
+    saveMemory(dataDir, memory);
+    return { confirmed: true, id: entry.id, auto: true, hitCount: entry.hitCount, errorMessage: entry.errorMessage };
+  }
+
   // Boost hitCount more than a regular search (+2 instead of +1)
   entry.hitCount = (entry.hitCount || 1) + 2;
   entry.lastSeen = new Date().toISOString();
@@ -854,9 +919,17 @@ function formatText(command, result) {
     }
     case 'confirm': {
       if (result.confirmed) {
-        out.push(`Confirmed entry: ${result.id} (total hits: ${result.hitCount}, confirmations: ${result.confirmCount})`);
-        out.push(`  Error: ${result.errorMessage.slice(0, 100)}`);
-        out.push(`  Weight boosted — future searches will rank this higher.`);
+        if (result.miss) {
+          out.push(`Miss entry: ${result.id} (total misses: ${result.missCount})`);
+          out.push(`  Error: ${result.errorMessage.slice(0, 100)}`);
+        } else if (result.auto) {
+          out.push(`Touched entry: ${result.id} (total hits: ${result.hitCount})`);
+          out.push(`  Error: ${result.errorMessage.slice(0, 100)}`);
+        } else {
+          out.push(`Confirmed entry: ${result.id} (total hits: ${result.hitCount}, confirmations: ${result.confirmCount})`);
+          out.push(`  Error: ${result.errorMessage.slice(0, 100)}`);
+          out.push(`  Weight boosted — future searches will rank this higher.`);
+        }
       } else {
         out.push(`Error: ${result.error}`);
       }
@@ -902,6 +975,45 @@ function formatText(command, result) {
         const idStr = p.skipped ? `(hitCount++)` : p.id ? p.id.slice(0, 24) + '...' : '(preview)';
         out.push(`  ${icon} [${p.skill}] ${p.trigger.slice(0, 80)}`);
         out.push(`     ${idStr} → ${p.behavior.slice(0, 120)}`);
+      }
+      break;
+    }
+    case 'quality': {
+      if (result.error) {
+        out.push(`Error: ${result.error}`);
+        break;
+      }
+      out.push('Memory Quality Dashboard');
+      out.push('='.repeat(40));
+      out.push(`  Total Entries:      ${result.totalEntries}`);
+      out.push(`  Active:             ${result.activeEntries}`);
+      out.push(`  Archived:           ${result.archived}`);
+      out.push('');
+      out.push('  Hit Rate Summary:');
+      out.push(`    With Hits:        ${result.hitRateSummary.entriesWithHits}`);
+      out.push(`    With Misses:      ${result.hitRateSummary.entriesWithMisses}`);
+      out.push(`    Zero Hits:        ${result.hitRateSummary.zeroHitCount} (${result.hitRateSummary.zeroHitRatio}%)`);
+      out.push(`  Conflicts:          ${result.conflictCount}`);
+      out.push('');
+      if (result.worstHitRates && result.worstHitRates.length > 0) {
+        out.push('  Worst Hit Rates (bottom 5):');
+        for (const r of result.worstHitRates) {
+          out.push(`    ${r.hitRate}%  hits=${r.hits} misses=${r.misses}  ${r.errorMessage}`);
+        }
+        out.push('');
+      }
+      if (result.mostValuable && result.mostValuable.length > 0) {
+        out.push('  Most Valuable (top 5 by hits):');
+        for (const v of result.mostValuable) {
+          out.push(`    ${v.hitCount} hits  ${v.errorMessage}`);
+        }
+        out.push('');
+      }
+      if (result.cleanupCandidates && result.cleanupCandidates.length > 0) {
+        out.push('  Cleanup Candidates (zero hits, not kept):');
+        for (const c of result.cleanupCandidates) {
+          out.push(`    ${c.created_at ? c.created_at.slice(0, 10) : '?'}  ${c.errorMessage}`);
+        }
       }
       break;
     }
@@ -1126,6 +1238,18 @@ function cmdConfirmDB(db, id, opts) {
   const entry = db.getEntry(id);
   if (!entry) return { confirmed: false, error: `No entry with id '${id}'` };
 
+  // --miss: increment missCount via incrementMissCount
+  if (opts.miss) {
+    db.incrementMissCount(id);
+    return { confirmed: true, id, miss: true, missCount: (entry.miss_count || 0) + 1, errorMessage: entry.error_message || entry.errorMessage };
+  }
+
+  // --auto: lightweight touch via touchEntry (does +1 hit + last_seen)
+  if (opts.auto) {
+    db.touchEntry(id);
+    return { confirmed: true, id, auto: true, hitCount: (entry.hit_count || 1) + 1, errorMessage: entry.error_message || entry.errorMessage };
+  }
+
   // +2 hits (+1 from touchEntry, +1 bonus for explicit confirmation)
   db.touchEntry(id);
   const updates = {
@@ -1182,6 +1306,88 @@ function cmdExportDB(db) {
   return { version: 1, entries: entries.map(normalizeDBEntry) };
 }
 
+function cmdQualityDB(db) {
+  const stats = db.stats();
+  const entries = db.listEntries({ includeArchived: true, limit: 999999 });
+
+  const total = entries.length;
+  const withMissCount = entries.filter(e => (e.miss_count || 0) > 0).length;
+  const withHitCount = entries.filter(e => (e.hit_count || 0) > 0).length;
+  const zeroHit = entries.filter(e => (e.hit_count || 0) === 0 && e.keep !== 'always').length;
+  const archived = entries.filter(e => e.status === 'archived').length;
+
+  // Hit rate per entry: hit / (hit + miss)
+  const hitRates = entries
+    .filter(e => (e.hit_count || 0) > 0 || (e.miss_count || 0) > 0)
+    .map(e => ({
+      id: e.id,
+      hitRate: (e.hit_count || 0) / ((e.hit_count || 0) + (e.miss_count || 0)),
+      hits: e.hit_count || 0,
+      misses: e.miss_count || 0,
+      errorMessage: (e.error_message || '').slice(0, 80),
+    }))
+    .sort((a, b) => a.hitRate - b.hitRate);
+
+  // Conflict analysis: entries with same hash but different resolutions
+  const hashGroups = {};
+  for (const e of entries) {
+    if (!e.hash) continue;
+    if (!hashGroups[e.hash]) hashGroups[e.hash] = [];
+    hashGroups[e.hash].push(e);
+  }
+  const conflicts = Object.values(hashGroups).filter(group => {
+    if (group.length < 2) return false;
+    const resolutions = group.filter(e => e.resolution).map(e => e.resolution);
+    if (resolutions.length < 2) return false;
+    for (let i = 0; i < resolutions.length; i++) {
+      for (let j = i + 1; j < resolutions.length; j++) {
+        const sim = textSimilarity(resolutions[i], resolutions[j]);
+        if (sim < 0.6) return true;
+      }
+    }
+    return false;
+  });
+
+  // Top 5 most valuable (highest hitCount)
+  const mostValuable = [...entries]
+    .filter(e => (e.hit_count || 0) > 0)
+    .sort((a, b) => (b.hit_count || 0) - (a.hit_count || 0))
+    .slice(0, 5)
+    .map(e => ({
+      id: e.id,
+      hitCount: e.hit_count,
+      errorMessage: (e.error_message || '').slice(0, 80),
+      resolution: (e.resolution || '').slice(0, 100),
+    }));
+
+  // Top 5 cleanup candidates (zero hit, not keep=always, not archived)
+  const cleanupCandidates = [...entries]
+    .filter(e => (e.hit_count || 0) === 0 && e.keep !== 'always' && e.status !== 'archived')
+    .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0))
+    .slice(0, 5)
+    .map(e => ({
+      id: e.id,
+      created_at: e.created_at,
+      errorMessage: (e.error_message || '').slice(0, 80),
+    }));
+
+  return {
+    totalEntries: total,
+    archived,
+    activeEntries: total - archived,
+    hitRateSummary: {
+      entriesWithHits: withHitCount,
+      entriesWithMisses: withMissCount,
+      zeroHitCount: zeroHit,
+      zeroHitRatio: total > 0 ? Math.round((zeroHit / total) * 100) : 0,
+    },
+    conflictCount: conflicts.length,
+    worstHitRates: hitRates.slice(0, 5).map(r => ({ ...r, hitRate: Math.round(r.hitRate * 100) })),
+    mostValuable,
+    cleanupCandidates,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
@@ -1204,6 +1410,7 @@ Commands:
   stats                      Show memory statistics
   export                     Export all entries as JSON
   extract                    Auto-generate skill_patches from findings (pipe JSON stdin)
+  quality                    Memory health dashboard (requires --db)
 
 Options:
   --resolution <text>        How the error was fixed (for store)
@@ -1257,7 +1464,7 @@ function parseArgs() {
     process.exit(0);
   }
   
-  const knownCommands = ['store', 'search', 'list', 'get', 'confirm', 'delete', 'stats', 'export', 'extract'];
+  const knownCommands = ['store', 'search', 'list', 'get', 'confirm', 'delete', 'stats', 'export', 'extract', 'quality'];
   const opts = {
     command: null,
     commandArgs: [],
@@ -1281,6 +1488,8 @@ function parseArgs() {
     ttl: null,
     keep: null,
     includeArchived: false,
+    auto: false,
+    crossSession: false,
     db: false,
     semantic: false,
   };
@@ -1359,6 +1568,9 @@ function parseArgs() {
       case '--ttl': opts.ttl = args[++i]; break;
       case '--keep': opts.keep = args[++i]; break;
       case '--include-archived': opts.includeArchived = true; break;
+      case '--auto': opts.auto = true; break;
+      case '--miss': opts.miss = true; break;
+      case '--cross-session': opts.crossSession = true; break;
       case '--db': opts.db = true; break;
       case '--semantic': opts.semantic = true; break;
     }
@@ -1403,11 +1615,12 @@ async function main() {
       case 'confirm': result = cmdConfirmDB(db, opts.commandArgs[0], opts); break;
       case 'delete': result = cmdDeleteDB(db, opts.commandArgs[0]); break;
       case 'stats': result = cmdStatsDB(db); break;
+      case 'quality': result = cmdQualityDB(db); break;
       case 'export': result = cmdExportDB(db); break;
       case 'extract':
-        // extract uses JSON findings pipeline, still valid
         result = cmdExtractSkillPatches(dataDir, readFindings(opts), {
           minFrequency: opts.minFrequency, dryRun: opts.dryRun,
+          crossSession: opts.crossSession,
         });
         break;
       default:
@@ -1441,10 +1654,12 @@ async function main() {
     case 'confirm': result = cmdConfirm(dataDir, opts.commandArgs[0], opts); break;
     case 'delete': result = cmdDelete(dataDir, opts.commandArgs[0]); break;
     case 'stats': result = cmdStats(dataDir); break;
+    case 'quality': result = { error: 'quality command requires --db (SQLite backend)' };
     case 'export': result = cmdExport(dataDir); break;
     case 'extract':
       result = cmdExtractSkillPatches(dataDir, readFindings(opts), {
         minFrequency: opts.minFrequency, dryRun: opts.dryRun,
+        crossSession: opts.crossSession,
       });
       break;
   }

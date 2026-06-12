@@ -57,6 +57,7 @@ permission:
 | `smart_context({command})` | Session 管理（含 context budget 查詢：`smart_context({command:"budget"})`） |
 | `smart_rules({file})` | 查詢專案規則（AGENTS.md / .cursorrules 等）— **編輯前必查** |
 | `smart_lsp({operation, file, line, character})` | **Type-aware 程式碼理解** — 找定義、查引用、看型別、診斷錯誤。支援 TS/JS/Python/Rust/Swift/PHP |
+| `smart_compact({toolHistory})` | **零成本 context 壓縮** — 分析工具歷史，識別可安全丟棄或摘要的輸出。無 LLM 開銷 |
 | `smart_hallucination_check({output, context?, query?})` | **輸出真實性驗證** — 檢查 LLM 輸出是否有幻覺（編造/錯誤歸因/偏離/矛盾/離題/過度自信）。`mode:"doi"` 可驗證文中 DOI 是否真實存在 |
 | `smart_academic_search({source, query?, doi?})` | **學術文獻搜尋** — OpenAlex/Crossref/Semantic Scholar/Unpaywall。支援 DOI 解析、OA 檢查、MDPI 過濾 |
 | `smart_academic_review({text, mode?})` | **學術同儕審查** — Remi 10-point framework（Nature/Science 等級）。`mode:"prompt"` 回傳審查提示，`mode:"template"` 回傳填空模板 |
@@ -95,8 +96,26 @@ permission:
 | 瀏覽器 | `pw_browser` | 控制瀏覽器（navigate/click/fill/screenshot） |
 | 學術 | `academic_search` | 🥇 學術文獻搜尋（OpenAlex/Crossref/Semantic Scholar/Unpaywall） |
 | 學術 | `academic_review` | 🥇 學術同儕審查（Remi 10-point，Nature/Science 等級） |
+| 程式碼分析 | `code_ast` | AST 查詢：找函式/類別/介面/型別/變數定義 |
+| 程式碼分析 | `code_type_infer` | 型別推斷：查詢變數/表達式的精確型別 |
+| 程式碼分析 | `codebase_index` | 持久化程式碼符號索引（build/update/query/map） |
+| 程式碼分析 | `naming` | 分析檔案與識別字命名慣例（kebab/camel/Pascal/UPPER） |
+| 程式碼分析 | `impact_flow` | 完整變更影響管線：git diff → CKG → test prediction |
 | 學術 | `docx_generate` | 🥈 APA 7th DOCX 文件生成（含 hanging indent 參考文獻） |
+| 學術 | `hallucination_check` | 🥉 輸出真實性驗證（幻覺檢查/DOI 驗證） |
 | 知識庫 | `obsidian_write` | 寫入 Obsidian vault（含 YAML frontmatter + tags） |
+| 知識庫 | `kg` | 知識圖譜記憶 — 結構化實體/關係存儲 |
+| 資料 | `db` | 唯讀 SQL 查詢（SQLite/PostgreSQL schema introspection） |
+| 資料 | `adr` | 架構決策記錄（ADR）— 記錄/搜尋/list |
+| 排程 | `schedule` | 排程背景任務（cron 表達式） |
+| 排程 | `progress` | 檢查長時間任務進度 |
+| 自動化 | `autofix` | 自動修復程式碼 + verify（test/lint/security） |
+| 自動化 | `pr_review` | 自動 PR 審查（git diff + security + LSP） |
+| 自動化 | `agent_execute` | 全自動工作流：選模板 → create → dispatch → 總結 |
+| 自動化 | `compose` | 工具組合管線（seq/par/cond 三種模式） |
+| 自動化 | `workflow` | 多工具工作流編排（create/report/replan/summary） |
+| 重構 | `refactor_plan` | CKG 重構助手：分析 API 使用模式，產出遷移計畫 |
+| 重構 | `exec` | 沙箱執行程式碼（bash/node/python/deno）
 
 > 不確定用哪個 sub-tool？→ `ssr({tool:"hybrid_router", args:{question:"描述你的任務"}})`
 
@@ -172,6 +191,10 @@ permission:
 | 學術研究 | `skill("deep-research")` 或手動：`smart_academic_search → smart_academic_search(unpaywall) → ssr(ingest_document) → smart_hallucination_check(mode:"doi") → smart_academic_review → smart_docx_generate` |
 | DOI 驗證 | `smart_hallucination_check({output, mode:"doi"}) → 檢查 dead links → 修正或刪除` |
 | 同儕審查 | `smart_academic_review({text, mode:"prompt"})` 或 `smart_deep_think({template:"peer_review"})` |
+| 排程任務 | `ssr(schedule args:{name:"nightly-test", cron:"0 9 * * *", command:"sm...test"}) → ssr(progress) → ssr(schedule list)` |
+| 知識圖譜 | `ssr(kg operation:"create_entities") → ssr(kg operation:"create_relations") → ssr(kg operation:"search_nodes")` |
+| 自動修復 | `ssr(autofix args:{file:"...", fix:"..."}) → 自動 verify test/lint/security` |
+| 重構計畫 | `ssr(refactor_plan args:{symbol:"...", newApi:"..."}) → 產出遷移計畫 → ssr(fast_apply)` |
 
 ---
 

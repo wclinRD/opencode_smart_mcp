@@ -5,7 +5,7 @@ export default {
   inputSchema: {
     type: 'object',
     properties: {
-      command: { type: 'string', enum: ['store', 'search', 'list', 'get', 'confirm', 'delete', 'stats', 'export', 'extract'], description: 'store/search/list/get/confirm/delete/stats/export/extract — extract auto-generates skill_patches from findings (pipe JSON via stdin)' },
+      command: { type: 'string', enum: ['store', 'search', 'list', 'get', 'confirm', 'delete', 'stats', 'export', 'extract', 'quality'], description: 'store/search/list/get/confirm/delete/stats/export/extract/quality — extract auto-generates skill_patches from findings (pipe JSON via stdin); quality shows memory health dashboard (requires --db)' },
       query: { type: 'string', description: 'Error message or trigger description to search or store (positional for store/search)' },
       type: { type: 'string', enum: ['error', 'skill_patch'], description: 'Entry type: "error" (default) for error resolutions, "skill_patch" for reusable behavior patterns' },
       targetSkill: { type: 'string', description: 'Target skill name this skill_patch applies to (for type:skill_patch)' },

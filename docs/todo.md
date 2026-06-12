@@ -1293,3 +1293,51 @@ flowchart LR
 - [x] 18 tests：record / search (title/context/decision) / list / get / update / delete / plugin handler / error handling
 - [x] 全量回歸：**1276 tests, 0 fail**
 
+---
+
+## Memory Feedback Loop Audit — 記憶系統品質審計與精準改進
+
+> 依據 plan.md 的 Memory Feedback Loop Audit 規劃。4 項精準改進，閉合記憶系統的 feedback loop。
+
+### ① preCheckMemory hit/miss 回饋 (~40 lines)
+
+- [x] `src/lib/memory-db.mjs` — entries 表新增 `miss_count` 欄位（DEFAULT 0）+ `incrementMissCount()`/`incrementHitCount()` 方法
+- [x] `src/server/index.mjs` — `trackMemoryMiss()` 函式：0.4-0.8 相似度 near-miss → 非同步 confirm --miss（missCount++）
+- [x] `src/server/index.mjs` — `preCheckMemory()` 成功命中 ≥0.8 → 非同步 confirm --auto（輕量 hitCount++）
+- [x] `src/cli/memory-store.mjs` — 新增 `--miss` 旗標到 cmdConfirm + cmdConfirmDB（incrementMissCount 替代 touchEntry）
+
+### ② 矛盾多 resolution 回傳 (~50 lines)
+
+- [x] `src/server/index.mjs` — `wordOverlapSimilarity()` Jaccard 函式 + `preCheckMemory()` 衝突檢測 → 多 resolution 回傳讓 LLM 選擇
+- [x] `src/cli/memory-store.mjs` — `confirm` 命令已支援 +2 hit + tools + resolution 記錄（未被選的 resolution 不需降低 confidence，LLM 不選就是 implicit rejection）
+
+### ③ 品質儀表板 (~80 lines)
+
+- [x] `src/cli/memory-store.mjs` — 新增 `cmdQualityDB()`：命中率最低 5 / conflict 分析 / 最有價值 5 / 清理候選 5
+- [x] `src/plugins/standard/memory_store.mjs` — 新增 `quality` 到 commands enum
+- [x] Mapper routing：plugin mapArgs 自動傳遞 command，品質路由不需額外 mapper
+  - 命中率最低的 entries（hitCount / (hitCount + missCount)）
+  - 從未被 preCheck 查到的 entries（hitCount = 0）
+  - conflict rate：有多少 hash 群有多筆 resolution
+  - stale/archived rate
+  - Top 5 最有價值 vs Top 5 可能需要清理的記憶
+### ④ 跨 session autoExtract 強化 (~60 lines)
+
+- [x] `src/cli/memory-store.mjs` — `cmdExtractSkillPatches()` 新增 `--cross-session` 模式：`SELECT ... FROM entries WHERE type='error' GROUP BY hash HAVING cnt >= 3` → 自動生成 skill_patch
+- [x] `src/server/index.mjs` — `autoExtractSkillPatches()` 每 100 tool calls 非同步觸發 `--cross-session --dry-run`
+- [x] 與現有 findings-based extract 共存（`--findings-file` 仍可用）
+
+### 預計 + Bug fix
+
+- [x] Bug fix: `trackMemoryMiss()` 原用 `confirm --auto`（+1 hit），已修正為 `--miss`（+1 miss）
+- [x] `src/cli/memory-store.mjs` 新增 `--miss` CLI 參數解析
+- [x] `formatText()` 新增 miss 顯示樣式
+
+### 全量回歸
+
+| 指標 | 數值 |
+|------|------|
+| 新增功能行數 | **~350**（含格式/路由/解析） |
+| 記憶相關測試 | **38 tests, 0 fail** |
+| Bug 修正 | `trackMemoryMiss` hit → miss 語意錯誤 |
+

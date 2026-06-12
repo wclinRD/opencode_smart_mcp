@@ -157,6 +157,13 @@ export class MemoryDB {
     // Phase 24: ADR schema
     this.#db.exec(ADR_SCHEMA_SQL);
 
+    // Migration: add miss_count column for miss tracking
+    try {
+      this.#db.exec("ALTER TABLE entries ADD COLUMN miss_count INTEGER DEFAULT 0");
+    } catch {
+      // Column already exists
+    }
+
     // Rebuild FTS5 index on startup (handles any out-of-sync state)
     this.rebuildFTS();
 
@@ -771,6 +778,26 @@ export class MemoryDB {
       UPDATE entries SET hit_count = hit_count + 1, last_seen = datetime('now')
       WHERE id = ?
     `).run(id);
+  }
+
+  /**
+   * Increment miss_count for an entry (near-miss tracking).
+   * Also calls touchEntry to update last_seen.
+   */
+  incrementMissCount(id) {
+    this.#ensureOpen();
+    this.#db.prepare('UPDATE entries SET miss_count = COALESCE(miss_count, 0) + 1 WHERE id = ?').run(id);
+    this.touchEntry(id);
+  }
+
+  /**
+   * Increment hit_count for an entry (explicit hit tracking).
+   * Also calls touchEntry which does an additional +1 hit + last_seen update.
+   */
+  incrementHitCount(id) {
+    this.#ensureOpen();
+    this.#db.prepare('UPDATE entries SET hit_count = COALESCE(hit_count, 0) + 1 WHERE id = ?').run(id);
+    this.touchEntry(id);
   }
 
   // -----------------------------------------------------------------------
