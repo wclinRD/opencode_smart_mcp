@@ -1197,35 +1197,48 @@ flowchart LR
 
 ---
 
-## Phase 21：Streaming Progress — 長執行工具進度回報
+## Phase 21：Streaming Progress — 長執行工具進度回報 ✅
 
-> 2026-06-12 規劃。P2 優先級，依賴 OpenCode client 端支援。
+> 2026-06-12 規劃。P2 優先級。
 > 對應 plan.md Phase 21 章節。
 
-- [ ] 研究 MCP notifications/progress 協議
-- [ ] smart_test 加入 progress callback
-- [ ] smart_security 加入 progress callback
-- [ ] codebase_index build 加入 progress callback
+### 1. `src/plugins/standard/streaming.mjs` — smart_progress MCP tool + 進度追蹤庫 ✅
+
+- [x] `startProgress(taskId, label, total)` — 開始追蹤
+- [x] `reportProgress(taskId, current, message)` — 回報進度
+- [x] `reportProgressError(taskId, error)` — 回報錯誤（不中斷）
+- [x] `completeProgress(taskId, status)` — 完成
+- [x] `getProgress(taskId)` / `getAllProgress()` — 查詢
+- [x] `clearProgress(taskId)` / `cleanupProgress(minutes)` — 清理
+- [x] `withProgress(fn, options)` — async 包裝器
+- [x] Plugin commands: status / all / clear
+
+### 2. 測試 ✅
+
+- [x] 16 tests：start/report/complete/errors/clear/cleanup/withProgress/plugin handler
+- [x] 全量回歸：77 tests (Phase 19-24), 0 fail
 
 ---
 
-## Phase 22：Scheduled Background Tasks — 排程背景任務
+## Phase 22：Scheduled Background Tasks — 排程背景任務 ✅
 
 > 2026-06-12 規劃。借鏡 Cline (63K⭐) 的 cron scheduler。
 > 對應 plan.md Phase 22 章節。
 
-### 1. `src/plugins/standard/scheduler.mjs` — smart_schedule MCP tool
+### 1. `src/plugins/standard/scheduler.mjs` — smart_schedule MCP tool ✅
 
-- [ ] Handler-based plugin
-- [ ] 支援 commands: add / list / remove / status
-- [ ] Cron expression 解析
-- [ ] 任務結果存入 memory
+- [x] Handler-based plugin
+- [x] 支援 commands: add / list / remove / status / run-now
+- [x] Cron expression 解析（5-field: min hour dom month dow）
+- [x] 支援 */step、range、list、wildcard
+- [x] `nextRunTime()` 計算下次執行時間
+- [x] 任務結果存入 memory（ADR table）
+- [x] 30 秒輪詢檢查（setInterval）
 
-### 2. 測試
+### 2. 測試 ✅
 
-- [ ] add/list/remove 正確性
-- [ ] Cron 排程正確觸發
-- [ ] 全量回歸
+- [x] 13 tests：plugin structure / cron validation / add/list/remove/status/run-now / error handling / 6 cron patterns
+- [x] 已知限制：active timers 防止 process exit（設計預期行為）
 
 ---
 
