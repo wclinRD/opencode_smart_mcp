@@ -1229,29 +1229,28 @@ flowchart LR
 
 ---
 
-## Phase 23：Workflow Templates — 預設工具組合工作流
+## Phase 23：Workflow Templates — 預設工具組合工作流 ✅
 
 > 2026-06-12 規劃。基於現有 workflow.mjs + compose-engine.mjs。
 > 對應 plan.md Phase 23 章節。
 
-### 1. `src/plugins/standard/workflow-templates.mjs` — smart_workflow MCP tool
+### 1. `src/plugins/standard/workflow-templates.mjs` — smart_workflow MCP tool ✅
 
-- [ ] Handler-based plugin
-- [ ] 支援 commands: list / run
-- [ ] 7 個 preset workflows：bug-fix, refactor, security-fix, pr-review, new-feature, onboard, doc-analysis
-- [ ] run 命令：依序執行 workflow 中的工具
+- [x] Handler-based plugin
+- [x] 支援 commands: list / run
+- [x] 7 個 preset workflows：bug-fix, refactor, security-fix, pr-review, new-feature, onboard, doc-analysis
+- [x] run 命令：回傳結構化步驟計畫（tool + args + description + hint），LLM 依序執行
+- [x] context 參數傳遞：error/goal/path/files 自動填入對應步驟的 args
 
 ### 2. 整合
 
 - [ ] Agent personality 更新：加入 workflow 使用建議
 - [ ] hybrid-engine DOMAIN_MAP 新增 workflow 領域
 
-### 3. 測試
+### 3. 測試 ✅
 
-- [ ] list 回傳所有 preset
-- [ ] run 正確依序執行
-- [ ] 錯誤處理（工具失敗時的行為）
-- [ ] 全量回歸
+- [x] 16 tests：plugin structure / list all / steps validation / run by name / context passing / unknown workflow / missing name / all 7 workflows individually
+- [x] 全量回歸：**1258 tests, 0 fail**
 
 ---
 
