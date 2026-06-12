@@ -393,7 +393,7 @@
 - [x] **Agent personality**：`smart-mcp.md` 品質閘區塊新增「強制執行 vs 建議」分界說明
 - [x] **Error fix**：新增 `_enforcement` 錯誤類型 + 指引訊息
 - [x] **plan.md**：Phase 7 新增設計文件
-- [ ] **測試**：驗證高風險任務無法繞過品質閘（待補 test case）
+- [x] **測試**：驗證高風險任務無法繞過品質閘（21 tests, quality-gate-unit.test.mjs）
 
 ---
 
@@ -458,11 +458,11 @@
 - [x] **測試**：27 tests（plugin structure / 4 語言 / timeout / sandbox / permission / output capping）
 - [x] **全量回歸**：1143 tests, 0 fail
 
-### 10.2 Impact Warning 自動觸發
+### 10.2 Impact Warning 自動觸發 ✅
 
-- [ ] **設計**：在 quality gate 加入自動 code_impact 觸發條件（edit > 2 files）
-- [ ] **實作**：擴充 `src/server/index.mjs` `checkHighRiskPrerequisites()`
-- [ ] **測試**：單檔編輯不觸發、多檔編輯自動觸發
+- [x] **設計**：在 quality gate 加入自動 code_impact 觸發條件（edit > 2 files）
+- [x] **實作**：擴充 `src/server/index.mjs` `checkHighRiskPrerequisites()`
+- [x] **測試**：單檔編輯不觸發、多檔編輯自動觸發
 
 ### 10.3 Error Recovery 統一策略 ✅
 
@@ -472,17 +472,17 @@
 - [x] **skipCapture** — retry attempt 不記錄到 context/stats，避免工具呼叫記錄膨脹
 - [x] **15 個測試**：isTransientError 11 種情境 + fallback 格式 + context integrity + 全量 regression
 
-### 10.4 Context Budget 主動管理
+### 10.4 Context Budget 主動管理 ✅
 
-- [ ] **設計**：threshold 定義（80%→L1, 90%→L2, 100%→存檔）
-- [ ] **實作**：`output-optimizer.mjs` 加入 budget-aware auto-escalation
-- [ ] **測試**：各 threshold 壓縮層級正確升級
+- [x] **設計**：threshold 定義（80%→L1, 90%→L2, 100%→存檔）
+- [x] **實作**：`output-optimizer.mjs` 加入 budget-aware auto-escalation
+- [x] **測試**：各 threshold 壓縮層級正確升級
 
-### 10.5 Auto Memory Injection（自動記憶注入）
+### 10.5 Auto Memory Injection（自動記憶注入）✅
 
-- [ ] **設計**：session init 自動查 memory_store + 注入策略（3-5條, <200 chars each）
-- [ ] **實作**：tool call wrapper 在 user query 時自動觸發 memory search
-- [ ] **測試**：相關記憶正確注入 + 不爆 budget
+- [x] **設計**：session init 自動查 memory_store + 注入策略（3-5條, <200 chars each）
+- [x] **實作**：tool call wrapper 在 user query 時自動觸發 memory search
+- [x] **測試**：相關記憶正確注入 + 不爆 budget
 
 ### 10.2b Impact Warning auto-trigger — 實作 ✅ (2026-06-11)
 
@@ -960,12 +960,12 @@ flowchart LR
   - budget warning 解讀方式
   - clear_tool_results 說明
 
-### 全量回歸
+### 全量回歸 ✅
 
-- [ ] context-manager clearToolResults + auto-trigger 測試
-- [ ] smart_compact plugin 測試（分類 + recoveryContext + 安全機制）
-- [ ] context-budget threshold 分級 warning 文字測試
-- [ ] 全量回歸：確認新測試加入後 regression 0 fail
+- [x] context-manager clearToolResults + auto-trigger 測試
+- [x] smart_compact plugin 測試（分類 + recoveryContext + 安全機制）
+- [x] context-budget threshold 分級 warning 文字測試
+- [x] 全量回歸：確認新測試加入後 regression 0 fail
 
 ### 優先級
 
@@ -1186,10 +1186,10 @@ flowchart LR
 - [x] 支援三種 fix 格式：SEARCH/REPLACE blocks、unified diff（patch 命令）、raw content
 - [x] responsePolicy: maxLevel 1
 
-### 2. 整合
+### 2. 整合 ✅
 
-- [ ] hybrid-engine DOMAIN_MAP 新增 autofix 領域
-- [ ] Agent personality 更新
+- [x] hybrid-engine DOMAIN_MAP 新增 autofix 領域
+- [x] Agent personality 更新
 
 ### 3. 測試 ✅
 
@@ -1256,10 +1256,10 @@ flowchart LR
 - [x] run 命令：回傳結構化步驟計畫（tool + args + description + hint），LLM 依序執行
 - [x] context 參數傳遞：error/goal/path/files 自動填入對應步驟的 args
 
-### 2. 整合
+### 2. 整合 ✅
 
-- [ ] Agent personality 更新：加入 workflow 使用建議
-- [ ] hybrid-engine DOMAIN_MAP 新增 workflow 領域
+- [x] Agent personality 更新：加入 workflow 使用建議
+- [x] hybrid-engine DOMAIN_MAP 新增 workflow 領域
 
 ### 3. 測試 ✅
 
