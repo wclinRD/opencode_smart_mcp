@@ -1254,26 +1254,29 @@ flowchart LR
 
 ---
 
-## Phase 24：ADR — Architecture Decision Records
+## Phase 24：ADR — Architecture Decision Records ✅
 
 > 2026-06-12 規劃。補 KG memory 的語意缺口。
 > 對應 plan.md Phase 24 章節。
 
-### 1. `src/lib/memory-db.mjs` 擴充 — ADR tables
+### 1. `src/lib/memory-db.mjs` 擴充 — ADR tables ✅
 
-- [ ] 新增 `adr` table（title, context, decision, alternatives JSON, consequences, created_at）
-- [ ] `recordADR(adr)` — INSERT
-- [ ] `searchADR(query)` — 跨 title/context/decision 搜尋
-- [ ] `listADR()` — 列出所有 ADR
+- [x] 新增 `adr` table（title, context, decision, alternatives JSON, consequences, status, created_at, updated_at）
+- [x] `recordADR(adr)` — INSERT
+- [x] `searchADR(query)` — 跨 title/context/decision 搜尋
+- [x] `listADR({limit, status})` — 列出所有 ADR（支援 status 過濾）
+- [x] `getADR(id)` — 單筆查詢
+- [x] `updateADRStatus(id, status)` — 更新狀態
+- [x] `deleteADR(id)` — 刪除
 
-### 2. Plugin — `smart_adr` MCP tool
+### 2. Plugin — `smart_adr` MCP tool ✅
 
-- [ ] `src/plugins/standard/adr.mjs` — handler-based plugin
-- [ ] 支援 commands: record / search / list / get
+- [x] `src/plugins/standard/adr.mjs` — handler-based plugin
+- [x] 支援 commands: record / search / list / get / update / delete
+- [x] 共用 memory.db（與 KG/semantic memory 同一資料庫）
 
-### 3. 測試
+### 3. 測試 ✅
 
-- [ ] record/search/list 正確性
-- [ ] 與 KG 的互補性驗證
-- [ ] 全量回歸
+- [x] 18 tests：record / search (title/context/decision) / list / get / update / delete / plugin handler / error handling
+- [x] 全量回歸：**1276 tests, 0 fail**
 

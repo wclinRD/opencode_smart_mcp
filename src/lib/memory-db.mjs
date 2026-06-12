@@ -95,6 +95,24 @@ const KG_SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_kg_relations_to ON kg_relations(to_entity);
 `;
 
+// Phase 24: Architecture Decision Records
+const ADR_SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS adr (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    context TEXT,
+    decision TEXT NOT NULL,
+    alternatives TEXT,
+    consequences TEXT,
+    status TEXT DEFAULT 'accepted',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_adr_title ON adr(title);
+  CREATE INDEX IF NOT EXISTS idx_adr_status ON adr(status);
+`;
+
 // ---------------------------------------------------------------------------
 // MemoryDB class
 // ---------------------------------------------------------------------------
@@ -135,6 +153,9 @@ export class MemoryDB {
 
     // Phase 16: Knowledge Graph schema
     this.#db.exec(KG_SCHEMA_SQL);
+
+    // Phase 24: ADR schema
+    this.#db.exec(ADR_SCHEMA_SQL);
 
     // Rebuild FTS5 index on startup (handles any out-of-sync state)
     this.rebuildFTS();
@@ -1043,6 +1064,95 @@ export class MemoryDB {
       to: r.to_entity,
       relationType: r.relation_type,
     }));
+  }
+
+  // -----------------------------------------------------------------------
+  // Phase 24: Architecture Decision Records (ADR)
+  // -----------------------------------------------------------------------
+
+  /**
+   * Record an architecture decision.
+   * @param {Object} adr - { title, context, decision, alternatives?, consequences?, status? }
+   */
+  recordADR(adr) {
+    const stmt = this.#db.prepare(`
+      INSERT INTO adr (title, context, decision, alternatives, consequences, status)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(
+      adr.title,
+      adr.context || null,
+      adr.decision,
+      adr.alternatives ? JSON.stringify(adr.alternatives) : null,
+      adr.consequences || null,
+      adr.status || 'accepted'
+    );
+    return { id: result.lastInsertRowid };
+  }
+
+  /**
+   * Search ADRs by query across title, context, and decision.
+   */
+  searchADR(query, { limit = 20 } = {}) {
+    const stmt = this.#db.prepare(`
+      SELECT id, title, context, decision, alternatives, consequences, status, created_at, updated_at
+      FROM adr
+      WHERE title LIKE ? OR context LIKE ? OR decision LIKE ?
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `);
+    const like = `%${query}%`;
+    const rows = stmt.all(like, like, like, limit);
+    return rows.map(r => ({
+      ...r,
+      alternatives: r.alternatives ? JSON.parse(r.alternatives) : []
+    }));
+  }
+
+  /**
+   * List all ADRs.
+   */
+  listADR({ limit = 50, status = null } = {}) {
+    let sql = 'SELECT id, title, context, decision, alternatives, consequences, status, created_at, updated_at FROM adr';
+    const params = [];
+    if (status) {
+      sql += ' WHERE status = ?';
+      params.push(status);
+    }
+    sql += ' ORDER BY updated_at DESC LIMIT ?';
+    params.push(limit);
+
+    const rows = this.#db.prepare(sql).all(...params);
+    return rows.map(r => ({
+      ...r,
+      alternatives: r.alternatives ? JSON.parse(r.alternatives) : []
+    }));
+  }
+
+  /**
+   * Get a single ADR by ID.
+   */
+  getADR(id) {
+    const row = this.#db.prepare('SELECT * FROM adr WHERE id = ?').get(id);
+    if (!row) return null;
+    return {
+      ...row,
+      alternatives: row.alternatives ? JSON.parse(row.alternatives) : []
+    };
+  }
+
+  /**
+   * Update ADR status.
+   */
+  updateADRStatus(id, status) {
+    this.#db.prepare('UPDATE adr SET status = ?, updated_at = datetime(\'now\') WHERE id = ?').run(status, id);
+  }
+
+  /**
+   * Delete an ADR.
+   */
+  deleteADR(id) {
+    this.#db.prepare('DELETE FROM adr WHERE id = ?').run(id);
   }
 }
 
