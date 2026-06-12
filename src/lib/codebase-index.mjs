@@ -680,6 +680,17 @@ export class CodebaseIndex {
     return graph;
   }
 
+  /** Get all symbols in a specific file */
+  getSymbolsByFile(filePath) {
+    return this.db.prepare(`
+      SELECT s.name, s.kind, s.line, s.signature, s.exported, f.path as file_path, f.language
+      FROM symbols s
+      JOIN files f ON s.file_id = f.id
+      WHERE f.path = ?
+      ORDER BY s.line
+    `).all(filePath);
+  }
+
   getCallGraph(symbolName) {
     return this.db.prepare(`
       SELECT DISTINCT d.callee_name as callee, f.path as file_path, cs.line as line

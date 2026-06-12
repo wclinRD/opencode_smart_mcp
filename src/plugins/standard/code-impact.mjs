@@ -118,7 +118,7 @@ Supports both git-diff input and direct file+symbol queries. Uses LSP references
         // Get symbols that changed in this file
         const symbols = targetSymbols.length > 0
           ? targetSymbols.map(s => ({ name: s }))
-          : index.querySymbol('', { kind: null }).filter(s => s.file_path === file);
+          : index.getSymbolsByFile(file);
 
         // File-level: reverse import lookup
         const importers = index.getReverseImports(file);
