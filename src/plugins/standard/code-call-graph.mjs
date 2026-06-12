@@ -1,10 +1,12 @@
 // code-call-graph.mjs → smart_code_call_graph
 // 給定函式名稱 + 檔案，追蹤 caller/callee 鏈。
-// 使用 LSP textDocument/references 為基礎，遞迴追蹤跨檔案呼叫關係。
+// 優先使用 codebase index 取得 callee 資訊（零 LSP 成本），
+// 再回頭用 LSP textDocument/references 追溯 callers。
 
 import { getLspBridge, closeAllLspBridges } from '../../lib/lsp-bridge.mjs';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { getCodebaseIndex, resetCodebaseIndex } from '../../lib/codebase-index.mjs';
 
 /** Recursively build call graph for a symbol */
 async function buildGraph(bridge, file, symbol, direction, depth, maxDepth, visited, rootDir) {
@@ -97,16 +99,49 @@ Supports configurable depth (1-3 levels) and cross-file tracking. Cannot determi
     required: ['file', 'symbol'],
   },
   handler: async (args) => {
+    const root = args.root || process.cwd();
+    const direction = args.direction || 'callers';
+    const depth = Math.min(args.depth || 1, 3);
+
+    // Try codebase index first (zero LSP cost, no file existence check needed)
+    if (direction === 'callees') {
+      try {
+        const index = getCodebaseIndex();
+        const calleeRows = index.getCallGraph(args.symbol);
+        if (calleeRows && calleeRows.length > 0) {
+          const output = {
+            root: { file: args.file || '(multiple)', symbol: args.symbol },
+            direction: 'callees',
+            depth: 1,
+            callees: calleeRows.map(r => ({
+              callee: r.callee,
+              file: r.file_path || '(unknown)',
+              line: r.line || 0,
+            })),
+          };
+          if (args.format === 'json') {
+            return JSON.stringify(output, null, 2);
+          }
+          let text = `Call Graph: ${args.symbol} in ${root}\n`;
+          text += `Direction: callees (from codebase index)  Depth: ${depth}\n`;
+          text += '─'.repeat(50) + '\n';
+          text += `Calls ${calleeRows.length} unique symbol(s):\n`;
+          for (const r of calleeRows) {
+            text += `  → ${r.callee} (${r.file_path || '(unknown)'})\n`;
+          }
+          return text;
+        }
+      } catch { /* index not available, fall through to LSP */ }
+    }
+
+    // Fallback: LSP-based analysis
     try {
-      const root = args.root || process.cwd();
       const absPath = resolve(root, args.file);
       if (!existsSync(absPath)) {
         return `File not found: ${args.file} (resolved: ${absPath})`;
       }
 
       const bridge = getLspBridge(root);
-      const direction = args.direction || 'callers';
-      const depth = Math.min(args.depth || 1, 3);
       const visited = new Set();
 
       const callers = await buildGraph(

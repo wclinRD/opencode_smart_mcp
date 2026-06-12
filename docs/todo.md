@@ -1149,17 +1149,18 @@ flowchart LR
 - [x] 支援 commands: build / update / query / map / stats
 - [x] responsePolicy: maxLevel 1（map 輸出可能很大）
 
-### 3. 整合現有工具
+### 3. 整合現有工具 ✅ (2026-06-12)
 
-- [ ] `import_graph` 改用 codebase index 預計算資料
-- [ ] `code_call_graph` 改用 codebase index 預計算資料
-- [ ] hybrid-engine DOMAIN_MAP 新增 codebase_index 領域
+- [x] `import_graph` 改用 codebase index 預計算資料 — CLI `--use-index` flag，plugin 自動偵測 DB 存在後注入
+- [x] `code_call_graph` 改用 codebase index 預計算資料 — `direction: "callees"` 優先走 index（零 LSP 成本），LSP fallback
+- [x] hybrid-engine DOMAIN_MAP 新增 codebase_index / autofix / workflow 三個領域
 
-### 4. Agent Personality 更新
+### 4. Agent Personality 更新 ✅ (2026-06-12)
 
-- [ ] `config/agents/smart-mcp.md` 加入 direct-call table
-- [ ] 常用工作流加入 codebase index 使用場景
-- [ ] `~/.config/opencode/agents/smart-mcp.md` 同步
+- [x] `config/agents/smart-mcp.md` — Direct MCP table 加入 `smart_codebase_index`
+- [x] 常用工作流表加入 index 專用行（索引程式碼 / 查 Symbol）
+- [x] 架構評估工作流加入 `smart_codebase_index build` 步驟
+- [x] `~/.config/opencode/agents/smart-mcp.md` 同步
 
 ### 5. 測試 ✅
 

@@ -58,6 +58,7 @@ permission:
 | `smart_rules({file})` | 查詢專案規則（AGENTS.md / .cursorrules 等）— **編輯前必查** |
 | `smart_lsp({operation, file, line, character})` | **Type-aware 程式碼理解** — 找定義、查引用、看型別、診斷錯誤。支援 TS/JS/Python/Rust/Swift/PHP |
 | `smart_compact({toolHistory})` | **零成本 context 壓縮** — 分析工具歷史，識別可安全丟棄或摘要的輸出。無 LLM 開銷 |
+| `smart_codebase_index({command})` | **持久化程式碼索引** — build/update/query/map/stats。用了之後 import_graph 自動快 5-50x |
 | `smart_hallucination_check({output, context?, query?})` | **輸出真實性驗證** — 檢查 LLM 輸出是否有幻覺（編造/錯誤歸因/偏離/矛盾/離題/過度自信）。`mode:"doi"` 可驗證文中 DOI 是否真實存在 |
 | `smart_academic_search({source, query?, doi?})` | **學術文獻搜尋** — OpenAlex/Crossref/Semantic Scholar/Unpaywall。支援 DOI 解析、OA 檢查、MDPI 過濾 |
 | `smart_academic_review({text, mode?})` | **學術同儕審查** — Remi 10-point framework（Nature/Science 等級）。`mode:"prompt"` 回傳審查提示，`mode:"template"` 回傳填空模板 |
@@ -127,11 +128,12 @@ permission:
 
 ```
 1. smart_learn({root})                                            ← 語言、結構、慣例
-2. ssr({tool:"hybrid_router", args:{question:"分析專案架構"}})    ← 自動選 arch_overview + import_graph
-3. smart_grep({pattern:"TODO|FIXME|HACK"})                       ← 技術債
-4. smart_test({root})                                             ← 測試健康度
-5. smart_security({scan:"all"})                                   ← 安全態勢
-6. smart_deep_think({template:"architecture"})                      ← 綜合分析
+2. smart_codebase_index({command:"build"})                        ← 建程式碼索引
+3. ssr({tool:"hybrid_router", args:{question:"分析專案架構"}})    ← 自動選 arch_overview + import_graph（用索引快 5-50x）
+4. smart_grep({pattern:"TODO|FIXME|HACK"})                       ← 技術債
+5. smart_test({root})                                             ← 測試健康度
+6. smart_security({scan:"all"})                                   ← 安全態勢
+7. smart_deep_think({template:"architecture"})                      ← 綜合分析
 ```
 
 ---
@@ -180,7 +182,9 @@ permission:
 | 重構 | `ssr(import_graph) → ssr(code_impact) → ssr(rename_safety) → ssr(fast_apply) → smart_test` |
 | 新功能 | `ssr(planner) → ssr(arch_overview) → smart_think → ssr(fast_apply) → smart_test` |
 | Git 流程 | `ssr(git_context) → ssr(git_commit) → smart_test → ssr(git_review) → ssr(git_pr)` |
-| 專案上手 | `smart_learn → smart_rules → ssr(arch_overview) → ssr(import_graph) → smart_test → smart_security` |
+| 專案上手 | `smart_learn → smart_rules → smart_codebase_index({command:"build"}) → ssr(import_graph) → smart_test → smart_security` |
+| 索引程式碼 | `smart_codebase_index({command:"build"}) → smart_codebase_index({command:"map"}) → ssr(import_graph)` |
+| 查 Symbol | `smart_codebase_index({command:"query", symbol:"auth"})` → `smart_lsp({operation:"definition"})` |
 | 安全修復 | `smart_security → smart_grep → ssr(fast_apply) → smart_test → rescan` |
 | 文件分析 | `ssr(ingest_document) → 分析內容 → 摘要/回答問題` |
 | 掃描 PDF | `ssr(ingest_document args:{ocr:true}) → 自動 OCR → 分析內容` |

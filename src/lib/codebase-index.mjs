@@ -602,7 +602,7 @@ export class CodebaseIndex {
 
   getCallGraph(symbolName) {
     return this.db.prepare(`
-      SELECT DISTINCT d.callee_name as callee, f.path as file_path
+      SELECT DISTINCT d.callee_name as callee, f.path as file_path, cs.line as line
       FROM dependencies d
       JOIN symbols s ON d.caller_symbol_id = s.id
       LEFT JOIN symbols cs ON cs.name = d.callee_name

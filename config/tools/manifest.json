@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-12T07:53:29.013Z",
+  "generatedAt": "2026-06-12T08:12:48.279Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -2995,7 +2995,7 @@
     },
     {
       "name": "smart_import_graph",
-      "description": "Use when: need to understand cross-file import dependencies before refactoring. Supports JS/TS, Python, Ruby, Rust, Go. Configure depth for shallow or deep analysis. Use focus to zoom in on specific files.",
+      "description": "Use when: need to understand cross-file import dependencies before refactoring. Supports JS/TS, Python, Ruby, Rust, Go. Configure depth for shallow or deep analysis. Use focus to zoom in on specific files. Auto-uses codebase index if available (5-50x faster).",
       "category": "analyze",
       "domain": "analyze",
       "safetyLevel": "low",

@@ -17,9 +17,10 @@
  *   node import-graph.mjs --format json --depth 2
  */
 
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync, existsSync as fsExists } from 'node:fs';
 import { resolve, relative, extname, basename, dirname, sep } from 'node:path';
 import { globToRegex, matchGlob, findFiles } from '../lib/utils.mjs';
+import { getCodebaseIndex } from '../lib/codebase-index.mjs';
 
 // ---------------------------------------------------------------------------
 // Language-specific import pattern matchers
@@ -321,6 +322,109 @@ function analyze(rootDir, options = {}) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Index-based analysis (using codebase index)
+// ---------------------------------------------------------------------------
+function analyzeFromIndex(rootDir, options = {}) {
+  const {
+    depth = Infinity,
+    focus = null,
+    noExternals = false,
+  } = options;
+
+  rootDir = resolve(rootDir);
+  const index = getCodebaseIndex();
+  const stats = index.getStats();
+
+  // Get all files and build nodes
+  const rows = index.db.prepare('SELECT id, path FROM files ORDER BY path').all();
+  const nodes = new Map();
+  for (const row of rows) {
+    const filePath = resolve(rootDir, row.path);
+    nodes.set(row.path, { path: row.path, file: filePath, imports: [], importedBy: [] });
+  }
+
+  // Get import edges
+  const edges = index.db.prepare(`
+    SELECT f1.path as from_file, f2.path as to_file
+    FROM imports i
+    JOIN files f1 ON i.file_id = f1.id
+    LEFT JOIN files f2 ON i.resolved_file_id = f2.id
+    WHERE i.resolved_file_id IS NOT NULL
+    ORDER BY f1.path
+  `).all();
+
+  for (const edge of edges) {
+    const from = nodes.get(edge.from_file);
+    const to = nodes.get(edge.to_file);
+    if (from && to) {
+      if (!from.imports.includes(edge.to_file)) from.imports.push(edge.to_file);
+      if (!to.importedBy.includes(edge.from_file)) to.importedBy.push(edge.from_file);
+    }
+  }
+
+  // External packages
+  const externalImports = new Map();
+  if (!noExternals) {
+    const extRows = index.db.prepare(`
+      SELECT f.path as from_file, i.import_path
+      FROM imports i
+      JOIN files f ON i.file_id = f.id
+      WHERE i.resolved_file_id IS NULL
+    `).all();
+
+    for (const row of extRows) {
+      const raw = row.import_path;
+      const pkgName = raw.startsWith('.') ? raw : raw.split('/')[0].startsWith('@')
+        ? raw.split('/').slice(0, 2).join('/')
+        : raw.split('/')[0];
+      if (!externalImports.has(pkgName)) {
+        externalImports.set(pkgName, { name: pkgName, importedBy: [] });
+      }
+      if (!externalImports.get(pkgName).importedBy.includes(row.from_file)) {
+        externalImports.get(pkgName).importedBy.push(row.from_file);
+      }
+    }
+  }
+
+  // Focus filtering
+  let filteredNodes = [...nodes.values()];
+  if (focus) {
+    const focusRel = relative(rootDir, resolve(rootDir, focus));
+    const focusMod = nodes.get(focusRel);
+    if (focusMod) {
+      const visited = new Set();
+      const queue = [{ path: focusRel, dist: 0 }];
+      while (queue.length > 0) {
+        const { path: p, dist } = queue.shift();
+        if (visited.has(p) || dist > depth) continue;
+        visited.add(p);
+        const mod = nodes.get(p);
+        if (mod) {
+          for (const imp of mod.imports) {
+            if (!visited.has(imp)) queue.push({ path: imp, dist: dist + 1 });
+          }
+          for (const impBy of mod.importedBy) {
+            if (!visited.has(impBy)) queue.push({ path: impBy, dist: dist + 1 });
+          }
+        }
+      }
+      filteredNodes = [...visited].map((p) => nodes.get(p)).filter(Boolean);
+    }
+  }
+
+  filteredNodes.sort((a, b) => a.path.localeCompare(b.path));
+
+  return {
+    root: rootDir,
+    totalFiles: stats.files,
+    analyzedFiles: filteredNodes.length,
+    nodes: filteredNodes,
+    externals: [...externalImports.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    source: 'codebase-index',
+  };
+}
+
 function existsSync(p) {
   try { return statSync(p).isFile(); } catch { return false; }
 }
@@ -521,6 +625,9 @@ function parseArgs() {
       case '--no-externals':
         opts.noExternals = true;
         break;
+      case '--use-index':
+        opts.useIndex = true;
+        break;
       case '--help':
       case '-h':
         printHelp();
@@ -542,8 +649,9 @@ Options:
   --exclude <glob>     Exclude file pattern (default: **/node_modules/**, ...)
   --depth <number>     Max depth for focus mode (default: infinite)
   --focus <path>       Focus on a specific file's neighborhood
-  --no-externals       Exclude external package references
-  -h, --help           Show this help
+   --no-externals       Exclude external package references
+   --use-index          Use pre-built codebase index (faster, requires smart_codebase_index build)
+   -h, --help           Show this help
 `);
 }
 
@@ -554,7 +662,17 @@ const opts = parseArgs();
 const root = opts.root || '.';
 const format = opts.format || 'text';
 
-const result = analyze(root, opts);
+let result;
+if (opts.useIndex) {
+  try {
+    result = analyzeFromIndex(root, opts);
+  } catch (e) {
+    console.error(`Codebase index not available: ${e.message}. Run 'smart_codebase_index build' first.`);
+    process.exit(1);
+  }
+} else {
+  result = analyze(root, opts);
+}
 
 switch (format) {
   case 'json':
