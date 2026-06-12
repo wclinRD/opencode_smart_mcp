@@ -25,9 +25,19 @@ reports/*.html
 .test-memory-*/
 .test-git-*/
 .test-workflows-*
+.test-memory-*/
+.test-git-*/
+.test-workflows-*
 .test-impact-*/
 .test-hybrid-*/
+.test-ingest-*/
+.test-lsp-*/
+.test-registry-*/
+.test-ckg-*/
+.test-cache-*/
 tmp-arch-*/
+tmp-test-cov-*/
+tmp-test-impact-*/
 
 # Runtime opencode data (machine-specific, not for sharing)
 .opencode/memory-core/
