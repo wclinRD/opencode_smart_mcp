@@ -12,6 +12,7 @@ import Database from 'better-sqlite3';
 import { existsSync, readFileSync, mkdirSync, statSync, readdirSync } from 'node:fs';
 import { resolve, relative, dirname, basename, extname, join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { execSync } from 'node:child_process';
 import os from 'node:os';
 
 // ---------------------------------------------------------------------------
@@ -474,9 +475,40 @@ export class CodebaseIndex {
 
   // --- Update (incremental) ---
 
-  updateIndex(projectRoot, { includeExts = DEFAULT_INCLUDE_EXTS, excludeDirs } = {}) {
+  updateIndex(projectRoot, { includeExts = DEFAULT_INCLUDE_EXTS, excludeDirs, strategy = 'hash' } = {}) {
     const absRoot = resolve(projectRoot);
-    const files = walkFiles(absRoot, { includeExts, excludeDirs });
+    const startTime = Date.now();
+
+    // Git-aware: only scan files changed since HEAD
+    let changedRelPaths = null;
+    if (strategy === 'git') {
+      try {
+        const gitRoot = execSync('git rev-parse --show-toplevel', { cwd: absRoot, encoding: 'utf8', timeout: 5000 }).trim();
+        const absGitRoot = resolve(gitRoot);
+        // Get modified + staged + untracked files
+        const modified = execSync('git diff --name-only HEAD', { cwd: absRoot, encoding: 'utf8', timeout: 5000 }).trim().split('\n').filter(Boolean);
+        const staged = execSync('git diff --name-only --cached', { cwd: absRoot, encoding: 'utf8', timeout: 5000 }).trim().split('\n').filter(Boolean);
+        const untracked = execSync('git ls-files --others --exclude-standard', { cwd: absRoot, encoding: 'utf8', timeout: 5000 }).trim().split('\n').filter(Boolean);
+        const allChanged = new Set([...modified, ...staged, ...untracked]);
+        // Filter by supported extensions and resolve paths
+        changedRelPaths = new Set();
+        const exts = new Set(includeExts);
+        for (const rel of allChanged) {
+          const ext = extname(rel).toLowerCase();
+          if (exts.has(ext) && !excludeDirs?.some(d => rel.startsWith(d + '/') || rel.includes('/' + d + '/'))) {
+            changedRelPaths.add(rel);
+          }
+        }
+      } catch { /* git not available, fall through to hash strategy */ }
+    }
+
+    let files;
+    if (changedRelPaths) {
+      // Only scan git-detected changed files + existing files that are no longer tracked
+      files = [...changedRelPaths].map(p => resolve(absRoot, p)).filter(p => existsSync(p));
+    } else {
+      files = walkFiles(absRoot, { includeExts, excludeDirs });
+    }
 
     let added = 0, updated = 0, removed = 0;
 
@@ -484,7 +516,7 @@ export class CodebaseIndex {
     const existingFiles = this.db.prepare('SELECT id, path, hash FROM files').all();
     const existingMap = new Map(existingFiles.map(f => [f.path, f]));
 
-    const currentPaths = new Set(files.map(f => relative(absRoot, f)));
+    const currentPaths = new Set(changedRelPaths || files.map(f => relative(absRoot, f)));
 
     // Remove deleted files
     for (const [path, file] of existingMap) {
@@ -494,13 +526,21 @@ export class CodebaseIndex {
       }
     }
 
+    // If git strategy found no changes, fast-exit
+    if (changedRelPaths && changedRelPaths.size === 0) {
+      return { added: 0, updated: 0, removed, elapsedMs: Date.now() - startTime, strategy: 'git-fast-path' };
+    }
+
     // Add/update files
     const insertFile = this.db.prepare('INSERT INTO files (path, hash, language, size) VALUES (?, ?, ?, ?)');
     const updateFile = this.db.prepare('UPDATE files SET hash = ?, size = ?, last_indexed = datetime(\'now\') WHERE id = ?');
     const deleteSymbols = this.db.prepare('DELETE FROM symbols WHERE file_id = ?');
     const deleteImports = this.db.prepare('DELETE FROM imports WHERE file_id = ?');
+    const deleteDeps = this.db.prepare('DELETE FROM dependencies WHERE caller_symbol_id IN (SELECT id FROM symbols WHERE file_id = ?)');
     const insertSymbol = this.db.prepare('INSERT INTO symbols (file_id, name, kind, line, signature, exported) VALUES (?, ?, ?, ?, ?, ?)');
     const insertImport = this.db.prepare('INSERT INTO imports (file_id, import_path, import_type) VALUES (?, ?, ?)');
+    const updateImportResolved = this.db.prepare('UPDATE imports SET resolved_file_id = ? WHERE file_id = ? AND import_path = ?');
+    const insertDep = this.db.prepare('INSERT OR IGNORE INTO dependencies (caller_symbol_id, callee_name, callee_file_id) VALUES (?, ?, ?)');
 
     const transaction = this.db.transaction(() => {
       for (const filePath of files) {
@@ -516,21 +556,42 @@ export class CodebaseIndex {
           const existing = existingMap.get(relPath);
 
           if (existing) {
-            // Check if changed
-            if (existing.hash === hash) continue; // unchanged
+            // Check if changed (hash strategy retires full hash; git strategy skips hash check)
+            if (strategy === 'hash' && existing.hash === hash) continue;
+            if (strategy === 'git' && !changedRelPaths?.has(relPath)) continue;
 
             // Update
             updateFile.run(hash, size, existing.id);
             deleteSymbols.run(existing.id);
             deleteImports.run(existing.id);
+            deleteDeps.run(existing.id);
             updated++;
 
-            const { symbols, imports } = extractSymbols(content, filePath);
+            const { symbols, imports, deps } = extractSymbols(content, filePath);
             for (const sym of symbols) {
               insertSymbol.run(existing.id, sym.name, sym.kind, sym.line, sym.signature || null, sym.exported ? 1 : 0);
             }
             for (const imp of imports) {
-              insertImport.run(existing.id, imp.import_path, imp.import_type);
+              const result = insertImport.run(existing.id, imp.import_path, imp.import_type);
+            }
+            // Resolve imports
+            for (const imp of imports) {
+              const resolved = resolveImportPath(imp.import_path, filePath, absRoot);
+              if (resolved) {
+                const relResolved = relative(absRoot, resolved);
+                const resolvedFile = this.db.prepare('SELECT id FROM files WHERE path = ?').get(relResolved);
+                if (resolvedFile) {
+                  updateImportResolved.run(resolvedFile.id, existing.id, imp.import_path);
+                }
+              }
+            }
+            // Store dependencies
+            for (const dep of deps) {
+              const callerSym = this.db.prepare('SELECT id FROM symbols WHERE file_id = ? AND name = ?').get(existing.id, dep.caller);
+              if (callerSym) {
+                const calleeFile = this.db.prepare('SELECT id FROM files WHERE path IN (SELECT path FROM symbols WHERE name = ?)').get(dep.callee);
+                insertDep.run(callerSym.id, dep.callee, calleeFile?.id || null);
+              }
             }
           } else {
             // New file
@@ -538,12 +599,31 @@ export class CodebaseIndex {
             const fileId = result.lastInsertRowid;
             added++;
 
-            const { symbols, imports } = extractSymbols(content, filePath);
+            const { symbols, imports, deps } = extractSymbols(content, filePath);
             for (const sym of symbols) {
               insertSymbol.run(fileId, sym.name, sym.kind, sym.line, sym.signature || null, sym.exported ? 1 : 0);
             }
             for (const imp of imports) {
               insertImport.run(fileId, imp.import_path, imp.import_type);
+            }
+            // Resolve imports
+            for (const imp of imports) {
+              const resolved = resolveImportPath(imp.import_path, filePath, absRoot);
+              if (resolved) {
+                const relResolved = relative(absRoot, resolved);
+                const resolvedFile = this.db.prepare('SELECT id FROM files WHERE path = ?').get(relResolved);
+                if (resolvedFile) {
+                  updateImportResolved.run(resolvedFile.id, fileId, imp.import_path);
+                }
+              }
+            }
+            // Store dependencies
+            for (const dep of deps) {
+              const callerSym = this.db.prepare('SELECT id FROM symbols WHERE file_id = ? AND name = ?').get(fileId, dep.caller);
+              if (callerSym) {
+                const calleeFile = this.db.prepare('SELECT id FROM files WHERE path IN (SELECT path FROM symbols WHERE name = ?)').get(dep.callee);
+                insertDep.run(callerSym.id, dep.callee, calleeFile?.id || null);
+              }
             }
           }
         } catch (err) {
@@ -554,7 +634,7 @@ export class CodebaseIndex {
 
     transaction();
 
-    return { added, updated, removed };
+    return { added, updated, removed, elapsedMs: Date.now() - startTime, strategy };
   }
 
   // --- Query ---
@@ -609,6 +689,31 @@ export class CodebaseIndex {
       LEFT JOIN files f ON cs.file_id = f.id
       WHERE s.name = ?
       ORDER BY d.callee_name
+    `).all(symbolName);
+  }
+
+  /** Reverse import lookup: which files import the given file? */
+  getReverseImports(filePath) {
+    return this.db.prepare(`
+      SELECT f.path as from_file
+      FROM imports i
+      JOIN files f ON i.file_id = f.id
+      JOIN files tf ON i.resolved_file_id = tf.id
+      WHERE tf.path = ?
+      ORDER BY f.path
+    `).all(filePath);
+  }
+
+  /** Reverse call lookup: which symbols call the given symbol? */
+  getCallers(symbolName) {
+    return this.db.prepare(`
+      SELECT DISTINCT s.name as caller, f.path as file_path, s.line as line
+      FROM dependencies d
+      JOIN symbols cs ON cs.name = d.callee_name
+      JOIN symbols s ON d.caller_symbol_id = s.id
+      JOIN files f ON s.file_id = f.id
+      WHERE cs.name = ?
+      ORDER BY s.name
     `).all(symbolName);
   }
 

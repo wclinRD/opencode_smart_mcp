@@ -3,6 +3,7 @@
 // 使用 LSP references + call-graph 交叉比對。
 
 import { getLspBridge, closeAllLspBridges } from '../../lib/lsp-bridge.mjs';
+import { getCodebaseIndex } from '../../lib/codebase-index.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -78,76 +79,120 @@ Supports both git-diff input and direct file+symbol queries. Uses LSP references
     required: [],
   },
   handler: async (args) => {
+    const root = args.root || process.cwd();
+    const depth = Math.min(args.depth || 1, 3);
+
+    // Step 1: Determine what changed
+    let changedFiles = [];
+    let targetSymbols = args.symbols || [];
+
+    if (args.diff) {
+      changedFiles = parseDiff(args.diff);
+    } else if (args.files && args.files.length > 0) {
+      changedFiles = args.files.map(f => ({ file: f, startLine: 0, lineCount: 0 }));
+    } else {
+      return 'Provide either "diff" (git diff text) or "files" (array of file paths).';
+    }
+
+    if (changedFiles.length === 0) {
+      return 'No changes detected.';
+    }
+
+    // Try codebase index first (zero LSP cost)
+    let useIndex = false;
+    let index = null;
     try {
-      const root = args.root || process.cwd();
-      const bridge = getLspBridge(root);
-      const depth = Math.min(args.depth || 1, 3);
+      index = getCodebaseIndex();
+      const stats = index.getStats();
+      useIndex = stats.files > 0;
+    } catch { /* index not available, fallback to LSP */ }
 
-      // Step 1: Determine what changed
-      let changedFiles = [];
-      let targetSymbols = args.symbols || [];
+    const directImpacts = [];
+    const visited = new Set();
 
-      if (args.diff) {
-        changedFiles = parseDiff(args.diff);
-      } else if (args.files && args.files.length > 0) {
-        changedFiles = args.files.map(f => ({ file: f, startLine: 0, lineCount: 0 }));
-      } else {
-        return 'Provide either "diff" (git diff text) or "files" (array of file paths).';
-      }
-
-      if (changedFiles.length === 0) {
-        return 'No changes detected.';
-      }
-
-      // Step 2: Get symbols for changed files
-      const directImpacts = [];
-      const visited = new Set();
-
+    if (useIndex) {
+      // --- Codebase index path (fast, zero LSP) ---
       for (const change of changedFiles) {
         const file = change.file;
-        if (!existsSync(resolve(root, file))) continue;
 
+        // Get symbols that changed in this file
         const symbols = targetSymbols.length > 0
           ? targetSymbols.map(s => ({ name: s }))
-          : await getFileSymbols(bridge, file);
+          : index.querySymbol('', { kind: null }).filter(s => s.file_path === file);
 
+        // File-level: reverse import lookup
+        const importers = index.getReverseImports(file);
+        if (importers.length > 0 && symbols.length === 0) {
+          directImpacts.push({
+            changedFile: file,
+            symbol: '(file)',
+            impacted: importers.map(i => ({ file: i.from_file, line: 0, confidence: 'medium', source: 'codebase-index' })),
+          });
+        }
+
+        // Symbol-level: caller lookup
         for (const sym of symbols) {
           if (!sym.name) continue;
+          const callers = index.getCallers(sym.name)
+            .filter(c => c.file_path !== file)
+            .map(c => ({ file: c.file_path, line: c.line || 0, confidence: 'high', source: 'codebase-index' }));
 
-          // Get references (who uses this symbol)
-          try {
-            const refs = await bridge.getReferences(file, sym.line || 1, sym.col || 0);
-            const callers = (refs.references || [])
-              .filter(r => r.file !== resolve(root, file)) // exclude self
-              .map(r => ({
-                file: r.file,
-                line: r.line,
-                confidence: 'high',
-              }));
-
-            if (callers.length > 0) {
-              directImpacts.push({
-                changedFile: file,
-                symbol: sym.name,
-                impacted: callers,
-              });
-            }
-          } catch {
-            // LSP might not have the file open
+          if (callers.length > 0) {
+            directImpacts.push({
+              changedFile: file,
+              symbol: sym.name,
+              impacted: callers,
+            });
           }
         }
       }
+    } else {
+      // --- LSP path (fallback) ---
+      const bridge = getLspBridge(root);
+      try {
+        for (const change of changedFiles) {
+          const file = change.file;
+          if (!existsSync(resolve(root, file))) continue;
 
-      // Step 3: Compute transitive impacts if depth > 1
-      let transitiveImpacts = [];
-      if (depth > 1) {
+          const symbols = targetSymbols.length > 0
+            ? targetSymbols.map(s => ({ name: s }))
+            : await getFileSymbols(bridge, file);
+
+          for (const sym of symbols) {
+            if (!sym.name) continue;
+            try {
+              const refs = await bridge.getReferences(file, sym.line || 1, sym.col || 0);
+              const callers = (refs.references || [])
+                .filter(r => r.file !== resolve(root, file))
+                .map(r => ({ file: r.file, line: r.line, confidence: 'high', source: 'lsp' }));
+
+              if (callers.length > 0) {
+                directImpacts.push({
+                  changedFile: file,
+                  symbol: sym.name,
+                  impacted: callers,
+                });
+              }
+            } catch { /* skip */ }
+          }
+        }
+      } finally {
+        // Close LSP after use
+      }
+    }
+
+    // Step 3: Compute transitive impacts if depth > 1 (always uses LSP for precision)
+    let transitiveImpacts = [];
+    if (depth > 1) {
+      const bridge = getLspBridge(root);
+      try {
         for (const impact of directImpacts) {
           for (const caller of impact.impacted) {
             const key = `${caller.file}`;
             if (visited.has(key)) continue;
             visited.add(key);
 
-            // Get symbols in impacted file
+            if (!existsSync(resolve(root, caller.file))) continue;
             const callerSymbols = await getFileSymbols(bridge, caller.file);
             for (const csym of callerSymbols) {
               if (csym.kind !== 'function' && csym.kind !== 'class') continue;
@@ -168,66 +213,70 @@ Supports both git-diff input and direct file+symbol queries. Uses LSP references
             }
           }
         }
+      } finally {
+        await closeAllLspBridges();
       }
+    } else if (!useIndex) {
+      // Only close LSP if we opened it and aren't doing transitive analysis
+      await closeAllLspBridges();
+    }
 
-      // Step 4: De-duplicate
-      const allImpactedFiles = new Set();
-      for (const di of directImpacts) {
-        for (const imp of di.impacted) allImpactedFiles.add(imp.file);
+    // Step 4: De-duplicate
+    const allImpactedFiles = new Set();
+    for (const di of directImpacts) {
+      for (const imp of di.impacted) allImpactedFiles.add(imp.file);
+    }
+    for (const ti of transitiveImpacts) {
+      for (const imp of ti.impacted) allImpactedFiles.add(imp.file);
+    }
+
+    const output = {
+      direct: directImpacts,
+      transitive: transitiveImpacts,
+      totalFiles: allImpactedFiles.size,
+      totalSymbols: directImpacts.length,
+      depth,
+      confidence: useIndex ? 'high (codebase-index)' : depth <= 1 ? 'high' : 'medium',
+      source: useIndex ? 'codebase-index' : 'lsp',
+    };
+
+    if (args.format === 'json') {
+      return JSON.stringify(output, null, 2);
+    }
+
+    // Text format
+    let text = `Impact Analysis (depth=${depth})\n`;
+    text += '─'.repeat(50) + '\n';
+
+    if (directImpacts.length === 0) {
+      text += 'No downstream impacts detected. Safe to modify.\n';
+      return text;
+    }
+
+    text += `\n⚠️  ${allImpactedFiles.size} file(s) potentially impacted:\n\n`;
+
+    for (const di of directImpacts) {
+      text += `  ${di.symbol} changed in ${di.changedFile}\n`;
+      for (const imp of di.impacted) {
+        const shortFile = imp.file.replace(root, '').replace(/^\//, '');
+        text += `    ← ${shortFile}:L${imp.line}\n`;
       }
+      text += '\n';
+    }
+
+    if (transitiveImpacts.length > 0) {
+      text += `\nTransitive impacts (depth ${depth}):\n`;
       for (const ti of transitiveImpacts) {
-        for (const imp of ti.impacted) allImpactedFiles.add(imp.file);
-      }
-
-      const output = {
-        direct: directImpacts,
-        transitive: transitiveImpacts,
-        totalFiles: allImpactedFiles.size,
-        totalSymbols: directImpacts.length,
-        depth,
-        confidence: depth <= 1 ? 'high' : 'medium',
-      };
-
-      if (args.format === 'json') {
-        return JSON.stringify(output, null, 2);
-      }
-
-      // Text format
-      let text = `Impact Analysis (depth=${depth})\n`;
-      text += '─'.repeat(50) + '\n';
-
-      if (directImpacts.length === 0) {
-        text += 'No downstream impacts detected. Safe to modify.\n';
-        return text;
-      }
-
-      text += `\n⚠️  ${allImpactedFiles.size} file(s) potentially impacted:\n\n`;
-
-      for (const di of directImpacts) {
-        text += `  ${di.symbol} changed in ${di.changedFile}\n`;
-        for (const imp of di.impacted) {
+        const shortVia = ti.via.replace(root, '').replace(/^\//, '');
+        text += `  via ${shortVia} → ${ti.symbol}\n`;
+        for (const imp of ti.impacted) {
           const shortFile = imp.file.replace(root, '').replace(/^\//, '');
           text += `    ← ${shortFile}:L${imp.line}\n`;
         }
-        text += '\n';
       }
-
-      if (transitiveImpacts.length > 0) {
-        text += `\nTransitive impacts (depth ${depth}):\n`;
-        for (const ti of transitiveImpacts) {
-          const shortVia = ti.via.replace(root, '').replace(/^\//, '');
-          text += `  via ${shortVia} → ${ti.symbol}\n`;
-          for (const imp of ti.impacted) {
-            const shortFile = imp.file.replace(root, '').replace(/^\//, '');
-            text += `    ← ${shortFile}:L${imp.line}\n`;
-          }
-        }
-      }
-
-      text += `\nConfidence: ${output.confidence}`;
-      return text;
-    } finally {
-      await closeAllLspBridges();
     }
+
+    text += `\nConfidence: ${output.confidence} (source: ${output.source})`;
+    return text;
   },
 };

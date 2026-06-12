@@ -23,6 +23,11 @@ export default {
         enum: ['build', 'update', 'query', 'map', 'stats'],
         description: 'Command: build (full scan), update (incremental), query (search symbols), map (repo map), stats (index statistics)'
       },
+      strategy: {
+        type: 'string',
+        enum: ['hash', 'git'],
+        description: 'Update strategy: "hash" reads all files (default), "git" uses git diff --name-only (5-50x faster for large projects). Only used with command:"update"'
+      },
       root: {
         type: 'string',
         description: 'Project root directory (default: current working directory)'
@@ -53,7 +58,7 @@ export default {
   },
 
   handler: async (args, context) => {
-    const { command, root, symbol, kind, limit, include, exclude } = args;
+    const { command, root, symbol, kind, limit, include, exclude, strategy } = args;
     const projectRoot = root || process.cwd();
 
     try {
@@ -76,15 +81,18 @@ export default {
         }
 
         case 'update': {
-          const result = index.updateIndex(projectRoot, { include, exclude });
+          const opts = { include, exclude };
+          if (strategy) opts.strategy = strategy;
+          const result = index.updateIndex(projectRoot, opts);
           return {
             content: [{
               type: 'text',
               text: JSON.stringify({
                 ok: true,
                 command: 'update',
+                strategy: result.strategy || (strategy || 'hash'),
                 ...result,
-                message: `Updated: ${result.added} added, ${result.updated} changed, ${result.removed} removed`
+                message: `Updated (${result.strategy || 'hash'}): ${result.added} added, ${result.updated} changed, ${result.removed} removed`
               }, null, 2)
             }]
           };

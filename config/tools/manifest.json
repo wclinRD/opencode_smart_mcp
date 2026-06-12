@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-12T08:12:48.279Z",
+  "generatedAt": "2026-06-12T08:27:17.562Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -1467,6 +1467,14 @@
               "stats"
             ],
             "description": "Command: build (full scan), update (incremental), query (search symbols), map (repo map), stats (index statistics)"
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "hash",
+              "git"
+            ],
+            "description": "Update strategy: \"hash\" reads all files (default), \"git\" uses git diff --name-only (5-50x faster for large projects). Only used with command:\"update\""
           },
           "root": {
             "type": "string",
