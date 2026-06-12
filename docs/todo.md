@@ -1124,3 +1124,159 @@ flowchart LR
 - [x] 13 tests（plugin structure / basic / filtering / meta / summary）
 - [x] 全量回歸：**1215 tests, 0 fail**
 
+---
+
+## Phase 19：Codebase Index — 持久化程式碼符號索引
+
+> 2026-06-12 規劃。借鏡 Aider (46K⭐) 的 repo map。
+> 對應 plan.md Phase 19 章節。
+
+### 1. `src/lib/codebase-index.mjs` — SQLite 程式碼索引庫
+
+- [ ] SQLite schema：files / symbols / imports / dependencies tables
+- [ ] `buildIndex(root)` — tree-sitter 全專案掃描，提取所有 symbol
+- [ ] `updateIndex(root)` — hash 比對增量更新
+- [ ] `querySymbol(name)` — 模糊搜尋 symbol → 定義位置 + 簽名
+- [ ] `getImportGraph()` — 從 index 查詢 import 關係（取代 import_graph 掃描）
+- [ ] `getCallGraph(symbol)` — 查詢函式呼叫關係
+- [ ] `generateRepoMap()` — 產生 Aider-style repo map
+- [ ] Singleton 模式（getIndex / resetIndex）
+
+### 2. Plugin — `smart_codebase_index` MCP tool
+
+- [ ] `src/plugins/standard/codebase-index.mjs` — handler-based plugin
+- [ ] 支援 commands: build / update / query / map / stats
+- [ ] responsePolicy: maxLevel 1（map 輸出可能很大）
+
+### 3. 整合現有工具
+
+- [ ] `import_graph` 改用 codebase index 預計算資料
+- [ ] `code_call_graph` 改用 codebase index 預計算資料
+- [ ] hybrid-engine DOMAIN_MAP 新增 codebase_index 領域
+
+### 4. Agent Personality 更新
+
+- [ ] `config/agents/smart-mcp.md` 加入 direct-call table
+- [ ] 常用工作流加入 codebase index 使用場景
+- [ ] `~/.config/opencode/agents/smart-mcp.md` 同步
+
+### 5. 測試
+
+- [ ] buildIndex：symbol 提取正確性（class/function/var）
+- [ ] updateIndex：增量更新正確性（只重新索引變動檔案）
+- [ ] querySymbol：模糊搜尋正確性
+- [ ] generateRepoMap：格式正確性
+- [ ] import graph 整合：與現有 import_graph 結果一致
+- [ ] 全量回歸
+
+---
+
+## Phase 20：Auto-Fix Pipeline — 自動化修改驗證循環
+
+> 2026-06-12 規劃。借鏡 Aider 的 lint/test auto-fix loop。
+> 對應 plan.md Phase 20 章節。
+
+### 1. `src/plugins/standard/auto-fix.mjs` — smart_autofix MCP tool
+
+- [ ] Handler-based plugin
+- [ ] 參數：fix, verify, maxRetries, files
+- [ ] 流程：fast_apply → verify（並行 test/lint/security）→ 成功/失敗處理
+- [ ] 循環邏輯：失敗 → 錯誤打包 → LLM 修正 → 重試（最多 maxRetries 次）
+- [ ] responsePolicy: maxLevel 1
+
+### 2. 整合
+
+- [ ] hybrid-engine DOMAIN_MAP 新增 autofix 領域
+- [ ] Agent personality 更新
+
+### 3. 測試
+
+- [ ] 單次成功：fix + verify 全過
+- [ ] 單次失敗：fix + verify 有錯誤 → 正確回傳
+- [ ] 多次重試：2 次修正後成功
+- [ ] maxRetries 耗盡：回傳「需手動介入」
+- [ ] 全量回歸
+
+---
+
+## Phase 21：Streaming Progress — 長執行工具進度回報
+
+> 2026-06-12 規劃。P2 優先級，依賴 OpenCode client 端支援。
+> 對應 plan.md Phase 21 章節。
+
+- [ ] 研究 MCP notifications/progress 協議
+- [ ] smart_test 加入 progress callback
+- [ ] smart_security 加入 progress callback
+- [ ] codebase_index build 加入 progress callback
+
+---
+
+## Phase 22：Scheduled Background Tasks — 排程背景任務
+
+> 2026-06-12 規劃。借鏡 Cline (63K⭐) 的 cron scheduler。
+> 對應 plan.md Phase 22 章節。
+
+### 1. `src/plugins/standard/scheduler.mjs` — smart_schedule MCP tool
+
+- [ ] Handler-based plugin
+- [ ] 支援 commands: add / list / remove / status
+- [ ] Cron expression 解析
+- [ ] 任務結果存入 memory
+
+### 2. 測試
+
+- [ ] add/list/remove 正確性
+- [ ] Cron 排程正確觸發
+- [ ] 全量回歸
+
+---
+
+## Phase 23：Workflow Templates — 預設工具組合工作流
+
+> 2026-06-12 規劃。基於現有 workflow.mjs + compose-engine.mjs。
+> 對應 plan.md Phase 23 章節。
+
+### 1. `src/plugins/standard/workflow-templates.mjs` — smart_workflow MCP tool
+
+- [ ] Handler-based plugin
+- [ ] 支援 commands: list / run
+- [ ] 7 個 preset workflows：bug-fix, refactor, security-fix, pr-review, new-feature, onboard, doc-analysis
+- [ ] run 命令：依序執行 workflow 中的工具
+
+### 2. 整合
+
+- [ ] Agent personality 更新：加入 workflow 使用建議
+- [ ] hybrid-engine DOMAIN_MAP 新增 workflow 領域
+
+### 3. 測試
+
+- [ ] list 回傳所有 preset
+- [ ] run 正確依序執行
+- [ ] 錯誤處理（工具失敗時的行為）
+- [ ] 全量回歸
+
+---
+
+## Phase 24：ADR — Architecture Decision Records
+
+> 2026-06-12 規劃。補 KG memory 的語意缺口。
+> 對應 plan.md Phase 24 章節。
+
+### 1. `src/lib/memory-db.mjs` 擴充 — ADR tables
+
+- [ ] 新增 `adr` table（title, context, decision, alternatives JSON, consequences, created_at）
+- [ ] `recordADR(adr)` — INSERT
+- [ ] `searchADR(query)` — 跨 title/context/decision 搜尋
+- [ ] `listADR()` — 列出所有 ADR
+
+### 2. Plugin — `smart_adr` MCP tool
+
+- [ ] `src/plugins/standard/adr.mjs` — handler-based plugin
+- [ ] 支援 commands: record / search / list / get
+
+### 3. 測試
+
+- [ ] record/search/list 正確性
+- [ ] 與 KG 的互補性驗證
+- [ ] 全量回歸
+

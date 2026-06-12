@@ -2219,3 +2219,219 @@ Knowledge Graph（新增）：
 - 不是只找 bug，而是給結構化建議
 - 結合專案知識（memory + KG）做 contextual review
 - 展示 Smart MCP 工具組合的威力
+
+---
+
+## Phase 19：Codebase Index — 持久化程式碼符號索引
+
+> 2026-06-12 規劃。借鏡 Aider (46K⭐) 的 repo map 功能。
+> 核心洞察：Smart MCP 的 smart_learn/arch_overview/import_graph 都是一次性分析，
+> 缺一個持久化、自動更新的程式碼符號索引。這是 Aider 在大型專案中高成功率的關鍵。
+
+### 核心問題
+
+```
+現狀：
+  LLM 進入新 session → smart_learn 給通用資訊
+  LLM 要找某個 function → grep 5-10 次
+  LLM 要了解依賴 → import_graph 每次重建（5-30 秒）
+
+Aider 的做法：
+  每次對話前自動注入 repo map（所有檔案的 class/function 簽名 + 依賴關係）
+  → LLM 一次就知道專案結構，不需反覆 grep
+```
+
+### 解決方案
+
+```
+Phase 19: SQLite codebase index (~/.smart/codebase-index.db)
+
+架構：
+  files:     path, hash, language, last_indexed
+  symbols:   file_id, name, kind (class/function/var), line, signature
+  imports:   from_file, to_file, import_type
+  deps:      caller_symbol, callee_symbol
+
+工具: smart_codebase_index
+  {command:"build"}    → tree-sitter 全專案掃描
+  {command:"update"}   → hash 比對增量更新
+  {command:"query", symbol:"auth"} → 模糊搜尋 symbol
+  {command:"map"}      → 產生 Aider-style repo map
+```
+
+### 設計
+
+| 層面 | 作法 |
+|------|------|
+| **解析引擎** | tree-sitter（已透過 LSP bridge 使用），支援 TS/JS/Python/Rust |
+| **儲存** | SQLite（better-sqlite3），共用 memory-db 的連線模式 |
+| **增量更新** | file hash 比對，只重新索引有變動的檔案 |
+| **查詢** | 模糊搜尋 symbol name → 定義位置 + 簽名 + 被誰呼叫 |
+| **Repo map** | 類似 Aider 格式，自動注入 session context |
+| **整合** | import_graph/code_call_graph 改用預計算資料（快 50-300x） |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| 大型專案定位程式碼 | grep 5-10 次 | 1 次 symbol query（<100ms） |
+| import_graph | 每次掃描 5-30 秒 | SQL 查詢 <100ms |
+| 新 session 理解專案 | smart_learn 通用資訊 | repo map 精確結構 |
+| Token 節省 | grep 回傳大量匹配行 | 只回傳簽名+位置（省 40-60%） |
+
+### 不上什麼
+
+| 項目 | 原因 |
+|------|------|
+| 完整 AST 儲存 | 太大，symbol 簽名就夠 LLM 定位 |
+| 自動 background indexing | P1 先做手動 build/update，P2 加 file watcher |
+| 所有語言的 tree-sitter | 先支援 TS/JS/Python/Rust（覆蓋 90% 場景） |
+
+---
+
+## Phase 20：Auto-Fix Pipeline — 自動化修改驗證循環
+
+> 2026-06-12 規劃。借鏡 Aider 的 lint/test auto-fix loop。
+> 核心洞察：LLM 修改程式碼後常忘記跑測試，或需要 3-5 次 round trip 才能修好。
+> Server 端自動化「修改→驗證→修復」循環可省 60-80% round trips。
+
+### 核心問題
+
+```
+現狀：
+  LLM 修改 → 手動跑 test → 看到錯誤 → 再改 → 再跑（3-5 round trips）
+  每次 round trip 都要重新描述錯誤，浪費 token 和時間
+
+Aider 的做法：
+  每次修改後自動跑 linter + test suite
+  有錯誤 → 把錯誤餵回 LLM → 自動修正 → 循環直到通過
+```
+
+### 解決方案
+
+```
+Phase 20: smart_autofix MCP tool
+
+參數：
+  { fix, verify: ["test","lint","security"], maxRetries: 3, files: [...] }
+
+流程：
+  1. fast_apply 套用修改
+  2. 並行跑 test + lint + security
+  3. 全過 → 回傳成功
+  4. 有失敗 → 錯誤打包回傳 → LLM 修正 → 回到步驟 1
+  5. 超過 maxRetries → 回傳「已嘗試 N 次，需手動介入」
+```
+
+### 設計
+
+| 層面 | 作法 |
+|------|------|
+| **Plugin** | `src/plugins/standard/auto-fix.mjs`，handler-based |
+| **驗證** | 並行執行 test/lint/security（Promise.all） |
+| **循環** | Server 端內部循環，LLM 只看最終結果 |
+| **整合** | 不取代 fast_apply — auto_fix 是 fast_apply + verify 的組合 |
+| **Quality gate** | 每次修正都走 Phase 7 self-correction |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| Fix-verify round trips | 3-5 次 | 1 次呼叫（省 60-80%） |
+| 忘記跑測試 | 依賴 LLM 記憶 | Server 強制驗證 |
+| 安全修復驗證 | 改了但沒 rescan | auto_fix 強制 security rescan |
+
+---
+
+## Phase 21：Streaming Progress — 長執行工具進度回報
+
+> 2026-06-12 規劃。MCP protocol 原生支援 progress notifications，但 Smart MCP 未使用。
+> 優先級 P2 — 依賴 OpenCode client 端支援。
+
+### 設計
+
+| 層面 | 作法 |
+|------|------|
+| **實作** | 長執行工具（test/security/index build）註冊 progress callback |
+| **協議** | MCP notifications/progress |
+| **頻率** | 每 5 秒或每 10 個 test case 發一次 |
+| **內容** | 已跑 N/M tests, 目前失敗數, 最新失敗訊息 |
+
+---
+
+## Phase 22：Scheduled Background Tasks — 排程背景任務
+
+> 2026-06-12 規劃。借鏡 Cline (63K⭐) 的 cron scheduler。
+> 從「被動回應」變「主動守護」。
+
+### 設計
+
+| 層面 | 作法 |
+|------|------|
+| **工具** | `smart_schedule({command:"add"|"list"|"remove"})` |
+| **排程** | cron expression（node-cron 或自建） |
+| **儲存** | SQLite，任務結果存入 memory |
+| **場景** | 每日安全掃描、每週依賴更新檢查、commit hook 自動跑 test |
+
+---
+
+## Phase 23：Workflow Templates — 預設工具組合工作流
+
+> 2026-06-12 規劃。Smart MCP 有 61 個 tools，LLM 要自己記最佳組合。
+> workflow.mjs 和 compose-engine.mjs 已存在但曝光不足。
+
+### 設計
+
+| 層面 | 作法 |
+|------|------|
+| **工具** | `smart_workflow({command:"list"|"run"})` |
+| **Preset** | bug-fix, refactor, security-fix, pr-review, new-feature, onboard, doc-analysis |
+| **整合** | 基於現有 workflow.mjs + compose-engine.mjs |
+
+### Preset Workflows
+
+| Name | Steps |
+|------|-------|
+| `bug-fix` | error_diagnose → debug → fast_apply → test → memory_store |
+| `refactor` | import_graph → code_impact → rename_safety → fast_apply → test |
+| `security-fix` | smart_security → smart_think(beam) → fast_apply → test → rescan |
+| `pr-review` | git_diff → security_scan → code_impact → LSP diagnostics |
+| `new-feature` | planner → arch_overview → smart_think → fast_apply → test |
+| `onboard` | smart_learn → smart_rules → arch_overview → import_graph → test → security |
+| `doc-analysis` | ingest_document → search_docs → smart_deep_think |
+
+---
+
+## Phase 24：ADR — Architecture Decision Records
+
+> 2026-06-12 規劃。補 KG memory 的語意缺口。
+> KG 記 entity-relation（auth → depends_on → db），
+> ADR 記 decision-context（為什麼 auth 依賴 db 而不是 cache）。
+
+### 設計
+
+| 層面 | 作法 |
+|------|------|
+| **工具** | `smart_adr({command:"record"|"search"|"list"})` |
+| **儲存** | SQLite（共用 memory.db） |
+| **欄位** | title, context, decision, alternatives[], consequences |
+| **整合** | 與 KG 互補：KG 記結構，ADR 記決策脈絡 |
+
+### 預期成效
+
+- 跨 session 保持設計一致性
+- 新 LLM session 理解專案設計脈絡
+- 避免重複討論已決定的架構問題
+
+---
+
+## 總優先級矩陣（Phase 19-24）
+
+| 優先級 | Phase | 項目 | 難度 | 估時 | 智慧提升 | Token 節省 |
+|:--:|:--:|------|:--:|:--:|:--:|:--:|
+| 🥇 P0 | 19 | **Codebase Index (Repo Map)** | 🟡 中 | 5-7d | 🎯🎯🎯 | 40-60% |
+| 🥇 P0 | 20 | **Auto-Fix Pipeline** | 🟡 中 | 3-5d | 🎯🎯🎯 | 60-80% |
+| 🥈 P1 | 23 | **Workflow Templates** | 🟢 低 | 1-2d | 🎯🎯 | 20-30% |
+| 🥈 P1 | 24 | **ADR** | 🟢 低 | 2-3d | 🎯🎯 | 間接 |
+| 🥈 P1 | 22 | **Scheduled Tasks** | 🟡 中 | 3-5d | 🎯 | 間接 |
+| 🥉 P2 | 21 | **Streaming Progress** | 🟡 中 | 2-3d | 🎯 | 間接 |
