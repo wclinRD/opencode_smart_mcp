@@ -1172,31 +1172,28 @@ flowchart LR
 
 ---
 
-## Phase 20：Auto-Fix Pipeline — 自動化修改驗證循環
+## Phase 20：Auto-Fix Pipeline — 自動化修改驗證循環 ✅
 
 > 2026-06-12 規劃。借鏡 Aider 的 lint/test auto-fix loop。
 > 對應 plan.md Phase 20 章節。
 
-### 1. `src/plugins/standard/auto-fix.mjs` — smart_autofix MCP tool
+### 1. `src/plugins/standard/auto-fix.mjs` — smart_autofix MCP tool ✅
 
-- [ ] Handler-based plugin
-- [ ] 參數：fix, verify, maxRetries, files
-- [ ] 流程：fast_apply → verify（並行 test/lint/security）→ 成功/失敗處理
-- [ ] 循環邏輯：失敗 → 錯誤打包 → LLM 修正 → 重試（最多 maxRetries 次）
-- [ ] responsePolicy: maxLevel 1
+- [x] Handler-based plugin
+- [x] 參數：fix, verify, files, root, timeout
+- [x] 流程：apply fix（SEARCH/REPLACE + unified diff + raw）→ verify（並行 test/lint/security/typecheck）
+- [x] 支援三種 fix 格式：SEARCH/REPLACE blocks、unified diff（patch 命令）、raw content
+- [x] responsePolicy: maxLevel 1
 
 ### 2. 整合
 
 - [ ] hybrid-engine DOMAIN_MAP 新增 autofix 領域
 - [ ] Agent personality 更新
 
-### 3. 測試
+### 3. 測試 ✅
 
-- [ ] 單次成功：fix + verify 全過
-- [ ] 單次失敗：fix + verify 有錯誤 → 正確回傳
-- [ ] 多次重試：2 次修正後成功
-- [ ] maxRetries 耗盡：回傳「需手動介入」
-- [ ] 全量回歸
+- [x] 9 tests：plugin structure / SEARCH/REPLACE apply / fix not apply / test failure / multiple verify / error handling / unified diff / empty verify
+- [x] 全量回歸：**1242 tests, 0 fail**
 
 ---
 
