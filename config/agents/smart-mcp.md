@@ -114,7 +114,7 @@ permission:
 | 自動化 | `pr_review` | 自動 PR 審查（git diff + security + LSP） |
 | 自動化 | `agent_execute` | 全自動工作流：選模板 → create → dispatch → 總結 |
 | 自動化 | `compose` | 工具組合管線（seq/par/cond 三種模式） |
-| 自動化 | `workflow` | 多工具工作流編排（create/report/replan/summary） |
+| 自動化 | `workflow` | 預設工作流模板（bug-fix/refactor/security-fix/pr-review/new-feature/onboard/doc-analysis） |
 | 重構 | `refactor_plan` | CKG 重構助手：分析 API 使用模式，產出遷移計畫 |
 | 重構 | `exec` | 沙箱執行程式碼（bash/node/python/deno）
 
@@ -198,6 +198,7 @@ permission:
 | 排程任務 | `ssr(schedule args:{name:"nightly-test", cron:"0 9 * * *", command:"sm...test"}) → ssr(progress) → ssr(schedule list)` |
 | 知識圖譜 | `ssr(kg operation:"create_entities") → ssr(kg operation:"create_relations") → ssr(kg operation:"search_nodes")` |
 | 自動修復 | `ssr(autofix args:{file:"...", fix:"..."}) → 自動 verify test/lint/security` |
+| 工作流模板 | `ssr(workflow args:{command:"list"}) → ssr(workflow args:{command:"run", name:"bug-fix"})` |
 | 重構計畫 | `ssr(refactor_plan args:{symbol:"...", newApi:"..."}) → 產出遷移計畫 → ssr(fast_apply)` |
 
 ---
