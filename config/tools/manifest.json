@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-13T00:01:08.033Z",
+  "generatedAt": "2026-06-13T03:13:40.856Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -2246,6 +2246,15 @@
       "inputSchema": {
         "type": "object",
         "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "run",
+              "verify"
+            ],
+            "description": "Execution mode: \"run\" (default) to execute, \"verify\" to validate code output (Phase 20)",
+            "default": "run"
+          },
           "language": {
             "type": "string",
             "enum": [
@@ -2258,7 +2267,7 @@
           },
           "code": {
             "type": "string",
-            "description": "Code to execute"
+            "description": "Code to execute or verify"
           },
           "permission": {
             "type": "string",
@@ -2279,10 +2288,25 @@
           "workdir": {
             "type": "string",
             "description": "Working directory (default: current project root)"
+          },
+          "expectedOutput": {
+            "type": "string",
+            "description": "Expected stdout substring (verify mode only)"
+          },
+          "testCases": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            },
+            "description": "Test cases for verification (verify mode only)"
+          },
+          "maxRetries": {
+            "type": "number",
+            "description": "Max retries on failure for verify mode (default: 1)",
+            "default": 1
           }
         },
         "required": [
-          "language",
           "code"
         ]
       }
@@ -2785,72 +2809,6 @@
       }
     },
     {
-      "name": "smart_edit",
-      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
-      "category": "standard",
-      "domain": "edit",
-      "safetyLevel": "high",
-      "routingRules": {
-        "autoRoute": true,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "file": {
-            "type": "string",
-            "description": "File path to edit (required)"
-          },
-          "oldString": {
-            "type": "string",
-            "description": "Text to find and replace (exact match by default, regex if regex=true)"
-          },
-          "newString": {
-            "type": "string",
-            "description": "Replacement text"
-          },
-          "files": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Multiple files to edit (alternative to file)"
-          },
-          "regex": {
-            "type": "boolean",
-            "description": "Use regex matching instead of exact (default: false)"
-          },
-          "apply": {
-            "type": "boolean",
-            "description": "Apply changes (default: false — dry run)"
-          },
-          "root": {
-            "type": "string",
-            "description": "Project root (default: current dir)"
-          },
-          "format": {
-            "type": "string",
-            "enum": [
-              "json",
-              "text"
-            ],
-            "description": "Output format (default: json — includes nextCommand)"
-          }
-        },
-        "required": [
-          "oldString",
-          "newString"
-        ]
-      }
-    },
-    {
       "name": "smart_hallucination_check",
       "description": "Check LLM output for hallucinations (fabrication, misattribution, unfaithful, self-contradiction, off-topic, confident-refusal).\n\nRuns 5 structural checks:\n  1. Factual — are mentioned identifiers present in context?\n  2. Consistency — are there internal contradictions?\n  3. Groundedness — can conclusions be traced to context?\n  4. Off-topic — does output address the query?\n  5. Confidence — overconfident language without evidence?\n\nDOI Verification mode (mode:\"doi\"):\n  Extracts all DOIs from the output and verifies each via doi.org liveness check.\n  Dead DOIs (404) = likely fabricated. Restricted (403) = paywalled but may exist.\n\nReturns: { overallScore: 1-10, verdict: \"pass\"|\"warn\"|\"fail\", issues[], summary }\n\nExamples:\n  { output: \"The bug is in parser.js...\", context: \"Error at parser.js:42\" }\n  { output: \"...\", query: \"Why does the parser crash?\", strictness: 7 }\n  { output: \"Smith (2024, doi:10.1234/fake) found...\", mode: \"doi\" }",
       "category": "standard",
@@ -3184,6 +3142,161 @@
       }
     },
     {
+      "name": "smart_edit",
+      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
+      "category": "standard",
+      "domain": "edit",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "File path to edit (required)"
+          },
+          "oldString": {
+            "type": "string",
+            "description": "Text to find and replace (exact match by default, regex if regex=true)"
+          },
+          "newString": {
+            "type": "string",
+            "description": "Replacement text"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Multiple files to edit (alternative to file)"
+          },
+          "regex": {
+            "type": "boolean",
+            "description": "Use regex matching instead of exact (default: false)"
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Apply changes (default: false — dry run)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: current dir)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "description": "Output format (default: json — includes nextCommand)"
+          }
+        },
+        "required": [
+          "oldString",
+          "newString"
+        ]
+      }
+    },
+    {
+      "name": "smart_edit_ast",
+      "description": "AST-aware code editor — more precise than smart_edit.\n\n  🥇 content-match — Context-aware replacement (whitespace-tolerant, shows surrounding code)\n  🥈 block-boundary — Line-range editing (insert/replace/delete at line boundaries)\n  🥉 symbol-edit — Edit within a specific symbol body (uses smart_read to locate)\n\n  Examples:\n    { mode: \"content-match\", file: \"src/auth.ts\", match: \"function login\", replace: \"function login(credentials)\" }\n    { mode: \"block-boundary\", file: \"src/auth.ts\", action: \"replace\", startLine: 10, endLine: 15, text: \"new code here\" }\n    { mode: \"symbol-edit\", file: \"src/auth.ts\", symbol: \"authenticate\", action: \"append\", text: \"  console.log('called');\" }",
+      "category": "standard",
+      "domain": "edit",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "File path (relative to root or absolute)"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "content-match",
+              "block-boundary",
+              "symbol-edit"
+            ],
+            "description": "Edit mode (default: content-match)"
+          },
+          "match": {
+            "type": "string",
+            "description": "Content to match (context-aware, trim-tolerant)"
+          },
+          "replace": {
+            "type": "string",
+            "description": "Replacement content (for content-match mode)"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "insert-before",
+              "insert-after",
+              "replace",
+              "delete"
+            ],
+            "description": "Block action (for block-boundary mode)"
+          },
+          "startLine": {
+            "type": "number",
+            "description": "Start line (1-indexed, for block-boundary mode)"
+          },
+          "endLine": {
+            "type": "number",
+            "description": "End line (inclusive, for block-boundary replace/delete)"
+          },
+          "text": {
+            "type": "string",
+            "description": "Text to insert (for block-boundary insert/replace)"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Symbol name to edit within (for symbol-edit mode)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: cwd)"
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Apply changes (default: false — dry run with diff)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "file"
+        ]
+      }
+    },
+    {
       "name": "smart_kg",
       "description": "Knowledge Graph memory — structured entity-relation storage.\nOperations: create_entities, create_relations, search_nodes, open_nodes, read_graph, delete_entities, delete_observations, delete_relations.\nUse when: need to remember structured relationships (who works on what, which module depends on which, etc.).\nComplements semantic memory (smart_memory_store) which is better for similarity search.",
       "category": "standard",
@@ -3333,6 +3446,63 @@
       }
     },
     {
+      "name": "smart_mcts_plan",
+      "description": "MCTS-based tool planning — uses Monte Carlo Tree Search to find the optimal tool chain for complex multi-step tasks.\nUse when: task requires 5+ steps, involves multiple files/tools, or static routing is uncertain.\nAvoid when: simple tasks with clear tool mappings (use smart_agent_recommend instead).",
+      "category": "standard",
+      "domain": "plan",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "string",
+            "description": "Task goal description"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Available tools to consider (default: all standard tools)"
+          },
+          "context": {
+            "type": "object",
+            "description": "Task context { workdir, args, previousResults }",
+            "additionalProperties": true
+          },
+          "maxIterations": {
+            "type": "number",
+            "description": "Max MCTS iterations (default: 100)",
+            "default": 100
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Timeout in ms (default: 30000)",
+            "default": 30000
+          },
+          "useFallback": {
+            "type": "boolean",
+            "description": "Fall back to static matching if MCTS times out (default: true)",
+            "default": true
+          }
+        },
+        "required": [
+          "goal"
+        ]
+      }
+    },
+    {
       "name": "smart_memory_store",
       "description": "Use when: need to store or retrieve past error resolutions, patterns, and learnings across sessions. Supports fuzzy matching + vector search (TF-IDF hybrid) — use vector=true for semantic matching across similar error messages. Use search first, add if not found. Also supports type:\"skill_patch\" for storing reusable behavior patterns (trigger_conditions + behavior_change + target_skill).",
       "category": "plan",
@@ -3462,6 +3632,10 @@
           "includeArchived": {
             "type": "boolean",
             "description": "Include archived entries in search/list results"
+          },
+          "agent": {
+            "type": "string",
+            "description": "Agent ID for cross-agent memory (e.g. \"claude-code\", \"opencode\", \"codex\"). Auto-detected from env if not specified. Use \"all\" to search across all agents."
           }
         },
         "required": [
@@ -4198,6 +4372,106 @@
         "required": [
           "type"
         ]
+      }
+    },
+    {
+      "name": "smart_read",
+      "description": "Progressive file reader — FULLY replaces raw read (text + dirs + images).\n  Session cache: same file unchanged = zero disk reads.\n\n  🥇 auto      — Smart mode by file size (<50 full, 50-300 sig, >300 outline)\n  📋 outline   — Structure: function/class/variable declarations + line numbers\n  📝 signatures — Structure + signature text + line ranges\n  🔍 symbol    — Extract specific symbol full body (by name)\n  🧠 explain   — Symbol + imports + callers in one call\n  📏 range     — Specific line range (startLine/endLine) + checksum\n  📄 full      — Traditional full read, offset/limit paging\n  📚 batch     — Read multiple files in one call\n  🗺  project   — Project symbol map <500 tokens\n  🖼  image     — PNG/JPG/GIF/WebP returned as viewable attachment\n  📁 directory  — Auto-detected, returns sorted listing\n\n  Output: text (default), compact, json\n  Session cache: repeat reads = zero disk I/O",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "File path (relative to root or absolute)"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "outline",
+              "signatures",
+              "symbol",
+              "explain",
+              "range",
+              "full",
+              "batch",
+              "list",
+              "project",
+              "image"
+            ],
+            "description": "Read mode (default: auto)"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Symbol name (required for mode:symbol | explain)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: cwd)"
+          },
+          "offset": {
+            "type": "number",
+            "description": "Starting line (1-indexed, for full mode)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max lines to read (for full/range mode)"
+          },
+          "startLine": {
+            "type": "number",
+            "description": "Start line (1-indexed, for range mode)"
+          },
+          "endLine": {
+            "type": "number",
+            "description": "End line (1-indexed, inclusive, for range mode)"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "File paths for batch mode"
+          },
+          "depth": {
+            "type": "number",
+            "description": "Max depth for project mode (default: 4)"
+          },
+          "maxFiles": {
+            "type": "number",
+            "description": "Max files for project mode (default: 40)"
+          },
+          "lang": {
+            "type": "string",
+            "description": "Force language (auto-detect if not provided)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "compact",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          },
+          "numbered": {
+            "type": "boolean",
+            "description": "Include line numbers (full/range mode, default: true)"
+          }
+        }
       }
     },
     {

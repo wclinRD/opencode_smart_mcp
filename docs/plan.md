@@ -1,6 +1,6 @@
 # Smart MCP — 完整強化路線圖
 
-> 最後更新：2026-06-13
+> 最後更新：2026-06-13 (M10 regression ✅)
 > 基於競爭品分析（smart-mcp、MCPlex、Continuum、Tool Compass、mcpflow-router、ReasonKit Think 等）
 > 與前沿技術研究（Structured CoT、MCTS Tool Planning、Meta-Reasoning、Self-Evolving Codegen 等）
 
@@ -301,7 +301,7 @@ Phase 20 改為：
 | M7 | Phase 22 (smart_edit_ast) 完成 | ✅ 2026-06-13 |
 | M8 | Phase 23 (smart_read 強化) 完成 | ✅ 2026-06-13 |
 | M9 | Phase 24 (Session Cache + Explain + Project Map) 完成 | ✅ 2026-06-13 |
-| M10 | 全量 regression + 效能 benchmark | ⏳ 待辦 |
+| M10 | 全量 regression + 效能 benchmark | ✅ 2026-06-13 |
 
 ---
 

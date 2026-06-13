@@ -38,7 +38,7 @@ describe('smart-mcp.md personality', () => {
     assert.ok(personality.includes('task 強制規則'));
     assert.ok(personality.includes('subagent 沒有 Smart MCP personality'));
     assert.ok(personality.includes('[Smart MCP Routing — injected by parent]'));
-    assert.ok(personality.includes('smart_lsp > smart_grep > raw grep/read'));
+    assert.ok(personality.includes('smart_lsp > smart_read > smart_grep > raw grep/read'));
     assert.ok(personality.includes('ssr(fast_apply)'));
     assert.ok(personality.includes('反例'));
     assert.ok(personality.includes('正例'));
