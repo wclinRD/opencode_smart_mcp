@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-13T07:48:08.018Z",
+  "generatedAt": "2026-06-13T10:18:36.848Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -470,6 +470,24 @@
               "json"
             ],
             "description": "Output format (default: text)"
+          },
+          "compress": {
+            "type": "string",
+            "enum": [
+              "none",
+              "caveman"
+            ],
+            "description": "Compress output to save tokens. \"caveman\" strips grammar, keeps facts (15-30% token savings). Default: none."
+          },
+          "compressLevel": {
+            "type": "string",
+            "enum": [
+              "light",
+              "semantic",
+              "aggressive",
+              "ultra"
+            ],
+            "description": "Caveman compression level. light=stop-words only, semantic=content selection, aggressive=full lemmatization, ultra=abbreviations+arrows (50-70% savings). Default: semantic."
           }
         },
         "required": [
@@ -524,6 +542,24 @@
               "json"
             ],
             "description": "Output format (default: text)"
+          },
+          "compress": {
+            "type": "string",
+            "enum": [
+              "none",
+              "caveman"
+            ],
+            "description": "Compress output to save tokens. \"caveman\" strips grammar, keeps facts (15-30% token savings). Default: none."
+          },
+          "compressLevel": {
+            "type": "string",
+            "enum": [
+              "light",
+              "semantic",
+              "aggressive",
+              "ultra"
+            ],
+            "description": "Caveman compression level. light=stop-words only, semantic=content selection, aggressive=full lemmatization, ultra=abbreviations+arrows (50-70% savings). Default: semantic."
           }
         },
         "required": [
