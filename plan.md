@@ -79,3 +79,102 @@ Phase 1:  →  6.2%（↓50%） AST 匹配解決空白/排版差異
 Phase 2:  →  3.1%（↓50%） diff-match-patch 捕撈剩餘
 Phase 3:  →  1.5%（↓50%） 自修復處理語法錯誤
 ```
+
+---
+
+# smart_grep 強化計畫
+
+## 背景
+2025-2026 年程式碼搜尋技術快速演進，業界共識為「grep 替代品不是一個工具，而是三個」：
+**lexical（文字）+ structural（結構）+ graph（關係圖）**。
+
+目前 smart_grep 是純 Node.js regex 搜尋引擎，無索引、無排名、無 semantic、無 tree-sitter。
+
+## 研究參考
+| 工具 | 核心技術 | 參考價值 |
+|------|---------|---------|
+| semble_rs | BM25 + Model2Vec hybrid, tree-sitter AST, code-aware reranking | ⭐⭐⭐ |
+| ColGREP | Identifier-aware BM25, camelCase 分割, NDCG +0.3 | ⭐⭐⭐ |
+| codixing | Trigram pre-filter (110x), BM25+PageRank, incremental sync | ⭐⭐⭐ |
+| Zoekt | Trigram 索引, sub-50ms, BM25 scoring | ⭐⭐ |
+| clew | Hybrid search, 7-type relationship graph, intent routing | ⭐⭐ |
+| Vectr | AST chunking, symbol graph, 6 fallback strategies | ⭐⭐ |
+| ripgrep 15 | SIMD Teddy, HIR bridge literal extraction (3.23x) | ⭐ |
+| ugrep 7.5 | Predict-match PM3+PM5, identifier-aware | ⭐ |
+
+## 路線圖
+
+```
+Phase 1 (2-3天)     Phase 2 (1週)       Phase 3 (2週)
+┌──────────────┐   ┌──────────────┐    ┌──────────────┐
+│ BM25排名     │ → │ worker_threads│ →  │ Trigram索引  │
+│ Identifier   │   │ 平行搜尋      │    │ Incremental  │
+│ Reranking    │   │ Tree-sitter   │    │ indexing     │
+│ 0 dep        │   │ +WASM dep     │    │ SQLite FTS5   │
+└──────────────┘   └──────────────┘    └──────────────┘
+```
+
+## Phase 1：排名與相關性（短期、高回報）
+- **實作時間**：2-3 天
+- **新依賴**：無（純 JS BM25）
+- **預期效果**：搜尋結果品質 ↑50%，LLM token 浪費 ↓30%
+
+### 實作內容
+1. **BM25 排名** — 對 searchFiles 結果做 BM25 相關性排序
+   - 參考 Zoekt BM25Scoring、codixing BM25+PageRank
+   - 支援 `--rank bm25` / `--rank none` 參數
+2. **Identifier-aware tokenization** — camelCase/PascalCase/snake_case 分割
+   - 參考 ColGREP IdentifierAware tokenizer
+   - 查詢 `parseRequest` 自動匹配 `parse_request`、`parse request`
+3. **Code-aware reranking signals**
+   - Definition boost：符號定義行 +0.25 權重
+   - Test demotion：test/spec 檔案 -0.30 權重
+   - File-coherence boost：同檔案多匹配 +0.20 權重
+   - 參考 semble_rs ranking signals
+
+## Phase 2：效能與精準度（中期）
+- **實作時間**：1 週
+- **新依賴**：`web-tree-sitter` + `tree-sitter-wasms`
+- **預期效果**：大型專案搜尋 3-5x 加速，scope 精準度 ↑80%
+
+### 實作內容
+1. **worker_threads 平行搜尋** — 多核加速檔案掃描
+   - 參考 ripgrep rayon work-stealing
+2. **Tree-sitter AST scope detection** — 取代 regex 猜測
+   - 支援 JS/TS/Python/Rust/Go/PHP/Ruby/Java
+   - 精準定位函式/類別/介面邊界
+3. **AST-aware chunking** — 以語法單元為搜尋單位
+   - 參考 semble_rs、clew tree-sitter chunking
+
+## Phase 3：索引與增量（長期）
+- **實作時間**：2 週
+- **新依賴**：`better-sqlite3`
+- **預期效果**：大型專案搜尋 10-50x 加速
+
+### 實作內容
+1. **Trigram 索引** — 基於 SQLite FTS5 或自建
+   - 參考 Zoekt trigram 設計、codixing trigrep
+   - 支援 `--index build` / `--index search` / `--index update`
+2. **Incremental indexing** — mtime 或 git diff 增量
+   - 參考 code-indexer Merkle tree sync
+3. **Trigram pre-filtering** — 搜尋前先過濾不相關檔案
+   - 參考 codixing 110x literal grep 加速
+
+## 長期展望（Phase 4+）
+- Hybrid BM25 + Semantic search（需 embedding model）
+- Call graph / Dependency graph traversal
+- SIMD 加速（WASM SIMD 或 native addon）
+
+---
+
+# exa_search 提升至 Layer 1
+
+## 背景
+exa_search 目前是 Layer 2 sub-tool，需透過 `ssr({tool:"exa_search", args:{...}})` 呼叫。
+但它是獨立搜尋工具，不依賴其他工具，使用頻率高，與 smart_grep 同為搜尋類。
+
+## 變更
+- 將 exa_search 從 Layer 2 提升至 Layer 1（Direct MCP tool）
+- 新增 `smart_exa_search` 直接呼叫介面
+- 參數：`{query, numResults?, maxChars?, command?}`
+- 保留 `ssr({tool:"exa_search"})` 向後相容

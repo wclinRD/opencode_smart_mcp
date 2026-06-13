@@ -40,3 +40,69 @@
 - [ ] `npm test` 全部通過
 - [ ] 更新 agent 設定（如有需要）
 - [ ] git commit & push
+
+---
+
+# smart_grep 強化待辦清單
+
+## Phase 1：排名與相關性（2-3 天）
+- [ ] 建立 `src/lib/bm25.mjs` — 純 JS BM25 實作
+  - [ ] `tokenize(text)` — 支援 identifier-aware 分割（camelCase/PascalCase/snake_case）
+  - [ ] `bm25Score(query, doc)` — BM25 相關性分數計算
+  - [ ] `rankResults(results, query)` — 對搜尋結果排序
+- [ ] 整合到 `contextual-grep.mjs`
+  - [ ] 新增 `--rank bm25` / `--rank none` CLI 參數
+  - [ ] 預設啟用 BM25 排名
+- [ ] Code-aware reranking signals
+  - [ ] `definitionBoost(match)` — 符號定義行 +0.25
+  - [ ] `testDemotion(filePath)` — test/spec 檔案 -0.30
+  - [ ] `fileCoherenceBoost(fileResults)` — 同檔案多匹配 +0.20
+- [ ] 測試：BM25 排名正確性
+- [ ] 測試：identifier-aware tokenization（camelCase/snake_case）
+
+## Phase 2：效能與精準度（1 週）
+- [ ] `npm install web-tree-sitter tree-sitter-wasms`
+- [ ] 建立 `src/lib/tree-sitter-scope.mjs`
+  - [ ] `initParser(lang)` — lazy WASM 載入
+  - [ ] `getEnclosingScope(content, line)` — AST 精準 scope
+  - [ ] `extractSymbols(content, lang)` — AST 符號提取
+- [ ] worker_threads 平行搜尋
+  - [ ] 建立 `src/lib/parallel-search.mjs`
+  - [ ] 檔案分組 → worker pool → 合併結果
+- [ ] 整合到 `contextual-grep.mjs`
+  - [ ] `--with-scope` 改用 tree-sitter（fallback regex）
+  - [ ] `--parallel` 啟用 worker_threads
+- [ ] 測試：5 語言 AST scope 精準度
+- [ ] 測試：平行搜尋效能（vs 單線程）
+
+## Phase 3：索引與增量（2 週）
+- [ ] `npm install better-sqlite3`
+- [ ] 建立 `src/lib/trigram-index.mjs`
+  - [ ] `buildIndex(root)` — 建立 trigram 索引
+  - [ ] `searchIndex(query)` — trigram 查詢
+  - [ ] `updateIndex(changedFiles)` — 增量更新
+- [ ] Trigram pre-filtering
+  - [ ] 搜尋前用 trigram 過濾不相關檔案
+  - [ ] 參考 codixing trigrep 110x 加速
+- [ ] 整合到 `contextual-grep.mjs`
+  - [ ] `--index build|search|update` CLI 參數
+  - [ ] 自動偵測索引是否存在
+- [ ] 測試：索引建立與查詢正確性
+- [ ] 測試：incremental update 正確性
+- [ ] Benchmark：大型專案（10K+ files）搜尋效能
+
+## 驗證與交付
+- [ ] `npm test` 全部通過
+- [ ] 更新 smart_grep plugin description
+- [ ] git commit & push
+
+---
+
+# exa_search 提升至 Layer 1
+
+- [ ] 建立 `src/plugins/search/exa-search.mjs` plugin 定義
+- [ ] 在 MCP server 註冊為 Direct MCP tool（`smart_exa_search`）
+- [ ] 更新 agent system prompt 路由規則
+- [ ] 保留 `ssr({tool:"exa_search"})` 向後相容
+- [ ] 測試：直接呼叫 `smart_exa_search({query:"..."})`
+- [ ] git commit & push
