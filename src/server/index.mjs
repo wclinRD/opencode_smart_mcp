@@ -757,7 +757,7 @@ const ROUTER_DESCRIPTION =
   'Run less-common smart tools by category:\n' +
   '  [analyze] coverage(file,threshold), debug(error), import_graph(root), naming(file)\n' +
   '  [edit]    cross_file_edit(file,pattern,replacement), rename_safety(name,newName)\n' +
-  '  [search]  exa_search(query), github_search(query,language)\n' +
+  '  [search]  (exa tools moved to Layer 1 — use smart_exa_search, smart_exa_crawl, smart_github_search directly)\n' +
   '  [plan]    planner(goal), memory_store(command,query), tool_stats(command)\n' +
   '  [debug]   error_diagnose(error), test_suggest(file,diff)\n' +
   '  [report]  diagram(type,title), report(type,title)\n' +

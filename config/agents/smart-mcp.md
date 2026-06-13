@@ -12,7 +12,7 @@ permission:
   # ⛔ 以下工具被禁用 → 強制走 Smart MCP 層
   edit: deny        # 強制使用 ssr(fast_apply)、ssr(edit) 或 ssr(edit_ast) — patch-based 更精確省 token
   grep: deny        # 強制使用 smart_grep — 回傳 scope/imports/context
-  webfetch: deny   # 強制使用 ssr(ingest_document) + exa_search — 更省 token
+  webfetch: deny   # 強制使用 smart_exa_search + smart_exa_crawl — 更省 token
   
   # ── Smart MCP 層（Layer 1 直接工具）──
   smart_smart_run: allow    # Sub-tools 路由入口
@@ -30,9 +30,12 @@ permission:
   smart_academic_search: allow     # 學術文獻搜尋
   smart_academic_review: allow     # 同儕審查
   smart_docx_generate: allow       # DOCX 生成
-  
+  smart_exa_search: allow         # 🥇 網路搜尋（取代 websearch/webfetch）
+  smart_exa_crawl: allow          # 🥇 網頁爬取（clean/markdown/chunk/crawlee）
+  smart_github_search: allow      # 🥇 GitHub 程式碼搜尋
+
   # ── 其他工具 ──
-  websearch: allow      # 網路搜尋（exa_search fallback）
+  websearch: deny       # 強制使用 smart_exa_search
   bash:                 
     node: allow
     npm: allow
@@ -80,6 +83,9 @@ permission:
 | `smart_academic_search({source, query?, doi?})` | **學術文獻搜尋** — OpenAlex/Crossref/Semantic Scholar/Unpaywall。支援 DOI 解析、OA 檢查、MDPI 過濾 |
 | `smart_academic_review({text, mode?})` | **學術同儕審查** — Remi 10-point framework（Nature/Science 等級）。`mode:"prompt"` 回傳審查提示，`mode:"template"` 回傳填空模板 |
 | `smart_docx_generate({title, sections?, references?})` | **DOCX 生成** — APA 7th 格式化 Word 文件。含 hanging indent 參考文獻、標題階層、表格 |
+| `smart_exa_search({command, query, numResults?})` | 🥇 **網路搜尋** — `command:"search"` 網頁搜尋，`command:"code"` 程式碼範例搜尋。完全取代 websearch/webfetch |
+| `smart_exa_crawl({urls, clean?, markdown?, chunk?})` | 🥇 **網頁爬取** — 支援 clean（去廣告導覽）、markdown（LLM 友善）、chunk（長文分段）、crawlee（JS 網站）、render（Playwright）|
+| `smart_github_search({query, repo?, language?})` | 🥇 **GitHub 程式碼搜尋** — 搜尋 public GitHub repos，支援 repo/path/language 過濾 |
 
 > **💡 快思 vs 慢想**：`smart_think`（🥇 預設 `mode:"cit"`）是來回對話式推理。`smart_deep_think`（慢想 + 模板）是單次完整深度分析。不確定 root cause 或有多種可能 → `think`。需要系統性完整評估 → `deep_think`。
 

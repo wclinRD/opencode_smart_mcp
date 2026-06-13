@@ -98,11 +98,11 @@
 
 ---
 
-# exa_search 提升至 Layer 1
+# exa 工具全系列提升至 Layer 1 ✅
 
-- [ ] 建立 `src/plugins/search/exa-search.mjs` plugin 定義
-- [ ] 在 MCP server 註冊為 Direct MCP tool（`smart_exa_search`）
-- [ ] 更新 agent system prompt 路由規則
-- [ ] 保留 `ssr({tool:"exa_search"})` 向後相容
-- [ ] 測試：直接呼叫 `smart_exa_search({query:"..."})`
-- [ ] git commit & push
+- [x] 搬移 `exa_search.mjs` → `src/plugins/core/`
+- [x] 搬移 `exa_crawl.mjs` → `src/plugins/core/`
+- [x] 搬移 `github_search.mjs` → `src/plugins/core/`
+- [x] 更新 `config/agents/smart-mcp.md`：Layer 1 表格 + 權限 + webfetch/websearch 引用
+- [x] 更新 `src/server/index.mjs` ROUTER_DESCRIPTION
+- [x] git commit & push

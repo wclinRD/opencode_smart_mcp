@@ -167,14 +167,24 @@ Phase 1 (2-3天)     Phase 2 (1週)       Phase 3 (2週)
 
 ---
 
-# exa_search 提升至 Layer 1
+# exa 工具全系列提升至 Layer 1 ✅
 
 ## 背景
-exa_search 目前是 Layer 2 sub-tool，需透過 `ssr({tool:"exa_search", args:{...}})` 呼叫。
-但它是獨立搜尋工具，不依賴其他工具，使用頻率高，與 smart_grep 同為搜尋類。
+exa_search、exa_crawl、github_search 原本是 Layer 2 sub-tools，需透過 `ssr()` 呼叫。
+但它們都是獨立搜尋工具，不依賴其他工具，使用頻率高。
 
-## 變更
-- 將 exa_search 從 Layer 2 提升至 Layer 1（Direct MCP tool）
-- 新增 `smart_exa_search` 直接呼叫介面
-- 參數：`{query, numResults?, maxChars?, command?}`
-- 保留 `ssr({tool:"exa_search"})` 向後相容
+## 已完成變更
+- ✅ 搬移 `exa_search.mjs` → `src/plugins/core/`（Layer 1）
+- ✅ 搬移 `exa_crawl.mjs` → `src/plugins/core/`（Layer 1）
+- ✅ 搬移 `github_search.mjs` → `src/plugins/core/`（Layer 1）
+- ✅ 更新 `config/agents/smart-mcp.md`：Layer 1 表格 + 權限
+- ✅ 更新 `src/server/index.mjs` ROUTER_DESCRIPTION
+- ✅ 保留 `ssr({tool:"exa_search"})` 向後相容（routerTools 仍可透過 smart_run 呼叫）
+
+## 使用方式
+```
+# 直接呼叫（Layer 1）
+smart_exa_search({command:"search", query:"latest AI news"})
+smart_exa_crawl({urls:"https://example.com", clean:true, markdown:true})
+smart_github_search({query:"useState", language:"typescript"})
+```
