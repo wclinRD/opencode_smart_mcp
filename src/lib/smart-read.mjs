@@ -1,17 +1,21 @@
 // smart-read.mjs — 漸進式檔案讀取引擎
 //
-// 四種模式減少 60-80% file read token：
+// 七種模式減少 60-80% file read token：
+//   auto       — 依檔案大小自動選擇最佳模式（新預設）
 //   outline    — 檔案結構輪廓（function/class/const 宣告）
 //   signatures — 比 outline 多包含 signature 行（+line range）
 //   symbol     — 只抽取特定 symbol 的完整 body
+//   range      — 指定行範圍讀取（startLine/endLine）
 //   full       — 傳統完整讀取（fallback）
+//   batch      — 一次讀取多個檔案
 //
 // 支援語言偵測（extension-based），針對 JS/TS/Python/Go/Rust 有最佳化 pattern。
 // 其他語言以通用 pattern 作為 fallback。
 
-import { readFileSync, existsSync } from 'node:fs';
-import { extname, resolve, relative } from 'node:path';
+import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
+import { extname, resolve, relative, basename } from 'node:path';
 import { cwd } from 'node:process';
+import { createHash } from 'node:crypto';
 
 // ---------------------------------------------------------------------------
 // Language-specific extraction patterns
@@ -412,6 +416,51 @@ function findBodyEnd(lines, startLine, lang) {
   return startLine + 1;
 }
 
+/**
+ * List directory contents (replaces raw read for directories).
+ * Returns entries with trailing `/` for subdirectories.
+ */
+function listDirectory(dirPath, root, opts) {
+  const relPath = relative(root, dirPath);
+  const entries = readdirSync(dirPath);
+
+  // Sort: directories first, then files, both alphabetical
+  const items = entries
+    .map(name => {
+      const full = resolve(dirPath, name);
+      let isDir = false;
+      try { isDir = statSync(full).isDirectory(); } catch { /* ignore */ }
+      return { name: isDir ? name + '/' : name, isDir };
+    })
+    .sort((a, b) => {
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+
+  return {
+    status: 'ok',
+    mode: 'list',
+    file: relPath || '.',
+    isDirectory: true,
+    totalEntries: items.length,
+    data: items.map(i => i.name),
+    lines: items.length,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Content hash for integrity verification
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute SHA-256 hash of file content.
+ * Returns hex string for integrity verification (edits can confirm they're
+ * editing the same content the LLM read).
+ */
+export function hashContent(content) {
+  return createHash('sha256').update(content, 'utf-8').digest('hex').slice(0, 16);
+}
+
 // ---------------------------------------------------------------------------
 // Main API
 // ---------------------------------------------------------------------------
@@ -425,20 +474,30 @@ export class SmartReader {
    * Read a file with progressive detail.
    *
    * @param {object} opts
-   * @param {string} opts.filePath - Absolute or relative path
-   * @param {string} [opts.mode='outline'] - 'outline' | 'signatures' | 'symbol' | 'full'
+   * @param {string} opts.filePath - Absolute or relative path (or files[] for batch)
+   * @param {string} [opts.mode='auto'] - 'auto'|'outline'|'signatures'|'symbol'|'range'|'full'|'batch'
    * @param {string} [opts.symbol] - Symbol name (required for mode:'symbol')
    * @param {string} [opts.root] - Project root (for relative paths)
    * @param {number} [opts.maxLines] - Max lines for full mode (default: 2000)
    * @param {number} [opts.offset] - Line offset for full mode (1-indexed)
    * @param {number} [opts.limit] - Line limit for full mode
    * @param {string} [opts.lang] - Force language (auto-detect if not provided)
-   * @returns {{ status, mode, file, lang, lines, totalLines, data, error? }}
+   * @param {number} [opts.startLine] - Start line for range mode (1-indexed)
+   * @param {number} [opts.endLine] - End line for range mode (1-indexed, inclusive)
+   * @param {string[]} [opts.files] - File paths for batch mode
+   * @param {object} [opts.thresholds] - Auto-mode thresholds: {full, signatures}
+   * @returns {{ status, mode, file, lang, lines, totalLines, data, error?, checksum? }}
    */
   async read(opts) {
     const root = opts.root || cwd();
+    const mode = opts.mode || 'auto';
+
+    // ── Batch mode: read multiple files ──
+    if (mode === 'batch') {
+      return this.readBatch(opts);
+    }
+
     const filePath = resolve(root, opts.filePath);
-    const mode = opts.mode || 'outline';
 
     if (!existsSync(filePath)) {
       return {
@@ -447,6 +506,12 @@ export class SmartReader {
         mode,
         file: opts.filePath,
       };
+    }
+
+    // Handle directory paths
+    const stat = statSync(filePath);
+    if (stat.isDirectory()) {
+      return listDirectory(filePath, root, opts);
     }
 
     const content = readFull(filePath);
@@ -463,6 +528,19 @@ export class SmartReader {
 
     try {
       switch (mode) {
+        // ── Auto: select best mode by file size ──
+        case 'auto': {
+          const thresholds = opts.thresholds || {};
+          const fullThreshold = thresholds.full ?? 50;
+          const sigThreshold = thresholds.signatures ?? 300;
+          const autoMode = totalLines < fullThreshold ? 'full'
+            : totalLines < sigThreshold ? 'signatures'
+            : 'outline';
+          // Re-call with determined mode (OS cache makes re-read negligible)
+          return this.read({ ...opts, mode: autoMode });
+        }
+
+        // ── Outline: function/class/variable declarations ──
         case 'outline': {
           const outline = generateOutline(content, lang);
           const lines = countLinesForOutline(outline);
@@ -471,6 +549,7 @@ export class SmartReader {
           break;
         }
 
+        // ── Signatures: outline + signature lines + ranges ──
         case 'signatures': {
           const signatures = generateSignatures(content, lang);
           const lines = countLinesForSignatures(signatures);
@@ -479,6 +558,7 @@ export class SmartReader {
           break;
         }
 
+        // ── Symbol: extract one symbol's full body ──
         case 'symbol': {
           if (!opts.symbol) {
             return { ...result, status: 'error', error: 'symbol name required for symbol mode' };
@@ -487,7 +567,6 @@ export class SmartReader {
           if (!symbolData) {
             return { ...result, status: 'error', error: `Symbol "${opts.symbol}" not found`, data: null };
           }
-          // Also provide context lines around the symbol
           const lines = content.split('\n');
           const symbolLines = lines.slice(symbolData.lineStart - 1, symbolData.lineEnd);
           const lineCount = symbolLines.length;
@@ -496,22 +575,56 @@ export class SmartReader {
           break;
         }
 
+        // ── Range: read specific line range ──
+        case 'range': {
+          const lines = content.split('\n');
+          const startLine = opts.startLine || 1;
+          const endLine = opts.endLine || Math.min(startLine + 100, lines.length);
+          const clampEnd = Math.min(endLine, lines.length);
+          const slice = lines.slice(startLine - 1, clampEnd);
+          const numbered = opts.numbered !== false;
+          result.data = numbered
+            ? slice.map((line, i) => `${startLine + i}: ${line}`).join('\n')
+            : slice.join('\n');
+          result.lines = slice.length;
+          result.offset = startLine;
+          result.limit = clampEnd;
+          result.numbered = numbered;
+          result.checksum = hashContent(slice.join('\n'));
+          break;
+        }
+
+        // ── List: show directory or file info ──
+        case 'list': {
+          if (!stat.isDirectory()) {
+            result.data = [{ name: basename(filePath), type: 'file', size: stat.size }];
+            result.lines = 1;
+          }
+          break;
+        }
+
+        // ── Full: traditional complete read ──
         case 'full': {
           const lines = content.split('\n');
           const offset = opts.offset || 1;
           const limit = opts.limit || lines.length;
           const maxLines = opts.maxLines || 2000;
+          const numbered = opts.numbered !== false;
 
           const slice = lines.slice(offset - 1, offset - 1 + Math.min(limit, maxLines));
-          result.data = slice.join('\n');
+          result.data = numbered
+            ? slice.map((line, i) => `${offset + i}: ${line}`).join('\n')
+            : slice.join('\n');
           result.lines = slice.length;
           result.offset = offset;
           result.limit = Math.min(limit, maxLines);
+          result.numbered = numbered;
+          result.checksum = hashContent(content);
           break;
         }
 
         default: {
-          return { ...result, status: 'error', error: `Unknown mode: ${mode}. Use outline|signatures|symbol|full` };
+          return { ...result, status: 'error', error: `Unknown mode: ${mode}. Use auto|outline|signatures|symbol|range|full|batch|list` };
         }
       }
     } catch (err) {
@@ -519,6 +632,44 @@ export class SmartReader {
     }
 
     return result;
+  }
+
+  /**
+   * Batch read multiple files in one call.
+   * Each entry in opts.files can be a string (path) or object ({filePath, mode?, symbol?, ...}).
+   * Results ordered same as input; error entries included per-file.
+   */
+  async readBatch(opts) {
+    const entries = opts.files || (opts.filePath ? [opts.filePath] : []);
+    if (entries.length === 0) {
+      return {
+        status: 'error',
+        mode: 'batch',
+        error: 'No files specified. Use files:["file1","file2"] or set mode differently.',
+        results: [],
+      };
+    }
+
+    const results = [];
+    for (const entry of entries) {
+      const entryOpts = typeof entry === 'string'
+        ? { filePath: entry, mode: opts.entryMode || opts.mode || 'auto', root: opts.root }
+        : { ...entry, root: opts.root };
+
+      const r = await this.read(entryOpts);
+      results.push(r);
+    }
+
+    const okCount = results.filter(r => r.status === 'ok').length;
+    return {
+      status: 'ok',
+      mode: 'batch',
+      file: opts.filePath || entries.join(', '),
+      totalFiles: entries.length,
+      okCount,
+      errorCount: entries.length - okCount,
+      results,
+    };
   }
 }
 

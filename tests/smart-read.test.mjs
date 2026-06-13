@@ -16,6 +16,7 @@ import {
   generateOutline,
   generateSignatures,
   extractSymbol,
+  hashContent,
 } from '../src/lib/smart-read.mjs';
 
 // ---------------------------------------------------------------------------
@@ -596,6 +597,198 @@ describe('File error handling', () => {
     const result = await reader.read({ filePath: '/tmp/smart-read-nonexistent-12345.js' });
     assert.equal(result.status, 'error');
     assert.ok(result.error.length > 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Auto Mode Tests (Phase 23)
+// ---------------------------------------------------------------------------
+
+describe('Auto mode (size-based selection)', () => {
+  const reader = new SmartReader();
+  const tmpDir = mkdtempSync(join(tmpdir(), 'smart-read-auto-'));
+
+  // Small file: < 50 lines → should select 'full'
+  const smallFile = join(tmpDir, 'small.js');
+  writeFileSync(smallFile, `const a = 1;\nconst b = 2;\nconst c = 3;\nconst d = 4;\n`, 'utf-8');
+
+  // Medium file: 50-300 lines → should select 'signatures'
+  const mediumLines = [];
+  for (let i = 0; i < 80; i++) mediumLines.push(`function fn${i}() {\n  return ${i};\n}`);
+  const mediumFile = join(tmpDir, 'medium.js');
+  writeFileSync(mediumFile, mediumLines.join('\n'), 'utf-8');
+
+  // Large file: > 300 lines → should select 'outline'
+  const largeLines = [];
+  for (let i = 0; i < 120; i++) largeLines.push(`function longFn${i}() {\n  return ${i};\n}`);
+  const largeFile = join(tmpDir, 'large.js');
+  writeFileSync(largeFile, largeLines.join('\n'), 'utf-8');
+
+  it('should select full for small files (< 50 lines)', async () => {
+    const result = await reader.read({ filePath: smallFile, mode: 'auto' });
+    assert.equal(result.status, 'ok');
+    assert.equal(result.mode, 'full');
+    assert.ok(typeof result.data === 'string');
+  });
+
+  it('should select signatures for medium files (50-300 lines)', async () => {
+    const result = await reader.read({ filePath: mediumFile, mode: 'auto' });
+    assert.equal(result.status, 'ok');
+    assert.equal(result.mode, 'signatures');
+    assert.ok(Array.isArray(result.data));
+  });
+
+  it('should select outline for large files (> 300 lines)', async () => {
+    const result = await reader.read({ filePath: largeFile, mode: 'auto' });
+    assert.equal(result.status, 'ok');
+    assert.equal(result.mode, 'outline');
+    assert.ok(Array.isArray(result.data));
+  });
+
+  it('should respect custom thresholds', async () => {
+    // With thresholds.full=100, the 4-line file should still be 'full'
+    const result = await reader.read({
+      filePath: smallFile,
+      mode: 'auto',
+      thresholds: { full: 100, signatures: 200 },
+    });
+    assert.equal(result.status, 'ok');
+    assert.equal(result.mode, 'full');
+  });
+
+  after(() => {
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Range Mode Tests (Phase 23)
+// ---------------------------------------------------------------------------
+
+describe('Range mode', () => {
+  const reader = new SmartReader();
+  const tmpDir = mkdtempSync(join(tmpdir(), 'smart-read-range-'));
+
+  const lines = [];
+  for (let i = 1; i <= 50; i++) lines.push(`line ${i}`);
+  const testFile = join(tmpDir, 'range-test.js');
+  writeFileSync(testFile, lines.join('\n'), 'utf-8');
+
+  it('should read specified line range', async () => {
+    const result = await reader.read({ filePath: testFile, mode: 'range', startLine: 5, endLine: 10 });
+    assert.equal(result.status, 'ok');
+    assert.equal(result.mode, 'range');
+    assert.equal(result.lines, 6);
+    assert.ok(result.data.includes('5: line 5'));
+    assert.ok(result.data.includes('10: line 10'));
+  });
+
+  it('should default to lines 1-100 when no range specified', async () => {
+    const result = await reader.read({ filePath: testFile, mode: 'range' });
+    assert.equal(result.status, 'ok');
+    assert.equal(result.lines, 50); // All 50 lines (file < 100)
+    assert.ok(result.data.includes('1: line 1'));
+  });
+
+  it('should include content checksum', async () => {
+    const result = await reader.read({ filePath: testFile, mode: 'range', startLine: 1, endLine: 3 });
+    assert.equal(result.status, 'ok');
+    assert.ok(result.checksum, 'checksum missing');
+    assert.equal(typeof result.checksum, 'string');
+    assert.equal(result.checksum.length, 16); // sha256 hex, truncated to 16
+  });
+
+  it('should support numbered:false', async () => {
+    const result = await reader.read({ filePath: testFile, mode: 'range', startLine: 5, endLine: 7, numbered: false });
+    assert.equal(result.status, 'ok');
+    assert.ok(result.data.includes('line 5'));
+    assert.ok(!result.data.includes('5:'));
+  });
+
+  after(() => {
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Batch Mode Tests (Phase 23)
+// ---------------------------------------------------------------------------
+
+describe('Batch mode', () => {
+  const reader = new SmartReader();
+  const tmpDir = mkdtempSync(join(tmpdir(), 'smart-read-batch-'));
+
+  const fileA = join(tmpDir, 'a.js');
+  const fileB = join(tmpDir, 'b.js');
+  const fileC = join(tmpDir, 'c.js'); // Will not be created (error test)
+  writeFileSync(fileA, 'const x = 1;\n', 'utf-8');
+  writeFileSync(fileB, 'function foo() { return 2; }\n', 'utf-8');
+
+  it('should read multiple files', async () => {
+    const result = await reader.readBatch({ files: [fileA, fileB], root: tmpDir });
+    assert.equal(result.status, 'ok');
+    assert.equal(result.mode, 'batch');
+    assert.equal(result.totalFiles, 2);
+    assert.equal(result.okCount, 2);
+    assert.equal(result.errorCount, 0);
+    assert.equal(result.results.length, 2);
+    assert.equal(result.results[0].file, fileA);
+    assert.equal(result.results[1].file, fileB);
+  });
+
+  it('should handle mixed success/error', async () => {
+    const result = await reader.readBatch({ files: [fileA, fileC, fileB] });
+    assert.equal(result.status, 'ok');
+    assert.equal(result.totalFiles, 3);
+    assert.equal(result.okCount, 2);
+    assert.equal(result.errorCount, 1);
+    assert.equal(result.results[1].status, 'error');
+  });
+
+  it('should error on empty files list', async () => {
+    const result = await reader.readBatch({ files: [] });
+    assert.equal(result.status, 'error');
+  });
+
+  after(() => {
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Content Hash Tests (Phase 23)
+// ---------------------------------------------------------------------------
+
+describe('hashContent', () => {
+  it('should produce consistent hashes', () => {
+    const h1 = hashContent('hello world');
+    const h2 = hashContent('hello world');
+    assert.equal(h1, h2);
+  });
+
+  it('should produce different hashes for different content', () => {
+    const h1 = hashContent('hello world');
+    const h2 = hashContent('hello world!');
+    assert.notEqual(h1, h2);
+  });
+
+  it('should return 16-char hex string', () => {
+    const h = hashContent('test content');
+    assert.equal(h.length, 16);
+    assert.match(h, /^[0-9a-f]+$/);
+  });
+
+  it('should include checksum in full mode', async () => {
+    const reader = new SmartReader();
+    const tmpDir = mkdtempSync(join(tmpdir(), 'smart-read-cksum-'));
+    const testFile = join(tmpDir, 'cksum.js');
+    writeFileSync(testFile, 'const a = 1;\nconst b = 2;\n', 'utf-8');
+
+    const result = await reader.read({ filePath: testFile, mode: 'full' });
+    assert.ok(result.checksum, 'checksum missing from full mode');
+    assert.equal(result.checksum.length, 16);
+
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 });
 

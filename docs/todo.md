@@ -377,7 +377,51 @@
 
 ---
 
-## Phase 16-22 里程碑
+## Phase 23：smart_read 強化（auto/range/batch/compact）✅
+
+> 參考：Arrayo/smart-context-mcp, rjkaes/trueline-mcp, breca/codemap, cline/cortex-works
+> 目標：讓 smart_read 比原生 read 更強大、更有效率
+
+### 23.1 研究：競爭品 smart read 功能比較（已完成）
+
+- [x] Arrayo/smart-context-mcp — batch 讀取、range mode、session context 恢復
+- [x] trueline-mcp — content hash 行驗證、大檔案自動轉向 smart_read
+- [x] breca/codemap — Tree-sitter AST SQLite 索引、漸進細節層級
+- [x] cortex-works — L1→L2→L3 漸進揭露、compact output
+
+### 23.2 實作：核心引擎強化
+
+- [x] `mode: "auto"` — 依檔案大小自動選模式（新預設！<50 full / 50-300 sig / >300 outline）
+- [x] `mode: "range"` — 指定行範圍讀取（startLine/endLine），附 content checksum
+- [x] `mode: "batch"` — 一次讀取多個檔案（files:["f1","f2"]），混合錯誤處理
+- [x] `hashContent()` — SHA-256 內容雜湊（16 hex），供編輯驗證用
+- [x] `thresholds` 自訂參數 — auto 模式 threshold 可設定
+
+### 23.3 實作：Plugin 強化
+
+- [x] 更新 inputSchema — 新增 mode:auto/range/batch、startLine/endLine、files
+- [x] `format: "compact"` — 零裝飾最小 token 輸出
+- [x] batch 模式輸出格式（進度摘要 + 各檔案預覽）
+- [x] range 模式輸出格式（含 checksum 顯示）
+- [x] Updated routing tips
+
+### 23.4 測試
+
+- [x] Auto mode tests（small→full, medium→sig, large→outline, custom thresholds）
+- [x] Range mode tests（specific range, default range, checksum, numbered:false）
+- [x] Batch mode tests（multiple files, mixed success/error, empty list）
+- [x] hashContent tests（consistency, different content, hex format）
+- [x] Full mode checksum test
+
+### 23.5 文件
+
+- [x] `docs/plan.md` — Phase 23 完成條目、長期願景重新編號
+- [x] `docs/todo.md` — Phase 23 完整追蹤、里程碑更新
+- [x] `config/agents/smart-mcp.md` — 路由規則更新
+
+---
+
+## Phase 16-23 里程碑
 
 | 里程碑 | 內容 | 預計日期 |
 |--------|------|---------|
@@ -388,7 +432,8 @@
 | M5 | Phase 20 完成（Verified Code Gen） | ✅ 2026-06-13 |
 | M6 | Phase 21 完成（smart_read） | ✅ 2026-06-13 |
 | M7 | Phase 22 完成（smart_edit_ast） | ✅ 2026-06-13 |
-| M8 | 全量 regression + 效能 benchmark | ⏳ 待辦 |
+| M8 | Phase 23 完成（smart_read 強化） | ✅ 2026-06-13 |
+| M9 | 全量 regression + 效能 benchmark | ⏳ 待辦 |
 
 ---
 
@@ -402,9 +447,10 @@ Phase 19 (Cross-Agent Memory)      — 相依 memory-db（已存在）
 Phase 20 (Verified Code Gen)       — 相依 smart_exec（已存在，Phase 10.1 ✅）
 Phase 21 (smart_read)              — 相依 src/lib/smart-read.mjs（新建）
 Phase 22 (smart_edit_ast)          — 相依 src/lib/smart-read.mjs（Phase 21）
+Phase 23 (smart_read 強化)         — 相依 src/lib/smart-read.mjs（Phase 21）
 ```
 
-**執行順序**：16 → 18 → 19（平行可做）→ 17 → 20 → 21 → 22
+**執行順序**：16 → 18 → 19（平行可做）→ 17 → 20 → 21 → 22 → 23
 
 ---
 

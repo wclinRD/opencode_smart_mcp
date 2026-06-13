@@ -289,6 +289,7 @@ Phase 20 改為：
 | 🥈 | **20** | Execution-Grounded Verification | 🟡 中 | 🟡 中（code 品質提升，可執行率 ~95%+） | ✅ 完成 (2026-06-13) |
 | 🥇 | **21** | smart_read — 漸進式檔案讀取 | 🟢 低 | 🔥 高（省 60-80% read token） | ✅ 完成 (2026-06-13) |
 | 🥈 | **22** | smart_edit_ast — AST 感知編輯 | 🟢 低 | 🟡 中（更精確的編輯，減少編輯錯誤） | ✅ 完成 (2026-06-13) |
+| 🥇 | **23** | smart_read 強化 — auto/range/batch/compact | 🟢 低 | 🔥 高（auto預設省token、range精準讀取、batch批量） | ✅ 完成 (2026-06-13) |
 
 ## 里程碑
 
@@ -297,7 +298,8 @@ Phase 20 改為：
 | M1-M5 | Phase 16-20 完成 | ✅ 2026-06-13 |
 | M6 | Phase 21 (smart_read) 完成 | ✅ 2026-06-13 |
 | M7 | Phase 22 (smart_edit_ast) 完成 | ✅ 2026-06-13 |
-| M8 | 全量 regression + 效能 benchmark | ⏳ 待辦 |
+| M8 | Phase 23 (smart_read 強化) 完成 | ✅ 2026-06-13 |
+| M9 | 全量 regression + 效能 benchmark | ⏳ 待辦 |
 
 ---
 
@@ -410,13 +412,52 @@ Phase 22 smart_edit_ast 改為：
 
 ---
 
-## 長期願景（Phase 23+）
+## Phase 23：smart_read 強化 ✅
+
+> 基於競爭品研究（Arrayo/smart-context-mcp, rjkaes/trueline-mcp, breca/codemap, cortex-works）
+> 讓 smart_read 比原生 read 更強大、更有效率
+
+### 新增功能
+
+| # | 功能 | 檔案 | 說明 |
+|---|------|------|------|
+| 1 | `mode: "auto"` | `src/lib/smart-read.mjs` | 依檔案大小自動選模式（新預設！）<50 lines → full, 50-300 → signatures, >300 → outline |
+| 2 | `mode: "range"` | `src/lib/smart-read.mjs` | 指定行範圍讀取（startLine/endLine），含 content checksum |
+| 3 | `mode: "batch"` | `src/lib/smart-read.mjs` | 一次讀取多個檔案，各自自動選模式，混和錯誤處理 |
+| 4 | Content hash | `src/lib/smart-read.mjs` | SHA-256 內容雜湊（16 hex），full/range 模式附帶，供編輯驗證 |
+| 5 | `format: "compact"` | `src/plugins/standard/smart-read.mjs` | 零裝飾最小 token 輸出（無 emoji、無分隔線） |
+| 6 | `numbered:false` | `src/lib/smart-read.mjs` | 可關閉行號（full/range 模式） |
+| 7 | `thresholds` param | `src/lib/smart-read.mjs` | auto 模式可自訂 threshold（如 thresholds: {full:100, signatures:200}） |
+
+### 研究參考
+
+| 來源 | 借鏡的功能 | 實作方式 |
+|------|-----------|---------|
+| **Arrayo/smart-context-mcp** | batch 讀取、range mode、inline range | 七種模式 + batch handler |
+| **trueline-mcp** | Content hash 行驗證 | SHA-256 hashContent() |
+| **breca/codemap** | Progressive detail levels（原有 outline→signatures→symbol→full） | 維持 + auto 模式自動階梯 |
+| **cortex-works** | L1→L2→L3 漸進揭露、compact output | auto mode 三階梯 + compact format |
+| **treesitter-mcp** | Token budget-aware 輸出 | `format:"compact"` 精簡輸出 |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| 預設使用體驗 | 需手動選 mode（outline） | auto 自動選最佳模式，省認知負擔 |
+| 精準讀取 | 需 offset/limit 計算 | range 直接指定 startLine/endLine |
+| 多檔案讀取 | 逐次呼叫 | batch 一次完成 |
+| 編輯安全 | 無原始內容驗證 | content checksum 確認編輯目標一致 |
+| Token 效率 | 固定輸出格式 | compact 零裝飾模式最小化 token |
+
+---
+
+## 長期願景（Phase 24+）
 
 | Phase | 名稱 | 說明 |
 |-------|------|------|
-| 23 | **External Cognitive Controller** | 參考 Meta-Reasoning — LLM 是 substrate，思考由外部治理。觀察思考軌跡 → 偵測 stall/redundancy → 強制分支或切換策略 |
-| 24 | **Self-Evolving Agent Prompts** | 參考 self-evolving-codegen — tool-strategy 的 pattern 匹配根據成功率自我進化 |
-| 25 | **Continuous Thought Vectors** | 參考 NeurIPS 2025 Coconut — 在 embedding 空間做推理（而非 token 空間） |
+| 24 | **External Cognitive Controller** | 參考 Meta-Reasoning — LLM 是 substrate，思考由外部治理。觀察思考軌跡 → 偵測 stall/redundancy → 強制分支或切換策略 |
+| 25 | **Self-Evolving Agent Prompts** | 參考 self-evolving-codegen — tool-strategy 的 pattern 匹配根據成功率自我進化 |
+| 26 | **Continuous Thought Vectors** | 參考 NeurIPS 2025 Coconut — 在 embedding 空間做推理（而非 token 空間） |
 
 ---
 

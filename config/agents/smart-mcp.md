@@ -72,7 +72,7 @@ permission:
 | `smart_context({command})` | Session 管理（含 context budget 查詢：`smart_context({command:"budget"})`） |
 | `smart_rules({file})` | 查詢專案規則（AGENTS.md / .cursorrules 等）— **編輯前必查** |
 | `smart_lsp({operation, file, line, character})` | **Type-aware 程式碼理解** — 找定義、查引用、看型別、診斷錯誤。支援 TS/JS/Python/Rust/Swift/PHP |
-| `smart_read({file, mode, symbol?, offset?, limit?})` | 🥇 **漸進式檔案讀取（優先於 raw read）** — `outline`（結構輪廓，省 90%+ token）、`signatures`（簽名行）、`symbol`（單一 symbol 主體）、`full`（完整，支援 offset/limit 分頁）。文字檔案一律用此工具；raw read 只用於目錄列表或二進位檔 |
+| `smart_read({file, mode?, symbol?, offset?, limit?, startLine?, endLine?, files?, format?, numbered?})` | 🥇 **漸進式檔案讀取（優先於 raw read）** — 七種模式：`auto`（依檔案大小自動選模式 🏆新預設）、`outline`（結構輪廓）、`signatures`（簽名行+行範圍）、`symbol`（單一 symbol 主體）、`range`（`startLine`/`endLine` 精準行範圍，附 checksum）、`full`（完整內容，支援 offset/limit 分頁）、`batch`（`files:["f1","f2"]` 一次讀多檔）。支援三種輸出格式：`text`（人類可讀）、`compact`（最小 token，無裝飾）、`json`（結構化）。文字檔案一律用此工具；raw read 只用於目錄列表或圖片/PDF |
 | `smart_compact({toolHistory})` | **零成本 context 壓縮** — 分析工具歷史，識別可安全丟棄或摘要的輸出。無 LLM 開銷 |
 | `smart_codebase_index({command})` | **持久化程式碼索引** — build/update/query/map/stats。用了之後 import_graph 自動快 5-50x |
 | `smart_hallucination_check({output, context?, query?})` | **輸出真實性驗證** — 檢查 LLM 輸出是否有幻覺（編造/錯誤歸因/偏離/矛盾/離題/過度自信）。`mode:"doi"` 可驗證文中 DOI 是否真實存在 |
@@ -202,8 +202,11 @@ permission:
 | 專案上手 | `smart_learn → smart_rules → smart_codebase_index({command:"build"}) → ssr(import_graph) → smart_test → smart_security` |
 | 索引程式碼 | `smart_codebase_index({command:"build"}) → smart_codebase_index({command:"map"}) → ssr(import_graph)` |
 | 查 Symbol | `smart_codebase_index({command:"query", symbol:"auth"})` → `smart_lsp({operation:"definition"})` |
-| 探索程式碼 | `smart_read({file, mode:"outline"}) → 看檔案結構 → smart_read({file, mode:"symbol", symbol:"targetFunc"}) → 精準讀函式` |
+| 探索程式碼 | `smart_read({file, mode:"auto"}) → 自動選模式 → smart_read({file, mode:"symbol", symbol:"targetFunc"}) → 精準讀函式` |
 | 大檔案分頁 | `smart_read({file, mode:"full", offset:1, limit:100}) → 第 1 頁 → smart_read({file, offset:101, limit:100}) → 第 2 頁` |
+| 行範圍讀取 | `smart_read({file, mode:"range", startLine:50, endLine:100}) → 精準讀 L50-100，含 checksum` |
+| 多檔案讀取 | `smart_read({mode:"batch", files:["src/a.ts","src/b.ts","src/c.ts"], format:"compact"}) → 一次讀三個檔` |
+| 緊湊輸出 | `smart_read({file, mode:"full", format:"compact"}) → 最小 token 輸出（無 emoji/裝飾）` |
 | AST 編輯 | `smart_read({file, mode:"signatures"}) → 確認行範圍 → ssr(edit_ast args:{mode:"block-boundary", action:"replace", startLine:10, endLine:20, text:"...", apply:true})` |
 | 安全修復 | `smart_security → smart_grep → ssr(fast_apply) → smart_test → rescan` |
 | 文件分析 | `ssr(ingest_document) → 分析內容 → 摘要/回答問題` |
