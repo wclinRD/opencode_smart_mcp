@@ -149,6 +149,270 @@ const PAST_TO_PRESENT = {
   'withstood': 'withstand', 'wrung': 'wring',
 };
 
+// Rule 10: Tech abbreviation dictionary (JuliusBrussee ultra mode style)
+const TECH_ABBREVIATIONS = {
+  'database': 'DB', 'databases': 'DB',
+  'authentication': 'auth', 'authenticate': 'auth', 'authenticated': 'auth',
+  'authorization': 'authz', 'authorize': 'authz',
+  'configuration': 'config', 'configure': 'config', 'configured': 'config',
+  'implementation': 'impl', 'implement': 'impl', 'implemented': 'impl',
+  'performance': 'perf',
+  'optimization': 'opt', 'optimize': 'opt', 'optimized': 'opt',
+  'application': 'app', 'applications': 'apps',
+  'function': 'fn', 'functions': 'fns',
+  'variable': 'var', 'variables': 'vars',
+  'parameter': 'param', 'parameters': 'params',
+  'argument': 'arg', 'arguments': 'args',
+  'reference': 'ref', 'references': 'refs',
+  'documentation': 'docs', 'document': 'doc',
+  'directory': 'dir', 'directories': 'dirs',
+  'repository': 'repo', 'repositories': 'repos',
+  'dependency': 'dep', 'dependencies': 'deps',
+  'environment': 'env', 'environments': 'envs',
+  'development': 'dev', 'developer': 'dev',
+  'production': 'prod',
+  'error': 'err', 'errors': 'errs',
+  'exception': 'ex', 'exceptions': 'exs',
+  'message': 'msg', 'messages': 'msgs',
+  'request': 'req', 'requests': 'reqs',
+  'response': 'res', 'responses': 'ress',
+  'connection': 'conn', 'connections': 'conns',
+  'instance': 'inst', 'instances': 'insts',
+  'object': 'obj', 'objects': 'objs',
+  'property': 'prop', 'properties': 'props',
+  'component': 'comp', 'components': 'comps',
+  'callback': 'cb', 'callbacks': 'cbs',
+  'asynchronous': 'async', 'synchronous': 'sync',
+  'initialization': 'init', 'initialize': 'init', 'initialized': 'init',
+  'execution': 'exec', 'execute': 'exec', 'executed': 'exec',
+  'calculation': 'calc', 'calculate': 'calc', 'calculated': 'calc',
+  'definition': 'def', 'define': 'def', 'defined': 'def',
+  'generation': 'gen', 'generate': 'gen', 'generated': 'gen',
+  'transformation': 'xform', 'transform': 'xform', 'transformed': 'xform',
+  'validation': 'validate', 'validated': 'validate',
+  'serialization': 'serialize', 'serialized': 'serialize',
+  'deserialization': 'deserialize',
+  'registration': 'register', 'registered': 'register',
+  'notification': 'notify', 'notifications': 'notify',
+  'subscription': 'sub', 'subscribe': 'sub',
+  'without': 'w/o', 'with': 'w/',
+  'between': 'btwn',
+  'because': 'b/c',
+  'approximately': '~', 'about': '~',
+  'maximum': 'max', 'minimum': 'min',
+  'number': 'num', 'numbers': 'nums',
+  'string': 'str', 'strings': 'strs',
+  'integer': 'int', 'integers': 'ints',
+  'boolean': 'bool',
+  'memory': 'mem',
+  'address': 'addr',
+  'pointer': 'ptr', 'pointers': 'ptrs',
+  'return': 'ret', 'returns': 'ret', 'returned': 'ret',
+  'value': 'val', 'values': 'vals',
+  'result': 'res', 'results': 'ress',
+  'default': 'dflt',
+  'required': 'reqd',
+  'optional': 'optl',
+  'available': 'avail',
+  'current': 'curr',
+  'previous': 'prev',
+  'following': 'next',
+  'original': 'orig',
+  'different': 'diff',
+  'additional': 'addl',
+  'including': 'incl',
+  'especially': 'esp',
+  'information': 'info',
+  'description': 'desc',
+  'example': 'ex', 'examples': 'exs',
+  'problem': 'prob', 'problems': 'probs',
+  'solution': 'soln', 'solutions': 'solns',
+  'question': 'q', 'questions': 'qs',
+  'answer': 'ans', 'answers': 'anss',
+  'recommendation': 'rec', 'recommend': 'rec', 'recommended': 'rec',
+  'requirement': 'req', 'requirements': 'reqs',
+  'specification': 'spec', 'specifications': 'specs',
+  'standard': 'std', 'standards': 'stds',
+  'version': 'ver', 'versions': 'vers',
+  'language': 'lang', 'languages': 'langs',
+  'library': 'lib', 'libraries': 'libs',
+  'framework': 'fw', 'frameworks': 'fws',
+  'package': 'pkg', 'packages': 'pkgs',
+  'module': 'mod', 'modules': 'mods',
+  'interface': 'iface', 'interfaces': 'ifaces',
+  'abstract': 'abstr',
+  'extension': 'ext', 'extensions': 'exts',
+  'template': 'tmpl', 'templates': 'tmpls',
+  'structure': 'struct', 'structures': 'structs',
+  'algorithm': 'algo', 'algorithms': 'algos',
+  'operation': 'op', 'operations': 'ops',
+  'instruction': 'instr', 'instructions': 'instrs',
+  'condition': 'cond', 'conditions': 'conds',
+  'expression': 'expr', 'expressions': 'exprs',
+  'statement': 'stmt', 'statements': 'stmts',
+  'declaration': 'decl', 'declarations': 'decls',
+  'assignment': 'assign',
+  'comparison': 'cmp', 'compare': 'cmp',
+  'iteration': 'iter', 'iterate': 'iter',
+  'recursion': 'recur', 'recursive': 'recur',
+  'inheritance': 'inherit',
+  'polymorphism': 'poly',
+  'encapsulation': 'encap',
+  'middleware': 'mw',
+  'endpoint': 'ep', 'endpoints': 'eps',
+  'header': 'hdr', 'headers': 'hdrs',
+  'payload': 'pld',
+  'token': 'tok', 'tokens': 'toks',
+  'session': 'sess', 'sessions': 'sesss',
+  'cookie': 'ck', 'cookies': 'cks',
+  'cache': 'cache', 'cached': 'cached',
+  'buffer': 'buf', 'buffers': 'bufs',
+  'stream': 'stream', 'streams': 'streams',
+  'socket': 'sock', 'sockets': 'socks',
+  'thread': 'thr', 'threads': 'thrs',
+  'process': 'proc', 'processes': 'procs',
+  'container': 'ctr', 'containers': 'ctrs',
+  'server': 'srv', 'servers': 'srvs',
+  'client': 'cli', 'clients': 'clis',
+  'backend': 'BE', 'frontend': 'FE',
+  'user interface': 'UI', 'user experience': 'UX',
+  'application programming interface': 'API',
+  'command line interface': 'CLI',
+  'continuous integration': 'CI',
+  'continuous deployment': 'CD',
+  'pull request': 'PR',
+  'proof of concept': 'PoC',
+  'single page application': 'SPA',
+  'server side rendering': 'SSR',
+  'static site generation': 'SSG',
+  'content delivery network': 'CDN',
+  'domain name system': 'DNS',
+  'transport layer security': 'TLS',
+  'secure sockets layer': 'SSL',
+  'hypertext transfer protocol': 'HTTP',
+  'representational state transfer': 'REST',
+  'create read update delete': 'CRUD',
+  'object relational mapping': 'ORM',
+  'model view controller': 'MVC',
+  'document object model': 'DOM',
+  'virtual dom': 'VDOM',
+  'single source of truth': 'SSOT',
+  'don\'t repeat yourself': 'DRY',
+  'keep it simple stupid': 'KISS',
+  'you aren\'t gonna need it': 'YAGNI',
+  'minimum viable product': 'MVP',
+};
+
+// Rule 11: Noun lemmatization (plural→singular, -tion→verb, -ment→verb)
+const NOUN_LEMMAS = {
+  // Plurals → singular
+  'analyses': 'analysis', 'axes': 'axis', 'bases': 'basis',
+  'children': 'child', 'criteria': 'criterion',
+  'data': 'datum', 'feet': 'foot', 'geese': 'goose',
+  'indices': 'index', 'matrices': 'matrix',
+  'men': 'man', 'mice': 'mouse', 'phenomena': 'phenomenon',
+  'teeth': 'tooth', 'vertices': 'vertex', 'women': 'woman',
+  // -tion nouns → base verb
+  'abstraction': 'abstract', 'activation': 'activate',
+  'adaptation': 'adapt', 'allocation': 'allocate',
+  'annotation': 'annotate', 'application': 'apply',
+  'calculation': 'calculate', 'certification': 'certify',
+  'classification': 'classify', 'combination': 'combine',
+  'communication': 'communicate', 'compilation': 'compile',
+  'computation': 'compute', 'configuration': 'configure',
+  'confirmation': 'confirm', 'connection': 'connect',
+  'conservation': 'conserve', 'construction': 'construct',
+  'consumption': 'consume', 'contribution': 'contribute',
+  'conversion': 'convert', 'cooperation': 'cooperate',
+  'correction': 'correct', 'creation': 'create',
+  'declaration': 'declare', 'definition': 'define',
+  'delegation': 'delegate', 'demonstration': 'demonstrate',
+  'derivation': 'derive', 'description': 'describe',
+  'destruction': 'destroy', 'detection': 'detect',
+  'determination': 'determine', 'distribution': 'distribute',
+  'documentation': 'document', 'duplication': 'duplicate',
+  'education': 'educate', 'elevation': 'elevate',
+  'elimination': 'eliminate', 'evaluation': 'evaluate',
+  'examination': 'examine', 'execution': 'execute',
+  'expectation': 'expect', 'explanation': 'explain',
+  'exploration': 'explore', 'exportation': 'export',
+  'expression': 'express', 'extraction': 'extract',
+  'filtration': 'filter', 'formation': 'form',
+  'formulation': 'formulate', 'foundation': 'found',
+  'generation': 'generate', 'identification': 'identify',
+  'illustration': 'illustrate', 'imagination': 'imagine',
+  'implementation': 'implement', 'importation': 'import',
+  'indication': 'indicate', 'information': 'inform',
+  'initialization': 'initialize', 'inspection': 'inspect',
+  'installation': 'install', 'integration': 'integrate',
+  'interpretation': 'interpret', 'investigation': 'investigate',
+  'invitation': 'invite', 'isolation': 'isolate',
+  'justification': 'justify', 'limitation': 'limit',
+  'localization': 'locate', 'manipulation': 'manipulate',
+  'migration': 'migrate', 'modification': 'modify',
+  'multiplication': 'multiply', 'navigation': 'navigate',
+  'negotiation': 'negotiate', 'normalization': 'normalize',
+  'notification': 'notify', 'observation': 'observe',
+  'operation': 'operate', 'optimization': 'optimize',
+  'organization': 'organize', 'orientation': 'orient',
+  'participation': 'participate', 'penetration': 'penetrate',
+  'permission': 'permit', 'population': 'populate',
+  'preparation': 'prepare', 'presentation': 'present',
+  'preservation': 'preserve', 'prevention': 'prevent',
+  'processing': 'process', 'production': 'produce',
+  'projection': 'project', 'pronunciation': 'pronounce',
+  'protection': 'protect', 'publication': 'publish',
+  'qualification': 'qualify', 'realization': 'realize',
+  'recommendation': 'recommend', 'registration': 'register',
+  'regulation': 'regulate', 'rejection': 'reject',
+  'relation': 'relate', 'relaxation': 'relax',
+  'repetition': 'repeat', 'representation': 'represent',
+  'reproduction': 'reproduce', 'resolution': 'resolve',
+  'restoration': 'restore', 'restriction': 'restrict',
+  'revelation': 'reveal', 'revolution': 'revolve',
+  'satisfaction': 'satisfy', 'selection': 'select',
+  'separation': 'separate', 'simplification': 'simplify',
+  'simulation': 'simulate', 'specification': 'specify',
+  'stabilization': 'stabilize', 'stimulation': 'stimulate',
+  'substitution': 'substitute', 'suggestion': 'suggest',
+  'synchronization': 'sync', 'termination': 'terminate',
+  'transformation': 'transform', 'translation': 'translate',
+  'transmission': 'transmit', 'transportation': 'transport',
+  'unification': 'unify', 'utilization': 'utilize',
+  'validation': 'validate', 'variation': 'vary',
+  'verification': 'verify', 'violation': 'violate',
+  'visualization': 'visualize', 'vocalization': 'vocalize',
+  // Words where -tion stripping fails (base ends in t/s)
+  'exhaustion': 'exhaust', 'digestion': 'digest',
+  'combustion': 'combust', 'suggestion': 'suggest',
+  'question': 'quest', 'congestion': 'congest',
+  // -ment words where abbreviation should win
+  'implement': 'impl', 'implementation': 'impl',
+  'development': 'dev', 'environment': 'env',
+  'argument': 'arg', 'assignment': 'assign',
+  'achievement': 'achieve', 'adjustment': 'adjust',
+  'advancement': 'advance', 'agreement': 'agree',
+  'alignment': 'align', 'amazement': 'amaze',
+  'amusement': 'amuse', 'announcement': 'announce',
+  'appointment': 'appoint', 'arrangement': 'arrange',
+  'assessment': 'assess', 'assignment': 'assign',
+  'attachment': 'attach', 'commitment': 'commit',
+  'deployment': 'deploy', 'employment': 'employ',
+  'encouragement': 'encourage', 'enforcement': 'enforce',
+  'engagement': 'engage', 'enhancement': 'enhance',
+  'enjoyment': 'enjoy', 'entertainment': 'entertain',
+  'equipment': 'equip', 'establishment': 'establish',
+  'fulfillment': 'fulfill', 'improvement': 'improve',
+  'involvement': 'involve', 'judgment': 'judge',
+  'management': 'manage', 'measurement': 'measure',
+  'movement': 'move', 'payment': 'pay',
+  'placement': 'place', 'punishment': 'punish',
+  'replacement': 'replace', 'requirement': 'require',
+  'retirement': 'retire', 'settlement': 'settle',
+  'shipment': 'ship', 'statement': 'state',
+  'treatment': 'treat',
+};
+
 // ---------------------------------------------------------------------------
 // Compression levels
 // ---------------------------------------------------------------------------
@@ -165,9 +429,14 @@ export const COMPRESS_LEVELS = {
     expectedSavings: '25-35%',
   },
   aggressive: {
-    description: 'Maximum compression',
-    rules: ['splitSentences', 'resolvePronouns', 'activeVoice', 'presentTense', 'removeIntensifiers', 'removeArticles', 'removeConnectives', 'limitWords', 'checkCompleteness'],
+    description: 'Full lemmatization + noun compression',
+    rules: ['splitSentences', 'resolvePronouns', 'activeVoice', 'presentTense', 'lemmatizeNouns', 'removeIntensifiers', 'removeArticles', 'removeConnectives', 'limitWords', 'checkCompleteness'],
     expectedSavings: '35-50%',
+  },
+  ultra: {
+    description: 'Max compression: abbreviations + arrows + 4-word limit (JuliusBrussee style)',
+    rules: ['splitSentences', 'resolvePronouns', 'activeVoice', 'presentTense', 'applyAbbreviations', 'lemmatizeNouns', 'arrowCausality', 'removeIntensifiers', 'removeArticles', 'removeConnectives', 'limitWordsUltra', 'checkCompleteness'],
+    expectedSavings: '50-70%',
   },
 };
 
@@ -396,6 +665,180 @@ function checkCompleteness(sentence) {
 }
 
 // ---------------------------------------------------------------------------
+// Rule 10: Tech abbreviation application (ultra mode)
+// ---------------------------------------------------------------------------
+
+function applyAbbreviations(sentence) {
+  let result = sentence;
+
+  // Apply multi-word abbreviations first (longest match first)
+  const multiWord = Object.entries(TECH_ABBREVIATIONS)
+    .filter(([k]) => k.includes(' '))
+    .sort((a, b) => b[0].length - a[0].length);
+
+  for (const [full, abbr] of multiWord) {
+    const regex = new RegExp('\\b' + full.replace(/\s+/g, '\\s+') + '\\b', 'gi');
+    result = result.replace(regex, abbr);
+  }
+
+  // Apply single-word abbreviations
+  const words = result.split(/\s+/);
+  const abbreviated = words.map(word => {
+    // Strip trailing punctuation for lookup
+    const clean = word.replace(/[.,!?;:]+$/, '');
+    const punct = word.slice(clean.length);
+    const lower = clean.toLowerCase();
+
+    if (TECH_ABBREVIATIONS[lower]) {
+      const abbr = TECH_ABBREVIATIONS[lower];
+      // Preserve capitalization for acronyms
+      if (abbr === abbr.toUpperCase() && abbr.length <= 4) {
+        return abbr + punct;
+      }
+      // Preserve original capitalization
+      if (clean[0] === clean[0]?.toUpperCase() && clean[0] !== clean[0]?.toLowerCase()) {
+        return abbr[0].toUpperCase() + abbr.slice(1) + punct;
+      }
+      return abbr + punct;
+    }
+    return word;
+  });
+
+  return abbreviated.join(' ');
+}
+
+// ---------------------------------------------------------------------------
+// Rule 11: Noun lemmatization (plural→singular, -tion→verb)
+// ---------------------------------------------------------------------------
+
+function lemmatizeNouns(sentence) {
+  const words = sentence.split(/\s+/);
+  const lemmatized = words.map(word => {
+    const clean = word.replace(/[.,!?;:]+$/, '');
+    const punct = word.slice(clean.length);
+    const lower = clean.toLowerCase();
+
+    // Check explicit lemma map
+    if (NOUN_LEMMAS[lower]) {
+      const lemma = NOUN_LEMMAS[lower];
+      if (clean[0] === clean[0]?.toUpperCase() && clean[0] !== clean[0]?.toLowerCase()) {
+        return lemma[0].toUpperCase() + lemma.slice(1) + punct;
+      }
+      return lemma + punct;
+    }
+
+    // Rule-based: -s/-es plural → singular
+    if (lower.endsWith('ies') && lower.length > 4) {
+      return clean.slice(0, -3) + 'y' + punct;
+    }
+    if (lower.endsWith('ves') && lower.length > 4) {
+      return clean.slice(0, -3) + 'f' + punct;
+    }
+    if (lower.endsWith('ses') && lower.length > 4 && /[szx]es$/.test(lower)) {
+      return clean.slice(0, -2) + punct;
+    }
+    if (lower.endsWith('s') && !lower.endsWith('ss') && lower.length > 3) {
+      // Don't strip 's' from words that end in 'ss' (class, pass)
+      // or from very short words (is, us, as)
+      if (['is', 'us', 'as', 'has', 'was'].includes(lower)) return word;
+      return clean.slice(0, -1) + punct;
+    }
+
+    // -tion → base verb (if not in explicit map)
+    if (lower.endsWith('tion') && lower.length > 6) {
+      const base = clean.slice(0, -4);
+      // Common patterns: -ation → -ate, -ition → -ite, -ution → -ute
+      if (base.endsWith('a')) return base + 'te' + punct;
+      if (base.endsWith('i')) return base + 'te' + punct;
+      if (base.endsWith('u')) return base + 'te' + punct;
+      // Words where -tion attaches to a base ending in t (exhaust-ion, digest-ion)
+      // The base already contains the t, just strip -ion
+      if (base.endsWith('t') || base.endsWith('s')) return base + punct;
+      return base + 'e' + punct;
+    }
+
+    // -ment → base verb
+    if (lower.endsWith('ment') && lower.length > 6) {
+      return clean.slice(0, -4) + punct;
+    }
+
+    // -ness → base adjective
+    if (lower.endsWith('ness') && lower.length > 6) {
+      return clean.slice(0, -4) + punct;
+    }
+
+    // -able/-ible → base verb
+    if (lower.endsWith('able') && lower.length > 6) {
+      return clean.slice(0, -4) + punct;
+    }
+    if (lower.endsWith('ible') && lower.length > 6) {
+      return clean.slice(0, -4) + punct;
+    }
+
+    // -ing → base verb (gerund)
+    if (lower.endsWith('ing') && lower.length > 5) {
+      const base = clean.slice(0, -3);
+      // Handle doubled consonants (running → run)
+      if (base.length >= 3 && base[base.length - 1] === base[base.length - 2]) {
+        return base.slice(0, -1) + punct;
+      }
+      return base + punct;
+    }
+
+    return word;
+  });
+
+  return lemmatized.join(' ');
+}
+
+// ---------------------------------------------------------------------------
+// Rule 12: Arrow causality notation (ultra mode — JuliusBrussee style)
+// ---------------------------------------------------------------------------
+
+function arrowCausality(sentence) {
+  // Replace common causality patterns with arrow notation
+  let result = sentence
+    // "X causes Y" → "X → Y"
+    .replace(/\b(\w+(?:\s+\w+){0,3})\s+(causes?|leads to|results in|triggers)\s+(\w+(?:\s+\w+){0,3})\b/gi, '$1 → $3')
+    // "X because Y" → "Y → X"
+    .replace(/\b(\w+(?:\s+\w+){0,3})\s+because\s+(\w+(?:\s+\w+){0,3})\b/gi, '$2 → $1')
+    // "if X then Y" → "X → Y"
+    .replace(/\bif\s+(\w+(?:\s+\w+){0,3})\s+then\s+(\w+(?:\s+\w+){0,3})\b/gi, '$1 → $2')
+    // "X therefore Y" → "X → Y"
+    .replace(/\b(\w+(?:\s+\w+){0,3})\s+therefore\s+(\w+(?:\s+\w+){0,3})\b/gi, '$1 → $2')
+    // "X so Y" → "X → Y"
+    .replace(/\b(\w+(?:\s+\w+){0,3})\s+so\s+(\w+(?:\s+\w+){0,3})\b/gi, '$1 → $2');
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Rule 8b: Ultra word limit (3 words, JuliusBrussee style)
+// ---------------------------------------------------------------------------
+
+function limitWordsUltra(sentence, maxWords = 4) {
+  const words = sentence.split(/\s+/);
+  if (words.length <= maxWords) return sentence;
+
+  // Try to split on comma or arrow first
+  const commaIdx = sentence.indexOf(',');
+  const arrowIdx = sentence.indexOf('→');
+
+  if (arrowIdx > 0 && arrowIdx < sentence.length / 2) {
+    return sentence.slice(0, arrowIdx + 1).trim() + ' ' +
+           sentence.slice(arrowIdx + 1).split(/\s+/).slice(0, 2).join(' ');
+  }
+
+  if (commaIdx > 0 && commaIdx < sentence.length / 2) {
+    const firstPart = sentence.slice(0, commaIdx).trim();
+    const firstWords = firstPart.split(/\s+/);
+    if (firstWords.length <= maxWords) return firstPart;
+  }
+
+  return words.slice(0, maxWords).join(' ');
+}
+
+// ---------------------------------------------------------------------------
 // Main compression pipeline
 // ---------------------------------------------------------------------------
 
@@ -404,10 +847,14 @@ const RULE_FUNCTIONS = {
   resolvePronouns,
   activeVoice,
   presentTense,
+  lemmatizeNouns,
+  applyAbbreviations,
+  arrowCausality,
   removeIntensifiers,
   removeArticles,
   removeConnectives,
   limitWords,
+  limitWordsUltra,
   checkCompleteness,
 };
 
@@ -548,7 +995,7 @@ function parseArgs() {
       case '--level':
         opts.level = args[++i];
         if (!COMPRESS_LEVELS[opts.level]) {
-          console.error(`Error: Unknown level "${opts.level}". Use: light, semantic, aggressive`);
+          console.error(`Error: Unknown level "${opts.level}". Use: light, semantic, aggressive, ultra`);
           process.exit(1);
         }
         break;

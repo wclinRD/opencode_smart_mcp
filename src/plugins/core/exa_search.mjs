@@ -38,8 +38,8 @@ export default {
       },
       compressLevel: {
         type: 'string',
-        enum: ['light', 'semantic', 'aggressive'],
-        description: 'Caveman compression level. light=stop-words only, semantic=content selection, aggressive=max compression. Default: semantic.',
+        enum: ['light', 'semantic', 'aggressive', 'ultra'],
+        description: 'Caveman compression level. light=stop-words only, semantic=content selection, aggressive=full lemmatization, ultra=abbreviations+arrows (50-70% savings). Default: semantic.',
       },
     },
     required: ['command'],
