@@ -39,6 +39,7 @@ import { getContextBudget, resetContextBudget } from '../lib/context-budget.mjs'
 import { parseJson as lenientParseJson } from '../lib/lenient-json.mjs';
 import { judgeHallucination, isHighRiskOutput } from '../lib/hallucination-judge.mjs';
 import { getPrefetchEngine } from '../lib/prefetch-engine.mjs';
+import { getConcurrencyGate } from '../lib/concurrency-gate.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -58,6 +59,9 @@ debugLog('Server starting, plugins loaded:', toolMap.size, 'tools');
 
 // Phase 18: Initialize pre-fetch engine
 const prefetchEngine = getPrefetchEngine({ toolMap });
+
+// Phase 25: Concurrency gate — prevents resource contention
+const gate = getConcurrencyGate();
 
 // ---------------------------------------------------------------------------
 // Graceful shutdown
@@ -875,9 +879,9 @@ function handleDevtoolRun(id, params, signal, callerArgs) {
     });
   }
 
-  // Execute — invokeToolWithRetry captures internally via captureAndReturn
+  // Execute — use gated execution for CLI tools, sync for handlers
   debugLog('Router dispatch:', subTool, 'args:', JSON.stringify(subArgs));
-  const result = invokeToolWithRetry(def, subArgs, timeout || null, signal);
+  const result = executeToolGated(def, subArgs, timeout || null, signal, String(id));
   return result;
 }
 
@@ -1397,6 +1401,256 @@ function invokeTool(def, args, timeoutOverride, signal, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 25: Async tool execution (spawn instead of spawnSync)
+// ---------------------------------------------------------------------------
+
+/**
+ * Spawn a CLI tool asynchronously. Returns a Promise with { code, stdout, stderr }.
+ * Unlike spawnSync, this does NOT block the event loop — allowing the server
+ * to process other requests while the tool runs.
+ */
+function spawnToolAsync(cliPath, cliArgs, msTimeout, signal) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('node', [cliPath, ...cliArgs], {
+      timeout: msTimeout,
+      env: { ...env, ...contextManager.getEnv() },
+      windowsHide: true,
+      signal,
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+
+    child.on('close', (code) => {
+      resolve({ code: code ?? null, stdout, stderr: stderr.trim() });
+    });
+
+    child.on('error', (err) => {
+      reject(err);
+    });
+  });
+}
+
+/**
+ * Async version of invokeTool for CLI tools. Uses spawn instead of spawnSync.
+ * Handler-based tools (fast, in-process) still use the sync path.
+ *
+ * @param {import('./tool-loader.mjs').default} def
+ * @param {Record<string, unknown>} args
+ * @param {number|null} timeoutOverride
+ * @param {AbortSignal} [signal]
+ * @param {{ skipCapture?: boolean }} [opts]
+ * @returns {Promise<{ ok: boolean, output?: string, error?: string, __async?: boolean }>}
+ */
+async function invokeToolAsync(def, args, timeoutOverride, signal, opts = {}) {
+  const finalAttempt = !opts.skipCapture;
+  const startTime = process.hrtime.bigint();
+
+  const emit = (result, elapsedMs) => {
+    if (!finalAttempt) return result;
+    return captureAndReturn(def.name, args, result, elapsedMs, def);
+  };
+
+  // Pre-check: memory lookup (same as sync path)
+  const PRECHECK_TOOLS = new Set(['smart_debug', 'smart_test', 'smart_cross_file_edit']);
+  if (PRECHECK_TOOLS.has(def.name)) {
+    const precheck = preCheckMemory(def.name, args);
+    if (precheck) {
+      const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+      return emit({ ok: true, output: precheck.output }, elapsedMs);
+    }
+  }
+
+  // Pre-fetch cache check
+  const prefetchHit = prefetchEngine.checkCache(def.name, args);
+  if (prefetchHit.hit) {
+    const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+    return emit(prefetchHit.result, elapsedMs);
+  }
+
+  // Quality enforcement
+  const enforcement = checkHighRiskPrerequisites(def.name, args);
+  if (enforcement) {
+    const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+    return emit({ ok: false, error: enforcement.message }, elapsedMs);
+  }
+
+  // Handler path — keep sync (fast, in-process)
+  const contextArgs = contextManager.inject(def.name, args);
+  if (typeof def.handler === 'function') {
+    try {
+      const handlerOutput = def.handler(contextArgs);
+      if (handlerOutput instanceof Promise) {
+        const resolved = await handlerOutput;
+        const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+        if (signal?.aborted) return emit({ ok: false, error: `Tool ${def.name} was cancelled` }, elapsedMs);
+        const output = String(resolved ?? '');
+        if (isStructuredError(output)) return emit({ ok: false, error: output }, elapsedMs);
+        return emit({ ok: true, output }, elapsedMs);
+      }
+      if (handlerOutput === null) {
+        // Fall through to CLI path
+      } else {
+        const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+        if (signal?.aborted) return emit({ ok: false, error: `Tool ${def.name} was cancelled` }, elapsedMs);
+        const output = String(handlerOutput ?? '');
+        if (isStructuredError(output)) return emit({ ok: false, error: output }, elapsedMs);
+        return emit({ ok: true, output }, elapsedMs);
+      }
+    } catch (err) {
+      const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+      const fix = getErrorFix(def.name, 'generic', err.message);
+      return emit({ ok: false, error: `Handler error in ${def.name}: ${err.message}\nFix: ${fix}` }, elapsedMs);
+    }
+  }
+
+  // CLI path — async spawn
+  const cliPath = def._cliPath;
+  if (!cliPath) return emit({ ok: false, error: `No CLI path or handler for ${def.name}` }, 0);
+
+  const cliArgs = def.mapArgs(args);
+  const msTimeout = (typeof timeoutOverride === 'number' && timeoutOverride > 0)
+    ? timeoutOverride
+    : (typeof args._timeout === 'number' && args._timeout > 0)
+      ? args._timeout
+      : runtimeConfig.timeoutMs;
+
+  try {
+    const { code, stdout, stderr: capturedStderr } = await spawnToolAsync(cliPath, cliArgs, msTimeout, signal);
+    const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+
+    if (signal?.aborted) {
+      return emit({ ok: false, error: `Tool ${def.name} was cancelled` }, elapsedMs);
+    }
+
+    if (capturedStderr) debugLog('Stderr:', capturedStderr.slice(0, 2000));
+
+    let output = stdout || '';
+    const originalLength = output.length;
+    if (originalLength > runtimeConfig.maxOutputChars) {
+      output = output.slice(0, runtimeConfig.maxOutputChars) +
+        `\n\n--- [TRUNCATED: ${originalLength} chars, showing first ${runtimeConfig.maxOutputChars}] ---`;
+    }
+
+    if (code !== 0 && code !== null && !output) {
+      const errMsg = `Tool ${def.name} failed: exit ${code}${capturedStderr ? ': ' + capturedStderr : ''}`;
+      const fix = getErrorFix(def.name.replace('smart_', ''), 'exit', errMsg);
+      return emit({ ok: false, error: `${errMsg}\nFix: ${fix}` }, elapsedMs);
+    }
+
+    if (elapsedMs > 5000) output = output.trimEnd() + `\n\n[Completed in ${(elapsedMs / 1000).toFixed(1)}s]`;
+    return emit({ ok: true, output }, elapsedMs);
+  } catch (err) {
+    const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+    let errMsg, errorType;
+    if (err.code === 'ETIMEDOUT' || err.killed) {
+      errMsg = `Tool ${def.name} timed out after ${msTimeout}ms`;
+      errorType = 'timeout';
+    } else if (err.name === 'AbortError') {
+      errMsg = `Tool ${def.name} was cancelled`;
+      errorType = 'cancel';
+    } else {
+      errMsg = `Failed to spawn ${def.name}: ${err.message}`;
+      errorType = 'generic';
+    }
+    const fix = getErrorFix(def.name.replace('smart_', ''), errorType, errMsg);
+    return emit({ ok: false, error: `${errMsg}\nFix: ${fix}` }, elapsedMs);
+  }
+}
+
+/**
+ * Async version of invokeToolWithRetry. Uses invokeToolAsync + retry logic.
+ * For CLI tools only — handler tools use the sync path.
+ */
+async function invokeToolWithRetryAsync(def, args, timeoutOverride, signal) {
+  let lastResult;
+  for (let attempt = 1; attempt <= RETRY_MAX_ATTEMPTS; attempt++) {
+    const retryTimeout = attempt > 1 && timeoutOverride
+      ? Math.min(timeoutOverride * attempt, 60000)
+      : timeoutOverride;
+    const skipCapture = attempt > 1;
+    lastResult = await invokeToolAsync(def, args, retryTimeout, signal, { skipCapture });
+    if (!isTransientError(lastResult)) return lastResult;
+    if (attempt < RETRY_MAX_ATTEMPTS) {
+      const delay = Math.min(RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1), RETRY_MAX_DELAY_MS);
+      debugLog(`Retry ${attempt}/${RETRY_MAX_ATTEMPTS - 1} for ${def.name} in ${delay}ms`);
+      await new Promise(r => setTimeout(r, delay));
+      if (signal?.aborted) {
+        return { ok: false, error: `Tool ${def.name} was cancelled during retry` };
+      }
+    }
+  }
+
+  // Fallback
+  const fallback = FALLBACK_MAP[def.name];
+  if (fallback) {
+    const fbDef = toolMap.get(fallback.tool || fallback);
+    if (fbDef) {
+      const fbArgs = typeof fallback === 'object' && fallback.argsTransform
+        ? fallback.argsTransform(args)
+        : args;
+      debugLog(`Fallback: ${def.name} → ${fbDef.name}`);
+      const fbResult = await invokeToolAsync(fbDef, fbArgs, timeoutOverride, signal);
+      if (!fbResult.ok) return lastResult;
+      return {
+        ...fbResult,
+        output: `[Fallback after ${RETRY_MAX_ATTEMPTS}× retry — using ${fbDef.name}]\n${fbResult.output || ''}`,
+      };
+    }
+  }
+
+  return lastResult;
+}
+
+/**
+ * Execute a tool through the concurrency gate.
+ * - Handler tools (fast, in-process): execute immediately (no gate)
+ * - CLI tools (spawn): go through gate, queued if overweight
+ *
+ * Returns a result object. For async CLI tools, returns { __async: true, promise }.
+ */
+function executeToolGated(def, args, timeoutOverride, signal, requestId) {
+  // Handler tools — skip gate, execute immediately
+  if (typeof def.handler === 'function' && !def._cliPath) {
+    return invokeToolWithRetry(def, args, timeoutOverride, signal);
+  }
+
+  // CLI tools — go through gate
+  const acquired = gate.tryAcquire(def.name, requestId);
+
+  if (acquired.allowed) {
+    // Got a slot immediately — execute async
+    const weight = acquired.weight;
+    const startTime = process.hrtime.bigint();
+
+    const promise = invokeToolWithRetryAsync(def, args, timeoutOverride, signal)
+      .finally(() => {
+        const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+        gate.release(def.name, weight, elapsedMs);
+      });
+
+    return { __async: true, promise, toolName: def.name, origArgs: args, startTime, _responsePolicy: def.responsePolicy };
+  }
+
+  // Need to wait — enqueue and execute when slot available
+  const startTime = process.hrtime.bigint();
+
+  const promise = gate.enqueue(def.name, requestId).then((weight) => {
+    const execStartTime = process.hrtime.bigint();
+    return invokeToolWithRetryAsync(def, args, timeoutOverride, signal)
+      .finally(() => {
+        const elapsedMs = Number(process.hrtime.bigint() - execStartTime) / 1_000_000;
+        gate.release(def.name, weight, elapsedMs);
+      });
+  });
+
+  return { __async: true, promise, toolName: def.name, origArgs: args, startTime, _responsePolicy: def.responsePolicy };
+}
+
+// ---------------------------------------------------------------------------
 // MCP transport
 // ---------------------------------------------------------------------------
 const PROTOCOL_VERSION = '2024-11-05';
@@ -1832,7 +2086,7 @@ function handleRequest(req) {
       const controller = new AbortController();
       if (id != null) pendingCalls.set(String(id), controller);
       try {
-        const result = invokeToolWithRetry(def, args, null, controller.signal);
+        const result = executeToolGated(def, args, null, controller.signal, String(id));
 
         // Async handler — resolve Promise and respond
         if (result && result.__async) {
@@ -1904,7 +2158,7 @@ function handleRequest(req) {
       const ctx = contextManager.get();
       const budget = getContextBudget();
       respond(id, {
-        status: 'ok', version: '3.1.0',
+        status: 'ok', version: '3.2.0',
         toolsRegistered: toolMap.size, toolNames: Array.from(toolMap.keys()),
         nativeCount: nativeTools.length, routerCount: routerTools.length,
         debug: DEBUG, pid: process.pid, uptime: process.uptime(),
@@ -1915,6 +2169,7 @@ function handleRequest(req) {
           findingCount: ctx.accumulatedFindings.length,
         } : null,
         budget: budget.getStatus(),
+        concurrency: gate.getStatus(),
       });
       break;
     }
