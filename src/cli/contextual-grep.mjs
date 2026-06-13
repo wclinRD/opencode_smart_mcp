@@ -177,6 +177,62 @@ function searchFiles(files, regex, opts) {
     let matchCount = 0;
     regex.lastIndex = 0;
 
+    // ── countOnly mode: just count matches per file ──
+    if (opts.countOnly) {
+      for (let i = 0; i < lines.length; i++) {
+        const lineRegex = new RegExp(regex.source, regex.flags.replace('g', '') + 'g');
+        let match;
+        while ((match = lineRegex.exec(lines[i])) !== null) {
+          matchCount++;
+        }
+      }
+      if (matchCount > 0) {
+        results.push({
+          file: filePath,
+          relFile: relative(opts.root || '.', filePath),
+          matchCount,
+        });
+      }
+      continue;
+    }
+
+    // ── invert mode: collect lines that do NOT match ──
+    if (opts.invert) {
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        // Use non-global regex for test() to avoid stateful lastIndex issues
+        const lineRegex = new RegExp(regex.source, regex.flags.replace('g', ''));
+        if (!lineRegex.test(line)) {
+          matchCount++;
+          fileResults.push({
+            line: i + 1,
+            column: 1,
+            matchLength: line.length,
+            matchedText: line.substring(0, 200),
+            lineContent: line,
+            contextBefore: lines.slice(Math.max(0, i - opts.before), i),
+            contextAfter: lines.slice(i + 1, Math.min(lines.length, i + 1 + opts.after)),
+          });
+          if (matchCount >= maxMatches) break;
+        }
+      }
+      if (fileResults.length > 0) {
+        let fileInfo;
+        try {
+          const st = statSync(filePath);
+          fileInfo = { size: st.size, modified: st.mtime.toISOString(), lines: lines.length };
+        } catch { fileInfo = {}; }
+        results.push({
+          file: filePath,
+          relFile: relative(opts.root || '.', filePath),
+          ...fileInfo,
+          matches: fileResults,
+        });
+      }
+      continue;
+    }
+
+    // ── normal mode: collect matching lines ──
     // Check for multi-line regex
     const isMultiLine = regex.source.includes('\\n') || regex.source.includes('\\s\\S');
 
@@ -403,6 +459,20 @@ function formatText(results, opts, color) {
       : 'No matches found.';
   }
 
+  // ── countOnly mode: simple file:count output ──
+  if (opts.countOnly) {
+    const totalCount = results.reduce((sum, r) => sum + (r.matchCount || 0), 0);
+    lines.push(color
+      ? `${c.bold}${c.green}${results.length} file(s), ${totalCount} total match(es)${c.reset}`
+      : `${results.length} file(s), ${totalCount} total match(es)`);
+    for (const r of results) {
+      lines.push(color
+        ? `  ${c.blue}${r.relFile}${c.reset}${c.dim}: ${r.matchCount}${c.reset}`
+        : `  ${r.relFile}: ${r.matchCount}`);
+    }
+    return lines.join('\n');
+  }
+
   const totalMatches = results.reduce((sum, r) => sum + r.matches.length, 0);
   lines.push(color
     ? `${c.bold}${c.green}${results.length} file(s), ${totalMatches} match(es)${c.reset}`
@@ -598,6 +668,9 @@ function parseArgs() {
       case '--no-query-detect': opts.queryDetect = false; break;
       case '--semantic': opts.semantic = true; break;
       case '--semantic-weight': opts.semanticWeight = parseFloat(args[++i]); break;
+      case '--invert': opts.invert = true; break;
+      case '--count-only': opts.countOnly = true; break;
+      case '--file-types': opts.fileTypes = args[++i]; break;
       default: break;
     }
     i++;
@@ -641,6 +714,9 @@ Options:
   --no-query-detect     Disable query type detection
   --semantic            Enable hybrid semantic search (BM25 + TF-IDF fusion)
   --semantic-weight <N> Custom semantic weight 0.0-1.0 (auto-detected from query type)
+  --invert              Invert match — show lines that do NOT match (like grep -v)
+  --count-only          Only show match counts per file (like grep -c)
+  --file-types <exts>   File type filter: "all" for any file, or comma-separated extensions like ".txt,.log,.md"
   -h, --help            Show this help
 
 Examples:
@@ -667,6 +743,17 @@ catch (e) {
   process.exit(1);
 }
 
+// Handle fileTypes override
+if (opts.fileTypes) {
+  if (opts.fileTypes === 'all') {
+    opts.include = ['**/*'];
+  } else {
+    // Build glob from comma-separated extensions: ".txt,.log,.md" → "**/*.{txt,log,md}"
+    const exts = opts.fileTypes.split(',').map(e => e.trim().replace(/^\./, ''));
+    opts.include = [`**/*.{${exts.join(',')}}`];
+  }
+}
+
 // Find files
 const root = resolve(opts.root);
 const files = findFiles(root, opts.include, opts.exclude);
@@ -681,14 +768,14 @@ if (opts.queryDetect) {
   queryType = detectQueryType(opts.pattern);
 }
 
-// BM25 ranking
-if (opts.rank !== 'none' && results.length > 0) {
+// BM25 ranking (skip for countOnly — results have matchCount not matches)
+if (!opts.countOnly && opts.rank !== 'none' && results.length > 0) {
   rankResults(results, opts.pattern);
   applyRerankSignals(results, opts.pattern);
 }
 
-// Hybrid semantic search
-if (opts.semantic && results.length > 0) {
+// Hybrid semantic search (skip for countOnly — different result structure)
+if (!opts.countOnly && opts.semantic && results.length > 0) {
   const cache = loadCache(root);
   const allChunks = [];
 
@@ -717,8 +804,8 @@ if (opts.semantic && results.length > 0) {
   try { saveCache(root, cache); } catch { /* optional */ }
 }
 
-// Enrich with import context if requested
-if (opts.withImports) {
+// Enrich with import context if requested (skip for countOnly — different result structure)
+if (!opts.countOnly && opts.withImports) {
   // Build full import graph for reverse lookup
   const importGraph = new Map(); // filePath -> { imports: [], importedBy: [] }
   for (const filePath of files) {
