@@ -290,6 +290,7 @@ Phase 20 改為：
 | 🥇 | **21** | smart_read — 漸進式檔案讀取 | 🟢 低 | 🔥 高（省 60-80% read token） | ✅ 完成 (2026-06-13) |
 | 🥈 | **22** | smart_edit_ast — AST 感知編輯 | 🟢 低 | 🟡 中（更精確的編輯，減少編輯錯誤） | ✅ 完成 (2026-06-13) |
 | 🥇 | **23** | smart_read 強化 — auto/range/batch/compact | 🟢 低 | 🔥 高（auto預設省token、range精準讀取、batch批量） | ✅ 完成 (2026-06-13) |
+| 🥇 | **24** | Session Cache + Explain + Project Map | 🟢 低 | 🔥 高（explain一次取代三次呼叫、cache省重讀token、project一覽專案符號） | ✅ 完成 (2026-06-13) |
 
 ## 里程碑
 
@@ -299,7 +300,8 @@ Phase 20 改為：
 | M6 | Phase 21 (smart_read) 完成 | ✅ 2026-06-13 |
 | M7 | Phase 22 (smart_edit_ast) 完成 | ✅ 2026-06-13 |
 | M8 | Phase 23 (smart_read 強化) 完成 | ✅ 2026-06-13 |
-| M9 | 全量 regression + 效能 benchmark | ⏳ 待辦 |
+| M9 | Phase 24 (Session Cache + Explain + Project Map) 完成 | ✅ 2026-06-13 |
+| M10 | 全量 regression + 效能 benchmark | ⏳ 待辦 |
 
 ---
 
@@ -451,13 +453,51 @@ Phase 22 smart_edit_ast 改為：
 
 ---
 
-## 長期願景（Phase 24+）
+## Phase 24：Session Memory Cache + Explain + Project Map ✅
+
+> 參考：Continuum（session cache）、cortex-works（漸進揭露）
+> 目標：同一 session 內不重讀未修改檔案（Cache HIT 直接回傳），新增 explain 模式（符號 + imports + callers 一次取得），新增 project 模式（專案符號地圖 <500 tokens）。
+> **完成日期：2026-06-13**
+
+### 24.1 Session Memory Cache
+
+- [x] `src/plugins/standard/smart-read.mjs` — `_readCache` Map（module-level，key=`path|mode|symbol-opts`）
+- [x] Cache invalidation：mtime 變化 + 10 分鐘 TTL
+- [x] `cacheWrap()` wrapper 包裹 SmartReader.read()
+- [x] 透明快取：LLM 無感，回傳結果與無快取一致
+
+### 24.2 Explain Mode
+
+- [x] `src/lib/smart-read.mjs` — `extractImports(content, lang)`：抽取 import/require 陳述 + 行號
+- [x] `src/lib/smart-read.mjs` — `extractCallers(content, lang, symbol)`：找出呼叫目標符號的位置（排除自身 body）
+- [x] SmartReader.read() — `case 'explain'`：回傳 `{name, type, lineStart, lineEnd, signature, body, imports[], callers[]}`
+- [x] 測試：symbol + imports + callers 一次回傳、missing symbol error、missing symbol param error
+
+### 24.3 Project Map Mode
+
+- [x] `src/lib/smart-read.mjs` — `buildProjectMap(root, opts={depth, maxFiles, maxTotalLines})`：遞迴掃目錄
+- [x] 支援 extension: .js/.ts/.py/.go/.rs/.rb/.php/.java/.swift/.kt/.c/.h/.cpp/.cs 等
+- [x] 自動跳過 node_modules/.git/dist/build/__pycache__/.venv 等
+- [x] 壓制在 token budget 內（depth:4, maxFiles:40, maxTotalLines:500 預設）
+- [x] 測試：專案符號地圖正確建立、maxFiles 限制正確
+
+### 24.4 測試
+
+- [x] extractImports 測試（JS imports、行號、空內容）
+- [x] extractCallers 測試（找呼叫者、排除自身 body、無呼叫者）
+- [x] explain mode 測試（完整回傳、錯誤處理）
+- [x] project map 測試（地圖建立、maxFiles 限制）
+- [x] **95 項測試全部通過**
+
+---
+
+## 長期願景（Phase 25+）
 
 | Phase | 名稱 | 說明 |
 |-------|------|------|
-| 24 | **External Cognitive Controller** | 參考 Meta-Reasoning — LLM 是 substrate，思考由外部治理。觀察思考軌跡 → 偵測 stall/redundancy → 強制分支或切換策略 |
-| 25 | **Self-Evolving Agent Prompts** | 參考 self-evolving-codegen — tool-strategy 的 pattern 匹配根據成功率自我進化 |
-| 26 | **Continuous Thought Vectors** | 參考 NeurIPS 2025 Coconut — 在 embedding 空間做推理（而非 token 空間） |
+| 25 | **External Cognitive Controller** | 參考 Meta-Reasoning — LLM 是 substrate，思考由外部治理。觀察思考軌跡 → 偵測 stall/redundancy → 強制分支或切換策略 |
+| 26 | **Self-Evolving Agent Prompts** | 參考 self-evolving-codegen — tool-strategy 的 pattern 匹配根據成功率自我進化 |
+| 27 | **Continuous Thought Vectors** | 參考 NeurIPS 2025 Coconut — 在 embedding 空間做推理（而非 token 空間） |
 
 ---
 

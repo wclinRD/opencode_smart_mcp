@@ -1,58 +1,96 @@
 // smart-read.mjs → smart_read (via smart_smart_run router)
-// Phase 23: Enhanced progressive file reading
+// Phase 24: Session cache + explain + project map
 //
-// 七種模式：
-//   auto       — 依檔案大小自動選模式（新預設！<50 full, 50-300 sig, >300 outline）
-//   outline    — 只看檔案結構函式/類別/變數宣告（5-20 lines for a 500-line file）
-//   signatures — 結構 + 簽名行 + 行範圍（10-40 lines）
-//   symbol     — 只抽取特定 symbol 的完整 body（精準定位）
-//   range      — 讀取指定行範圍（startLine/endLine）
-//   full       — 傳統完整讀取（fallback），支援 offset/limit 分頁
+// 九種模式：
+//   auto       — 依檔案大小自動選模式（<50 full, 50-300 sig, >300 outline）
+//   outline    — 檔案結構函式/類別/變數宣告
+//   signatures — 結構 + 簽名行 + 行範圍
+//   symbol     — 只抽取特定 symbol 的完整 body
+//   explain    — symbol + imports + callers 一次取得 🆕
+//   range      — 指定行範圍（startLine/endLine）+ checksum
+//   full       — 傳統完整讀取，支援 offset/limit 分頁
 //   batch      — 一次讀取多個檔案
+//   project    — 專案符號地圖（<500 tokens）🆕
 //
-// 輸出格式：
-//   text     — 完整人類可讀（含 emoji + 分隔線 + tip）🥇 default
-//   compact  — Token 最小化輸出（無 emoji、無裝飾）🥈
-//   json     — 結構化資料
+// 輸出格式：text / compact / json
 //
-// 路由原則（更新版）：
-//   - 了解檔案結構 → auto（新預設！自動選最佳模式）
-//   - 了解檔案結構（強制）→ outline
-//   - 需要簽名細節   → signatures
-//   - 需要特定函式實作內容 → symbol
-//   - 需要某段行範圍 → range
-//   - 需要完整內容   → full
-//   - 一次看多個檔案 → batch
+// Session Memory Cache（🆕）：同一 session 內未更改檔案零磁碟讀取
+//
+// 路由原則：
+//   - 快速了解專案   → project（全新！一次看整個 codebase）
+//   - 了解檔案結構   → auto（預設）
+//   - 需要特定函式   → symbol
+//   - 需函式+依賴   → explain（取代 symbol→grep imports→grep callers）
+//   - 需要行範圍     → range
+//   - 一次看多檔     → batch
 
-import { SmartReader, detectLanguage, getDomainEntry, hashContent } from '../../lib/smart-read.mjs';
+import { existsSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { cwd } from 'node:process';
+import { SmartReader, hashContent } from '../../lib/smart-read.mjs';
+
+// =========================================================================
+// Session Memory Cache — 零磁碟重複讀取
+// =========================================================================
+
+const _readCache = new Map();
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+function getCacheKey(filePath, opts) {
+  const mode = opts.mode || 'auto';
+  let key = `${filePath}|${mode}`;
+  if (mode === 'symbol' || mode === 'explain') key += `|${opts.symbol || ''}`;
+  if (mode === 'range') key += `|${opts.startLine || 1}-${opts.endLine || ''}`;
+  if (mode === 'full') key += `|${opts.offset || 1}-${opts.limit || ''}`;
+  return key;
+}
+
+function cacheWrap(reader, filePath, opts) {
+  const key = getCacheKey(filePath, opts);
+  try {
+    if (existsSync(filePath)) {
+      const stat = statSync(filePath);
+      const cached = _readCache.get(key);
+      if (cached && cached.mtime === stat.mtimeMs && (Date.now() - cached.timestamp) < CACHE_TTL) {
+        return cached.result;
+      }
+    }
+  } catch { /* ignore perms issues */ }
+
+  // Cache miss: read fresh
+  const result = reader.read(opts);
+  try {
+    if (existsSync(filePath) && result.status === 'ok') {
+      const stat = statSync(filePath);
+      _readCache.set(key, { mtime: stat.mtimeMs, result, timestamp: Date.now() });
+    }
+  } catch { /* ignore */ }
+  return result;
+}
+
+// =========================================================================
+// Plugin Export
+// =========================================================================
 
 export default {
   name: 'smart_read',
   category: 'standard',
   description: `Progressive file reader — saves 60-80% read tokens vs raw read.
+  Session cache: same file unchanged = zero disk reads (🆕)
 
-  🥇 auto      — Smart mode selection by file size (<50 full, 50-300 sig, >300 outline) ← default
-  📋 outline   — File structure: function/class/variable declarations with line numbers
-  📝 signatures — Structure + signature text + line ranges (lineStart-lineEnd)
-  🔍 symbol    — Extract a specific symbol's full body (by name)
-  📏 range     — Read a specific line range (startLine/endLine)
-  📄 full      — Traditional full read, supports offset/limit paging
-  📚 batch     — Read multiple files in one call (files:["f1.ts","f2.ts"])
+  🥇 auto      — Smart mode by file size (<50 full, 50-300 sig, >300 outline)
+  📋 outline   — Structure: function/class/variable declarations + line numbers
+  📝 signatures — Structure + signature text + line ranges
+  🔍 symbol    — Extract specific symbol full body (by name)
+  🧠 explain   — Symbol + imports + callers in one call (🆕)
+  📏 range     — Specific line range (startLine/endLine) + checksum
+  📄 full      — Traditional full read, offset/limit paging
+  📚 batch     — Read multiple files in one call
+  🗺  project   — Project symbol map <500 tokens (🆕)
 
-  Output formats: text (default), compact (no emoji/dividers), json
+  Output: text (default), compact (no emoji), json
+  Session cache auto-enabled: repeat reads = zero disk I/O`,
 
-  Examples:
-    { file:"src/auth.ts" }
-      → auto-detect: <50 lines (full), 50-300 (signatures), >300 (outline)
-
-    { mode:"range", file:"src/auth.ts", startLine:10, endLine:30 }
-      → Lines 10-30 with line numbers, plus content checksum
-
-    { mode:"batch", files:["src/a.ts","src/b.ts"] }
-      → Reads both files in one call, each auto-modulated
-
-    { mode:"full", file:"src/auth.ts", offset:1, limit:100, format:"compact" }
-      → Minimal token output, no decorative characters`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -62,12 +100,12 @@ export default {
       },
       mode: {
         type: 'string',
-        enum: ['auto', 'outline', 'signatures', 'symbol', 'range', 'full', 'batch', 'list'],
+        enum: ['auto', 'outline', 'signatures', 'symbol', 'explain', 'range', 'full', 'batch', 'list', 'project'],
         description: 'Read mode (default: auto)',
       },
       symbol: {
         type: 'string',
-        description: 'Symbol name to extract (required for mode:symbol)',
+        description: 'Symbol name (required for mode:symbol | explain)',
       },
       root: {
         type: 'string',
@@ -94,6 +132,14 @@ export default {
         items: { type: 'string' },
         description: 'File paths for batch mode',
       },
+      depth: {
+        type: 'number',
+        description: 'Max depth for project mode (default: 4)',
+      },
+      maxFiles: {
+        type: 'number',
+        description: 'Max files for project mode (default: 40)',
+      },
       lang: {
         type: 'string',
         description: 'Force language (auto-detect if not provided)',
@@ -109,44 +155,59 @@ export default {
       },
     },
   },
-  responsePolicy: { maxLevel: 0 }, // Lossless — symbol body must be exact
+  responsePolicy: { maxLevel: 0 },
   handler: async (args) => {
     try {
       const format = args.format || 'text';
+      const root = args.root || cwd();
       const reader = new SmartReader();
 
-      // Batch mode: pass files array
-      const readOpts = args.mode === 'batch'
-        ? {
-            filePath: args.file,
-            mode: 'batch',
-            files: args.files,
-            root: args.root,
-            entryMode: args.entryMode,
-          }
-        : {
-            filePath: args.file,
-            mode: args.mode || 'auto',
-            symbol: args.symbol,
-            root: args.root,
-            offset: args.offset,
-            limit: args.limit,
-            startLine: args.startLine,
-            endLine: args.endLine,
-            lang: args.lang,
-            numbered: args.numbered,
-          };
-
-      const result = await reader.read(readOpts);
-
-      if (format === 'json') {
-        return JSON.stringify(result, null, 2);
+      // Project mode: no file parameter needed
+      if (args.mode === 'project') {
+        const result = await reader.read({ filePath: root, mode: 'project', depth: args.depth, maxFiles: args.maxFiles });
+        if (format === 'json') return JSON.stringify(result, null, 2);
+        if (format === 'compact') return formatCompact(result, args);
+        return formatOutput(result, args);
       }
 
-      if (format === 'compact') {
-        return formatCompact(result, args);
+      // Batch mode
+      if (args.mode === 'batch') {
+        const result = await reader.readBatch({
+          filePath: args.file,
+          mode: 'batch',
+          files: args.files,
+          root,
+          entryMode: args.entryMode,
+        });
+        if (format === 'json') return JSON.stringify(result, null, 2);
+        if (format === 'compact') return formatCompact(result, args);
+        return formatOutput(result, args);
       }
 
+      // Standard file modes (with session cache)
+      if (!args.file) {
+        return JSON.stringify({ status: 'error', error: 'file parameter required', mode: args.mode || 'auto' }, null, 2);
+      }
+
+      const filePath = resolve(root, args.file);
+      const readOpts = {
+        filePath: args.file,
+        mode: args.mode || 'auto',
+        symbol: args.symbol,
+        root,
+        offset: args.offset,
+        limit: args.limit,
+        startLine: args.startLine,
+        endLine: args.endLine,
+        lang: args.lang,
+        numbered: args.numbered,
+      };
+
+      // Session cache: skip disk read if file unchanged
+      const result = cacheWrap(reader, filePath, readOpts);
+
+      if (format === 'json') return JSON.stringify(result, null, 2);
+      if (format === 'compact') return formatCompact(result, args);
       return formatOutput(result, args);
     } catch (err) {
       return JSON.stringify({
@@ -276,7 +337,6 @@ function formatOutput(result, args) {
           if (Array.isArray(r.data)) {
             text += `     ${r.data.length} declarations\n`;
           } else if (typeof r.data === 'string') {
-            // Show first/last few lines
             const lines = r.data.split('\n');
             const preview = lines.length <= 6 ? r.data : lines.slice(0, 3).join('\n') + '\n     ...\n';
             text += `     ${preview.replace(/\n/g, '\n     ')}\n`;
@@ -287,14 +347,67 @@ function formatOutput(result, args) {
       }
       return text;
     }
+
+    // ── Explain: symbol + imports + callers ──
+    case 'explain': {
+      if (!result.data) {
+        return `🧠 Symbol not found: ${args.symbol} in ${file}\n`;
+      }
+      const d = result.data;
+      text = `🧠 ${d.name} (${d.type}) in ${file}\n`;
+      text += `    Line ${d.lineStart}-${d.lineEnd}\n`;
+      text += `${'─'.repeat(60)}\n`;
+
+      // Imports section
+      if (d.imports && d.imports.length > 0) {
+        text += `\n  Imports:\n`;
+        for (const imp of d.imports) {
+          text += `    :${imp.line}  ${imp.text}\n`;
+        }
+      }
+
+      // Body
+      text += `\n  Body:\n`;
+      text += `${'─'.repeat(40)}\n`;
+      text += d.body + '\n';
+
+      // Callers section
+      if (d.callers && d.callers.length > 0) {
+        text += `\n  Callers in this file:\n`;
+        for (const c of d.callers) {
+          text += `    :${c.line}  ${c.text}\n`;
+        }
+      } else {
+        text += `\n  (no internal callers found)\n`;
+      }
+      break;
+    }
+
+    // ── Project map ──
+    case 'project': {
+      text = `🗺  Project map: ${result.file}\n`;
+      text += `${'─'.repeat(60)}\n`;
+      text += `  ${result.mappedFiles}/${result.totalFiles} code files, ~${result.estimatedTokens} tokens\n\n`;
+      for (const entry of (result.data || [])) {
+        text += `  📄 ${entry.file} (${entry.lang})\n`;
+        for (const sym of entry.symbols) {
+          text += `    ${sym}\n`;
+        }
+        text += '\n';
+      }
+      if (result.totalFiles > result.mappedFiles) {
+        text += `  ... ${result.totalFiles - result.mappedFiles} more files (use depth/maxFiles to expand)\n`;
+      }
+      return text;
+    }
   }
 
-  // Token-saving tip (only in text mode)
+  // Token-saving tip
   if (mode === 'outline' || mode === 'signatures') {
     text += `\n${'─'.repeat(60)}`;
-    text += `\n💡 Tip: use mode:"symbol" + symbol:"name" for a specific function.`;
-    text += `\n   use mode:"full" for traditional read.`;
-    text += `\n   use mode:"range" for a line range.`;
+    text += `\n💡 Tip: mode:"symbol" for a specific function.`;
+    text += `\n   mode:"explain" for symbol + imports + callers.`;
+    text += `\n   mode:"project" for whole-repo map.`;
   }
 
   return text;
@@ -359,6 +472,28 @@ function formatCompact(result, args) {
         `${r.status === 'ok' ? '+' : '-'} ${r.file} (${r.mode}, ${r.lines || 'err'} lines)`
       );
       return `[batch] ${result.okCount}/${result.totalFiles} ok\n${parts.join('\n')}`;
+    }
+
+    case 'explain': {
+      if (!result.data) return `[explain] ${file} -- not found: ${args.symbol}`;
+      const d = result.data;
+      let out = `[explain] ${file} -- ${d.name} (${d.type}) L${d.lineStart}-${d.lineEnd}`;
+      if (d.imports && d.imports.length > 0) {
+        out += `\n  imports: ${d.imports.map(i => i.text).join('; ')}`;
+      }
+      out += `\n${d.body}`;
+      if (d.callers && d.callers.length > 0) {
+        out += `\n  callers: ${d.callers.map(c => `${c.text} (:${c.line})`).join('; ')}`;
+      }
+      return out;
+    }
+
+    case 'project': {
+      if (!result.data || result.data.length === 0) return `[project] ${result.file} -- empty`;
+      const lines = result.data.map(e =>
+        `  ${e.file} (${e.lang}): ${e.symbols.join(', ')}`
+      );
+      return `[project] ${result.file} (${result.mappedFiles}/${result.totalFiles} files, ~${result.estimatedTokens} tok)\n${lines.join('\n')}`;
     }
 
     default:

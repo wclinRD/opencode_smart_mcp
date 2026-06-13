@@ -16,6 +16,8 @@ import {
   generateOutline,
   generateSignatures,
   extractSymbol,
+  extractImports,
+  extractCallers,
   hashContent,
 } from '../src/lib/smart-read.mjs';
 
@@ -788,6 +790,151 @@ describe('hashContent', () => {
     assert.ok(result.checksum, 'checksum missing from full mode');
     assert.equal(result.checksum.length, 16);
 
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Explain Mode Tests (Phase 24)
+// ---------------------------------------------------------------------------
+
+const EXPLAIN_FIXTURE = `import { foo } from './foo';
+import { bar } from './bar';
+const CONST_VAL = 42;
+
+function helper() {
+  return CONST_VAL;
+}
+
+function greet(name) {
+  return helper() + 'Hello, ' + name;
+}
+
+class Greeter {
+  greet(name) {
+    return greet(name);
+  }
+}
+
+function unused() {
+  return 'nothing';
+}
+`;
+
+describe('extractImports', () => {
+  it('should extract JS imports', () => {
+    const imports = extractImports(EXPLAIN_FIXTURE, 'javascript');
+    assert.ok(imports.length >= 2);
+    assert.ok(imports.some(i => i.text.includes('./foo')));
+    assert.ok(imports.some(i => i.text.includes('./bar')));
+  });
+
+  it('should include line numbers', () => {
+    const imports = extractImports(EXPLAIN_FIXTURE, 'javascript');
+    const fooImport = imports.find(i => i.text.includes('./foo'));
+    assert.ok(fooImport);
+    assert.equal(fooImport.line, 1);
+  });
+
+  it('should handle empty content', () => {
+    const imports = extractImports('', 'javascript');
+    assert.equal(imports.length, 0);
+  });
+});
+
+describe('extractCallers', () => {
+  it('should find callers of a function', () => {
+    const sym = extractSymbol(EXPLAIN_FIXTURE, 'javascript', 'helper');
+    assert.ok(sym, 'helper not found');
+    const callers = extractCallers(EXPLAIN_FIXTURE, sym, 'javascript');
+    assert.ok(callers.length >= 1, 'should find at least one caller of helper');
+    // greet() calls helper() — the caller text contains "return helper()..."
+    assert.ok(callers.some(c => c.text.includes('helper()')), 'caller should reference helper()');
+  });
+
+  it('should exclude symbol own body', () => {
+    const sym = extractSymbol(EXPLAIN_FIXTURE, 'javascript', 'greet');
+    assert.ok(sym, 'greet not found');
+    const callers = extractCallers(EXPLAIN_FIXTURE, sym, 'javascript');
+    // None of the callers should be in greet's own body (it calls helper ONCE in its body)
+    assert.ok(callers.every(c => c.line !== sym.lineStart));
+  });
+
+  it('should return empty for uncalled functions', () => {
+    const sym = extractSymbol(EXPLAIN_FIXTURE, 'javascript', 'unused');
+    assert.ok(sym, 'unused not found');
+    const callers = extractCallers(EXPLAIN_FIXTURE, sym, 'javascript');
+    assert.equal(callers.length, 0);
+  });
+});
+
+describe('SmartReader explain mode', () => {
+  const reader = new SmartReader();
+  const tmpDir = mkdtempSync(join(tmpdir(), 'smart-read-explain-'));
+  const tmpFile = join(tmpDir, 'explain.js');
+  writeFileSync(tmpFile, EXPLAIN_FIXTURE, 'utf-8');
+
+  it('should return symbol + imports + callers', async () => {
+    const result = await reader.read({ filePath: tmpFile, mode: 'explain', symbol: 'helper' });
+    assert.equal(result.status, 'ok');
+    assert.equal(result.mode, 'explain');
+    assert.ok(result.data, 'data missing');
+    assert.equal(result.data.name, 'helper');
+    assert.ok(result.data.body, 'body missing');
+    // Imports
+    assert.ok(Array.isArray(result.data.imports), 'imports should be array');
+    assert.ok(result.data.imports.length >= 2, 'should find imports');
+    // Callers
+    assert.ok(Array.isArray(result.data.callers), 'callers should be array');
+  });
+
+  it('should error on missing symbol', async () => {
+    const result = await reader.read({ filePath: tmpFile, mode: 'explain', symbol: 'NonExistent' });
+    assert.equal(result.status, 'error');
+  });
+
+  it('should error without symbol param', async () => {
+    const result = await reader.read({ filePath: tmpFile, mode: 'explain' });
+    assert.equal(result.status, 'error');
+  });
+
+  after(() => {
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Project Map Tests (Phase 24)
+// ---------------------------------------------------------------------------
+
+describe('Project map mode', () => {
+  const reader = new SmartReader();
+  const tmpDir = mkdtempSync(join(tmpdir(), 'smart-read-project-'));
+  const srcDir = join(tmpDir, 'src');
+  mkdirSync(srcDir, { recursive: true });
+  writeFileSync(join(srcDir, 'index.js'), 'export function main() { return 1; }\nexport class App { run() {} }\n', 'utf-8');
+  writeFileSync(join(srcDir, 'utils.js'), 'export function helper() { return 42; }\nexport const VERSION = "1.0";\n', 'utf-8');
+  writeFileSync(join(srcDir, 'styles.css'), 'body { color: red; }\n', 'utf-8'); // Non-code, should be skipped
+  mkdirSync(join(tmpDir, 'node_modules'), { recursive: true });
+  writeFileSync(join(tmpDir, 'node_modules', 'dep.js'), 'module.exports = {};\n', 'utf-8'); // Should be skipped
+
+  it('should build project map with code files', async () => {
+    const result = await reader.read({ filePath: tmpDir, mode: 'project', depth: 3 });
+    assert.equal(result.status, 'ok');
+    assert.equal(result.mode, 'project');
+    assert.ok(result.mappedFiles >= 2, 'should find at least 2 code files');
+    assert.ok(result.mappedFiles <= 2, 'should not include node_modules'); // No, it's 2 because node_modules is skipped, and .css is non-code
+    // Should skip node_modules
+    const hasNodeModules = (result.data || []).some(e => e.file.includes('node_modules'));
+    assert.ok(!hasNodeModules, 'should skip node_modules');
+  });
+
+  it('should respect maxFiles limit', async () => {
+    const result = await reader.read({ filePath: tmpDir, mode: 'project', maxFiles: 1, depth: 3 });
+    assert.ok(result.mappedFiles <= 1);
+  });
+
+  after(() => {
     try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
 });

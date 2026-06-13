@@ -1,10 +1,11 @@
 // smart-read.mjs — 漸進式檔案讀取引擎
 //
-// 七種模式減少 60-80% file read token：
-//   auto       — 依檔案大小自動選擇最佳模式（新預設）
+// 八種模式減少 60-80% file read token：
+//   auto       — 依檔案大小自動選擇最佳模式
 //   outline    — 檔案結構輪廓（function/class/const 宣告）
 //   signatures — 比 outline 多包含 signature 行（+line range）
 //   symbol     — 只抽取特定 symbol 的完整 body
+//   explain    — symbol body + imports + callers 一次取得
 //   range      — 指定行範圍讀取（startLine/endLine）
 //   full       — 傳統完整讀取（fallback）
 //   batch      — 一次讀取多個檔案
@@ -13,7 +14,7 @@
 // 其他語言以通用 pattern 作為 fallback。
 
 import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
-import { extname, resolve, relative, basename } from 'node:path';
+import { extname, resolve, relative, basename, join } from 'node:path';
 import { cwd } from 'node:process';
 import { createHash } from 'node:crypto';
 
@@ -449,6 +450,94 @@ function listDirectory(dirPath, root, opts) {
 }
 
 // ---------------------------------------------------------------------------
+// Import and caller extraction (for explain mode)
+// ---------------------------------------------------------------------------
+
+/**
+ * Get import pattern regexes per language.
+ */
+function getImportPatterns(lang) {
+  switch (lang) {
+    case 'javascript':
+    case 'typescript':
+      return [
+        /^import\s+/,
+        /^const\s+\w+\s*=\s*require\(/,
+        /^(?:import|export)\s+.*\s+from\s+/,
+        /^export\s+\*\s+from/,
+      ];
+    case 'python':
+      return [
+        /^import\s+/,
+        /^from\s+\S+\s+import\s+/,
+      ];
+    case 'go':
+      return [/^import\s+(?!"|`)/];
+    case 'rust':
+      return [/^use\s+/];
+    default:
+      return [
+        /^import\s+/,
+        /^use\s+/,
+        /^from\s+/,
+        /^require/,
+      ];
+  }
+}
+
+/**
+ * Extract import statements from the first N lines of a file.
+ * Returns [{ line, text }].
+ */
+export function extractImports(content, lang) {
+  const lines = content.split('\n');
+  const patterns = getImportPatterns(lang);
+  const maxLines = Math.min(lines.length, 80);
+  const imports = [];
+  for (let i = 0; i < maxLines; i++) {
+    const line = lines[i];
+    for (const re of patterns) {
+      if (re.test(line)) {
+        imports.push({ line: i + 1, text: line.trim() });
+        break;
+      }
+    }
+  }
+  return imports;
+}
+
+/**
+ * Extract callers of a symbol within the same file (excluding symbol's own body).
+ * Returns [{ line, text }].
+ */
+export function extractCallers(content, symbolData, _lang) {
+  const lines = content.split('\n');
+  const symbolName = symbolData.name;
+  const defLine = symbolData.lineStart;
+  const endLine = symbolData.lineEnd;
+  const callers = [];
+
+  const escaped = symbolName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`\\b${escaped}\\s*\\(`, 'g');
+
+  for (let i = 0; i < lines.length; i++) {
+    // Skip symbol's own definition body
+    if (i >= defLine - 1 && i < endLine) continue;
+
+    const trimmed = lines[i].trim();
+    // Skip comments
+    if (trimmed.startsWith('//') || trimmed.startsWith('#') || trimmed.startsWith('/*') || trimmed.startsWith('*')) continue;
+
+    re.lastIndex = 0;
+    if (re.test(lines[i])) {
+      callers.push({ line: i + 1, text: trimmed.length > 80 ? trimmed.slice(0, 80) + '…' : trimmed });
+    }
+  }
+
+  return callers;
+}
+
+// ---------------------------------------------------------------------------
 // Content hash for integrity verification
 // ---------------------------------------------------------------------------
 
@@ -459,6 +548,79 @@ function listDirectory(dirPath, root, opts) {
  */
 export function hashContent(content) {
   return createHash('sha256').update(content, 'utf-8').digest('hex').slice(0, 16);
+}
+
+// ---------------------------------------------------------------------------
+// Project Map — 專案符號地圖
+// ---------------------------------------------------------------------------
+
+const CODE_EXTENSIONS = new Set([
+  '.js', '.jsx', '.mjs', '.cjs', '.ts', '.tsx', '.mts', '.cts',
+  '.py', '.pyw', '.go', '.rs', '.rb', '.php', '.java', '.swift',
+  '.kt', '.scala', '.c', '.h', '.cpp', '.hpp', '.cc', '.cxx', '.cs',
+]);
+const SKIP_DIRS = new Set(['node_modules', '.git', '.svn', 'dist', 'build', '.next', '.nuxt', '__pycache__', '.venv', 'vendor', 'target', '.opencode']);
+
+/**
+ * Build a compact project symbol map.
+ * Walks directory tree, extracts top-level symbols per code file.
+ * Returns { status, mode, file, totalFiles, mappedFiles, estimatedTokens, data }
+ */
+export function buildProjectMap(root, opts = {}) {
+  const maxDepth = opts.depth || 4;
+  const maxFiles = opts.maxFiles || 40;
+  const maxTotalLines = opts.maxTotalLines || 500;
+  const entries = [];
+  let totalLines = 0;
+  let filesScanned = 0;
+
+  function walk(dir, depth) {
+    if (depth > maxDepth || entries.length >= maxFiles || totalLines >= maxTotalLines) return;
+    let list;
+    try { list = readdirSync(dir); } catch { return; }
+
+    for (const name of list) {
+      if (entries.length >= maxFiles || totalLines >= maxTotalLines) break;
+      if (name.startsWith('.')) continue;
+
+      const full = join(dir, name);
+      let stat;
+      try { stat = statSync(full); } catch { continue; }
+
+      if (stat.isDirectory()) {
+        if (!SKIP_DIRS.has(name)) walk(full, depth + 1);
+      } else if (stat.isFile() && CODE_EXTENSIONS.has(extname(name).toLowerCase())) {
+        filesScanned++;
+        try {
+          const content = readFileSync(full, 'utf-8');
+          const lang = detectLanguage(full);
+          const outline = generateOutline(content, lang);
+          const relPath = relative(root, full);
+          const syms = outline.slice(0, 8).map(s => `${s.name}:${s.line}`);
+          if (outline.length > 8) syms.push(`…+${outline.length - 8} more`);
+
+          const lineCount = syms.length + 1;
+          if (totalLines + lineCount <= maxTotalLines) {
+            entries.push({ file: relPath, lang, symbols: syms, totalDecls: outline.length });
+            totalLines += lineCount;
+          }
+        } catch { /* unreadable file, skip */ }
+      }
+    }
+  }
+
+  walk(root, 0);
+  entries.sort((a, b) => a.file.localeCompare(b.file));
+
+  return {
+    status: 'ok',
+    mode: 'project',
+    file: relative(cwd(), root) || '.',
+    totalFiles: filesScanned,
+    mappedFiles: entries.length,
+    estimatedTokens: totalLines * 3,
+    data: entries,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -495,6 +657,12 @@ export class SmartReader {
     // ── Batch mode: read multiple files ──
     if (mode === 'batch') {
       return this.readBatch(opts);
+    }
+
+    // ── Project mode: build symbol map ──
+    if (mode === 'project') {
+      const projectRoot = opts.filePath ? resolve(root, opts.filePath) : root;
+      return buildProjectMap(projectRoot, opts);
     }
 
     const filePath = resolve(root, opts.filePath);
@@ -575,6 +743,32 @@ export class SmartReader {
           break;
         }
 
+        // ── Explain: symbol + imports + callers ──
+        case 'explain': {
+          if (!opts.symbol) {
+            return { ...result, status: 'error', error: 'symbol name required for explain mode' };
+          }
+          const symbolData = extractSymbol(content, lang, opts.symbol);
+          if (!symbolData) {
+            return { ...result, status: 'error', error: `Symbol "${opts.symbol}" not found` };
+          }
+          // Extract dependencies
+          const imports = extractImports(content, lang);
+          const callers = extractCallers(content, symbolData, lang);
+          result.data = {
+            name: symbolData.name,
+            type: symbolData.type,
+            lineStart: symbolData.lineStart,
+            lineEnd: symbolData.lineEnd,
+            signature: symbolData.signature,
+            body: symbolData.body,
+            imports,
+            callers,
+          };
+          result.lines = (symbolData.body || '').split('\n').length + imports.length + callers.length;
+          break;
+        }
+
         // ── Range: read specific line range ──
         case 'range': {
           const lines = content.split('\n');
@@ -624,7 +818,7 @@ export class SmartReader {
         }
 
         default: {
-          return { ...result, status: 'error', error: `Unknown mode: ${mode}. Use auto|outline|signatures|symbol|range|full|batch|list` };
+          return { ...result, status: 'error', error: `Unknown mode: ${mode}. Use auto|outline|signatures|symbol|explain|range|full|batch|list|project` };
         }
       }
     } catch (err) {

@@ -72,7 +72,7 @@ permission:
 | `smart_context({command})` | Session 管理（含 context budget 查詢：`smart_context({command:"budget"})`） |
 | `smart_rules({file})` | 查詢專案規則（AGENTS.md / .cursorrules 等）— **編輯前必查** |
 | `smart_lsp({operation, file, line, character})` | **Type-aware 程式碼理解** — 找定義、查引用、看型別、診斷錯誤。支援 TS/JS/Python/Rust/Swift/PHP |
-| `smart_read({file, mode?, symbol?, offset?, limit?, startLine?, endLine?, files?, format?, numbered?})` | 🥇 **漸進式檔案讀取（優先於 raw read）** — 七種模式：`auto`（依檔案大小自動選模式 🏆新預設）、`outline`（結構輪廓）、`signatures`（簽名行+行範圍）、`symbol`（單一 symbol 主體）、`range`（`startLine`/`endLine` 精準行範圍，附 checksum）、`full`（完整內容，支援 offset/limit 分頁）、`batch`（`files:["f1","f2"]` 一次讀多檔）。支援三種輸出格式：`text`（人類可讀）、`compact`（最小 token，無裝飾）、`json`（結構化）。文字檔案一律用此工具；raw read 只用於目錄列表或圖片/PDF |
+| `smart_read({file, mode?, symbol?, offset?, limit?, startLine?, endLine?, files?, format?, numbered?, depth?, maxFiles?})` | 🥇 **漸進式檔案讀取（優先於 raw read）** — 九種模式：`auto`（依檔案大小自動選模式 🏆新預設）、`outline`（結構輪廓）、`signatures`（簽名行+行範圍）、`symbol`（單一 symbol 主體）、`explain`（符號 body + imports + callers 一次取得）、`range`（`startLine`/`endLine` 精準行範圍，附 checksum）、`full`（完整內容，支援 offset/limit 分頁）、`batch`（`files:["f1","f2"]` 一次讀多檔）、`project`（專案符號地圖 <500 tokens）。內建 **Session Cache**：同一 session 內不重讀未修改檔案（mtime + 10min TTL）。支援三種輸出格式：`text`（人類可讀）、`compact`（最小 token，無裝飾）、`json`（結構化）。文字檔案一律用此工具；raw read 只用於目錄列表或圖片/PDF |
 | `smart_compact({toolHistory})` | **零成本 context 壓縮** — 分析工具歷史，識別可安全丟棄或摘要的輸出。無 LLM 開銷 |
 | `smart_codebase_index({command})` | **持久化程式碼索引** — build/update/query/map/stats。用了之後 import_graph 自動快 5-50x |
 | `smart_hallucination_check({output, context?, query?})` | **輸出真實性驗證** — 檢查 LLM 輸出是否有幻覺（編造/錯誤歸因/偏離/矛盾/離題/過度自信）。`mode:"doi"` 可驗證文中 DOI 是否真實存在 |
@@ -222,6 +222,9 @@ permission:
 | 知識圖譜 | `ssr(kg operation:"create_entities") → ssr(kg operation:"create_relations") → ssr(kg operation:"search_nodes")` |
 | 自動修復 | `ssr(autofix args:{file:"...", fix:"..."}) → 自動 verify test/lint/security` |
 | 程式碼驗證 | `smart_exec({mode:"verify", code}) → 自動 syntax check + execute + output verify → 失敗自動 retry (最多 1 輪)` |
+| Explain 符號 | `smart_read({file:"src/auth.ts", mode:"explain", symbol:"authenticate"}) → 一次取得符號 body + imports + callers` |
+| 專案一覽 | `smart_read({mode:"project", depth:3, maxFiles:30, format:"compact"}) → 專案符號地圖 <500 tokens` |
+| Session 快取 | `第一次 smart_read 會讀取檔案 → 第二次相同呼叫直接回傳快取結果（mtime 檢查 + 10min TTL）` |
 | 工作流模板 | `ssr(workflow args:{command:"list"}) → ssr(workflow args:{command:"run", name:"bug-fix"})` |
 | 重構計畫 | `ssr(refactor_plan args:{symbol:"...", newApi:"..."}) → 產出遷移計畫 → ssr(fast_apply)` |
 
