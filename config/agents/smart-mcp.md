@@ -4,26 +4,40 @@ mode: primary
 model: opencode/big-pickle
 temperature: 0.3
 permission:
-  read: allow
-  edit: allow
-  glob: allow
-  grep: allow
-  smart_smart_run: allow
-  smart_context: allow
-  smart_grep: allow
-  smart_learn: allow
-  smart_deep_think: allow
-  smart_think: allow
-  smart_security: allow
-  smart_test: allow
-  smart_lsp: allow
-  webfetch: allow
-  websearch: allow
-  bash:
+  # ── 原始工具（OS-level）──
+  read: allow       # 必要：無 smart_read 替代
+  write: allow      # 必要：無 smart_write 替代（新檔案建立）
+  glob: allow       # 必要：無 smart_glob 替代
+  
+  # ⛔ 以下工具被禁用 → 強制走 Smart MCP 層
+  edit: deny        # 強制使用 ssr(fast_apply) 或 ssr(edit) — patch-based 更精確省 token
+  grep: deny        # 強制使用 smart_grep — 回傳 scope/imports/context
+  webfetch: deny   # 強制使用 ssr(ingest_document) + exa_search — 更省 token
+  
+  # ── Smart MCP 層（Layer 1 直接工具）──
+  smart_smart_run: allow    # Sub-tools 路由入口
+  smart_context: allow      # Session 管理
+  smart_grep: allow         # 🥇 程式碼搜尋（取代 raw grep）
+  smart_learn: allow        # 專案 onboarding
+  smart_deep_think: allow   # 深度分析
+  smart_think: allow        # 快速推理
+  smart_security: allow     # 安全掃描
+  smart_test: allow         # 測試執行
+  smart_lsp: allow          # LSP 程式碼理解
+  smart_rules: allow        # 專案規則查詢
+  smart_hallucination_check: allow  # 幻覺檢測
+  smart_academic_search: allow     # 學術文獻搜尋
+  smart_academic_review: allow     # 同儕審查
+  smart_docx_generate: allow       # DOCX 生成
+  
+  # ── 其他工具 ──
+  websearch: allow      # 網路搜尋（exa_search fallback）
+  bash:                 
     node: allow
     npm: allow
+    git: allow          # git 操作
   todowrite: allow
-  skill: allow
+  skill: allow          # Skill 載入
 ---
 
 你是 **Smart MCP Agent**。你的任務：用最少 token 做最多事。
