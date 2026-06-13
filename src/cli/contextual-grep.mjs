@@ -29,6 +29,9 @@ import { resolve, relative, extname, dirname, sep } from 'node:path';
 import { globToRegex, matchGlob, findFiles, COLORS, useColor } from '../lib/utils.mjs';
 import { rankResults, applyRerankSignals } from '../lib/bm25.mjs';
 import { detectQueryType } from '../lib/query-detector.mjs';
+import { semanticSearch } from '../lib/semantic-search.mjs';
+import { hybridRank } from '../lib/hybrid-search.mjs';
+import { loadCache, saveCache, getCachedOrEmbed } from '../lib/embedding-cache.mjs';
 
 // ---------------------------------------------------------------------------
 // Scope detection — find enclosing function/class/block for a line
@@ -564,6 +567,8 @@ function parseArgs() {
     filesOnly: false,
     rank: 'bm25',       // default: BM25 ranking enabled
     queryDetect: true,  // default: query type detection enabled
+    semantic: false,    // default: semantic search disabled
+    semanticWeight: undefined, // auto-detect from query type
   };
   let i = 1;
 
@@ -591,6 +596,8 @@ function parseArgs() {
       case '--no-rank': opts.rank = 'none'; break;
       case '--query-detect': opts.queryDetect = true; break;
       case '--no-query-detect': opts.queryDetect = false; break;
+      case '--semantic': opts.semantic = true; break;
+      case '--semantic-weight': opts.semanticWeight = parseFloat(args[++i]); break;
       default: break;
     }
     i++;
@@ -632,6 +639,8 @@ Options:
   --no-rank             Disable ranking (equivalent to --rank none)
   --query-detect        Enable query type detection (default: on)
   --no-query-detect     Disable query type detection
+  --semantic            Enable hybrid semantic search (BM25 + TF-IDF fusion)
+  --semantic-weight <N> Custom semantic weight 0.0-1.0 (auto-detected from query type)
   -h, --help            Show this help
 
 Examples:
@@ -676,6 +685,36 @@ if (opts.queryDetect) {
 if (opts.rank !== 'none' && results.length > 0) {
   rankResults(results, opts.pattern);
   applyRerankSignals(results, opts.pattern);
+}
+
+// Hybrid semantic search
+if (opts.semantic && results.length > 0) {
+  const cache = loadCache(root);
+  const allChunks = [];
+
+  for (const fileResult of results) {
+    try {
+      const st = statSync(fileResult.file);
+      const { chunks } = getCachedOrEmbed(fileResult.file, st.mtime.toISOString(), cache);
+      if (chunks.length > 0) {
+        for (const chunk of chunks) {
+          allChunks.push({ ...chunk, file: fileResult.file, relFile: fileResult.relFile });
+        }
+      }
+    } catch { /* skip unreadable files */ }
+  }
+
+  if (allChunks.length > 0) {
+    const semanticResults = semanticSearch(opts.pattern, allChunks, { topK: Math.min(allChunks.length, 50) });
+    const hybridResults = hybridRank(results, semanticResults, queryType?.type || 'symbol', {
+      semanticWeight: opts.semanticWeight,
+    });
+    results.length = 0;
+    results.push(...hybridResults.filter(r => r.matches && r.matches.length > 0));
+  }
+
+  // Save cache for next run
+  try { saveCache(root, cache); } catch { /* optional */ }
 }
 
 // Enrich with import context if requested

@@ -17,6 +17,8 @@ export default {
       filesOnly: { type: 'boolean', description: 'List files only' },
       maxMatches: { type: 'number', description: 'Max matches per file (default: 100)' },
       format: { type: 'string', enum: ['text', 'json', 'markdown'], description: 'Output format' },
+      semantic: { type: 'boolean', description: 'Enable hybrid semantic search (BM25 + TF-IDF fusion)' },
+      semanticWeight: { type: 'number', description: 'Custom semantic weight 0.0-1.0 (auto-detected from query type)' },
     },
     required: ['pattern'],
   },
@@ -34,6 +36,8 @@ export default {
     if (a.filesOnly) cli.push('--files-only');
     if (a.maxMatches) cli.push('--max-matches', String(a.maxMatches));
     if (a.format) cli.push('--format', String(a.format));
+    if (a.semantic) cli.push('--semantic');
+    if (a.semanticWeight != null) cli.push('--semantic-weight', String(a.semanticWeight));
     cli.push('--no-color');
     return cli;
   },

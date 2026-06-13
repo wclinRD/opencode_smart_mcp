@@ -68,28 +68,36 @@
 - [x] 測試：identifier-aware tokenization（camelCase/snake_case）
 - [x] 測試：query type detection 三種類型
 
-## Phase 2：Hybrid Semantic Search 🆕（1 週）
-- [ ] `npm install @xenova/transformers`
-- [ ] 建立 `src/lib/semantic-search.mjs`
-  - [ ] `initEmbedder(modelName)` — lazy 載入 ONNX model（all-MiniLM-L6-v2）
-  - [ ] `embedChunks(chunks)` — 批量 embedding
-  - [ ] `cosineSimilarity(a, b)` — 餘弦相似度
-  - [ ] `semanticSearch(query, chunks)` — 語意搜尋
-- [ ] 建立 `src/lib/hybrid-search.mjs`
-  - [ ] `rrfFusion(bm25Results, semanticResults, k=60)` — RRF 合併
-  - [ ] `weightedFusion(bm25Results, semanticResults, queryType)` — 依 query type 加權
-- [ ] 建立 `src/lib/embedding-cache.mjs`
-  - [ ] `loadCache(root)` — 載入 `.smart/grep-embeddings.json`
-  - [ ] `saveCache(root, cache)` — 儲存快取
-  - [ ] `getCachedOrEmbed(file, mtime, embedder)` — mtime 檢查 + 嵌入
+## Phase 2：Hybrid Semantic Search 🆕 ✅（已完成 2026-06-13）
+- [x] 使用現有 `@huggingface/transformers`（已安裝）
+- [x] 建立 `src/lib/semantic-search.mjs`
+  - [x] `chunkCode(content, filePath)` — 結構化程式碼切割（JS/TS/Python/Rust/Go）
+  - [x] `semanticSearch(query, chunks)` — TF-IDF 語意搜尋
+  - [x] `initSemanticSearch()` — lazy 載入 sentence embedding model
+  - [x] `embedText(text)` — sentence embedding（fallback TF-IDF）
+- [x] 建立 `src/lib/hybrid-search.mjs`
+  - [x] `rrfFusion(bm25Results, semanticResults, k=60)` — RRF 合併
+  - [x] `weightedFusion(bm25Results, semanticResults, queryType)` — 依 query type 加權
+  - [x] `hybridRank(bm25Results, semanticResults, queryType)` — 主入口
+- [x] 建立 `src/lib/embedding-cache.mjs`
+  - [x] `loadCache(root)` — 載入 `.smart/grep-embeddings.json`
+  - [x] `saveCache(root, cache)` — 儲存快取
+  - [x] `getCachedOrEmbed(file, mtime, cache)` — mtime + content hash 檢查
+  - [x] `cleanStaleEntries(cache)` — 清除過期條目
+  - [x] `getCacheStats(cache)` — 快取統計
 - [x] 整合到 `contextual-grep.mjs`
-  - [ ] `--semantic` 啟用 hybrid search
-  - [ ] `--semantic-weight 0.0-1.0` 自訂 semantic 權重
-  - [ ] 預設：symbol query → BM25 70% + semantic 30%
-  - [ ] 預設：NL query → BM25 30% + semantic 70%
-- [ ] 測試：semantic search 正確性（概念查詢）
-- [ ] 測試：RRF fusion 正確性
-- [ ] 測試：embedding cache 命中率
+  - [x] `--semantic` 啟用 hybrid search
+  - [x] `--semantic-weight 0.0-1.0` 自訂 semantic 權重
+  - [x] 預設：symbol query → BM25 70% + semantic 30%
+  - [x] 預設：NL query → BM25 30% + semantic 70%
+- [x] 更新 `grep.mjs` plugin（新增 semantic/semanticWeight 參數）
+- [x] 更新 `compose-engine.mjs` TOOL_ARGS_CONVERTERS
+- [x] 更新 `workflow.mjs` TOOL_ARGS_CONVERTERS
+- [x] 測試：semantic search 正確性（概念查詢）— 6 tests
+- [x] 測試：RRF fusion 正確性 — 6 tests
+- [x] 測試：embedding cache 命中率 — 5 tests
+- [x] 測試：CLI integration — 4 tests
+- [x] **21 項測試全部通過**
 
 ## Phase 3：Tree-sitter Structural Intelligence（1 週）
 - [ ] `npm install web-tree-sitter tree-sitter-wasms`

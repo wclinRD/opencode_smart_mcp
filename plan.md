@@ -158,9 +158,9 @@ Phase 1 (2-3天)    Phase 2 (1週)      Phase 3 (1週)      Phase 4 (2週)      
    - 🆕 Symbol name match：符號名稱精確匹配 +0.30 權重
    - 參考 semble_rs、search-semantically ranking signals
 
-## Phase 2：Hybrid Semantic Search 🆕（從 Phase 4+ 提前）
+## Phase 2：Hybrid Semantic Search 🆕 ✅（已完成 2026-06-13）
 - **實作時間**：1 週
-- **新依賴**：`@xenova/transformers`（ONNX runtime，無 GPU 需求）或 Model2Vec static embeddings
+- **新依賴**：無（使用現有 `@huggingface/transformers` + TF-IDF fallback）
 - **預期效果**：語意查詢準確率 ↑60%，MRR ↑40-60%
 
 ### 實作內容
