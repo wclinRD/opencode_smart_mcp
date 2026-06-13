@@ -545,7 +545,7 @@ function generatePreview(content, search, replace, lineNum) {
 function wrapDiffBlock(diffText) {
   // Wrap in markdown fenced code block with 'diff' language tag
   // opencode's shiki renderer will syntax-highlight + (green) and - (red)
-  return `\`\`\`diff\n${diffText}\n\`\`\``;
+  return "```diff\n" + diffText + "```";
 }
 
 function formatOutput(data, format) {

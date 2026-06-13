@@ -952,7 +952,15 @@ export function applyAtomic(changes, opts = {}) {
  * Generate a unified-diff-style summary of changes.
  */
 function generateDiffSummary(oldContent, newContent, filePath) {
-  const rel = relative(process.cwd(), filePath);
+  const rel = (() => {
+    const r = relative(process.cwd(), filePath);
+    // If path goes above project root, use basename for clean display
+    if (r.startsWith('../') || r.includes('/../')) {
+      const parts = filePath.split('/');
+      return parts[parts.length - 1];
+    }
+    return r;
+  })();
   const ol = oldContent.split('\n');
   const nl = newContent.split('\n');
   const added = [], removed = [];
