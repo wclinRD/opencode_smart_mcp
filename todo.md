@@ -1,5 +1,14 @@
 # smart_fast_apply 強化待辦清單
 
+## Diff Rendering Enhancement ✅
+- [x] `ansiColorizeDiff()` — +綠/-紅/@@青 ANSI 色碼
+- [x] `codeBlockLang()` — 副檔名→chroma 語言映射
+- [x] `wrapDiffBlock(diffText, filePath)` — 格式 code block + ANSI
+- [x] `formatAnsiDiff()` — 純 ANSI 輸出模式
+- [x] `format:"ansi"` 加入 output enum
+- [x] 第 4 個 SEARCH/REPLACE conflict 修復（r.file 參數）
+- [x] 78 tests pass, 0 fail
+
 ## Phase 0：BlockDiff 新格式
 - [x] plan.md / todo.md 建立
 - [ ] `inputSchema.format.enum` 加入 `block-diff`

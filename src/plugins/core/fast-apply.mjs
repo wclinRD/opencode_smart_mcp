@@ -188,8 +188,8 @@ Dry-run by default — safe to use without side effects.`,
 
       output: {
         type: 'string',
-        enum: ['text', 'json', 'diff'],
-        description: 'Output format (default: text)',
+        enum: ['text', 'json', 'diff', 'ansi'],
+        description: 'Output format (default: text). Use "ansi" for terminal-colored diff output (works in iTerm2 headless mode).',
       },
     },
     // No strict required — can use blocks, text, diff, or whole
@@ -542,14 +542,86 @@ function generatePreview(content, search, replace, lineNum) {
   };
 }
 
-function wrapDiffBlock(diffText) {
-  // Wrap in markdown fenced code block with 'diff' language tag
-  // opencode's shiki renderer will syntax-highlight + (green) and - (red)
-  return "```diff\n" + diffText + "```";
+// ── Diff rendering ──
+//
+// ANSI color codes for terminal diff display
+const ANSI_RED    = '\x1b[31m';
+const ANSI_GREEN  = '\x1b[32m';
+const ANSI_CYAN   = '\x1b[36m';
+const ANSI_RESET  = '\x1b[0m';
+
+/**
+ * Colorize unified diff text with ANSI escape codes.
+ *   + lines → green
+ *   - lines → red
+ *   @@ lines → cyan
+ */
+function ansiColorizeDiff(diffText) {
+  if (!diffText) return '';
+  return diffText.split('\n').map(line => {
+    if (line.startsWith('+') && !line.startsWith('+++ ')) return ANSI_GREEN + line + ANSI_RESET;
+    if (line.startsWith('-') && !line.startsWith('--- ')) return ANSI_RED + line + ANSI_RESET;
+    if (line.startsWith('@@')) return ANSI_CYAN + line + ANSI_RESET;
+    return line;
+  }).join('\n');
+}
+
+/**
+ * Map file extension to chroma-compatible code block language tag.
+ */
+function codeBlockLang(filePath) {
+  if (!filePath) return 'diff';
+  const map = {
+    '.js':'javascript','.jsx':'javascript','.mjs':'javascript','.cjs':'javascript',
+    '.ts':'typescript','.tsx':'typescript','.mts':'typescript','.cts':'typescript',
+    '.py':'python','.rb':'ruby','.go':'go','.rs':'rust',
+    '.java':'java','.swift':'swift','.kt':'kotlin',
+    '.c':'c','.cpp':'cpp','.h':'c','.hpp':'cpp',
+    '.cs':'csharp','.php':'php','.sh':'bash','.bash':'bash',
+    '.yaml':'yaml','.yml':'yaml','.json':'json','.xml':'xml',
+    '.md':'markdown','.css':'css','.scss':'scss','.html':'html','.vue':'vue',
+    '.svelte':'svelte','.sql':'sql','.r':'r','.pl':'perl',
+    '.lua':'lua','.dart':'dart','.zig':'zig',
+  };
+  return map[extname(filePath).toLowerCase()] || 'diff';
+}
+
+/**
+ * Wrap diff text for optimal rendering in opencode:
+ *
+ *   - Uses the file's actual language as code block tag → chroma in TUI highlights the code
+ *   - Adds ANSI escape codes for +/−/@@ lines → works when output goes to terminal
+ *   - Falls back to 'diff' language tag for shiki (web/desktop view)
+ *
+ * In opencode TUI: chroma syntax-highlights the code portion (language-based)
+ * In opencode run --format default: markdown rendered, language tag helps shiki
+ * In raw terminal (opencode run, export, copy-paste): ANSI codes color the diff markers
+ */
+function wrapDiffBlock(diffText, filePath) {
+  const lang = codeBlockLang(filePath);
+  const colored = ansiColorizeDiff(diffText);
+  return "```" + lang + "\n" + colored + "```";
+}
+
+/**
+ * Render diff as pure ANSI-colored plain text (no code block).
+ * Use with output: "ansi" for headless/bare-terminal contexts.
+ */
+function formatAnsiDiff(diffText) {
+  return ansiColorizeDiff(diffText);
 }
 
 function formatOutput(data, format) {
   if (format === 'json') return data;
+
+  if (format === 'ansi') {
+    // Pure ANSI-colored diff (no markdown code blocks, no status text)
+    // Works great with opencode run or direct terminal output
+    if (data.results) {
+      return data.results.filter(r => r.diff).map(r => formatAnsiDiff(r.diff)).join('\n\n');
+    }
+    return JSON.stringify(data, null, 2);
+  }
 
   if (format === 'diff') {
     if (data.results) {
@@ -609,7 +681,7 @@ function formatOutput(data, format) {
     if (data.results?.some(r => r.diff)) {
       out.push('\n--- Diffs ---');
       for (const r of data.results) {
-        if (r.diff) out.push(`\n${wrapDiffBlock(r.diff)}`);
+        if (r.diff) out.push(`\n${wrapDiffBlock(r.diff, r.file)}`);
       }
     }
     return out.join('\n');

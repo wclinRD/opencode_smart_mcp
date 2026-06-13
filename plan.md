@@ -1,5 +1,16 @@
 # smart_fast_apply 強化計畫
 
+## ✅ Diff Rendering Enhancement 已完成
+- ANSI 色碼輸出（+綠/-紅/@@青），支援 terminal 直接顯示
+- 檔案語言映射（chroma 相容），TUI 也可語法高亮
+- `format:"ansi"` 模式：純 ANSI 輸出，無 code block
+- 向後相容：不影響現有 ` ```diff ` 格式（web/Shiki 可繼續用）
+
+**opencode TUI 限制**：MCP 工具輸出無法用 custom renderer（#21018），
+只能透過 chroma code block 語言 tag 間接達成效用。
+若未來 opencode 實作 `diff.v1` metadata kind（#15451），
+可移除 ANSI hack，改用原生 diff renderer。
+
 ## 目標
 將 smart_fast_apply 的編輯衝突率從 ~25% 降至 ~2.5%，透過 4 個階段的技術升級。
 

@@ -53,3 +53,6 @@ config/skills/**/.scraper_circuit.json
 config/skills/**/*.app/
 config/skills/**/MeetingRecorder
 config/skills/**/RecordingControlPanel
+
+# Smart MCP auto-backup
+*.apply.bak

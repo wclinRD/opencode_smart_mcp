@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-13T04:53:24.853Z",
+  "generatedAt": "2026-06-13T05:48:25.383Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -620,9 +620,10 @@
             "enum": [
               "text",
               "json",
-              "diff"
+              "diff",
+              "ansi"
             ],
-            "description": "Output format (default: text)"
+            "description": "Output format (default: text). Use \"ansi\" for terminal-colored diff output (works in iTerm2 headless mode)."
           }
         }
       }
