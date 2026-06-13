@@ -7,7 +7,7 @@ permission:
   # ── 原始工具（OS-level）──
   read: deny        # ❗ smart_read 已完全取代（11 種模式）。所有檔案讀取一律走 smart_read — 禁止 cat/head/tail/read
   write: allow      # 必要：無 smart_write 替代（新檔案建立）
-  glob: allow       # 必要：無 smart_glob 替代
+  glob: deny        # ❗ smart_glob 已取代（rg --files --glob，絕對路徑，100 筆上限）
   
   # ⛔ 以下工具被禁用 → 強制走 Smart MCP 層
   edit: deny        # 強制使用 ssr(fast_apply)、ssr(edit) 或 ssr(edit_ast) — patch-based 更精確省 token
@@ -33,6 +33,7 @@ permission:
   smart_exa_search: allow         # 🥇 網路搜尋（取代 websearch/webfetch）
   smart_exa_crawl: allow          # 🥇 網頁爬取（clean/markdown/chunk/crawlee）
   smart_github_search: allow      # 🥇 GitHub 程式碼搜尋
+  smart_glob: allow             # 🥇 檔案 glob 搜尋（取代內建 glob）
 
   # ── 其他工具 ──
   websearch: deny       # 強制使用 smart_exa_search
@@ -86,6 +87,7 @@ permission:
 | `smart_exa_search({command, query, numResults?})` | 🥇 **網路搜尋** — `command:"search"` 網頁搜尋，`command:"code"` 程式碼範例搜尋。完全取代 websearch/webfetch |
 | `smart_exa_crawl({urls, clean?, markdown?, chunk?})` | 🥇 **網頁爬取** — 支援 clean（去廣告導覽）、markdown（LLM 友善）、chunk（長文分段）、crawlee（JS 網站）、render（Playwright）|
 | `smart_github_search({query, repo?, language?})` | 🥇 **GitHub 程式碼搜尋** — 搜尋 public GitHub repos，支援 repo/path/language 過濾 |
+| `smart_glob({pattern, path?})` | 🥇 **檔案 glob 搜尋** — 完全取代內建 glob。底層用 `rg --files --glob`，回傳絕對路徑，上限 100 筆。與內建 glob 行為 100% 一致 |
 
 > **💡 快思 vs 慢想**：`smart_think`（🥇 預設 `mode:"cit"`）是來回對話式推理。`smart_deep_think`（慢想 + 模板）是單次完整深度分析。不確定 root cause 或有多種可能 → `think`。需要系統性完整評估 → `deep_think`。
 

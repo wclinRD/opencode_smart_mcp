@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-13T12:03:39.528Z",
+  "generatedAt": "2026-06-13T15:39:53.970Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -918,6 +918,14 @@
               "markdown"
             ],
             "description": "Output format"
+          },
+          "semantic": {
+            "type": "boolean",
+            "description": "Enable hybrid semantic search (BM25 + TF-IDF fusion)"
+          },
+          "semanticWeight": {
+            "type": "number",
+            "description": "Custom semantic weight 0.0-1.0 (auto-detected from query type)"
           }
         },
         "required": [
