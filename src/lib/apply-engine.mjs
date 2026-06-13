@@ -594,6 +594,51 @@ export function detectMultiOccurrence(content, search, opts = {}) {
 // Apply: SEARCH/REPLACE
 // ---------------------------------------------------------------------------
 
+/** File extension → language name for AST fallback */
+function detectApplyLang(filePath) {
+  const ext = filePath?.split('.').pop()?.toLowerCase();
+  const map = {
+    js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript',
+    ts: 'typescript', mts: 'typescript', tsx: 'typescript',
+    py: 'python', rb: 'ruby', php: 'php', rs: 'rust', swift: 'swift',
+    go: 'go', java: 'java', kt: 'kotlin', dart: 'dart',
+    c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp',
+    vue: 'vue', svelte: 'svelte', css: 'css', scss: 'scss', html: 'html',
+  };
+  return map[ext] || null;
+}
+
+/**
+ * AST fallback retry for Level 7 fuzzy match failures.
+ * Inlines matchByAST from ast-engine.mjs synchronously (no circular dep).
+ */
+function tryASTMatch(content, search, lang) {
+  if (!content || !search) return null;
+  const lines = content.split('\n');
+  const searchLines = search.split('\n');
+
+  // Strategy 1: trimmed text match
+  const normSearch = search.replace(/\s+/g, ' ').trim();
+  for (let i = 0; i < lines.length; i++) {
+    const block = lines.slice(i, i + searchLines.length).join('\n');
+    if (block.replace(/\s+/g, ' ').trim() === normSearch) {
+      return { line: i + 1, level: 7 };
+    }
+  }
+
+  // Strategy 2: anchor line match
+  const anchor = searchLines.find(l => l.trim().length > 10);
+  if (anchor) {
+    const anchorTrimmed = anchor.trim();
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].trim() === anchorTrimmed) {
+        return { line: i + 1, level: 7 };
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Apply a SEARCH/REPLACE block to a single file.
  *
@@ -615,10 +660,11 @@ export function applySearchReplace(filePath, block, opts = {}) {
 
   const { search, replace } = block;
   if (!search) {
-    // Empty search → prepend or append based on replace content
-    // Treat as whole-file replacement
     return applyWholeFile(filePath, replace, opts);
   }
+
+  // Detect language from file extension for AST fallback
+  const lang = detectApplyLang(filePath);
 
   // Find match position
   let match = null;
@@ -626,7 +672,6 @@ export function applySearchReplace(filePath, block, opts = {}) {
   // Try exact match first
   const exactIdx = content.indexOf(search);
   if (exactIdx !== -1) {
-    // Check multi-occurrence: if search appears multiple times, report clearly
     const multiCheck = detectMultiOccurrence(content, search, { level: 2 });
     if (multiCheck.multi) {
       return {
@@ -639,7 +684,17 @@ export function applySearchReplace(filePath, block, opts = {}) {
     const lineNum = content.substring(0, exactIdx).split('\n').length;
     match = { line: lineNum, level: 2 };
   } else if (fuzzy) {
-    match = fuzzyMatch(content, search);
+    match = fuzzyMatch(content, search, { lang });
+  }
+
+  // Level 7 → try AST engine retry
+  if (match && match.level === 7 && match.hint === 'AST fallback available') {
+    const astMatch = tryASTMatch(content, search, lang);
+    if (astMatch) {
+      match = astMatch;
+    } else {
+      match = null;
+    }
   }
 
   if (!match) {
