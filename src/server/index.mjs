@@ -1241,11 +1241,19 @@ function invokeTool(def, args, timeoutOverride, signal, opts = {}) {
       if (handlerOutput === null) {
         debugLog('Handler returned null, falling back to CLI for:', def.name);
       } else {
-        const output = String(handlerOutput ?? '');
+        // Image content — preserve structured data
+        const isImage = handlerOutput && typeof handlerOutput === 'object' && handlerOutput._imageContent;
         const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
         if (signal?.aborted) {
           return emit({ ok: false, error: `Tool ${def.name} was cancelled` }, elapsedMs);
         }
+        if (isImage) {
+          // Store the full handlerOutput on emitResult so extractImageContent can find data+mimeType
+          const emitResult = { ok: true, output: `[image: ${handlerOutput.mimeType}]` };
+          Object.assign(emitResult, handlerOutput);
+          return emit(emitResult, elapsedMs);
+        }
+        const output = String(handlerOutput ?? '');
         // Structured error from safe-handler wrapper → route through isError path
         if (isStructuredError(output)) {
           return emit({ ok: false, error: output }, elapsedMs);
@@ -1333,6 +1341,34 @@ function writeMsg(msg) { stdout.write(JSON.stringify(msg) + '\n'); }
 
 let _respondChain = Promise.resolve();
 let _autoCleared = false; // Phase 14.1: fire-once flag for auto clear_tool_results
+
+/**
+ * Extract image content from a result object if it has _imageContent flag.
+ * Returns { data, mimeType } or null.
+ */
+function extractImageContent(obj) {
+  if (obj && typeof obj === 'object' && obj._imageContent) {
+    return { data: obj.data, mimeType: obj.mimeType };
+  }
+  return null;
+}
+
+/**
+ * Build MCP content array from tool result.
+ * Detects _imageContent for image responses vs text.
+ */
+function buildToolContent(resolvedOutput, result) {
+  // Image content takes priority — check multiple sources
+  const img = extractImageContent(resolvedOutput) || extractImageContent(result);
+  if (img) {
+    return [{ type: 'image', data: img.data, mimeType: img.mimeType }];
+  }
+  // Text content
+  const text = resolvedOutput !== undefined
+    ? String(resolvedOutput ?? '')
+    : String(result?.output ?? '');
+  return [{ type: 'text', text }];
+}
 
 function respond(id, result, opts = {}) {
   // Phase 2: Apply output optimization BEFORE writing via pipeline
@@ -1660,6 +1696,13 @@ function handleRequest(req) {
                   respond(id, { content: [{ type: 'text', text: '' }] });
                   return;
                 }
+                // Image content — bypass text processing
+                const _img1 = extractImageContent(resolvedOutput);
+                if (_img1) {
+                  captureAndReturn(tName, origArgs, { ok: true, output: `[image: ${_img1.mimeType}]` }, elapsedMs);
+                  respond(id, { content: [{ type: 'image', data: _img1.data, mimeType: _img1.mimeType }] });
+                  return;
+                }
                 const output = String(resolvedOutput ?? '');
                 // Structured error from safe-handler wrapper → route through isError path
                 if (isStructuredError(output)) {
@@ -1683,6 +1726,12 @@ function handleRequest(req) {
                 }, { optimize: false });
               });
           } else if (result.ok) {
+            // Check for image content
+            const _img2 = extractImageContent(result);
+            if (_img2) {
+              respond(id, { content: [{ type: 'image', data: _img2.data, mimeType: _img2.mimeType }] });
+              return;
+            }
             const resp2 = { content: [{ type: 'text', text: result.output }] };
             if (result._responsePolicy) resp2._responsePolicy = result._responsePolicy;
             if (result._pendingImpact) resp2._pendingImpact = result._pendingImpact;
@@ -1724,6 +1773,13 @@ function handleRequest(req) {
                 respond(id, { content: [{ type: 'text', text: '' }] });
                 return;
               }
+              // Image content — bypass text processing
+              const _img3 = extractImageContent(resolvedOutput);
+              if (_img3) {
+                captureAndReturn(tName, origArgs, { ok: true, output: `[image: ${_img3.mimeType}]` }, elapsedMs);
+                respond(id, { content: [{ type: 'image', data: _img3.data, mimeType: _img3.mimeType }] });
+                return;
+              }
               const output = String(resolvedOutput ?? '');
               // Structured error from safe-handler wrapper → route through isError path
               if (isStructuredError(output)) {
@@ -1750,6 +1806,12 @@ function handleRequest(req) {
         }
 
         if (result.ok) {
+          // Check for image content
+          const _img4 = extractImageContent(result);
+          if (_img4) {
+            respond(id, { content: [{ type: 'image', data: _img4.data, mimeType: _img4.mimeType }] });
+            return;
+          }
           const resp4 = { content: [{ type: 'text', text: result.output }] };
           if (result._responsePolicy) resp4._responsePolicy = result._responsePolicy;
           if (result._pendingImpact) resp4._pendingImpact = result._pendingImpact;

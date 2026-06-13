@@ -57,15 +57,27 @@ function cacheWrap(reader, filePath, opts) {
     }
   } catch { /* ignore perms issues */ }
 
-  // Cache miss: read fresh
-  const result = reader.read(opts);
+  // Cache miss: read fresh (async or sync)
+  const raw = reader.read(opts);
+  if (raw instanceof Promise) {
+    return raw.then(result => {
+      if (result?._imageContent) return result; // don't cache images (too large)
+      storeInCache(key, filePath, result);
+      return result;
+    });
+  }
+  if (raw?._imageContent) return raw; // don't cache images
+  storeInCache(key, filePath, raw);
+  return raw;
+}
+
+function storeInCache(key, filePath, result) {
   try {
-    if (existsSync(filePath) && result.status === 'ok') {
+    if (existsSync(filePath) && result?.status === 'ok') {
       const stat = statSync(filePath);
       _readCache.set(key, { mtime: stat.mtimeMs, result, timestamp: Date.now() });
     }
   } catch { /* ignore */ }
-  return result;
 }
 
 // =========================================================================
@@ -75,21 +87,23 @@ function cacheWrap(reader, filePath, opts) {
 export default {
   name: 'smart_read',
   category: 'standard',
-  description: `Progressive file reader — saves 60-80% read tokens vs raw read.
-  Session cache: same file unchanged = zero disk reads (🆕)
+  description: `Progressive file reader — FULLY replaces raw read (text + dirs + images).
+  Session cache: same file unchanged = zero disk reads.
 
   🥇 auto      — Smart mode by file size (<50 full, 50-300 sig, >300 outline)
   📋 outline   — Structure: function/class/variable declarations + line numbers
   📝 signatures — Structure + signature text + line ranges
   🔍 symbol    — Extract specific symbol full body (by name)
-  🧠 explain   — Symbol + imports + callers in one call (🆕)
+  🧠 explain   — Symbol + imports + callers in one call
   📏 range     — Specific line range (startLine/endLine) + checksum
   📄 full      — Traditional full read, offset/limit paging
   📚 batch     — Read multiple files in one call
-  🗺  project   — Project symbol map <500 tokens (🆕)
+  🗺  project   — Project symbol map <500 tokens
+  🖼  image     — PNG/JPG/GIF/WebP returned as viewable attachment
+  📁 directory  — Auto-detected, returns sorted listing
 
-  Output: text (default), compact (no emoji), json
-  Session cache auto-enabled: repeat reads = zero disk I/O`,
+  Output: text (default), compact, json
+  Session cache: repeat reads = zero disk I/O`,
 
   inputSchema: {
     type: 'object',
@@ -100,7 +114,7 @@ export default {
       },
       mode: {
         type: 'string',
-        enum: ['auto', 'outline', 'signatures', 'symbol', 'explain', 'range', 'full', 'batch', 'list', 'project'],
+        enum: ['auto', 'outline', 'signatures', 'symbol', 'explain', 'range', 'full', 'batch', 'list', 'project', 'image'],
         description: 'Read mode (default: auto)',
       },
       symbol: {
@@ -165,6 +179,7 @@ export default {
       // Project mode: no file parameter needed
       if (args.mode === 'project') {
         const result = await reader.read({ filePath: root, mode: 'project', depth: args.depth, maxFiles: args.maxFiles });
+        if (result._imageContent) return result;
         if (format === 'json') return JSON.stringify(result, null, 2);
         if (format === 'compact') return formatCompact(result, args);
         return formatOutput(result, args);
@@ -179,6 +194,7 @@ export default {
           root,
           entryMode: args.entryMode,
         });
+        if (result._imageContent) return result;
         if (format === 'json') return JSON.stringify(result, null, 2);
         if (format === 'compact') return formatCompact(result, args);
         return formatOutput(result, args);
@@ -205,6 +221,9 @@ export default {
 
       // Session cache: skip disk read if file unchanged
       const result = cacheWrap(reader, filePath, readOpts);
+
+      // Image content — return raw _imageContent for server to construct MCP image response
+      if (result._imageContent) return result;
 
       if (format === 'json') return JSON.stringify(result, null, 2);
       if (format === 'compact') return formatCompact(result, args);

@@ -61,6 +61,38 @@ export function detectLanguage(filePath) {
   return map[ext] || 'unknown';
 }
 
+// ---------------------------------------------------------------------------
+// Image file support
+// ---------------------------------------------------------------------------
+
+const IMAGE_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.ico', '.avif',
+]);
+
+const IMAGE_MIME_TYPES = {
+  '.png':  'image/png',
+  '.jpg':  'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif':  'image/gif',
+  '.webp': 'image/webp',
+  '.bmp':  'image/bmp',
+  '.svg':  'image/svg+xml',
+  '.ico':  'image/x-icon',
+  '.avif': 'image/avif',
+};
+
+export function isImageFile(filePath) {
+  return IMAGE_EXTENSIONS.has(extname(filePath).toLowerCase());
+}
+
+export function readImageAsBase64(filePath) {
+  const ext = extname(filePath).toLowerCase();
+  const mimeType = IMAGE_MIME_TYPES[ext] || 'application/octet-stream';
+  const raw = readFileSync(filePath);
+  const data = raw.toString('base64');
+  return { data, mimeType };
+}
+
 /**
  * Get declaration pattern list for a given language.
  * Each pattern: { re, type, nameGroup?, signatureGroup? }
@@ -680,6 +712,20 @@ export class SmartReader {
     const stat = statSync(filePath);
     if (stat.isDirectory()) {
       return listDirectory(filePath, root, opts);
+    }
+
+    // Handle image files — return base64 + mimeType for MCP image content
+    if (isImageFile(filePath)) {
+      const img = readImageAsBase64(filePath);
+      return {
+        _imageContent: true,
+        status: 'ok',
+        mode: 'image',
+        file: opts.filePath,
+        data: img.data,
+        mimeType: img.mimeType,
+        sizeBytes: stat.size,
+      };
     }
 
     const content = readFull(filePath);

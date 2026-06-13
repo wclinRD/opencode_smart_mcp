@@ -5,7 +5,7 @@ model: opencode/big-pickle
 temperature: 0.3
 permission:
   # ── 原始工具（OS-level）──
-  read: allow       # ❗ 後備用。文字檔案優先使用 smart_read（省 60-80% token）。raw read 只用於：目錄列表、二進位檔、smart_read 無法處理的邊界案例
+  read: deny        # ❗ smart_read 已完全取代（文字九模式 + 目錄列表 + 圖片附件）。所有檔案讀取一律走 smart_read
   write: allow      # 必要：無 smart_write 替代（新檔案建立）
   glob: allow       # 必要：無 smart_glob 替代
   
@@ -72,7 +72,7 @@ permission:
 | `smart_context({command})` | Session 管理（含 context budget 查詢：`smart_context({command:"budget"})`） |
 | `smart_rules({file})` | 查詢專案規則（AGENTS.md / .cursorrules 等）— **編輯前必查** |
 | `smart_lsp({operation, file, line, character})` | **Type-aware 程式碼理解** — 找定義、查引用、看型別、診斷錯誤。支援 TS/JS/Python/Rust/Swift/PHP |
-| `smart_read({file, mode?, symbol?, offset?, limit?, startLine?, endLine?, files?, format?, numbered?, depth?, maxFiles?})` | 🥇 **漸進式檔案讀取（優先於 raw read）** — 九種模式：`auto`（依檔案大小自動選模式 🏆新預設）、`outline`（結構輪廓）、`signatures`（簽名行+行範圍）、`symbol`（單一 symbol 主體）、`explain`（符號 body + imports + callers 一次取得）、`range`（`startLine`/`endLine` 精準行範圍，附 checksum）、`full`（完整內容，支援 offset/limit 分頁）、`batch`（`files:["f1","f2"]` 一次讀多檔）、`project`（專案符號地圖 <500 tokens）。內建 **Session Cache**：同一 session 內不重讀未修改檔案（mtime + 10min TTL）。支援三種輸出格式：`text`（人類可讀）、`compact`（最小 token，無裝飾）、`json`（結構化）。文字檔案一律用此工具；raw read 只用於目錄列表或圖片/PDF |
+| `smart_read({file, mode?, symbol?, offset?, limit?, startLine?, endLine?, files?, format?, numbered?, depth?, maxFiles?})` | 🥇 **完全取代 raw read** — 11 種模式：`auto`（依檔案大小自動選模式 🏆預設）、`outline`（結構輪廓）、`signatures`（簽名行+行範圍）、`symbol`（單一 symbol 主體）、`explain`（符號 body + imports + callers 一次）、`range`（`startLine`/`endLine` 精準行範圍，附 checksum）、`full`（完整內容，支援 offset/limit 分頁）、`batch`（`files:["f1","f2"]` 一次讀多檔）、`project`（專案符號地圖 <500 tokens）、`image`（PNG/JPG/GIF/WebP → LLM 可視附件）、目錄（自動偵測，回傳排序清單）。內建 **Session Cache**（mtime + 10min TTL）。輸出：`text` / `compact` / `json`。文字/目錄/圖片全部都用 smart_read |
 | `smart_compact({toolHistory})` | **零成本 context 壓縮** — 分析工具歷史，識別可安全丟棄或摘要的輸出。無 LLM 開銷 |
 | `smart_codebase_index({command})` | **持久化程式碼索引** — build/update/query/map/stats。用了之後 import_graph 自動快 5-50x |
 | `smart_hallucination_check({output, context?, query?})` | **輸出真實性驗證** — 檢查 LLM 輸出是否有幻覺（編造/錯誤歸因/偏離/矛盾/離題/過度自信）。`mode:"doi"` 可驗證文中 DOI 是否真實存在 |
@@ -418,7 +418,7 @@ Smart MCP 自動壓縮大型輸出（L0/L1/L2）。遇到 `_optimized`：
 絕對不能做的事：
   ❌ 自寫腳本測試 API（用 ssr({tool:"pw_browser"}) 取代）
   ❌ 手動 curl/wget 猜參數（用 ssr({tool:"pw_browser"}) + addInitScript 攔截）
-  ❌ 盲目 grep/read 大量檔案（用 smart_grep 或 smart_read 取代）
+  ❌ 用 read 工具（已被禁用 — smart_read 完全取代文字/目錄/圖片讀取）
   ❌ 不查規則就編輯（先用 smart_rules({file:"目標檔案"}) 確認專案慣例）
   ❌ 用 grep 找定義/引用（用 smart_lsp({operation:"definition"|"references"}) — LSP 比 regex 精準且省 token）
 ❌ 用 webfetch 研究 GitHub repo（先用 `git clone` 下載到 `/tmp/`，再本地分析 — webfetch 只抓到 HTML 浪費 token，clone 後用 bash/find/read/grep 精準探索）
