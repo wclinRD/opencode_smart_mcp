@@ -491,15 +491,173 @@ Phase 22 smart_edit_ast 改為：
 
 ---
 
-## 長期願景（Phase 25+）
-
-| Phase | 名稱 | 說明 |
-|-------|------|------|
-| 25 | **External Cognitive Controller** | 參考 Meta-Reasoning — LLM 是 substrate，思考由外部治理。觀察思考軌跡 → 偵測 stall/redundancy → 強制分支或切換策略 |
-| 26 | **Self-Evolving Agent Prompts** | 參考 self-evolving-codegen — tool-strategy 的 pattern 匹配根據成功率自我進化 |
-| 27 | **Continuous Thought Vectors** | 參考 NeurIPS 2025 Coconut — 在 embedding 空間做推理（而非 token 空間） |
 
 ---
+
+## Phase 25：Tool Transition Learning — 工具轉移學習
+
+> 參考：AutoTool（Learning to Route Tools）— 觀察工具呼叫序列，學習工具間的轉移模式
+> 核心洞察：LLM 使用工具有固定序列模式（如 grep→lsp hover→fast_apply→test）。
+> 目前 prefetch-engine 的 5 條規則是硬編碼的，無法適應實際使用模式。
+> Phase 25 透過 SQLite 記錄工具轉移統計，讓 prefetch 和路由建議從數據中學習。
+
+### 設計
+
+```
+目前：
+  5 條硬編碼 pre-fetch 規則（維護者必須手動更新）
+
+Phase 25 改為：
+  工具 A 執行後 → 記錄工具 A → 工具 B 的轉移
+  → 累積統計：from_tool × to_tool × success_count × avg_duration
+  → prefetch-engine 查詢 DB：工具 A 後最可能用什麼？前 3 名
+  → 靜態規則 + 動態統計混合（靜態作為 fallback）
+```
+
+### 實作範圍
+
+| # | 項目 | 檔案 | 說明 |
+|---|------|------|------|
+| 1 | `tool_transitions` 表 | `src/lib/memory-db.mjs` | from_tool, to_tool, success_count, fail_count, avg_duration, last_seen |
+| 2 | Transition CRUD | `src/lib/memory-db.mjs` | recordTransition, getTopTransitions, getTransitionStats |
+| 3 | Server hook | `src/server/index.mjs` | 每次成功工具呼叫後記錄 transition（前一個工具 → 當前工具） |
+| 4 | Prefetch 強化 | `src/lib/prefetch-engine.mjs` | 查詢 DB transitions 取代/補充靜態規則 |
+| 5 | Recipe 學習 | `src/lib/prefetch-engine.mjs` | 自動分析 3+ 步驟的常見工具鏈序列 |
+| 6 | System prompt | `src/agent/system-prompt.mjs` | 提及 transition learning |
+| 7 | 測試 | `tests/transition-learn.test.mjs` | 記錄/查詢/統計驗證 |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| Pre-fetch 規則維護 | 手動更新硬編碼 | 自動從數據學習 |
+| Pre-fetch 準確率 | 靜態規則（50-60%） | 動態學習（70-85%+） |
+| 冷啟動時間 | 需手動編寫規則 | 5-10 次使用後自動學習模式 |
+| 適應不同專案 | 通用規則，不適應專案差異 | 自動學習專案特有模式 |
+
+---
+
+## Phase 26：Tool Selection Feedback — 工具選擇回饋
+
+> 參考：JTPRO（Just-in-Time Prompt Routing）— 根據實際使用結果回饋調整路由策略
+> 核心洞察：tool-strategy 的 12 條靜態規則永遠不會知道自己選對還是選錯。
+> Phase 26 加入回饋迴路：推薦工具 → LLM 實際選擇 → 比較 → 調整。
+
+### 設計
+
+```
+目前：
+  任務描述 → 正則匹配 12 條規則 → 靜態推薦（永不修正）
+
+Phase 26 改為：
+  任務描述 → 正則匹配 → 推薦工具
+  → LLM 實際呼叫的工具（由 server 記錄）
+  → 對比推薦 vs 實際
+  → 更新 tool_feedback 表：(goal_context, recommended_tool, actual_tool, success)
+  → tool-strategy 查詢回饋統計調整推薦
+```
+
+### 實作範圍
+
+| # | 項目 | 檔案 | 說明 |
+|---|------|------|------|
+| 1 | `tool_feedback` 表 | `src/lib/memory-db.mjs` | goal_context, recommended_tool, actual_tool, success, duration, timestamp |
+| 2 | Feedback CRUD | `src/lib/memory-db.mjs` | recordFeedback, getRecommendationStats, getPatternAdjustments |
+| 3 | Server hook | `src/server/index.mjs` | 記錄每次推薦 → 實際選擇的對比 |
+| 4 | tool-strategy 強化 | `src/agent/tool-strategy.mjs` | 查詢回饋統計，調整 pattern 分數 |
+| 5 | 自動調整 | `src/agent/tool-strategy.mjs` | 低成功率 pattern 降級，高成功率 pattern 升級 |
+| 6 | System prompt | `src/agent/system-prompt.mjs` | 提及回饋機制 |
+| 7 | 測試 | `tests/tool-feedback.test.mjs` | 記錄/查詢/調整驗證 |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| 工具推薦準確率 | 靜態（~70%） | 自適應（80-90%+） |
+| 錯誤推薦率 | 固定（~30% 不適用） | 持續下降（每 20 次使用調整一次） |
+| 適應性 | 永不改變 | 隨使用模式持續進化 |
+
+---
+
+## Phase 27：Semantic Cache Routing — 語意快取路由
+
+> 參考：semantic-cache（Embedding-based caching for LLM routing decisions）
+> 核心洞察：相同或類似的任務目標通常需要相同的工具鏈。
+> 現有 sqlite-vec（384-dim 向量搜尋）已可支援語意相似度比對。
+
+### 設計
+
+```
+目前：
+  每次任務 → 正則匹配（O(n) 掃描 12 條規則）
+  → 每次匹配結果相同（無記憶）
+
+Phase 27 改為：
+  新任務 →
+    1. 產生任務目標 embedding（384-dim）
+    2. 查詢 semantic_cache 表（sqlite-vec ANN）：找最相似 past goal
+    3. 若相似度 > 0.85 → 直接回傳 cached tool chain（0ms）
+    4. 若相似度 < 0.85 → 正常 pattern match
+    5. 使用後將 (goal, tool_chain) 存入 cache
+```
+
+### 實作範圍
+
+| # | 項目 | 檔案 | 說明 |
+|---|------|------|------|
+| 1 | `semantic_cache` 表 | `src/lib/memory-db.mjs` | goal TEXT, goal_embedding BLOB(384), tool_chain TEXT, hit_count, success_count, created_at |
+| 2 | Cache CRUD | `src/lib/memory-db.mjs` | cacheGoal, searchCache, updateCacheStats |
+| 3 | Embedding 產生器 | `src/lib/semantic-cache.mjs` | 從 goal text 產生 384-dim embedding（hash-based 降級方案） |
+| 4 | tool-strategy 整合 | `src/agent/tool-strategy.mjs` | recommendTools 前先查 cache |
+| 5 | Server hook | `src/server/index.mjs` | 每次成功工具鏈後快取 |
+| 6 | System prompt | `src/agent/system-prompt.mjs` | 提及語意快取 |
+| 7 | 測試 | `tests/semantic-cache.test.mjs` | 快取/命中/未命中/相似度驗證 |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| 任務路由延遲 | O(n) pattern match | O(1) cache hit（相似度 > 0.85） |
+| 冷啟動 | 無歷史 | 5-10 次使用後開始有 cache hit |
+| 重複任務處理 | 每次都重新匹配 | 命中後直接回傳（省 100% pattern match token） |
+| 長期準確率 | 靜態 | 隨 cache 累積持續提升 |
+
+---
+
+## 優先級總覽（更新後）
+
+| 優先 | Phase | 名稱 | 難度 | 影響 | 估時 |
+|:----:|-------|------|:----:|:----:|:----:|
+| 🥇 | **16** | Structured Thinking (Grammar-Constrained CoT) | 🟡 中 | 🔥 高 | ✅ 完成 |
+| 🥇 | **17** | MCTS Tool Planning | 🔴 高 | 🔥 高 | ✅ 完成 |
+| 🥇 | **18** | Speculative Tool Pre-fetch | 🟢 低 | 🔥 高 | ✅ 完成 |
+| 🥈 | **19** | Cross-Agent Shared Memory | 🟢 低 | 🟡 中 | ✅ 完成 |
+| 🥈 | **20** | Execution-Grounded Verification | 🟡 中 | 🟡 中 | ✅ 完成 |
+| 🥇 | **21** | smart_read — 漸進式檔案讀取 | 🟢 低 | 🔥 高 | ✅ 完成 |
+| 🥈 | **22** | smart_edit_ast — AST 感知編輯 | 🟢 低 | 🟡 中 | ✅ 完成 |
+| 🥇 | **23** | smart_read 強化 | 🟢 低 | 🔥 高 | ✅ 完成 |
+| 🥇 | **24** | Session Cache + Explain + Project Map | 🟢 低 | 🔥 高 | ✅ 完成 |
+| 🥇 | **25** | Tool Transition Learning | 🟡 中 | 🔥 高（自適應 prefetch） | 2-3h |
+| 🥇 | **26** | Tool Selection Feedback | 🟡 中 | 🔥 高（自適應路由） | 2-3h |
+| 🥈 | **27** | Semantic Cache Routing | 🔴 高 | 🟡 中（長期累積效益） | 3-4h |
+
+## 里程碑（更新後）
+
+| 里程碑 | 內容 | 預計日期 |
+|--------|------|---------|
+| M1-M10 | Phase 16-24 完成 | ✅ 2026-06-13 |
+| M11 | Phase 25 (Transition Learning) 完成 | 📅 本期 |
+| M12 | Phase 26 (Tool Selection Feedback) 完成 | 📅 本期 |
+| M13 | Phase 27 (Semantic Cache Routing) 完成 | 📅 本期 |
+| M14 | Phase 25-27 全量 regression | 📅 本期 |
+
+## 長期研究方向（Phase 28+）
+
+| Phase | 研究方向 | 說明 | 前置 |
+|-------|---------|------|------|
+| 28 | **External Cognitive Controller** | 參考 Meta-Reasoning — LLM 思考由外部治理，偵測 stall/redundancy 強制分支 | 需 Phase 25-27 穩定 |
+| 29 | **Self-Evolving Tool Patterns** | 參考 self-evolving-codegen — pattern 規則根據 Phase 26 回饋自動進化 | 需 Phase 26 數據 |
+| 30 | **Cross-Session Learning** | 跨 session 的工具使用模式遷移學習 | 需 Phase 25 DB |
 
 ## 不上什麼（競爭品分析後的取捨）
 

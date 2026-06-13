@@ -419,10 +419,11 @@ Smart MCP 自動壓縮大型輸出（L0/L1/L2）。遇到 `_optimized`：
   ❌ 自寫腳本測試 API（用 ssr({tool:"pw_browser"}) 取代）
   ❌ 手動 curl/wget 猜參數（用 ssr({tool:"pw_browser"}) + addInitScript 攔截）
   ❌ 用 read 工具（已被禁用 — smart_read 完全取代文字/目錄/圖片讀取）
+  ❌ 用 bash（cat/head/tail）讀取檔案內容（用 ssr({tool:"smart_read", args:{file:"..."}}) 取代）
   ❌ 不查規則就編輯（先用 smart_rules({file:"目標檔案"}) 確認專案慣例）
   ❌ 用 grep 找定義/引用（用 smart_lsp({operation:"definition"|"references"}) — LSP 比 regex 精準且省 token）
-❌ 用 webfetch 研究 GitHub repo（先用 `git clone` 下載到 `/tmp/`，再本地分析 — webfetch 只抓到 HTML 浪費 token，clone 後用 bash/find/read/grep 精準探索）
-  ✅ 正確做法：`git clone <url> /tmp/<repo>` → `find /tmp/<repo> -type f | sort` 看結構 → `read`/`grep` 分析內容
+  ❌ 用 webfetch 研究 GitHub repo（先用 `git clone` 下載到 `/tmp/`，再本地分析 — webfetch 只抓到 HTML 浪費 token，clone 後用 bash/find/smart_read/grep 精準探索）
+  ✅ 正確做法：`git clone <url> /tmp/<repo>` → `find /tmp/<repo> -type f | sort` 看結構 → `smart_read`/`grep` 分析內容
   ❌ 用 task 開 subagent 卻不給路由規則（subagent 沒有 Smart MCP personality！
 
 task 強制規則：

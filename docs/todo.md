@@ -476,7 +476,151 @@
 
 ---
 
-## Phase 25+：全量 regression（M10）
+## Phase 25：Tool Transition Learning — 工具轉移學習
+
+> 參考：AutoTool（Learning to Route Tools）
+> 目標：從工具呼叫序列中學習轉移模式，讓 prefetch 和路由建議從數據學習而非硬編碼。
+> 預估：pre-fetch 準確率從 50-60% 提升至 70-85%+
+
+### 25.1 Schema：`tool_transitions` 表
+
+- [ ] `src/lib/memory-db.mjs` — 新增 `tool_transitions` SQLite 表
+  - from_tool TEXT NOT NULL
+  - to_tool TEXT NOT NULL
+  - success_count INTEGER DEFAULT 1
+  - fail_count INTEGER DEFAULT 0
+  - avg_duration REAL
+  - last_seen TEXT
+  - UNIQUE(from_tool, to_tool)
+
+### 25.2 Transition CRUD
+
+- [ ] `src/lib/memory-db.mjs` — `recordTransition(from, to, success, duration)`：記錄一次工具轉移
+- [ ] `src/lib/memory-db.mjs` — `getTopTransitions(fromTool, limit=3)`：查詢最可能的下個工具
+- [ ] `src/lib/memory-db.mjs` — `getTransitionStats()`：整體轉移統計
+- [ ] `src/lib/memory-db.mjs` — `learnToolChain(minLength=3)`：從 transition 數據學習常用工具鏈
+
+### 25.3 Server 端 hook
+
+- [ ] `src/server/index.mjs` — invokeTool 成功後記錄 transition（追蹤前一個工具 → 當前工具）
+- [ ] Transition 追蹤：{ lastTool, lastToolResult, lastToolDuration } session 變數
+- [ ] 僅記錄成功呼叫（失敗不影響 transition 權重）
+
+### 25.4 Prefetch 強化
+
+- [ ] `src/lib/prefetch-engine.mjs` — `prefetchFromTransitions(fromTool)`：查詢 DB 取得 top 3 轉移
+- [ ] 靜態規則 + 動態 transition 混合：transition 有數據時優先使用，否則 fallback 靜態規則
+- [ ] 自動在 5 筆 transitions 後啟用動態模式
+
+### 25.5 測試
+
+- [ ] Transition 記錄正確（from→to + success/fail）
+- [ ] getTopTransitions 回傳正確排序
+- [ ] 混合模式（靜態 + 動態）正確
+- [ ] 冷啟動：無數據時正常 fallback
+
+---
+
+## Phase 26：Tool Selection Feedback — 工具選擇回饋
+
+> 參考：JTPRO（Just-in-Time Prompt Routing）
+> 目標：記錄推薦 vs 實際使用的工具，根據回饋自動調整路由策略。
+> 預估：工具推薦準確率從 ~70% 提升至 80-90%+
+
+### 26.1 Schema：`tool_feedback` 表
+
+- [ ] `src/lib/memory-db.mjs` — 新增 `tool_feedback` SQLite 表
+  - id INTEGER PRIMARY KEY
+  - goal_context TEXT（任務描述片段）
+  - recommended_tool TEXT
+  - actual_tool TEXT
+  - success INTEGER（推薦命中 = 1）
+  - duration_ms INTEGER
+  - session_id TEXT
+  - created_at TEXT
+
+### 26.2 Feedback CRUD
+
+- [ ] `src/lib/memory-db.mjs` — `recordFeedback(goal, recommended, actual, duration)`
+- [ ] `src/lib/memory-db.mjs` — `getRecommendationStats(tool)`：查詢某工具的推薦成功率
+- [ ] `src/lib/memory-db.mjs` — `getPatternAdjustments()`：取得需調整的 pattern 列表
+
+### 26.3 tool-strategy 強化
+
+- [ ] `src/agent/tool-strategy.mjs` — recommendTools 傳入 feedback context
+- [ ] 低成功率 tool chain 降級（success < 0.3 自動降低優先順序）
+- [ ] 高成功率 pattern 升級（success > 0.8 提高 matchScore 權重）
+
+### 26.4 Server 端 hook
+
+- [ ] `src/server/index.mjs` — 在 invokeTool 入口記錄推薦 vs 實際選擇
+- [ ] 服務統計 API 包含 feedback 數據
+
+### 26.5 測試
+
+- [ ] Feedback 記錄正確
+- [ ] getRecommendationStats 正確計算
+- [ ] Pattern 自動調整正確
+- [ ] 無數據時正常運作
+
+---
+
+## Phase 27：Semantic Cache Routing — 語意快取路由
+
+> 參考：semantic-cache（Embedding-based caching for LLM routing）
+> 目標：對相同/相似任務目標直接回傳 cached tool chain，省 pattern match 時間。
+> 預估：重複任務處理速度提升 10x（cache hit）
+
+### 27.1 Schema：`semantic_cache` 表
+
+- [ ] `src/lib/memory-db.mjs` — 新增 `semantic_cache` SQLite 表
+  - goal TEXT（原始任務描述）
+  - goal_hash TEXT UNIQUE（用於 exact match）
+  - goal_embedding BLOB（384-dim）
+  - tool_chain TEXT（JSON 陣列）
+  - hit_count INTEGER DEFAULT 1
+  - success_count INTEGER DEFAULT 1
+  - created_at TEXT
+  - last_seen TEXT
+
+### 27.2 Embedding 產生器
+
+- [ ] `src/lib/semantic-cache.mjs` — `hashEmbed(text)`：使用 hash-based 384-dim embedding（不依賴外部模型）
+- [ ] 降級方案：使用 simple hash → 384-dim float 轉換（確保與現有 sqlite-vec 相容）
+
+### 27.3 Cache CRUD
+
+- [ ] `src/lib/memory-db.mjs` — `cacheGoal(goal, toolChain)`：儲存 goal→toolChain 映射 + embedding
+- [ ] `src/lib/memory-db.mjs` — `searchCache(goal, threshold=0.85)`：語意搜尋最相似 past goal
+- [ ] `src/lib/memory-db.mjs` — `updateCacheStats(goalHash, success)`：更新命中/成功統計
+
+### 27.4 tool-strategy 整合
+
+- [ ] `src/agent/tool-strategy.mjs` — recommendTools 前先查 semantic cache
+- [ ] Cache hit（similarity > 0.85）→ 直接回傳 cached tool chain
+- [ ] Cache miss → 正常 pattern match → 快取結果
+
+### 27.5 測試
+
+- [ ] hashEmbed 一致性驗證（相同 text → 相同 embedding）
+- [ ] cacheGoal / searchCache 正確
+- [ ] 相似度 threshold 正確過濾
+- [ ] 無數據時正常 fallback
+
+---
+
+## Phase 25-27 里程碑
+
+| 里程碑 | 內容 | 預計日期 |
+|--------|------|---------|
+| M11 | Phase 25 (Transition Learning) 完成 | 📅 本期 |
+| M12 | Phase 26 (Tool Selection Feedback) 完成 | 📅 本期 |
+| M13 | Phase 27 (Semantic Cache Routing) 完成 | 📅 本期 |
+| M14 | Phase 25-27 全量 regression | 📅 本期 |
+
+---
+
+## M10 全量 regression（已完成 ✅）
 
 - [x] 執行全量測試 — 發現 personality test 中 task subagent routing rule 的 assert 字串過時（`smart_read` 已插入工具鏈），已修正為 `smart_lsp > smart_read > smart_grep > raw grep/read`
 - [x] 確認 251 項核心測試通過（smart-read / MCTS / thinking / code-verifier / prefetch / memory-db）
