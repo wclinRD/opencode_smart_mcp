@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-13T04:22:45.811Z",
+  "generatedAt": "2026-06-13T04:53:24.853Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -405,6 +405,226 @@
           "thought",
           "nextThoughtNeeded"
         ]
+      }
+    },
+    {
+      "name": "smart_fast_apply",
+      "description": "Unified editing tool — replaces write + edit + edit_ast.\nSupports 6 input formats (ordered by token efficiency):\n  - unified-diff: git diff format — MOST token-efficient (40-60% savings). Use +/- lines only, no unchanged lines needed.\n  - lazy: SEARCH/REPLACE with // ... existing code ... markers (80-98% savings for large files)\n  - hashline: line-number + content-hash addressing — MOST ROBUST for large files (>400 lines). Specify line range directly. No fuzzy match ambiguity.\n  - partial: abbreviated SEARCH context (fewer lines, L5 fuzzy matching)\n  - search-replace: standard SEARCH/REPLACE blocks (Aider-compatible)\n  - whole-file: full file replacement (most tokens)\n💡 Tip: prefer unified-diff for small edits, hashline for >400 line files, lazy for large files with few changes.\nFeatures: 6-level fuzzy matching (L6 = gap-tolerant subsequence), hashline addressing with content verification, atomic multi-file apply, undo snapshots, binary/access checks.\nDry-run by default — safe to use without side effects.",
+      "category": "edit",
+      "domain": "edit",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [
+        {
+          "prerequisite": "smart_security",
+          "condition": "smart_think mode:beam after security scan",
+          "message": "Security fix requires multi-path analysis first. Run smart_think({mode:\"beam\"}) before applying fixes."
+        }
+      ],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "search-replace",
+              "lazy",
+              "partial",
+              "unified-diff",
+              "whole-file",
+              "hashline",
+              "block-diff"
+            ],
+            "description": "Input format (default: search-replace). Token efficiency: unified-diff (best, +/- only) > lazy > hashline > partial > search-replace > whole-file. Use hashline for large files (>400 lines) where SEARCH/REPLACE matching is unreliable."
+          },
+          "blocks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string",
+                  "description": "Target file path"
+                },
+                "search": {
+                  "type": "string",
+                  "description": "Text to search (multi-line). For lazy format: use // ... markers to skip unchanged code. For partial format: abbreviated context lines."
+                },
+                "replace": {
+                  "type": "string",
+                  "description": "Replacement text (multi-line)"
+                },
+                "symbol": {
+                  "type": "string",
+                  "description": "Symbol name (function/class) for block-diff format"
+                },
+                "newContent": {
+                  "type": "string",
+                  "description": "Replacement content for block-diff format (paired with symbol)"
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "replace",
+                    "prepend",
+                    "append"
+                  ],
+                  "description": "Block-diff action (default: replace)"
+                }
+              },
+              "required": [
+                "file",
+                "search",
+                "replace"
+              ]
+            },
+            "description": "Edit blocks. For search-replace/lazy/partial: {file,search,replace}. For block-diff: {file,symbol,newContent,action?}."
+          },
+          "text": {
+            "type": "string",
+            "description": "Raw text containing SEARCH/REPLACE blocks or unified diff (auto-parsed)"
+          },
+          "diff": {
+            "type": "string",
+            "description": "Unified diff string (format=unified-diff). Token-efficient: only +/- lines needed, omit unchanged context."
+          },
+          "whole": {
+            "type": "object",
+            "properties": {
+              "file": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              }
+            },
+            "description": "Whole file replacement (for format=whole-file)"
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string",
+                  "description": "Target file path"
+                },
+                "startLine": {
+                  "type": "number",
+                  "description": "Start line (1-indexed)"
+                },
+                "endLine": {
+                  "type": "number",
+                  "description": "End line (1-indexed, inclusive)"
+                },
+                "oldContent": {
+                  "type": "string",
+                  "description": "Expected content of the line range (for verification)"
+                },
+                "newContent": {
+                  "type": "string",
+                  "description": "Replacement content"
+                }
+              },
+              "required": [
+                "file",
+                "startLine",
+                "endLine",
+                "newContent"
+              ]
+            },
+            "description": "Hashline edit changes (for format=hashline). Specify line range directly with content verification — most robust for large files."
+          },
+          "file": {
+            "type": "string",
+            "description": "Target file path (flat syntax). Combine with content to create file, or with search+replace to edit."
+          },
+          "search": {
+            "type": "string",
+            "description": "Text to find (flat syntax, paired with replace and file)"
+          },
+          "replace": {
+            "type": "string",
+            "description": "Replacement text (flat syntax, paired with search and file)"
+          },
+          "content": {
+            "type": "string",
+            "description": "New file content (flat syntax, paired with file — creates or overwrites entire file)"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Symbol name (function/class) for symbol-aware editing. Combines with action+newContent to edit a specific symbol body."
+          },
+          "newContent": {
+            "type": "string",
+            "description": "Content for symbol-aware editing (paired with symbol+action) or block-boundary action (paired with action+startLine)"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "append",
+              "prepend",
+              "replace",
+              "insert-before",
+              "insert-after",
+              "delete"
+            ],
+            "description": "Edit action. With symbol: append/prepend/replace. With startLine: insert-before/insert-after/delete."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Restrict changes to these files only"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: .)"
+          },
+          "fuzzy": {
+            "type": "boolean",
+            "description": "Enable 4-level fuzzy matching (default: true)"
+          },
+          "validate": {
+            "type": "boolean",
+            "description": "Check brace/bracket balance after apply (default: false)"
+          },
+          "undo": {
+            "type": "boolean",
+            "description": "Create .apply.bak snapshots for rollback (default: true)"
+          },
+          "atomic": {
+            "type": "boolean",
+            "description": "Apply all changes atomically with rollback on failure (default: false)"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Preview only — show changes without applying (default: true)"
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Actually apply changes (default: false, explicit opt-in for 3+ files)"
+          },
+          "output": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "diff"
+            ],
+            "description": "Output format (default: text)"
+          }
+        }
       }
     },
     {
@@ -2412,172 +2632,6 @@
       }
     },
     {
-      "name": "smart_fast_apply",
-      "description": "Use when: need to apply LLM-suggested code edits faster and more accurately.\nSupports 6 input formats (ordered by token efficiency):\n  - unified-diff: git diff format — MOST token-efficient (40-60% savings). Use +/- lines only, no unchanged lines needed.\n  - lazy: SEARCH/REPLACE with // ... existing code ... markers (80-98% savings for large files)\n  - hashline: line-number + content-hash addressing — MOST ROBUST for large files (>400 lines). Specify line range directly. No fuzzy match ambiguity.\n  - partial: abbreviated SEARCH context (fewer lines, L5 fuzzy matching)\n  - search-replace: standard SEARCH/REPLACE blocks (Aider-compatible)\n  - whole-file: full file replacement (most tokens)\n💡 Tip: prefer unified-diff for small edits, hashline for >400 line files, lazy for large files with few changes.\nFeatures: 6-level fuzzy matching (L6 = gap-tolerant subsequence), hashline addressing with content verification, atomic multi-file apply, undo snapshots, binary/access checks.\nDry-run by default — safe to use without side effects.",
-      "category": "edit",
-      "domain": "edit",
-      "safetyLevel": "high",
-      "routingRules": {
-        "autoRoute": false,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [
-        {
-          "prerequisite": "smart_security",
-          "condition": "smart_think mode:beam after security scan",
-          "message": "Security fix requires multi-path analysis first. Run smart_think({mode:\"beam\"}) before applying fixes."
-        }
-      ],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "format": {
-            "type": "string",
-            "enum": [
-              "search-replace",
-              "lazy",
-              "partial",
-              "unified-diff",
-              "whole-file",
-              "hashline"
-            ],
-            "description": "Input format (default: search-replace). Token efficiency: unified-diff (best, +/- only) > lazy > hashline > partial > search-replace > whole-file. Use hashline for large files (>400 lines) where SEARCH/REPLACE matching is unreliable."
-          },
-          "blocks": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "file": {
-                  "type": "string",
-                  "description": "Target file path"
-                },
-                "search": {
-                  "type": "string",
-                  "description": "Text to search (multi-line). For lazy format: use // ... markers to skip unchanged code. For partial format: abbreviated context lines."
-                },
-                "replace": {
-                  "type": "string",
-                  "description": "Replacement text (multi-line)"
-                }
-              },
-              "required": [
-                "file",
-                "search",
-                "replace"
-              ]
-            },
-            "description": "SEARCH/REPLACE blocks (for format=search-replace, lazy, or partial)"
-          },
-          "text": {
-            "type": "string",
-            "description": "Raw text containing SEARCH/REPLACE blocks or unified diff (auto-parsed)"
-          },
-          "diff": {
-            "type": "string",
-            "description": "Unified diff string (format=unified-diff). Token-efficient: only +/- lines needed, omit unchanged context."
-          },
-          "whole": {
-            "type": "object",
-            "properties": {
-              "file": {
-                "type": "string"
-              },
-              "content": {
-                "type": "string"
-              }
-            },
-            "description": "Whole file replacement (for format=whole-file)"
-          },
-          "changes": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "file": {
-                  "type": "string",
-                  "description": "Target file path"
-                },
-                "startLine": {
-                  "type": "number",
-                  "description": "Start line (1-indexed)"
-                },
-                "endLine": {
-                  "type": "number",
-                  "description": "End line (1-indexed, inclusive)"
-                },
-                "oldContent": {
-                  "type": "string",
-                  "description": "Expected content of the line range (for verification)"
-                },
-                "newContent": {
-                  "type": "string",
-                  "description": "Replacement content"
-                }
-              },
-              "required": [
-                "file",
-                "startLine",
-                "endLine",
-                "newContent"
-              ]
-            },
-            "description": "Hashline edit changes (for format=hashline). Specify line range directly with content verification — most robust for large files."
-          },
-          "files": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Restrict changes to these files only"
-          },
-          "root": {
-            "type": "string",
-            "description": "Project root directory (default: .)"
-          },
-          "fuzzy": {
-            "type": "boolean",
-            "description": "Enable 4-level fuzzy matching (default: true)"
-          },
-          "validate": {
-            "type": "boolean",
-            "description": "Check brace/bracket balance after apply (default: false)"
-          },
-          "undo": {
-            "type": "boolean",
-            "description": "Create .apply.bak snapshots for rollback (default: true)"
-          },
-          "atomic": {
-            "type": "boolean",
-            "description": "Apply all changes atomically with rollback on failure (default: false)"
-          },
-          "dryRun": {
-            "type": "boolean",
-            "description": "Preview only — show changes without applying (default: true)"
-          },
-          "apply": {
-            "type": "boolean",
-            "description": "Actually apply changes (default: false, explicit opt-in for 3+ files)"
-          },
-          "output": {
-            "type": "string",
-            "enum": [
-              "text",
-              "json",
-              "diff"
-            ],
-            "description": "Output format (default: text)"
-          }
-        }
-      }
-    },
-    {
       "name": "smart_git_commit",
       "description": "Use when: you need to commit changes with an auto-generated conventional commit message. Analyzes staged diff, generates type (feat/fix/refactor/etc.) and scope, then optionally executes the commit. Supports --dry-run preview, --amend, --all auto-stage, and custom --type/--scope overrides.",
       "category": "git",
@@ -2909,8 +2963,8 @@
       }
     },
     {
-      "name": "smart_edit_ast",
-      "description": "AST-aware code editor — more precise than smart_edit.\n\n  🥇 content-match — Context-aware replacement (whitespace-tolerant, shows surrounding code)\n  🥈 block-boundary — Line-range editing (insert/replace/delete at line boundaries)\n  🥉 symbol-edit — Edit within a specific symbol body (uses smart_read to locate)\n\n  Examples:\n    { mode: \"content-match\", file: \"src/auth.ts\", match: \"function login\", replace: \"function login(credentials)\" }\n    { mode: \"block-boundary\", file: \"src/auth.ts\", action: \"replace\", startLine: 10, endLine: 15, text: \"new code here\" }\n    { mode: \"symbol-edit\", file: \"src/auth.ts\", symbol: \"authenticate\", action: \"append\", text: \"  console.log('called');\" }",
+      "name": "smart_edit",
+      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
       "category": "standard",
       "domain": "edit",
       "safetyLevel": "high",
@@ -2930,70 +2984,47 @@
         "properties": {
           "file": {
             "type": "string",
-            "description": "File path (relative to root or absolute)"
+            "description": "File path to edit (required)"
           },
-          "mode": {
+          "oldString": {
             "type": "string",
-            "enum": [
-              "content-match",
-              "block-boundary",
-              "symbol-edit"
-            ],
-            "description": "Edit mode (default: content-match)"
+            "description": "Text to find and replace (exact match by default, regex if regex=true)"
           },
-          "match": {
+          "newString": {
             "type": "string",
-            "description": "Content to match (context-aware, trim-tolerant)"
+            "description": "Replacement text"
           },
-          "replace": {
-            "type": "string",
-            "description": "Replacement content (for content-match mode)"
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Multiple files to edit (alternative to file)"
           },
-          "action": {
-            "type": "string",
-            "enum": [
-              "insert-before",
-              "insert-after",
-              "replace",
-              "delete"
-            ],
-            "description": "Block action (for block-boundary mode)"
-          },
-          "startLine": {
-            "type": "number",
-            "description": "Start line (1-indexed, for block-boundary mode)"
-          },
-          "endLine": {
-            "type": "number",
-            "description": "End line (inclusive, for block-boundary replace/delete)"
-          },
-          "text": {
-            "type": "string",
-            "description": "Text to insert (for block-boundary insert/replace)"
-          },
-          "symbol": {
-            "type": "string",
-            "description": "Symbol name to edit within (for symbol-edit mode)"
-          },
-          "root": {
-            "type": "string",
-            "description": "Project root (default: cwd)"
+          "regex": {
+            "type": "boolean",
+            "description": "Use regex matching instead of exact (default: false)"
           },
           "apply": {
             "type": "boolean",
-            "description": "Apply changes (default: false — dry run with diff)"
+            "description": "Apply changes (default: false — dry run)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: current dir)"
           },
           "format": {
             "type": "string",
             "enum": [
-              "text",
-              "json"
+              "json",
+              "text"
             ],
-            "description": "Output format (default: text)"
+            "description": "Output format (default: json — includes nextCommand)"
           }
         },
         "required": [
-          "file"
+          "oldString",
+          "newString"
         ]
       }
     },
@@ -4065,45 +4096,6 @@
       }
     },
     {
-      "name": "smart_progress",
-      "description": "Check progress of long-running tasks. View active tasks, their completion percentage, and recent messages.",
-      "category": "standard",
-      "domain": "general",
-      "safetyLevel": "medium",
-      "routingRules": {
-        "autoRoute": true,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "command": {
-            "type": "string",
-            "enum": [
-              "status",
-              "all",
-              "clear"
-            ],
-            "description": "Command: status (check one task), all (list all tasks), clear (remove completed tasks)"
-          },
-          "taskId": {
-            "type": "string",
-            "description": "Task ID to check (for status command)"
-          }
-        },
-        "required": [
-          "command"
-        ]
-      }
-    },
-    {
       "name": "smart_pw_browser",
       "description": "Control a web browser — navigate, click, fill forms, screenshot, execute JavaScript.\n\nCommands:\n  navigate(url):   Browse to a URL\n  snapshot():      Get page text + links\n  click(selector): Click element (text or CSS selector)\n  fill(selector, value): Fill a form field\n  screenshot():    Capture page as PNG (base64)\n  run_code(code):  Execute JavaScript in the page\n\nNOT for: reading article content (use smart_exa_crawl with --clean).\nNOT for: searching the web (use smart_exa_search).",
       "category": "standard",
@@ -4409,11 +4401,11 @@
       }
     },
     {
-      "name": "smart_edit",
-      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
+      "name": "smart_progress",
+      "description": "Check progress of long-running tasks. View active tasks, their completion percentage, and recent messages.",
       "category": "standard",
-      "domain": "edit",
-      "safetyLevel": "high",
+      "domain": "general",
+      "safetyLevel": "medium",
       "routingRules": {
         "autoRoute": true,
         "interceptorRequired": false,
@@ -4428,49 +4420,22 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "file": {
-            "type": "string",
-            "description": "File path to edit (required)"
-          },
-          "oldString": {
-            "type": "string",
-            "description": "Text to find and replace (exact match by default, regex if regex=true)"
-          },
-          "newString": {
-            "type": "string",
-            "description": "Replacement text"
-          },
-          "files": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Multiple files to edit (alternative to file)"
-          },
-          "regex": {
-            "type": "boolean",
-            "description": "Use regex matching instead of exact (default: false)"
-          },
-          "apply": {
-            "type": "boolean",
-            "description": "Apply changes (default: false — dry run)"
-          },
-          "root": {
-            "type": "string",
-            "description": "Project root (default: current dir)"
-          },
-          "format": {
+          "command": {
             "type": "string",
             "enum": [
-              "json",
-              "text"
+              "status",
+              "all",
+              "clear"
             ],
-            "description": "Output format (default: json — includes nextCommand)"
+            "description": "Command: status (check one task), all (list all tasks), clear (remove completed tasks)"
+          },
+          "taskId": {
+            "type": "string",
+            "description": "Task ID to check (for status command)"
           }
         },
         "required": [
-          "oldString",
-          "newString"
+          "command"
         ]
       }
     },

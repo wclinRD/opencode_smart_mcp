@@ -45,6 +45,7 @@
     "@playwright/mcp": "0.0.75",
     "better-sqlite3": "12.10.0",
     "crawlee": "3.17.0",
+    "diff-match-patch": "1.0.5",
     "docx": "9.7.1",
     "file-type": "22.0.1",
     "html-to-text": "10.0.0",
@@ -53,7 +54,9 @@
     "mammoth": "1.12.0",
     "pdf-parse": "2.4.5",
     "sqlite-vec": "0.1.9",
+    "tree-sitter-wasms": "0.1.13",
     "turndown": "7.2.4",
+    "web-tree-sitter": "0.26.9",
     "xlsx": "0.18.5"
   }
 }

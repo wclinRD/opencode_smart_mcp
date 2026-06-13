@@ -1,16 +1,20 @@
 // fast-apply.mjs → smart_fast_apply
 //
 // Fast Apply: 讓 LLM 快速準確 apply 程式碼修改。
-// 支援 3 種輸入格式:
-//   1. SEARCH/REPLACE blocks (Aider 相容)
-//   2. Unified diff (git diff 格式)
-//   3. Whole file replacement
+// 支援 7 種輸入格式:
+//   1. block-diff: symbol-aware 區塊取代（新，最省 token）
+//   2. unified-diff: git diff 格式（高效）
+//   3. lazy: SEARCH/REPLACE with // ... markers
+//   4. hashline: 行號 + content-hash（最穩健）
+//   5. partial: 縮寫 SEARCH context
+//   6. search-replace: 標準 SEARCH/REPLACE（Aider 相容）
+//   7. whole-file: 完整檔案取代
 //
 // 安全設計:
 //   - dry-run 預設（只顯示變更計畫）
 //   - 3+ 檔案須 `apply: true` 明確授權
 //   - undo 支援（git-based 回滾）
-//   - 4 層模糊匹配（精確→空白容錯）
+//   - 6+1 層模糊匹配（L1-L6 文字 + L7 AST 感知）
 //
 // 使用流程:
 //   LLM output → smart_fast_apply(dry-run) → review → smart_fast_apply(apply)
@@ -61,7 +65,7 @@ Dry-run by default — safe to use without side effects.`,
     properties: {
       format: {
         type: 'string',
-        enum: ['search-replace', 'lazy', 'partial', 'unified-diff', 'whole-file', 'hashline'],
+        enum: ['search-replace', 'lazy', 'partial', 'unified-diff', 'whole-file', 'hashline', 'block-diff'],
         description: 'Input format (default: search-replace). Token efficiency: unified-diff (best, +/- only) > lazy > hashline > partial > search-replace > whole-file. Use hashline for large files (>400 lines) where SEARCH/REPLACE matching is unreliable.',
       },
       blocks: {
@@ -72,10 +76,14 @@ Dry-run by default — safe to use without side effects.`,
             file: { type: 'string', description: 'Target file path' },
             search: { type: 'string', description: 'Text to search (multi-line). For lazy format: use // ... markers to skip unchanged code. For partial format: abbreviated context lines.' },
             replace: { type: 'string', description: 'Replacement text (multi-line)' },
+            // BlockDiff fields (required when format=block-diff)
+            symbol: { type: 'string', description: 'Symbol name (function/class) for block-diff format' },
+            newContent: { type: 'string', description: 'Replacement content for block-diff format (paired with symbol)' },
+            action: { type: 'string', enum: ['replace', 'prepend', 'append'], description: 'Block-diff action (default: replace)' },
           },
           required: ['file', 'search', 'replace'],
         },
-        description: 'SEARCH/REPLACE blocks (for format=search-replace, lazy, or partial)',
+        description: 'Edit blocks. For search-replace/lazy/partial: {file,search,replace}. For block-diff: {file,symbol,newContent,action?}.',
       },
       text: {
         type: 'string',
@@ -202,7 +210,29 @@ Dry-run by default — safe to use without side effects.`,
     let changes = [];
 
     try {
-      if (format === 'search-replace' && args.blocks) {
+      if (format === 'block-diff' && args.blocks) {
+        // BlockDiff: { file, symbol, newContent, action? }
+        for (const b of args.blocks) {
+          if (!b.file || !b.symbol || b.newContent === undefined) {
+            throw new Error(`Invalid block-diff block for ${b.file || 'unknown'}: need file, symbol, newContent`);
+          }
+          const filePath = resolve(root, b.file);
+          const fc = readFileSafe(filePath);
+          if (fc === null) throw new Error(`File not found: ${b.file}`);
+          const lang = detectLanguage(filePath);
+          const sym = extractSymbol(fc, lang, b.symbol);
+          if (!sym) throw new Error(`Symbol "${b.symbol}" not found in ${b.file}`);
+          const act = b.action || 'replace';
+          const nc = b.newContent;
+          if (act === 'prepend') {
+            changes.push({ file: b.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineStart, newContent: nc, action: 'insert-before' });
+          } else if (act === 'append') {
+            changes.push({ file: b.file, type: 'hashline', startLine: sym.lineEnd, endLine: sym.lineEnd, newContent: nc, action: 'insert-after' });
+          } else {
+            changes.push({ file: b.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineEnd, newContent: nc, action: 'replace' });
+          }
+        }
+      } else if (format === 'search-replace' && args.blocks) {
         changes = parseSearchReplace(args.blocks).map(b => ({ ...b, type: 'search-replace' }));
       } else if (format === 'lazy' && args.blocks) {
         changes = parseSearchReplace(args.blocks).map(b => ({ ...b, type: 'lazy' }));

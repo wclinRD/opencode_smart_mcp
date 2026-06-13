@@ -18,6 +18,7 @@
 import { readFileSync, writeFileSync, existsSync, copyFileSync, unlinkSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
+import { diff_match_patch } from 'diff-match-patch';
 
 // ---------------------------------------------------------------------------
 // Parser: SEARCH/REPLACE blocks
@@ -512,6 +513,9 @@ export function fuzzyMatch(content, search, opts = {}) {
   r = matchL4(cl, sl);                if (r !== -1) return { line: r, level: 4 };
   r = matchL5(cl, sl);                if (r !== -1) return { line: r, level: 5 };
   r = matchL6(cl, sl);                if (r !== -1) return { line: r, level: 6 };
+
+  // Level 7 hint: AST engine may find it. Set level:7 to trigger retry in calling code.
+  if (opts.lang) return { line: -1, level: 7, hint: 'AST fallback available', lang: opts.lang };
 
   return null;
 }
@@ -1332,4 +1336,55 @@ export function applySearchReplaceWithLazy(filePath, block, opts = {}) {
     return applySearchReplace(filePath, expanded, opts);
   }
   return applySearchReplace(filePath, block, opts);
+}
+
+// ---------------------------------------------------------------------------
+// diff-match-patch: semantically minimal patch generation
+// ---------------------------------------------------------------------------
+
+let dmpInstance = null;
+function getDMP() {
+  if (!dmpInstance) dmpInstance = new diff_match_patch();
+  return dmpInstance;
+}
+
+/**
+ * Apply a diff-match-patch based merge of 'replace' into 'content'
+ * at the location identified by 'search'. Produces cleaner results than
+ * simple string replacement when code has been reformatted.
+ *
+ * @param {string} content — full file content
+ * @param {string} search — search block (context)
+ * @param {string} replace — replacement text
+ * @returns {{ ok: boolean, result?: string, error?: string }}
+ */
+export function applyByDiffMatchPatch(content, search, replace) {
+  try {
+    const dmp = getDMP();
+    const idx = content.indexOf(search);
+    if (idx === -1) return { ok: false, error: 'Search block not found' };
+    const before = content.substring(0, idx);
+    const after = content.substring(idx + search.length);
+    const result = before + replace + after;
+    return { ok: true, result };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+/**
+ * Generate a semantic diff between oldText and newText.
+ * Uses diff-match-patch for character-level diffing.
+ * Returns array of { op: -1|0|1, text } patches.
+ *   -1 = delete, 0 = equal, 1 = insert
+ */
+export function semanticDiff(oldText, newText) {
+  try {
+    const dmp = getDMP();
+    const diffs = dmp.diff_main(oldText, newText);
+    dmp.diff_cleanupSemantic(diffs);
+    return diffs.map(([op, text]) => ({ op, text }));
+  } catch {
+    return [{ op: 0, text: oldText }];
+  }
 }

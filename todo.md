@@ -1,0 +1,33 @@
+# smart_fast_apply 強化待辦清單
+
+## Phase 0：BlockDiff 新格式
+- [x] plan.md / todo.md 建立
+- [ ] `inputSchema.format.enum` 加入 `block-diff`
+- [ ] 新增 `parseBlockDiff()` 區塊解析
+- [ ] Handler 中 block-diff → applyHashline 轉換
+- [ ] 更新 description 文件
+- [ ] 測試：block-diff 基本功能
+
+## Phase 1：Tree-sitter AST 匹配層
+- [ ] `npm install web-tree-sitter tree-sitter-wasms`
+- [ ] 建立 `src/lib/ast-engine.mjs`
+- [ ] `fuzzyMatch()` 加入 L7 AST fallback
+- [ ] 更新 description 文件
+- [ ] 測試：5 語言 AST 匹配
+- [ ] 測試：AST 匹配成功降級
+
+## Phase 2：Google diff-match-patch 降級
+- [ ] 整合 diff-match-patch
+- [ ] fuzzyMatch 最後防線加入 patch_apply
+- [ ] 測試：程式碼移動後仍 patch 成功
+
+## Phase 3：AST 驗證 + 自動修復
+- [ ] apply 後 validateSyntax()
+- [ ] 自動修復 handler
+- [ ] 測試：語法錯誤自動修復
+- [ ] 測試：修不了時正確回報
+
+## 驗證與交付
+- [ ] `npm test` 全部通過
+- [ ] 更新 agent 設定（如有需要）
+- [ ] git commit & push
