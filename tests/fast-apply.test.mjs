@@ -12,7 +12,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, mkdtempSync, readFileSync, unlinkSync, rmdirSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, readFileSync, unlinkSync, rmdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 
@@ -32,6 +32,8 @@ import {
   applyPartial,
   checkFileAccess,
 } from '../src/lib/apply-engine.mjs';
+
+import { parseBlockDiff } from '../src/plugins/core/fast-apply.mjs';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -796,6 +798,77 @@ describe('applyPartial', () => {
 // ===========================================================================
 // 11. File access validation — checkFileAccess
 // ===========================================================================
+
+// ===========================================================================
+// 12. BlockDiff — parseBlockDiff
+// ===========================================================================
+
+describe('parseBlockDiff', () => {
+
+  function symFile(content) {
+    const dir = mkdtempSync(join(tmpdir(), 'bd-test-'));
+    const p = join(dir, 'test.js');
+    writeFileSync(p, content, 'utf-8');
+    return p;
+  }
+
+  it('replaces entire function body', () => {
+    const content = 'function hello() { return 1; }\n';
+    const fp = symFile(content);
+    const root = dirname(fp);
+    const blocks = [
+      { file: 'test.js', symbol: 'hello', newContent: 'function hello() { return 42; }' }
+    ];
+    const changes = parseBlockDiff(blocks, root);
+    assert.equal(changes.length, 1);
+    assert.equal(changes[0].type, 'hashline');
+    assert.equal(changes[0].action, 'replace');
+    assert.ok(changes[0].startLine >= 1);
+    assert.ok(changes[0].endLine >= changes[0].startLine);
+    // Cleanup
+    rmSync(dirname(fp), { recursive: true, force: true });
+  });
+
+  it('throws on missing symbol', () => {
+    const content = 'const x = 1;\n';
+    const fp = symFile(content);
+    const root = dirname(fp);
+    const blocks = [{ file: 'test.js', symbol: 'nonexistent', newContent: 'hi' }];
+    assert.throws(() => parseBlockDiff(blocks, root), /not found/);
+    rmSync(dirname(fp), { recursive: true, force: true });
+  });
+
+  it('throws on missing fields', () => {
+    const blocks = [{ file: 'test.js' }];
+    assert.throws(() => parseBlockDiff(blocks, '/tmp'), /need file, symbol/);
+  });
+
+  it('handles append action', () => {
+    const content = 'function greet() { return "hi"; }\n';
+    const fp = symFile(content);
+    const root = dirname(fp);
+    const blocks = [
+      { file: 'test.js', symbol: 'greet', newContent: 'console.log("done");', action: 'append' }
+    ];
+    const changes = parseBlockDiff(blocks, root);
+    assert.equal(changes.length, 1);
+    assert.equal(changes[0].action, 'insert-after');
+    rmSync(dirname(fp), { recursive: true, force: true });
+  });
+
+  it('handles prepend action', () => {
+    const content = 'function foo() { return 0; }\n';
+    const fp = symFile(content);
+    const root = dirname(fp);
+    const blocks = [
+      { file: 'test.js', symbol: 'foo', newContent: 'const x = 1;', action: 'prepend' }
+    ];
+    const changes = parseBlockDiff(blocks, root);
+    assert.equal(changes.length, 1);
+    assert.equal(changes[0].action, 'insert-before');
+    rmSync(dirname(fp), { recursive: true, force: true });
+  });
+});
 
 describe('checkFileAccess', () => {
   it('passes for normal text file', () => {

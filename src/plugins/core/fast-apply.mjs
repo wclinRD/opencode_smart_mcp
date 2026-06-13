@@ -49,14 +49,15 @@ export default {
   category: 'edit',
   cli: 'fast-apply.mjs',
   description: `Unified editing tool — replaces write + edit + edit_ast.
-Supports 6 input formats (ordered by token efficiency):
+Supports 7 input formats (ordered by token efficiency):
+  - block-diff: symbol-aware block editing (NEW, most reliable). Specify {file, symbol, newContent, action?}. No fuzzy matching needed.
   - unified-diff: git diff format — MOST token-efficient (40-60% savings). Use +/- lines only, no unchanged lines needed.
   - lazy: SEARCH/REPLACE with // ... existing code ... markers (80-98% savings for large files)
   - hashline: line-number + content-hash addressing — MOST ROBUST for large files (>400 lines). Specify line range directly. No fuzzy match ambiguity.
   - partial: abbreviated SEARCH context (fewer lines, L5 fuzzy matching)
   - search-replace: standard SEARCH/REPLACE blocks (Aider-compatible)
   - whole-file: full file replacement (most tokens)
-💡 Tip: prefer unified-diff for small edits, hashline for >400 line files, lazy for large files with few changes.
+💡 Tip: block-diff for symbol-level edits, unified-diff for small edits, hashline for >400 line files, lazy for large files with few changes.
 Features: 6-level fuzzy matching (L6 = gap-tolerant subsequence), hashline addressing with content verification, atomic multi-file apply, undo snapshots, binary/access checks.
 Dry-run by default — safe to use without side effects.`,
 
@@ -211,27 +212,7 @@ Dry-run by default — safe to use without side effects.`,
 
     try {
       if (format === 'block-diff' && args.blocks) {
-        // BlockDiff: { file, symbol, newContent, action? }
-        for (const b of args.blocks) {
-          if (!b.file || !b.symbol || b.newContent === undefined) {
-            throw new Error(`Invalid block-diff block for ${b.file || 'unknown'}: need file, symbol, newContent`);
-          }
-          const filePath = resolve(root, b.file);
-          const fc = readFileSafe(filePath);
-          if (fc === null) throw new Error(`File not found: ${b.file}`);
-          const lang = detectLanguage(filePath);
-          const sym = extractSymbol(fc, lang, b.symbol);
-          if (!sym) throw new Error(`Symbol "${b.symbol}" not found in ${b.file}`);
-          const act = b.action || 'replace';
-          const nc = b.newContent;
-          if (act === 'prepend') {
-            changes.push({ file: b.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineStart, newContent: nc, action: 'insert-before' });
-          } else if (act === 'append') {
-            changes.push({ file: b.file, type: 'hashline', startLine: sym.lineEnd, endLine: sym.lineEnd, newContent: nc, action: 'insert-after' });
-          } else {
-            changes.push({ file: b.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineEnd, newContent: nc, action: 'replace' });
-          }
-        }
+        changes = parseBlockDiff(args.blocks, root);
       } else if (format === 'search-replace' && args.blocks) {
         changes = parseSearchReplace(args.blocks).map(b => ({ ...b, type: 'search-replace' }));
       } else if (format === 'lazy' && args.blocks) {
@@ -601,6 +582,36 @@ function wrapDiffBlock(diffText, filePath) {
   const lang = codeBlockLang(filePath);
   const colored = ansiColorizeDiff(diffText);
   return "```" + lang + "\n" + colored + "```";
+}
+
+/**
+ * Parse block-diff format blocks into normalized hashline changes.
+ * BlockDiff: { file, symbol, newContent, action? } — no fuzzy matching needed,
+ * uses extractSymbol() for precise AST-aware targeting.
+ */
+export function parseBlockDiff(blocks, root) {
+  const changes = [];
+  for (const b of blocks) {
+    if (!b.file || !b.symbol || b.newContent === undefined) {
+      throw new Error(`Invalid block-diff block for ${b.file || 'unknown'}: need file, symbol, newContent`);
+    }
+    const filePath = resolve(root, b.file);
+    const fc = readFileSafe(filePath);
+    if (fc === null) throw new Error(`File not found: ${b.file}`);
+    const lang = detectLanguage(filePath);
+    const sym = extractSymbol(fc, lang, b.symbol);
+    if (!sym) throw new Error(`Symbol "${b.symbol}" not found in ${b.file}`);
+    const act = b.action || 'replace';
+    const nc = b.newContent;
+    if (act === 'prepend') {
+      changes.push({ file: b.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineStart, newContent: nc, action: 'insert-before' });
+    } else if (act === 'append') {
+      changes.push({ file: b.file, type: 'hashline', startLine: sym.lineEnd, endLine: sym.lineEnd, newContent: nc, action: 'insert-after' });
+    } else {
+      changes.push({ file: b.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineEnd, newContent: nc, action: 'replace' });
+    }
+  }
+  return changes;
 }
 
 /**

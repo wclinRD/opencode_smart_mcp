@@ -9,13 +9,13 @@
 - [x] 第 4 個 SEARCH/REPLACE conflict 修復（r.file 參數）
 - [x] 78 tests pass, 0 fail
 
-## Phase 0：BlockDiff 新格式
-- [x] plan.md / todo.md 建立
-- [ ] `inputSchema.format.enum` 加入 `block-diff`
-- [ ] 新增 `parseBlockDiff()` 區塊解析
-- [ ] Handler 中 block-diff → applyHashline 轉換
-- [ ] 更新 description 文件
-- [ ] 測試：block-diff 基本功能
+## Phase 0：BlockDiff 新格式 ✅
+- [x] plan.md / todo.md 建立（已在 Phase 0 前完成）
+- [x] `inputSchema.format.enum` 已含 `block-diff`（前期已加入）
+- [x] 新增 `parseBlockDiff()` 區塊解析（自動化函式，含 JSDoc）
+- [x] Handler 中 block-diff → applyHashline 轉換（現呼叫 parseBlockDiff -> applyHashline）
+- [x] 更新 description 文件（7 種格式，block-diff 排首位）
+- [x] 測試：5 個 block-diff 測試（replace/append/prepend/錯誤處理）
 
 ## Phase 1：Tree-sitter AST 匹配層
 - [ ] `npm install web-tree-sitter tree-sitter-wasms`
