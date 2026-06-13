@@ -1,6 +1,7 @@
-// exec.mjs — Sandbox Execution (Phase 10.1)
+// exec.mjs — Sandbox Execution (Phase 10.1) + Code Verification (Phase 20)
 //
 // smart_exec MCP tool: execute code in a sandboxed environment.
+// Supports mode: "run" (default) and "verify" (Phase 20).
 // Primary: deno --allow-none (maximum safety)
 // Fallback: node with limited permissions
 //
@@ -12,6 +13,7 @@ import { writeFileSync, unlinkSync, mkdirSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { verifyCode } from '../../lib/code-verifier.mjs';
 
 // ---------------------------------------------------------------------------
 // Runtime detection
@@ -225,6 +227,12 @@ Avoid when: running production services, long-running processes, or untrusted th
   inputSchema: {
     type: 'object',
     properties: {
+      mode: {
+        type: 'string',
+        enum: ['run', 'verify'],
+        description: 'Execution mode: "run" (default) to execute, "verify" to validate code output (Phase 20)',
+        default: 'run',
+      },
       language: {
         type: 'string',
         enum: ['bash', 'node', 'python', 'deno'],
@@ -232,7 +240,7 @@ Avoid when: running production services, long-running processes, or untrusted th
       },
       code: {
         type: 'string',
-        description: 'Code to execute',
+        description: 'Code to execute or verify',
       },
       permission: {
         type: 'string',
@@ -249,13 +257,43 @@ Avoid when: running production services, long-running processes, or untrusted th
         type: 'string',
         description: 'Working directory (default: current project root)',
       },
+      expectedOutput: {
+        type: 'string',
+        description: 'Expected stdout substring (verify mode only)',
+      },
+      testCases: {
+        type: 'array',
+        items: { type: 'object' },
+        description: 'Test cases for verification (verify mode only)',
+      },
+      maxRetries: {
+        type: 'number',
+        description: 'Max retries on failure for verify mode (default: 1)',
+        default: 1,
+      },
     },
-    required: ['language', 'code'],
+    required: ['code'],
   },
 
   handler: async (args) => {
-    const { language, code, permission = 'none', timeout = 30000, workdir } = args;
+    const { mode = 'run', language, code, permission = 'none', timeout = 30000, workdir, expectedOutput, testCases, maxRetries = 1 } = args;
 
+    // Verify mode (Phase 20)
+    if (mode === 'verify') {
+      const result = verifyCode(code, {
+        language,
+        timeout,
+        maxRetries,
+        expectedOutput,
+        testCases,
+      });
+      return JSON.stringify({
+        ...result,
+        mode: 'verify',
+      }, null, 2);
+    }
+
+    // Run mode (Phase 10.1, default)
     // Check safety
     const warnings = checkSafety({ language, permission });
     const lang = LANGUAGES[language];
@@ -282,6 +320,7 @@ Avoid when: running production services, long-running processes, or untrusted th
     // Add metadata
     return JSON.stringify({
       ...result,
+      mode: 'run',
       sandbox: language === 'deno' ? `deno --allow-none (max safety)` :
                language === 'node' ? `node (permission: ${permission})` :
                language === 'python' ? 'python3 (no sandbox)' :

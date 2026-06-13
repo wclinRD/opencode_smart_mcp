@@ -198,6 +198,7 @@ permission:
 | 排程任務 | `ssr(schedule args:{name:"nightly-test", cron:"0 9 * * *", command:"sm...test"}) → ssr(progress) → ssr(schedule list)` |
 | 知識圖譜 | `ssr(kg operation:"create_entities") → ssr(kg operation:"create_relations") → ssr(kg operation:"search_nodes")` |
 | 自動修復 | `ssr(autofix args:{file:"...", fix:"..."}) → 自動 verify test/lint/security` |
+| 程式碼驗證 | `smart_exec({mode:"verify", code}) → 自動 syntax check + execute + output verify → 失敗自動 retry (最多 1 輪)` |
 | 工作流模板 | `ssr(workflow args:{command:"list"}) → ssr(workflow args:{command:"run", name:"bug-fix"})` |
 | 重構計畫 | `ssr(refactor_plan args:{symbol:"...", newApi:"..."}) → 產出遷移計畫 → ssr(fast_apply)` |
 

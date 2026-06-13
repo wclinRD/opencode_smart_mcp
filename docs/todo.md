@@ -58,62 +58,64 @@
 
 ---
 
-## Phase 17：MCTS Tool Planning — 蒙地卡羅樹搜尋工具規劃
+## Phase 17：MCTS Tool Planning — 蒙地卡羅樹搜尋工具規劃 ✅
 
 > 參考：ToolTree (ICLR 2026) — 雙回饋 MCTS + 雙向剪枝
 > 目標：在工具空間中用 MCTS 搜尋最佳路徑，取代靜態正則匹配。
 > 預估：複雜任務工具選擇準確率從 ~70% 提升至 ~85%+
+> **完成日期：2026-06-13**
 
 ### 17.1 研究：現有 tool-strategy 架構分析
 
-- [ ] 閱讀 `src/agent/tool-strategy.mjs` 現有 code
-- [ ] 分析 TASK_PATTERNS 的匹配邏輯和 chain 定義
-- [ ] 理解 hybrid-engine.mjs 的 classifyQuestion + DOMAIN_MAP 路由
-- [ ] 確定哪些任務適合 MCTS（5+ 步驟的複雜 multi-step 任務）
+- [x] 閱讀 `src/agent/tool-strategy.mjs` 現有 code
+- [x] 分析 TASK_PATTERNS 的匹配邏輯和 chain 定義
+- [x] 理解 hybrid-engine.mjs 的 classifyQuestion + DOMAIN_MAP 路由
+- [x] 確定哪些任務適合 MCTS（5+ 步驟的複雜 multi-step 任務）
 
 ### 17.2 MCTS 引擎設計
 
-- [ ] MCTS Node 資料結構：{ id, tool, args, parent, children, visits, reward, preScore, postScore }
-- [ ] UCT (Upper Confidence Bound for Trees) selection formula
-- [ ] Pre-evaluation：快速 schema/slot 檢查（不執行工具）
-- [ ] Post-evaluation：根據執行結果評分工具貢獻
-- [ ] Bidirectional pruning：pre + post 雙向剪枝
-- [ ] 收斂條件：max iterations 或 score 穩定
+- [x] MCTS Node 資料結構：{ id, tool, args, parent, children, visits, reward, preScore, postScore }
+- [x] UCT (Upper Confidence Bound for Trees) selection formula
+- [x] Pre-evaluation：快速 schema/slot 檢查（不執行工具）
+- [x] Post-evaluation：根據執行結果評分工具貢獻
+- [x] Bidirectional pruning：pre + post 雙向剪枝
+- [x] 收斂條件：max iterations 或 score 穩定
 
 ### 17.3 實作：MCTS 引擎
 
-- [ ] `src/lib/mcts-planner.mjs` — MCTS 核心引擎
-- [ ] UCTNode class + selection/expansion/simulation/backpropagation
-- [ ] PreEvaluator：工具 schema/slot 相容性檢查
-- [ ] PostEvaluator：執行結果貢獻評分
-- [ ] BidirectionalPruner：剪枝邏輯
-- [ ] SearchLoop：iteration 管理 + 收斂判斷
-- [ ] 降級機制：MCTS timeout → fallback 到靜態正則匹配
+- [x] `src/lib/mcts-planner.mjs` — MCTS 核心引擎
+- [x] UCTNode class + selection/expansion/simulation/backpropagation
+- [x] PreEvaluator：工具 schema/slot 相容性檢查
+- [x] PostEvaluator：執行結果貢獻評分
+- [x] BidirectionalPruner：剪枝邏輯
+- [x] SearchLoop：iteration 管理 + 收斂判斷
+- [x] 降級機制：MCTS timeout → fallback 到靜態正則匹配
 
 ### 17.4 MCP Plugin
 
-- [ ] `src/plugins/standard/mcts-plan.mjs` — `smart_mcts_plan` 工具
-- [ ] inputSchema：{ goal, tools, context, maxIterations?, timeout? }
-- [ ] handler：呼叫 MCTS engine → 回傳最佳工具鏈
-- [ ] responsePolicy: maxLevel 0（結果不能壓縮）
+- [x] `src/plugins/standard/mcts-plan.mjs` — `smart_mcts_plan` 工具
+- [x] inputSchema：{ goal, tools, context, maxIterations?, timeout? }
+- [x] handler：呼叫 MCTS engine → 回傳最佳工具鏈
+- [x] responsePolicy: maxLevel 0（結果不能壓縮）
 
 ### 17.5 hybrid-engine 整合
 
-- [ ] `src/lib/hybrid-engine.mjs` DOMAIN_MAP 加入 mcts 領域
-- [ ] 觸發條件：複雜 multi-step 任務（5+ 步驟、多檔案、跨工具）
-- [ ] 整合流程：classify → MCTS → 推薦工具鏈
-- [ ] 查看現有 general recommendation 流程，確保不破壞
+- [x] `src/lib/hybrid-engine.mjs` DOMAIN_MAP 加入 mcts 領域
+- [x] 觸發條件：複雜 multi-step 任務（5+ 步驟、多檔案、跨工具）
+- [x] 整合流程：classify → MCTS → 推薦工具鏈
+- [x] 查看現有 general recommendation 流程，確保不破壞
 
 ### 17.6 測試
 
-- [ ] MCTS Node selection (UCT) 正確性
-- [ ] Pre-evaluation 正確過濾不相容工具
-- [ ] Post-evaluation 正確評分
-- [ ] Bidirectional pruning 正確性
-- [ ] 收斂判斷（max iterations / score stable）
-- [ ] 降級機制（timeout → static fallback）
-- [ ] Plugin integration（smart_mcts_plan 正常回傳）
-- [ ] hybrid-engine 整合不破壞現有 routing
+- [x] MCTS Node selection (UCT) 正確性
+- [x] Pre-evaluation 正確過濾不相容工具
+- [x] Post-evaluation 正確評分
+- [x] Bidirectional pruning 正確性
+- [x] 收斂判斷（max iterations / score stable）
+- [x] 降級機制（timeout → static fallback）
+- [x] Plugin integration（smart_mcts_plan 正常回傳）
+- [x] hybrid-engine 整合不破壞現有 routing
+- [x] **40 項測試全部通過**
 
 ---
 
@@ -210,42 +212,44 @@
 
 ---
 
-## Phase 20：Execution-Grounded Verification — 執行驗證的程式碼生成
+## Phase 20：Execution-Grounded Verification — 執行驗證的程式碼生成 ✅
 
 > 參考：IBM/verified-code-cot
 > 目標：code generation 後自動在 sandbox 執行驗證，確保產出可執行的 code。
 > 預估：可執行率從 ~70% 提升至 ~95%+。
+> **完成日期：2026-06-13**
 
 ### 20.1 Code Verification Pipeline
 
-- [ ] `src/lib/code-verifier.mjs` — `verifyCode(code, language)` 函數
-- [ ] 執行流程：extract code → sandbox execute → check exit code + output
-- [ ] 成功路徑：回傳 code + execution result + metadata
-- [ ] 失敗路徑：回傳 code + error + suggestion
-- [ ] Retry loop：最多 1 輪自動修正
-- [ ] 安全限制：timeout 30s, output cap 50KB
+- [x] `src/lib/code-verifier.mjs` — `verifyCode(code, language)` 函數
+- [x] 執行流程：extract code → sandbox execute → check exit code + output
+- [x] 成功路徑：回傳 code + execution result + metadata
+- [x] 失敗路徑：回傳 code + error + suggestion
+- [x] Retry loop：最多 1 輪自動修正
+- [x] 安全限制：timeout 30s, output cap 50KB
 
 ### 20.2 smart_exec 擴充
 
-- [ ] `src/plugins/standard/exec.mjs` — 新增 `verify` mode
-- [ ] verify mode 參數：{ code, language, testCases?, maxRetries? }
-- [ ] Handler：呼叫 code-verifier → 回傳驗證結果
-- [ ] 回傳格式：{ ok, exitCode, stdout, stderr, verified }
+- [x] `src/plugins/standard/exec.mjs` — 新增 `verify` mode
+- [x] verify mode 參數：{ code, language, testCases?, maxRetries? }
+- [x] Handler：呼叫 code-verifier → 回傳驗證結果
+- [x] 回傳格式：{ ok, verified, compilation, execution, retries, issues }
 
 ### 20.3 Agent personality
 
-- [ ] `config/agents/smart-mcp.md` — code generation 自動驗證流程
-- [ ] 規則：產生 code 後自動呼叫 `smart_exec({mode:"verify", ...})`
-- [ ] 驗證失敗：自動修正（最多 1 輪）
+- [x] `config/agents/smart-mcp.md` — code generation 自動驗證流程
+- [x] 規則：產生 code 後自動呼叫 `smart_exec({mode:"verify", ...})`
+- [x] 驗證失敗：自動修正（最多 1 輪）
 
 ### 20.4 測試
 
-- [ ] verifyCode 正確執行（4 種語言：js/py/bash/ts）
-- [ ] 成功碼驗證（exit code 0 + 預期 output）
-- [ ] 失敗碼處理（exit code non-zero + error 訊息）
-- [ ] Retry loop 正確（最多 1 輪）
-- [ ] Safety limits（timeout / output cap）
-- [ ] Plugin integration（smart_exec mode:"verify"）
+- [x] verifyCode 正確執行（4 種語言：js/py/bash/ts）
+- [x] 成功碼驗證（exit code 0 + 預期 output）
+- [x] 失敗碼處理（exit code non-zero + error 訊息）
+- [x] Retry loop 正確（最多 1 輪）
+- [x] Safety limits（timeout / output cap）
+- [x] Plugin integration（smart_exec mode:"verify"）
+- [x] **21 項測試全部通過**
 
 ---
 
@@ -256,9 +260,9 @@
 | M1 | Phase 16 完成（Structured Thinking） | ✅ 2026-06-13 |
 | M2 | Phase 18 完成（Speculative Pre-fetch） | ✅ 2026-06-13 |
 | M3 | Phase 19 完成（Cross-Agent Memory） | ✅ 2026-06-13 |
-| M4 | Phase 17 完成（MCTS Planning） | t+18 天 |
-| M5 | Phase 20 完成（Verified Code Gen） | t+22 天 |
-| M6 | 全量 regression + 效能 benchmark | t+25 天 |
+| M4 | Phase 17 完成（MCTS Planning） | ✅ 2026-06-13 |
+| M5 | Phase 20 完成（Verified Code Gen） | ✅ 2026-06-13 |
+| M6 | 全量 regression + 效能 benchmark | ⏳ 待辦 |
 
 ---
 

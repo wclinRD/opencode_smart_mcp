@@ -961,6 +961,14 @@ const DOMAIN_MAP = [
     workflow: ['Build index: smart_codebase_index({command:"build"})', 'Query symbol: smart_codebase_index({command:"query", symbol:"..."})', 'Generate repo map: smart_codebase_index({command:"map"})', 'Import graph (from index): smart_import_graph (auto-detects index)'],
   },
   {
+    domain: 'mcts_plan',
+    keywords: ['mcts', '蒙地卡羅', '工具規劃', '工具 搜尋', '最佳 工具', 'multi-step', '複雜 任務', '多步驟', 'tool selection', 'tool chain', '工具 選擇', '複雜 工具', '不確定 用哪個'],
+    skill: null,
+    tools: ['smart_mcts_plan'],
+    description: 'MCTS 蒙地卡羅樹搜尋工具規劃：複雜 multi-step 任務的最佳工具鏈搜尋',
+    workflow: ['Plan: smart_mcts_plan({goal, tools, context})', 'Review recommended tool chain', 'Execute each step sequentially', 'Fallback: MCTSPlanner.fallbackRecommendation if MCTS times out'],
+  },
+  {
     domain: 'autofix',
     keywords: ['自動修復', '自動修正', 'autofix', 'auto fix', '自動修復 循環', 'fix and verify', 'apply and test', '修改 並 測試', '一鍵 修復', '修復 驗證'],
     skill: null,

@@ -89,11 +89,12 @@ Phase 16 改為：
 
 ---
 
-## Phase 17：MCTS Tool Planning — 蒙地卡羅樹搜尋工具規劃
+## Phase 17：MCTS Tool Planning — 蒙地卡羅樹搜尋工具規劃 ✅
 
 > 參考：ToolTree (ICLR 2026) — 雙回饋 MCTS + 雙向剪枝
 > 核心洞察：目前 tool-strategy 是靜態正則匹配，無法處理複雜 multi-step 任務的工具選擇。
-> MCTS 可以在工具空間中搜尋最佳路徑。
+> MCTS 可以在工具空間中搜尋最佳路徑。 
+> **完成日期：2026-06-13**
 
 ### 設計
 
@@ -132,6 +133,13 @@ Phase 17 改為：
 | 複雜任務工具選擇準確率 | ~70%（靜態匹配） | ~85%+（MCTS 搜尋） |
 | 不適用工具呼叫次數 | 2-3 次/任務 | <1 次/任務 |
 | 適用場景 | — | 5+ 步驟的複雜 multi-step 任務 |
+
+### 實作摘要
+
+- `src/lib/mcts-planner.mjs` — MCTS 核心引擎（UCTNode / PreEvaluator / PostEvaluator / BidirectionalPruner）
+- `src/plugins/standard/mcts-plan.mjs` — `smart_mcts_plan` MCP 工具（接收 goal/tools/context，回傳最佳工具鏈）
+- `src/lib/hybrid-engine.mjs` — DOMAIN_MAP 新增 mcts_plan 領域
+- `tests/mcts-planner.test.mjs` — 40 項測試，全部通過
 
 ---
 
@@ -226,11 +234,12 @@ Phase 19 改為：
 
 ---
 
-## Phase 20：Execution-Grounded Verification — 執行驗證的程式碼生成
+## Phase 20：Execution-Grounded Verification — 執行驗證的程式碼生成 ✅
 
 > 參考：IBM/verified-code-cot
 > 核心洞察：目前 smart_exec 可以執行 code，但沒有自動驗證 code generation 的結果。
 > 加入 sandbox 執行驗證，自動過濾掉無法執行的 code。
+> **完成日期：2026-06-13**
 
 ### 設計
 
@@ -260,6 +269,13 @@ Phase 20 改為：
 | 產生 code 可執行率 | ~70% | ~95%+ |
 | 使用者手動修正次數 | 高 | 低（自動修正） |
 
+### 實作摘要
+
+- `src/lib/code-verifier.mjs` — Code verification pipeline（extractCode / verifyCode / verifyCodeBatch）
+- `src/plugins/standard/exec.mjs` — `smart_exec` 新增 `mode:"verify"` 參數
+- `config/agents/smart-mcp.md` — 加入 code verification 工作流
+- `tests/code-verifier.test.mjs` — 21 項測試，全部通過
+
 ---
 
 ## 優先級總覽
@@ -268,9 +284,9 @@ Phase 20 改為：
 |:----:|-------|------|:----:|:----:|:----:|
 | 🥇 | **16** | Structured Thinking (Grammar-Constrained CoT) | 🟡 中 | 🔥 高（省 50-70% 思考 token） | ✅ 完成 (2026-06-13) |
 | 🥇 | **18** | Speculative Tool Pre-fetch | 🟢 低 | 🔥 高（省 1-2 輪 round-trip） | ✅ 完成 (2026-06-13) |
+| 🥇 | **17** | MCTS Tool Planning | 🔴 高 | 🔥 高（複雜任務工具選擇準確率 ~85%+） | ✅ 完成 (2026-06-13) |
 | 🥈 | **19** | Cross-Agent Shared Memory | 🟢 低 | 🟡 中（跨 agent 學習） | ✅ 完成 (2026-06-13) |
-| 🥈 | **17** | MCTS Tool Planning | 🔴 高 | 🟡 中（複雜任務工具選擇） | 5-7 天 |
-| 🥉 | **20** | Execution-Grounded Verification | 🟡 中 | 🟢 低（code 品質提升） | 3-4 天 |
+| 🥈 | **20** | Execution-Grounded Verification | 🟡 中 | 🟡 中（code 品質提升，可執行率 ~95%+） | ✅ 完成 (2026-06-13) |
 
 ---
 
