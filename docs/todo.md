@@ -117,48 +117,53 @@
 
 ---
 
-## Phase 18：Speculative Tool Pre-fetch — 推測性工具預取
+## Phase 18：Speculative Tool Pre-fetch — 推測性工具預取 ✅
 
 > 參考：naimengye/speculative-action
 > 目標：當 LLM 呼叫一個工具時，server 推測下一步可能用什麼工具並提前執行。
 > 預估：省 1-2 輪 tool call round-trip，cache hit rate 40-60%。
+> **完成日期：2026-06-13**
 
 ### 18.1 設計 Pre-fetch 規則
 
-- [ ] 定義 pre-fetch 規則表（觸發工具 → pre-fetch 工具 + TTL）
+- [x] 定義 pre-fetch 規則表（觸發工具 → pre-fetch 工具 + TTL）
   - smart_grep → smart_lsp hover（對 grep 結果的第一個符號）
   - smart_think → memory_store search（對 think topic）
   - smart_security → smart_grep（對 security 找到的檔案）
   - smart_learn → import_graph
   - smart_error_diagnose → smart_lsp diagnostics
-- [ ] TTL 設計：pre-fetch 結果 TTL 5s，過期自動丟棄
-- [ ] 安全機制：pre-fetch 結果不進 context 除非命中
+- [x] TTL 設計：pre-fetch 結果 TTL 5s，過期自動丟棄
+- [x] 安全機制：pre-fetch 結果不進 context 除非命中
 
 ### 18.2 實作：Pre-fetch Engine
 
-- [ ] `src/lib/prefetch-engine.mjs` — Pre-fetch 引擎
-- [ ] PrefetchRule class：{ trigger, prefetch, ttl, contextExtractor }
-- [ ] contextExtractor：從 trigger tool 的 args/result 中提取 pre-fetch 所需的 context
-- [ ] In-memory cache：Map<tool+argsHash, { result, expiresAt }>
-- [ ] Cache hit/miss 判斷 + TTL 檢查
-- [ ] Fire-and-forget 執行（不堵塞主回應）
-- [ ] 統計追蹤：cache hit/miss/expiry 次數
+- [x] `src/lib/prefetch-engine.mjs` — Pre-fetch 引擎
+- [x] PrefetchRule：{ trigger, prefetch, ttl, contextExtractor }
+- [x] contextExtractor：從 trigger tool 的 args/result 中提取 pre-fetch 所需的 context
+- [x] In-memory cache：Map<tool+argsHash, { result, expiresAt }>
+- [x] Cache hit/miss 判斷 + TTL 檢查
+- [x] Fire-and-forget 執行（不堵塞主回應）
+- [x] 統計追蹤：cache hit/miss/expiry/triggered/skipped 次數
+- [x] Recursion guard：pre-fetch 結果不觸發進一步 pre-fetch
+- [x] Dedup：相同 key 的 pre-fetch 只執行一次
 
 ### 18.3 Server 端整合
 
-- [ ] `src/server/index.mjs` — invokeTool 成功後 fire-and-forget pre-fetch
-- [ ] `src/server/index.mjs` — invokeTool 前檢查 pre-fetch cache
-- [ ] 條件：只在成功呼叫後觸發（失敗不 pre-fetch）
-- [ ] 條件：只在非預取操作觸發（避免遞迴 pre-fetch）
+- [x] `src/server/index.mjs` — invokeTool 成功後 fire-and-forget pre-fetch（captureAndReturn）
+- [x] `src/server/index.mjs` — invokeTool 前檢查 pre-fetch cache
+- [x] 條件：只在成功呼叫後觸發（失敗不 pre-fetch）
+- [x] 條件：只在非預取操作觸發（skipCapture 避免遞迴）
+- [x] Pre-fetch stats 整合進 getStatsSummary
 
 ### 18.4 測試
 
-- [ ] Pre-fetch 觸發規則正確性（5 條規則逐一驗證）
-- [ ] Cache hit/miss 判斷正確
-- [ ] TTL 過期自動清除
-- [ ] Fire-and-forget 不堵塞主回應
-- [ ] 遞迴 pre-fetch 防護
-- [ ] 統計追蹤正確
+- [x] Pre-fetch 觸發規則正確性（5 條規則逐一驗證）
+- [x] Cache hit/miss 判斷正確
+- [x] TTL 過期自動清除
+- [x] Fire-and-forget 不堵塞主回應
+- [x] 遞迴 pre-fetch 防護
+- [x] 統計追蹤正確
+- [x] 19 項測試全部通過
 
 ---
 
@@ -247,7 +252,7 @@
 | 里程碑 | 內容 | 預計日期 |
 |--------|------|---------|
 | M1 | Phase 16 完成（Structured Thinking） | ✅ 2026-06-13 |
-| M2 | Phase 18 完成（Speculative Pre-fetch） | t+8 天 |
+| M2 | Phase 18 完成（Speculative Pre-fetch） | ✅ 2026-06-13 |
 | M3 | Phase 19 完成（Cross-Agent Memory） | t+11 天 |
 | M4 | Phase 17 完成（MCTS Planning） | t+18 天 |
 | M5 | Phase 20 完成（Verified Code Gen） | t+22 天 |

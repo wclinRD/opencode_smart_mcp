@@ -38,6 +38,7 @@ import { isStructuredError } from '../lib/safe-handler.mjs';
 import { getContextBudget, resetContextBudget } from '../lib/context-budget.mjs';
 import { parseJson as lenientParseJson } from '../lib/lenient-json.mjs';
 import { judgeHallucination, isHighRiskOutput } from '../lib/hallucination-judge.mjs';
+import { getPrefetchEngine } from '../lib/prefetch-engine.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -54,6 +55,9 @@ function debugLog(...args) {
 }
 
 debugLog('Server starting, plugins loaded:', toolMap.size, 'tools');
+
+// Phase 18: Initialize pre-fetch engine
+const prefetchEngine = getPrefetchEngine({ toolMap });
 
 // ---------------------------------------------------------------------------
 // Graceful shutdown
@@ -184,6 +188,7 @@ function getStatsSummary() {
       savingsChars: budgetStatus.savingsChars,
       savingsPct: budgetStatus.savingsPct,
     },
+    prefetch: prefetchEngine.getStats(),
   };
 }
 
@@ -892,6 +897,19 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
   if (success && isHighRiskOutput(toolName) && result.output) {
     result._pendingHallucination = triggerHallucinationCheck(toolName, args, result);
   }
+  // Phase 18: Speculative Pre-fetch — fire-and-forget after tool success
+  if (success && toolName !== 'smart_memory_store') {
+    prefetchEngine.triggerAfter(toolName, args, result, async (pfTool, pfArgs) => {
+      // Invoke pre-fetch tool directly (skip capture to avoid polluting context)
+      const pfDef = toolMap.get(pfTool);
+      if (!pfDef) return null;
+      try {
+        return invokeTool(pfDef, pfArgs, null, null, { skipCapture: true });
+      } catch {
+        return null;
+      }
+    });
+  }
   // Attach responsePolicy + responsePipeline for output optimization downstream
   if (def?.responsePolicy) {
     result._responsePolicy = def.responsePolicy;
@@ -1161,6 +1179,14 @@ function invokeTool(def, args, timeoutOverride, signal, opts = {}) {
       const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
       return emit({ ok: true, output: precheck.output }, elapsedMs);
     }
+  }
+
+  // Phase 18: Pre-fetch cache check — before executing, check if result was pre-fetched
+  const prefetchHit = prefetchEngine.checkCache(def.name, args);
+  if (prefetchHit.hit) {
+    const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+    debugLog('Prefetch cache HIT for:', def.name);
+    return emit(prefetchHit.result, elapsedMs);
   }
 
   // Phase 7 ⑥: Quality Enforcement — check high-risk tool prerequisites
