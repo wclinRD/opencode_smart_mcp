@@ -107,6 +107,9 @@ Phase 3:  →  1.5%（↓50%） 自修復處理語法錯誤
 | hypergrep | Structural search, call graph, impact analysis, token budget | ⭐⭐⭐ | v2 |
 | trigrep/ngi/fastgrep | Trigram index, 2-70x faster than ripgrep | ⭐⭐⭐ | v2 |
 | search-semantically | POEM 6-signal ranking, git recency, import graph | ⭐⭐⭐ | v2 |
+| **SIFS** 🆕 | Sparse BM25 + Model2Vec, 182ms cold index, NDCG@10=0.82 | ⭐⭐⭐ | v3 |
+| **Gortex** 🆕 | 257 langs, 100+ MCP tools, in-memory CKG, 3-modality paradigm | ⭐⭐⭐ | v3 |
+| **Cursor sparse n-grams** 🆕 | Frequency-based sparse n-gram, Git base+overlay, 2026-03 | ⭐⭐⭐ | v3 |
 | goodgrep | Dense+ColBERT reranking, NL enrichment, MCP native | ⭐⭐ | v2 |
 | ColGREP | Identifier-aware BM25, camelCase 分割, NDCG +0.3 | ⭐⭐⭐ | v1 |
 | codixing | Trigram pre-filter (110x), BM25+PageRank, incremental sync | ⭐⭐⭐ | v1 |
@@ -176,8 +179,8 @@ Phase 1 (2-3天)    Phase 2 (1週)      Phase 3 (1週)      Phase 4 (2週)      
 4. **Persistent embedding cache** — 嵌入向量快取到 `.smart/grep-embeddings.json`
    - mtime 檢查，只重新嵌入變更的檔案
 
-## Phase 3：Tree-sitter Structural Intelligence（增強版 Phase 2）
-- **實作時間**：1 週
+## Phase 3：Tree-sitter Structural Intelligence（v3 增強版）
+- **實作時間**：1.5 週（原 1 週 + 0.5 週 v3 新增）
 - **新依賴**：`web-tree-sitter` + `tree-sitter-wasms`
 - **預期效果**：scope 精準度 ↑80%，結構化搜尋能力從無到有
 
@@ -190,44 +193,75 @@ Phase 1 (2-3天)    Phase 2 (1週)      Phase 3 (1週)      Phase 4 (2週)      
 3. **AST-aware chunking** — 以語法單元為搜尋單位
    - 參考 semble_rs、Veles tree-sitter chunking
    - 函式/類別/方法級別切割，保留完整語意
-4. **Structural Pattern Search** 🆕 — AST 模式匹配
+4. **Structural Pattern Search** — AST 模式匹配
    - 參考 ast-grep 的 code-shaped pattern（`$VAR` wildcard）
    - 支援 `--structural` 模式：`smart_grep --structural "$obj.$method($arg)"`
    - 忽略空白/格式差異，只匹配結構
-5. **Symbol Graph Extraction** 🆕 — 提取符號關係圖
+5. **Symbol Graph Extraction** — 提取符號關係圖
    - 參考 Veles defs/refs、Lucerna knowledge graph
    - 每個檔案提取：定義符號、呼叫關係、import 關係
    - 支援 `--symbols` / `--defs` / `--refs` 查詢
+6. **🆕 Bundled Security/Quality Detectors** — 內建結構化檢測器（v3 新增）
+   - 參考 Gortex search_ast 的 10 個 bundled detectors
+   - 內建檢測器：`sql-string-concat`、`weak-crypto`、`hardcoded-secret`、`panic-in-library`、`empty-catch`、`http-client-no-timeout`
+   - 支援 `--detect sql-string-concat` 一鍵掃描
+   - 每個結果附帶 enclosing symbol，可直接串接 `--callers` / `--impact`
+7. **🆕 Codebase Mental Model** — 專案結構摘要（v3 新增）
+   - 參考 hypergrep `--model`（699 tokens codebase summary）
+   - 支援 `--summary`：回傳 ~500 token 專案結構摘要
+   - 包含：目錄樹、主要模組、entry points、關鍵符號
+   - Agent session 開始時載入一次，省 80% 探索性搜尋
 
-## Phase 4：Trigram/Sparse N-gram 索引 + Token Budget（增強版 Phase 3）
-- **實作時間**：2 週
+## Phase 4：Sparse N-gram 索引 + Token Budget（v3 增強版）
+- **實作時間**：2.5 週（原 2 週 + 0.5 週 v3 新增）
 - **新依賴**：`better-sqlite3`
 - **預期效果**：大型專案搜尋 10-50x 加速，token 輸出 ↓60-80%
+- **v3 核心變更**：Sparse N-gram 從「選項」升級為「主要索引策略」
 
 ### 實作內容
-1. **Trigram 索引** — 基於 SQLite 自建 inverted index
-   - 參考 trigrep/ngi/fastgrep 的 trigram 設計
+1. **Sparse N-gram 索引（主要）** 🆕 — 取代 trigram 成為預設索引
+   - 參考 Cursor 2026-03 sparse n-gram 論文、GitHub Blackbird、Roslyn PR #82708
+   - **Frequency-based weight function**：從大型開源語料庫計算 bigram 頻率表
+     - 稀有 bigram（如 `Q_`、`zx`）→ 高權重 → 自然邊界 → 長 n-gram
+     - 常見 bigram（如 `th`、`er`）→ 低權重 → 邊界在 hash valley
+   - **BuildAllNgrams**（索引時）：monotonic stack 演算法，最多 2n-2 個 variable-length n-gram
+   - **BuildCoveringNgrams**（查詢時）：最小覆蓋子集，最多 n-2 個 n-gram
+   - 效果：`handleClick` → trigram 需 9 次 lookup，sparse 只需 2 次（`handleCl`、`Click`）
    - 支援 `--index build` / `--index search` / `--index update`
-2. **Sparse N-gram 選項** 🆕 — 選擇性更強的先進索引
-   - 參考 Cursor 2026-03 sparse n-gram 論文、GitHub Code Search
-   - 對大型 monorepo 選擇性更佳（trigram 可能命中太多檔案）
-   - 作為 `--index-type sparse` 選項
-3. **Incremental indexing** — mtime + content hash 增量
+2. **Trigram 索引（備用）** — 保留作為 fallback
+   - 參考 trigrep/ngi/fastgrep 的 trigram 設計
+   - 當 sparse n-gram 不適用時自動 fallback（如極短查詢 < 4 chars）
+   - 支援 `--index-type trigram` 強制使用
+3. **🆕 Git-based Index Layering** — base commit + live overlay（v3 新增）
+   - 參考 Cursor 的 Git commit pinning + overlay 架構
+   - Base layer：固定在當前 Git commit，mmap 唯讀
+   - Overlay layer：未 commit 的變更（dirty files），輕量增量
+   - 效果：commit 後不需重建整個索引，只更新 overlay
+4. **Incremental indexing** — mtime + content hash 增量
    - 參考 QEX Merkle DAG、code-indexer Merkle tree sync
    - 只重新索引變更的檔案，其餘保留
-4. **Trigram pre-filtering** — 搜尋前先過濾不相關檔案
+5. **🆕 Bloom Filter Existence Checks** — 快速存在性查詢（v3 新增）
+   - 參考 hypergrep `--exists`（291ns）、bloom filter 設計
+   - 支援 `--exists redis`：瞬間回答「這個專案是否使用 Redis」
+   - 支援 `--exists-pkg express`：檢查特定套件是否存在
+   - 基於 Bloom filter，false positive rate < 1%
+6. **Trigram pre-filtering** — 搜尋前先過濾不相關檔案
    - 參考 codixing 110x literal grep 加速
    - 自動判斷：若 candidate files < 10% → 用索引；> 10% → fallback 全掃（參考 ngi 策略）
-5. **Token Budget Optimization** 🆕 — AI agent 專用輸出優化
+7. **Token Budget Optimization** — AI agent 專用輸出優化
    - 參考 hypergrep `--budget`、semble_rs semantic compression
    - `--budget 500`：在 500 token 內回傳最佳結果
    - Greedy selection：依相關性分數選取，直到達到 token 上限
-   - L0/L1/L2 壓縮等級（signature only / +context / full body）
+   - L0/L1/L2 壓縮等級：
+     - L0: signature only（檔名+行號+匹配行，~15 tokens/result）
+     - L1: +3 行 context + call graph（~80-120 tokens/result）
+     - L2: full function body（~200-800 tokens/result）
 
-## Phase 5：Multi-Signal Ranking + Graph Traversal 🆕（全新）
+## Phase 5：Multi-Signal Ranking + Graph Traversal（v3 增強版）
 - **實作時間**：2 週
 - **新依賴**：可選 ONNX runtime（cross-encoder）
 - **預期效果**：搜尋準確率再 ↑15-25%，支援關係圖查詢
+- **v3 核心變更**：明確三模態範式 + 效能目標 + CKG 整合
 
 ### 實作內容
 1. **POEM-style Multi-Signal Ranking** — 6+ 信號融合排名
@@ -246,22 +280,63 @@ Phase 1 (2-3天)    Phase 2 (1週)      Phase 3 (1週)      Phase 4 (2週)      
    - 參考 Vera cross-encoder（MRR 0.28→0.60）、goodgrep ColBERT
    - 對 top-20 候選做 joint scoring
    - 可選啟用（需 ONNX model ~100MB）
+5. **🆕 Three-Modality Paradigm 文件化** — 明確三模態分工（v3 新增）
+   - 參考 Gortex「grep replacement is three tools, not one」
+   - Lexical（文字）：`smart_grep` — regex/BM25/hybrid search
+   - Structural（結構）：`smart_grep --structural` — AST pattern matching
+   - Graph（關係）：`smart_grep --callers/--callees/--impact` — call graph traversal
+   - 更新 agent system prompt 引導 LLM 選擇正確模態
+6. **🆕 效能目標** — 對標 SIFS 級別（v3 新增）
+   - Cold index：< 500ms（SIFS: 182ms）
+   - Warm query：< 10ms（SIFS: 4.8ms）
+   - NDCG@10：> 0.80（SIFS: 0.82, Vera: 0.84）
+   - Token reduction：> 85% vs grep+read（hypergrep: 87%, semble: 98%）
 
 ## 長期展望（Phase 6+）
 - NL Enrichment：程式碼 chunk 自動產生自然語言摘要（參考 CodeRAG 10x 品質提升）
 - SIMD 加速：WASM SIMD 或 native addon
 - MCP-native streaming：大型結果集串流回傳
 - Multi-repo federated search：跨多個 repo 的聯合搜尋
+- 🆕 Code Knowledge Graph (CKG) 完整整合：參考 Gortex in-memory graph（257 langs, 100+ tools）
+- 🆕 LSP bridge：直接對接 language server 做 resolved references（參考 Gortex 22-server LSP bridge）
 
 ## 預期效果疊加
 ```
 Phase 前:  regex only，無排名，無索引
 Phase 1:  搜尋品質 ↑50%，token 浪費 ↓30%（BM25 + 6 rerank signals）
 Phase 2:  語意查詢準確率 ↑60%，MRR ↑40-60%（Hybrid semantic）
-Phase 3:  scope 精準度 ↑80%，結構化搜尋從無到有（Tree-sitter + structural）
-Phase 4:  大型專案 10-50x 加速，token 輸出 ↓60-80%（Trigram index + budget）
-Phase 5:  準確率再 ↑15-25%，支援關係圖查詢（Multi-signal + graph）
+Phase 3:  scope 精準度 ↑80%，結構化搜尋從無到有（Tree-sitter + structural + detectors）
+Phase 4:  大型專案 10-50x 加速，token 輸出 ↓60-80%（Sparse N-gram index + budget + bloom）
+Phase 5:  準確率再 ↑15-25%，支援關係圖查詢（Multi-signal + graph + 3-modality）
 ```
+
+---
+
+## v3 更新摘要（2026-06-13）
+
+### 調研發現
+2026 年 6 月深度調研 SIFS、Gortex、Cursor sparse n-grams、Hypergrep 後，發現以下關鍵差距：
+
+| 差距 | 現有計畫 | v3 調整 |
+|------|---------|--------|
+| Sparse N-gram 定位 | Phase 4 可選 (`--index-type sparse`) | Phase 4 **主要索引策略**（預設） |
+| Frequency-based weights | 未提及 | Phase 4 新增 bigram 頻率表 |
+| Git-based layering | 僅 mtime 增量 | Phase 4 新增 base commit + overlay |
+| Bloom filter | 未提及 | Phase 4 新增 `--exists` 快速查詢 |
+| Bundled detectors | 未提及 | Phase 3 新增 6 個安全/品質檢測器 |
+| Codebase mental model | 未提及 | Phase 3 新增 `--summary` |
+| 三模態範式 | 隱含但未明確 | Phase 5 明確文件化 |
+| 效能目標 | 無量化目標 | Phase 5 對標 SIFS 級別 |
+| CKG 整合 | Phase 6+ 模糊 | Phase 6+ 明確參考 Gortex |
+| LSP bridge | 未提及 | Phase 6+ 新增 |
+
+### 時間調整
+| Phase | 原估計 | v3 調整 | 原因 |
+|-------|--------|--------|------|
+| Phase 3 | 1 週 | 1.5 週 | +bundled detectors + codebase summary |
+| Phase 4 | 2 週 | 2.5 週 | sparse n-gram 升級 + Git layering + Bloom filter |
+| Phase 5 | 2 週 | 2 週 | 不變（新增項目為文件化 + 效能目標） |
+| **總計** | **6 週** | **6.5 週** | +0.5 週 |
 ---
 
 # exa 工具全系列提升至 Layer 1 ✅

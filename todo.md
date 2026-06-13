@@ -99,64 +99,102 @@
 - [x] 測試：CLI integration — 4 tests
 - [x] **21 項測試全部通過**
 
-## Phase 3：Tree-sitter Structural Intelligence（1 週）
+## Phase 3：Tree-sitter Structural Intelligence（v3 增強版，1.5 週）
 - [ ] `npm install web-tree-sitter tree-sitter-wasms`
 - [ ] 建立 `src/lib/tree-sitter-scope.mjs`
   - [ ] `initParser(lang)` — lazy WASM 載入
   - [ ] `getEnclosingScope(content, line)` — AST 精準 scope
   - [ ] `extractSymbols(content, lang)` — AST 符號提取
-- [ ] 建立 `src/lib/structural-search.mjs` 🆕
+- [ ] 建立 `src/lib/structural-search.mjs`
   - [ ] `parseStructuralPattern(pattern)` — 解析 `$VAR` wildcard
   - [ ] `matchStructuralPattern(ast, pattern)` — AST 結構匹配
   - [ ] 支援 JS/TS/Python/Rust/Go 五語言
-- [ ] 建立 `src/lib/symbol-graph.mjs` 🆕
+- [ ] 建立 `src/lib/symbol-graph.mjs`
   - [ ] `extractDefs(content, lang)` — 提取符號定義
   - [ ] `extractRefs(content, lang, symbol)` — 提取符號引用
   - [ ] `extractCallGraph(content, lang)` — 提取呼叫關係
   - [ ] `extractImportGraph(content, lang)` — 提取 import 關係
+- [ ] 🆕 建立 `src/lib/bundled-detectors.mjs`（v3 新增）
+  - [ ] `detectSqlStringConcat(ast)` — SQL injection 檢測
+  - [ ] `detectWeakCrypto(ast)` — 弱加密演算法檢測
+  - [ ] `detectHardcodedSecret(ast)` — 硬編碼密鑰檢測
+  - [ ] `detectPanicInLibrary(ast)` — library panic 檢測
+  - [ ] `detectEmptyCatch(ast)` — 空 catch block 檢測
+  - [ ] `detectHttpClientNoTimeout(ast)` — HTTP client 無 timeout 檢測
+  - [ ] `runDetector(name, ast)` — 統一檢測器介面
+  - [ ] 支援 `--detect <name>` CLI 參數
+- [ ] 🆕 建立 `src/lib/codebase-summary.mjs`（v3 新增）
+  - [ ] `generateSummary(root)` — 產生 ~500 token 專案結構摘要
+  - [ ] 包含：目錄樹、主要模組、entry points、關鍵符號
+  - [ ] 支援 `--summary` CLI 參數
 - [ ] worker_threads 平行搜尋
   - [ ] 建立 `src/lib/parallel-search.mjs`
   - [ ] 檔案分組 → worker pool → 合併結果
-- [x] 整合到 `contextual-grep.mjs`
+- [ ] 整合到 `contextual-grep.mjs`
   - [ ] `--with-scope` 改用 tree-sitter（fallback regex）
   - [ ] `--parallel` 啟用 worker_threads
-  - [ ] 🆕 `--structural` 啟用 AST 模式匹配
-  - [ ] 🆕 `--symbols` / `--defs` / `--refs` 符號查詢
+  - [ ] `--structural` 啟用 AST 模式匹配
+  - [ ] `--symbols` / `--defs` / `--refs` 符號查詢
+  - [ ] 🆕 `--detect <name>` 安全/品質檢測器
+  - [ ] 🆕 `--summary` 專案結構摘要
 - [ ] 測試：5 語言 AST scope 精準度
 - [ ] 測試：structural pattern matching 正確性
 - [ ] 測試：symbol graph 提取正確性
+- [ ] 🆕 測試：bundled detectors 正確性（6 個檢測器）
+- [ ] 🆕 測試：codebase summary 正確性
 - [ ] 測試：平行搜尋效能（vs 單線程）
 
-## Phase 4：Trigram/Sparse N-gram 索引 + Token Budget（2 週）
+## Phase 4：Sparse N-gram 索引 + Token Budget（v3 增強版，2.5 週）
 - [ ] `npm install better-sqlite3`
-- [ ] 建立 `src/lib/trigram-index.mjs`
+- [ ] 🆕 建立 `src/lib/sparse-ngram-index.mjs`（v3：升級為主要索引）
+  - [ ] `buildFrequencyTable(corpus)` — 從大型語料庫計算 bigram 頻率表
+  - [ ] `buildAllNgrams(text)` — monotonic stack 演算法，最多 2n-2 個 n-gram
+  - [ ] `buildCoveringNgrams(query)` — 最小覆蓋子集，最多 n-2 個 n-gram
+  - [ ] `buildSparseIndex(root)` — sparse n-gram inverted index
+  - [ ] `searchSparseIndex(query)` — sparse n-gram 查詢
+  - [ ] 預設索引策略（`--index build` 預設使用 sparse）
+- [ ] 建立 `src/lib/trigram-index.mjs`（備用 fallback）
   - [ ] `buildIndex(root)` — 建立 trigram inverted index
   - [ ] `searchIndex(query)` — trigram 查詢 + candidate filtering
   - [ ] `updateIndex(changedFiles)` — 增量更新（mtime + content hash）
   - [ ] `autoFallback(candidateRatio)` — >10% 自動 fallback 全掃
-- [ ] 建立 `src/lib/sparse-ngram-index.mjs` 🆕
-  - [ ] `buildSparseIndex(root)` — sparse n-gram 索引（參考 Cursor 2026-03）
-  - [ ] `searchSparseIndex(query)` — sparse n-gram 查詢
-  - [ ] 作為 `--index-type sparse` 選項
-- [ ] 建立 `src/lib/token-budget.mjs` 🆕
+  - [ ] 支援 `--index-type trigram` 強制使用
+- [ ] 🆕 建立 `src/lib/git-index-layer.mjs`（v3 新增）
+  - [ ] `buildBaseLayer(commitHash)` — 固定在 Git commit 的 base layer
+  - [ ] `buildOverlayLayer(dirtyFiles)` — 未 commit 變更的 overlay
+  - [ ] `mergeLayers(baseResults, overlayResults)` — 合併兩層結果
+  - [ ] 支援 `--index-base <commit>` 指定 base commit
+- [ ] 🆕 建立 `src/lib/bloom-filter.mjs`（v3 新增）
+  - [ ] `buildBloomFilter(root)` — 建立專案級 Bloom filter
+  - [ ] `checkExists(term)` — O(1) 存在性查詢
+  - [ ] `checkPackageExists(pkgName)` — 套件存在性查詢
+  - [ ] 支援 `--exists <term>` / `--exists-pkg <pkg>` CLI 參數
+  - [ ] False positive rate < 1%
+- [ ] 建立 `src/lib/token-budget.mjs`
   - [ ] `fitToBudget(results, maxTokens)` — greedy selection
   - [ ] `compressLevel(results, level)` — L0/L1/L2 壓縮
-    - [ ] L0: signature only（檔名+行號+匹配行）
-    - [ ] L1: +3 行 context
-    - [ ] L2: full function body
-- [x] 整合到 `contextual-grep.mjs`
+    - [ ] L0: signature only（檔名+行號+匹配行，~15 tokens/result）
+    - [ ] L1: +3 行 context + call graph（~80-120 tokens/result）
+    - [ ] L2: full function body（~200-800 tokens/result）
+- [ ] 整合到 `contextual-grep.mjs`
   - [ ] `--index build|search|update` CLI 參數
-  - [ ] `--index-type trigram|sparse` 索引類型
-  - [ ] 🆕 `--budget 500` token 預算限制
-  - [ ] 🆕 `--compress L0|L1|L2` 壓縮等級
+  - [ ] `--index-type sparse|trigram` 索引類型（預設 sparse）
+  - [ ] 🆕 `--index-base <commit>` Git base commit
+  - [ ] 🆕 `--exists <term>` Bloom filter 存在性查詢
+  - [ ] 🆕 `--exists-pkg <pkg>` 套件存在性查詢
+  - [ ] `--budget 500` token 預算限制
+  - [ ] `--compress L0|L1|L2` 壓縮等級
   - [ ] 自動偵測索引是否存在
-- [ ] 測試：索引建立與查詢正確性
+- [ ] 測試：sparse n-gram 索引建立與查詢正確性
+- [ ] 測試：frequency-based weight 正確性
+- [ ] 測試：Git-based layering 正確性（base + overlay）
+- [ ] 測試：Bloom filter 正確性（false positive rate）
 - [ ] 測試：incremental update 正確性（mtime + hash）
 - [ ] 測試：sparse n-gram vs trigram 選擇性比較
 - [ ] 測試：token budget greedy selection 正確性
 - [ ] Benchmark：大型專案（10K+ files）搜尋效能
 
-## Phase 5：Multi-Signal Ranking + Graph Traversal 🆕（2 週）
+## Phase 5：Multi-Signal Ranking + Graph Traversal（v3 增強版，2 週）
 - [ ] 建立 `src/lib/multi-signal-rank.mjs`
   - [ ] `computeSignals(query, candidates)` — 計算 6 個信號分數
   - [ ] `poemRank(signals)` — POEM Pareto Optimal 排名
@@ -174,7 +212,16 @@
   - [ ] `initCrossEncoder(modelName)` — lazy 載入 ONNX cross-encoder
   - [ ] `rerank(query, candidates)` — 第二階段精排 top-20
   - [ ] 可選啟用（`--cross-encode`）
-- [x] 整合到 `contextual-grep.mjs`
+- [ ] 🆕 三模態範式文件化（v3 新增）
+  - [ ] 更新 agent system prompt：Lexical / Structural / Graph 三模態引導
+  - [ ] 更新 `config/agents/smart-mcp.md`：smart_grep 三模態使用說明
+  - [ ] 更新 README.md：三模態範式架構圖
+- [ ] 🆕 效能目標驗證（v3 新增）
+  - [ ] Cold index benchmark：目標 < 500ms
+  - [ ] Warm query benchmark：目標 < 10ms
+  - [ ] NDCG@10 benchmark：目標 > 0.80
+  - [ ] Token reduction benchmark：目標 > 85% vs grep+read
+- [ ] 整合到 `contextual-grep.mjs`
   - [ ] `--callers symbol` / `--callees symbol` / `--impact symbol`
   - [ ] `--cross-encode` 啟用精排
   - [ ] `--signal-weights` 自訂信號權重
