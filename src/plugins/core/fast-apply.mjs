@@ -542,6 +542,12 @@ function generatePreview(content, search, replace, lineNum) {
   };
 }
 
+function wrapDiffBlock(diffText) {
+  // Wrap in markdown fenced code block with 'diff' language tag
+  // opencode's shiki renderer will syntax-highlight + (green) and - (red)
+  return `\`\`\`diff\n${diffText}\n\`\`\``;
+}
+
 function formatOutput(data, format) {
   if (format === 'json') return data;
 
@@ -603,7 +609,7 @@ function formatOutput(data, format) {
     if (data.results?.some(r => r.diff)) {
       out.push('\n--- Diffs ---');
       for (const r of data.results) {
-        if (r.diff) out.push(`\n${r.diff}`);
+        if (r.diff) out.push(`\n${wrapDiffBlock(r.diff)}`);
       }
     }
     return out.join('\n');
