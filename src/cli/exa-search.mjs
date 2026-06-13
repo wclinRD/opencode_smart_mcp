@@ -18,6 +18,8 @@
 //   --no-color            Disable color output
 //   --fetch-only          Force native HTTP fetch (skip Exa, no API key needed)
 //   --no-cache            Bypass cache
+//   --caveman             Apply Caveman compression (strip grammar, keep facts)
+//   --caveman-level <lvl> Compression level: light, semantic, aggressive (default: semantic)
 //   -h, --help            Show this help
 
 const EXA_API_KEY = process.env.EXA_API_KEY || '';
@@ -34,6 +36,9 @@ import { smartFetch } from './lib/crawler.mjs';
 
 // Stealth fetch (TLS impersonation + browser stealth — optional dep: impers)
 import { stealthFetch } from './lib/stealth.mjs';
+
+// Caveman semantic compression (zero-dependency, pure code)
+import { compress as cavemanCompress } from './lib/caveman.mjs';
 
 const API_BASE = 'https://api.exa.ai';
 // Include ?tools= to enable non-default tools (get_code_context_exa, etc.)
@@ -279,6 +284,19 @@ function isContentTruncated(text) {
 function truncateTo(text, maxChars) {
   if (!text || text.length <= maxChars) return text;
   return text.slice(0, maxChars).replace(/\s+\S*$/, '') + '\n\n[Content truncated at ' + maxChars + ' chars]';
+}
+
+/**
+ * Apply Caveman compression to text output if enabled.
+ * @param {string} text - The text to potentially compress
+ * @param {object} opts - Options with caveman/cavemanLevel
+ * @returns {string} - Compressed or original text
+ */
+function applyCaveman(text, opts) {
+  if (!opts.caveman || !text) return text;
+  const level = opts.cavemanLevel || 'semantic';
+  const result = cavemanCompress(text, level);
+  return result.text;
 }
 
 // ---------------------------------------------------------------------------
@@ -537,7 +555,7 @@ async function cmdSearch(query, opts) {
     lines.push('');
   }
   lines.push(`Total: ${results.length} result(s)`);
-  return lines.join('\n');
+  return applyCaveman(lines.join('\n'), opts);
 }
 
 /**
@@ -685,7 +703,7 @@ async function cmdCrawlFetch(urls, opts) {
     lines.push('');
   }
 
-  return lines.join('\n');
+  return applyCaveman(lines.join('\n'), opts);
 }
 
 /**
@@ -820,7 +838,7 @@ async function cmdCrawlStealth(urls, opts) {
     lines.push('');
   }
 
-  return lines.join('\n');
+  return applyCaveman(lines.join('\n'), opts);
 }
 
 /**
@@ -852,7 +870,7 @@ async function cmdCrawl(urls, opts) {
       lines.push('');
       lines.push('');
     }
-    return lines.join('\n');
+    return applyCaveman(lines.join('\n'), opts);
   }
 
   // --- Standard Exa crawl ---
@@ -931,7 +949,7 @@ async function cmdCrawl(urls, opts) {
     lines.push('');
     lines.push('');
   }
-  return lines.join('\n');
+  return applyCaveman(lines.join('\n'), opts);
 }
 
 /**
@@ -961,7 +979,7 @@ async function cmdCrawlRendered(urls, opts) {
     lines.push('');
     lines.push('');
   }
-  return lines.join('\n');
+  return applyCaveman(lines.join('\n'), opts);
 }
 
 /**
@@ -1001,7 +1019,7 @@ async function cmdCode(query, opts) {
     lines.push('');
   }
   lines.push(`Total: ${results.length} result(s)`);
-  return lines.join('\n');
+  return applyCaveman(lines.join('\n'), opts);
 }
 
 // ---------------------------------------------------------------------------
@@ -1031,6 +1049,8 @@ function parseArgs() {
     chunk: false,
     maxChunkSize: 2000,
     stealth: false,
+    caveman: false,
+    cavemanLevel: 'semantic',
   };
 
   let i = 1;
@@ -1070,6 +1090,12 @@ function parseArgs() {
         break;
       case '--stealth':
         opts.stealth = true;
+        break;
+      case '--caveman':
+        opts.caveman = true;
+        break;
+      case '--caveman-level':
+        opts.cavemanLevel = args[++i];
         break;
       case '--max-chunk-size':
         opts.maxChunkSize = parseInt(args[++i], 10);

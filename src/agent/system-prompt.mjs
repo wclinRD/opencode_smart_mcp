@@ -29,6 +29,7 @@ opencode prefixes MCP server "smart" tools with \`smart_\`. So internal \`smart_
 - \`smart_smart_rules\` — project rules discovery (AGENTS.md, .cursorrules, etc.)
 - \`smart_smart_read\` 🥇 — progressive file reader (11 modes: auto/outline/signatures/symbol/explain/range/full/batch/project/image/directory). Session cache = zero disk I/O on repeat reads. Fully replaces raw read.
 - \`smart_smart_compact\` — zero-cost context compression (rules-based, no LLM cost)
+- \`smart_smart_exa_search\` / \`smart_smart_exa_crawl\` — web search & crawl. 🆕 Support \`compress:"caveman"\` + \`compressLevel:"semantic"\` to save 15-30% tokens on search results (strips grammar, keeps facts/URLs/technical terms)
 
 ### Layer 2: Router Tools (via \`smart_smart_run\`)
 Use: \`smart_smart_run({tool:"<name>", args:{...}})\`

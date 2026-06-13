@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-13T06:42:20.690Z",
+  "generatedAt": "2026-06-13T07:48:08.018Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -408,6 +408,130 @@
       }
     },
     {
+      "name": "smart_exa_crawl",
+      "description": "Crawl web pages and extract their content. Auto-detects static vs JS sites (no need to specify renderer).\n\nUse with options for better results:\n  - clean: (recommended) For news, blogs, articles — removes nav/ads/footer, saves 40-60% tokens\n  - markdown: For LLM-friendly output — converts to Markdown, preserves structure\n  - chunk: For long articles with 5+ sections — splits by heading, saves LLM context\n  - crawlee: (advanced) For complex sites — auto-detects static vs JS, retries on failure\n  - render: For JS-heavy sites with no visible content — uses Playwright rendering\n\nDo NOT use for: searching the web (use smart_exa_search). Operating a browser (use smart_pw_browser).",
+      "category": "search",
+      "domain": "crawl",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "urls": {
+            "type": "string",
+            "description": "URLs to crawl, comma-separated (required)"
+          },
+          "clean": {
+            "type": "boolean",
+            "description": "Article extraction: removes nav/ads/footer. Use for news, blogs, tutorials. (recommended)"
+          },
+          "markdown": {
+            "type": "boolean",
+            "description": "Convert to Markdown. Use when the result feeds into an LLM. Saves ~60% tokens vs raw HTML."
+          },
+          "chunk": {
+            "type": "boolean",
+            "description": "Split long content by heading. Use when article has 5+ sections. Saves LLM context window."
+          },
+          "maxChunkSize": {
+            "type": "number",
+            "description": "Max chars per chunk when --chunk is used (default: 2000)"
+          },
+          "crawlee": {
+            "type": "boolean",
+            "description": "Adaptive crawl: auto-detects static vs JS-heavy sites. Use for complex sites that might need JS rendering. Requires npm install crawlee."
+          },
+          "render": {
+            "type": "boolean",
+            "description": "Render JS-heavy pages with Playwright. Use when content is empty/missing without JS."
+          },
+          "extended": {
+            "type": "boolean",
+            "description": "Extended mode — up to 30,000 chars per result. Use for very long documents."
+          },
+          "maxChars": {
+            "type": "number",
+            "description": "Max chars per result (crawl default: 8000)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "urls"
+        ]
+      }
+    },
+    {
+      "name": "smart_exa_search",
+      "description": "Search the web or code/documentation with natural language queries. Returns structured results with URLs and summaries.\n\nUse for:\n  - Web search: finding recent articles, docs, news (command: \"search\")\n  - Code search: finding code examples, API usage patterns (command: \"code\")\n\nDo NOT use for: crawling a specific URL (use smart_exa_crawl). Operating a browser (use smart_pw_browser).",
+      "category": "search",
+      "domain": "search",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "search",
+              "code"
+            ],
+            "description": "search: web search for information. code: find code examples and docs."
+          },
+          "query": {
+            "type": "string",
+            "description": "Search query (required for search/code)"
+          },
+          "numResults": {
+            "type": "number",
+            "description": "Number of results (default: 10)"
+          },
+          "maxChars": {
+            "type": "number",
+            "description": "Max chars per result (search/code default: 3000)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
       "name": "smart_fast_apply",
       "description": "Unified editing tool — replaces write + edit + edit_ast.\nSupports 7 input formats (ordered by token efficiency):\n  - block-diff: symbol-aware block editing (NEW, most reliable). Specify {file, symbol, newContent, action?}. No fuzzy matching needed.\n  - unified-diff: git diff format — MOST token-efficient (40-60% savings). Use +/- lines only, no unchanged lines needed.\n  - lazy: SEARCH/REPLACE with // ... existing code ... markers (80-98% savings for large files)\n  - hashline: line-number + content-hash addressing — MOST ROBUST for large files (>400 lines). Specify line range directly. No fuzzy match ambiguity.\n  - partial: abbreviated SEARCH context (fewer lines, L5 fuzzy matching)\n  - search-replace: standard SEARCH/REPLACE blocks (Aider-compatible)\n  - whole-file: full file replacement (most tokens)\n💡 Tip: block-diff for symbol-level edits, unified-diff for small edits, hashline for >400 line files, lazy for large files with few changes.\nFeatures: 6-level fuzzy matching (L6 = gap-tolerant subsequence), hashline addressing with content verification, atomic multi-file apply, undo snapshots, binary/access checks.\nDry-run by default — safe to use without side effects.",
       "category": "edit",
@@ -626,6 +750,68 @@
             "description": "Output format (default: text). Use \"ansi\" for terminal-colored diff output (works in iTerm2 headless mode)."
           }
         }
+      }
+    },
+    {
+      "name": "smart_github_search",
+      "description": "Use when: need to find real-world code examples from public GitHub repos. Filter by repo, path, language, case. Best for: seeing how others use an API, finding production patterns. Avoid when: need to search your own codebase (use grep instead).",
+      "category": "search",
+      "domain": "search",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Code pattern (supports regex)"
+          },
+          "repo": {
+            "type": "string",
+            "description": "Filter repo (e.g., facebook/react)"
+          },
+          "path": {
+            "type": "string",
+            "description": "Filter path (e.g., src/)**"
+          },
+          "language": {
+            "type": "string",
+            "description": "Filter langs, comma-separated"
+          },
+          "matchCase": {
+            "type": "boolean",
+            "description": "Case-sensitive"
+          },
+          "matchWholeWords": {
+            "type": "boolean",
+            "description": "Whole words only"
+          },
+          "maxResults": {
+            "type": "number",
+            "description": "Max results (default: 10, max: 100)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format"
+          }
+        },
+        "required": [
+          "query"
+        ]
       }
     },
     {
@@ -2424,130 +2610,6 @@
       }
     },
     {
-      "name": "smart_exa_crawl",
-      "description": "Crawl web pages and extract their content. Auto-detects static vs JS sites (no need to specify renderer).\n\nUse with options for better results:\n  - clean: (recommended) For news, blogs, articles — removes nav/ads/footer, saves 40-60% tokens\n  - markdown: For LLM-friendly output — converts to Markdown, preserves structure\n  - chunk: For long articles with 5+ sections — splits by heading, saves LLM context\n  - crawlee: (advanced) For complex sites — auto-detects static vs JS, retries on failure\n  - render: For JS-heavy sites with no visible content — uses Playwright rendering\n\nDo NOT use for: searching the web (use smart_exa_search). Operating a browser (use smart_pw_browser).",
-      "category": "search",
-      "domain": "crawl",
-      "safetyLevel": "medium",
-      "routingRules": {
-        "autoRoute": false,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "urls": {
-            "type": "string",
-            "description": "URLs to crawl, comma-separated (required)"
-          },
-          "clean": {
-            "type": "boolean",
-            "description": "Article extraction: removes nav/ads/footer. Use for news, blogs, tutorials. (recommended)"
-          },
-          "markdown": {
-            "type": "boolean",
-            "description": "Convert to Markdown. Use when the result feeds into an LLM. Saves ~60% tokens vs raw HTML."
-          },
-          "chunk": {
-            "type": "boolean",
-            "description": "Split long content by heading. Use when article has 5+ sections. Saves LLM context window."
-          },
-          "maxChunkSize": {
-            "type": "number",
-            "description": "Max chars per chunk when --chunk is used (default: 2000)"
-          },
-          "crawlee": {
-            "type": "boolean",
-            "description": "Adaptive crawl: auto-detects static vs JS-heavy sites. Use for complex sites that might need JS rendering. Requires npm install crawlee."
-          },
-          "render": {
-            "type": "boolean",
-            "description": "Render JS-heavy pages with Playwright. Use when content is empty/missing without JS."
-          },
-          "extended": {
-            "type": "boolean",
-            "description": "Extended mode — up to 30,000 chars per result. Use for very long documents."
-          },
-          "maxChars": {
-            "type": "number",
-            "description": "Max chars per result (crawl default: 8000)"
-          },
-          "format": {
-            "type": "string",
-            "enum": [
-              "text",
-              "json"
-            ],
-            "description": "Output format (default: text)"
-          }
-        },
-        "required": [
-          "urls"
-        ]
-      }
-    },
-    {
-      "name": "smart_exa_search",
-      "description": "Search the web or code/documentation with natural language queries. Returns structured results with URLs and summaries.\n\nUse for:\n  - Web search: finding recent articles, docs, news (command: \"search\")\n  - Code search: finding code examples, API usage patterns (command: \"code\")\n\nDo NOT use for: crawling a specific URL (use smart_exa_crawl). Operating a browser (use smart_pw_browser).",
-      "category": "search",
-      "domain": "search",
-      "safetyLevel": "low",
-      "routingRules": {
-        "autoRoute": false,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "command": {
-            "type": "string",
-            "enum": [
-              "search",
-              "code"
-            ],
-            "description": "search: web search for information. code: find code examples and docs."
-          },
-          "query": {
-            "type": "string",
-            "description": "Search query (required for search/code)"
-          },
-          "numResults": {
-            "type": "number",
-            "description": "Number of results (default: 10)"
-          },
-          "maxChars": {
-            "type": "number",
-            "description": "Max chars per result (search/code default: 3000)"
-          },
-          "format": {
-            "type": "string",
-            "enum": [
-              "text",
-              "json"
-            ],
-            "description": "Output format (default: text)"
-          }
-        },
-        "required": [
-          "command"
-        ]
-      }
-    },
-    {
       "name": "smart_exec",
       "description": "Execute code in a sandboxed environment. Supports bash, node, python, deno.\nSafety: deno --allow-none by default (no fs, no net). Other languages run with limited permissions.\nUse when: need to verify code works, run tests, or execute small scripts safely.\nAvoid when: running production services, long-running processes, or untrusted third-party code.",
       "category": "standard",
@@ -2899,68 +2961,6 @@
             "description": "Max review comments per file (default: 5)"
           }
         }
-      }
-    },
-    {
-      "name": "smart_github_search",
-      "description": "Use when: need to find real-world code examples from public GitHub repos. Filter by repo, path, language, case. Best for: seeing how others use an API, finding production patterns. Avoid when: need to search your own codebase (use grep instead).",
-      "category": "search",
-      "domain": "search",
-      "safetyLevel": "low",
-      "routingRules": {
-        "autoRoute": false,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "query": {
-            "type": "string",
-            "description": "Code pattern (supports regex)"
-          },
-          "repo": {
-            "type": "string",
-            "description": "Filter repo (e.g., facebook/react)"
-          },
-          "path": {
-            "type": "string",
-            "description": "Filter path (e.g., src/)**"
-          },
-          "language": {
-            "type": "string",
-            "description": "Filter langs, comma-separated"
-          },
-          "matchCase": {
-            "type": "boolean",
-            "description": "Case-sensitive"
-          },
-          "matchWholeWords": {
-            "type": "boolean",
-            "description": "Whole words only"
-          },
-          "maxResults": {
-            "type": "number",
-            "description": "Max results (default: 10, max: 100)"
-          },
-          "format": {
-            "type": "string",
-            "enum": [
-              "text",
-              "json"
-            ],
-            "description": "Output format"
-          }
-        },
-        "required": [
-          "query"
-        ]
       }
     },
     {

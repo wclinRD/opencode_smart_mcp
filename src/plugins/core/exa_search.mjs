@@ -31,6 +31,16 @@ export default {
         enum: ['text', 'json'],
         description: 'Output format (default: text)',
       },
+      compress: {
+        type: 'string',
+        enum: ['none', 'caveman'],
+        description: 'Compress output to save tokens. "caveman" strips grammar, keeps facts (15-30% token savings). Default: none.',
+      },
+      compressLevel: {
+        type: 'string',
+        enum: ['light', 'semantic', 'aggressive'],
+        description: 'Caveman compression level. light=stop-words only, semantic=content selection, aggressive=max compression. Default: semantic.',
+      },
     },
     required: ['command'],
   },
@@ -42,6 +52,10 @@ export default {
     if (a.numResults) cli.push('--num-results', String(a.numResults));
     if (a.maxChars) cli.push('--max-chars', String(a.maxChars));
     if (a.format) cli.push('--format', String(a.format));
+    if (a.compress === 'caveman') {
+      cli.push('--caveman');
+      if (a.compressLevel) cli.push('--caveman-level', String(a.compressLevel));
+    }
     cli.push('--no-color');
     return cli;
   },
