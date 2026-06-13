@@ -253,7 +253,131 @@
 
 ---
 
-## Phase 16-20 里程碑
+## Phase 21：smart_read — 漸進式檔案讀取 ✅
+
+> 參考：Arrayo/smart-context-mcp（90% token 省 — outline/signatures/symbol/full 四層壓縮）
+> 目標：用 outline/signatures/symbol/full 四模式取代 raw read，省 60-80% read token。
+> **完成日期：2026-06-13**
+
+### 21.1 核心引擎
+
+- [x] `src/lib/smart-read.mjs` — SmartReader class + 四種 mode handler
+- [x] `detectLanguage()` — 21 種 extension → language 映射
+- [x] `getPatternsForLanguage()` — 6 種語言 pattern（JS/TS/Python/Go/Rust/Universal）
+- [x] `parseDeclarations()` — line-based 解析器（regex + 行號追蹤）
+- [x] `extractSymbol()` — exact + fuzzy symbol 查詢
+- [x] `generateOutline()` — 檔案結構輪廓（name + type + line）
+- [x] `generateSignatures()` — 結構 + 簽名行 + 行範圍
+- [x] `readFull()` — 傳統完整讀取
+- [x] Brace matching body extraction（JS/TS/Go/Rust/C/etc.）
+- [x] Python indentation-based body extraction
+- [x] Dedup + 排序（按行號）
+
+### 21.2 JS/TS 支援
+
+- [x] 函式：`function`, `async function`, `export function`, `export default function`
+- [x] 類別：`class`, `export class`, `abstract class`, `export default class`
+- [x] 箭頭函式：`const name = (args) =>`
+- [x] 變數：`const`, `let`, `var` assignments
+- [x] 介面：`interface Name`
+- [x] Type alias：`type Name =`
+- [x] Enum：`enum Name`
+- [x] Symbol body 提取（正確巢狀 brace matching）
+
+### 21.3 Python 支援
+
+- [x] 函式：`def name`, `async def name`
+- [x] 類別：`class Name`
+- [x] Decorator-aware（`@property`, `@staticmethod` 等）
+- [x] Indentation-based body extraction
+
+### 21.4 Go 支援
+
+- [x] 函式：`func name`, `func (r T) name`
+- [x] 結構體：`type T struct`
+- [x] 介面：`type T interface`
+- [x] Type alias：`type T =`
+
+### 21.5 Rust 支援
+
+- [x] 函式：`fn name`, `pub fn name`, `async fn name`
+- [x] 結構體：`struct Name`
+- [x] Impl：`impl Name`
+- [x] Trait：`trait Name`
+- [x] Enum：`enum Name`
+- [x] 常數：`const NAME: type`
+
+### 21.6 MCP Plugin
+
+- [x] `src/plugins/standard/smart-read.mjs` — `smart_read` 工具
+- [x] inputSchema：{ file, mode, symbol, root, offset, limit, lang, format }
+- [x] Four modes：outline / signatures / symbol / full
+- [x] Text 輸出格式（human-readable + 省 token tip）
+- [x] JSON 輸出格式（machine-readable）
+- [x] responsePolicy: maxLevel 0（lossless）
+
+### 21.7 測試
+
+- [x] `tests/smart-read.test.mjs` — language detection（21 cases）
+- [x] JS parseDeclarations（7 cases）
+- [x] JS outline / signatures / extractSymbol
+- [x] TS interface/type/enum/class/function 檢測
+- [x] TS symbol body extraction（class + interface）
+- [x] Python def/class/async def 檢測
+- [x] Python class body extraction（indentation-based）
+- [x] Go func/struct/interface 檢測
+- [x] Rust fn/struct/impl/trait/enum 檢測
+- [x] SmartReader class 整合（8 cases：outline/signatures/symbol/full/offset/error）
+- [x] Error handling（file not found, symbol not found, invalid mode）
+- [x] **69 項測試全部通過**
+
+---
+
+## Phase 22：smart_edit_ast — AST 感知編輯 ✅
+
+> 參考：Zenith-MCP（AST-based editing，三模式）
+> 目標：提供比 smart_edit 更精確、更容錯的編輯能力。
+> **完成日期：2026-06-13**
+
+### 22.1 Plugin 實作
+
+- [x] `src/plugins/standard/smart-edit-ast.mjs` — `smart_edit_ast` 工具
+- [x] inputSchema：{ file, mode, match/replace, action/startLine/endLine/text, symbol, apply, format }
+- [x] responsePolicy: maxLevel 0（lossless）
+
+### 22.2 content-match 模式
+
+- [x] Exact match（原始字串）
+- [x] Flexible match（trim-tolerant，逐行比對）
+- [x] Context display（前後 3 行）
+- [x] Diff preview（簡易 unified diff）
+
+### 22.3 block-boundary 模式
+
+- [x] replace：取代指定行範圍
+- [x] delete：刪除指定行範圍
+- [x] insert-before：在指定行前插入
+- [x] insert-after：在指定行後插入
+- [x] 行範圍驗證（1-indexed，邊界檢查）
+
+### 22.4 symbol-edit 模式
+
+- [x] 整合 smart-read extractSymbol 定位 symbol
+- [x] append：在 symbol body 結尾附加
+- [x] prepend：在 symbol body 開頭插入
+- [x] replace-body：置換整個 body
+- [x] delete：刪除整個 symbol
+
+### 22.5 安全性
+
+- [x] 預設 dry-run（apply:false）
+- [x] Diff preview 在 dry-run 時顯示
+- [x] File existence 檢查
+- [x] JSON/text 雙輸出格式
+
+---
+
+## Phase 16-22 里程碑
 
 | 里程碑 | 內容 | 預計日期 |
 |--------|------|---------|
@@ -262,7 +386,9 @@
 | M3 | Phase 19 完成（Cross-Agent Memory） | ✅ 2026-06-13 |
 | M4 | Phase 17 完成（MCTS Planning） | ✅ 2026-06-13 |
 | M5 | Phase 20 完成（Verified Code Gen） | ✅ 2026-06-13 |
-| M6 | 全量 regression + 效能 benchmark | ⏳ 待辦 |
+| M6 | Phase 21 完成（smart_read） | ✅ 2026-06-13 |
+| M7 | Phase 22 完成（smart_edit_ast） | ✅ 2026-06-13 |
+| M8 | 全量 regression + 效能 benchmark | ⏳ 待辦 |
 
 ---
 
@@ -274,9 +400,11 @@ Phase 17 (MCTS Tool Planning)      — 相依 hybrid-engine（已存在）
 Phase 18 (Speculative Pre-fetch)    — 相依 server/index.mjs（已存在）
 Phase 19 (Cross-Agent Memory)      — 相依 memory-db（已存在）
 Phase 20 (Verified Code Gen)       — 相依 smart_exec（已存在，Phase 10.1 ✅）
+Phase 21 (smart_read)              — 相依 src/lib/smart-read.mjs（新建）
+Phase 22 (smart_edit_ast)          — 相依 src/lib/smart-read.mjs（Phase 21）
 ```
 
-**執行順序**：16 → 18 → 19（平行可做）→ 17 → 20
+**執行順序**：16 → 18 → 19（平行可做）→ 17 → 20 → 21 → 22
 
 ---
 

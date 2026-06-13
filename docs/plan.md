@@ -287,16 +287,136 @@ Phase 20 改為：
 | 🥇 | **17** | MCTS Tool Planning | 🔴 高 | 🔥 高（複雜任務工具選擇準確率 ~85%+） | ✅ 完成 (2026-06-13) |
 | 🥈 | **19** | Cross-Agent Shared Memory | 🟢 低 | 🟡 中（跨 agent 學習） | ✅ 完成 (2026-06-13) |
 | 🥈 | **20** | Execution-Grounded Verification | 🟡 中 | 🟡 中（code 品質提升，可執行率 ~95%+） | ✅ 完成 (2026-06-13) |
+| 🥇 | **21** | smart_read — 漸進式檔案讀取 | 🟢 低 | 🔥 高（省 60-80% read token） | ✅ 完成 (2026-06-13) |
+| 🥈 | **22** | smart_edit_ast — AST 感知編輯 | 🟢 低 | 🟡 中（更精確的編輯，減少編輯錯誤） | ✅ 完成 (2026-06-13) |
+
+## 里程碑
+
+| 里程碑 | 內容 | 預計日期 |
+|--------|------|---------|
+| M1-M5 | Phase 16-20 完成 | ✅ 2026-06-13 |
+| M6 | Phase 21 (smart_read) 完成 | ✅ 2026-06-13 |
+| M7 | Phase 22 (smart_edit_ast) 完成 | ✅ 2026-06-13 |
+| M8 | 全量 regression + 效能 benchmark | ⏳ 待辦 |
 
 ---
 
-## 長期願景（Phase 21+）
+## Phase 21：smart_read — 漸進式檔案讀取 ✅
+
+> 參考：Arrayo/smart-context-mcp（90% token 省採用 outline/signatures/symbol/full 四層壓縮）
+> 核心洞察：LLM 讀檔案時 80% 的情況只需要結構或特定函式內容，不需要整份檔案。
+> 漸進式讀取可以在不損失資訊完整性的前提下省 60-80% read token。
+> **完成日期：2026-06-13**
+
+### 設計
+
+```
+目前 raw read：
+  LLM：「讀 src/auth.ts」
+  → 回傳整份檔案（可能 500+ lines）
+  → LLM 只看其中某個函式（浪費 90% token）
+
+Phase 21 smart_read 改為：
+  LLM：「smart_read({file: "src/auth.ts", mode:"outline"})」
+  → 回傳檔案結構（5-10 lines summary of functions/classes）
+  
+  LLM：「smart_read({file: "src/auth.ts", mode:"symbol", symbol:"authenticate"})」
+  → 只回傳 authenticate() 函式 body（精準定位）
+  
+  LLM：「smart_read({file: "src/auth.ts", mode:"full", offset:1, limit:100})」
+  → 回傳第 1-100 行（支援分頁）
+```
+
+### 實作範圍
+
+| # | 項目 | 檔案 | 說明 |
+|---|------|------|------|
+| 1 | 核心引擎 | `src/lib/smart-read.mjs` | SmartReader class + parseDeclarations / generateOutline / generateSignatures / extractSymbol |
+| 2 | 語言偵測 | `src/lib/smart-read.mjs` | 21 種 extension → language 映射 |
+| 3 | JS/TS parsing | `src/lib/smart-read.mjs` | function/class/interface/type/enum/const/arrow function |
+| 4 | Python parsing | `src/lib/smart-read.mjs` | def/async def/class/decorator-aware |
+| 5 | Go parsing | `src/lib/smart-read.mjs` | func/struct/interface/method |
+| 6 | Rust parsing | `src/lib/smart-read.mjs` | fn/struct/impl/trait/enum/const |
+| 7 | 通用 fallback | `src/lib/smart-read.mjs` | 通用 pattern 支援所有語言 |
+| 8 | Brace matching | `src/lib/smart-read.mjs` | 正確追蹤 { } 巢狀深度 |
+| 9 | Python indentation | `src/lib/smart-read.mjs` | 基於縮排的 body 範圍偵測 |
+| 10 | MCP Plugin | `src/plugins/standard/smart-read.mjs` | `smart_read` 工具，text/json 雙輸出 |
+| 11 | Agent config | `config/agents/smart-mcp.md` | Layer 1 direct tool 權限 + 路由 + 工作流 |
+| 12 | 測試 | `tests/smart-read.test.mjs` | 69 項測試，6 種語言，全部通過 |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| 平均 read token 消耗 | 500-2000 lines/file | 5-50 lines（outline/symbol mode） |
+| 檔案結構理解速度 | 慢（需讀完整檔） | 快（outline 5-10 lines） |
+| 特定函式定位 | grep 後讀整檔 | 精準 symbol extraction |
+| 大檔案處理 | 單次讀取耗盡 context | offset/limit 分頁控制 |
+
+### 實作摘要
+
+- `src/lib/smart-read.mjs` — SmartReader class 核心引擎（detectLanguage / parseDeclarations / generateOutline / generateSignatures / extractSymbol）
+- `src/plugins/standard/smart-read.mjs` — MCP plugin（outline/signatures/symbol/full 四模式，text/json 雙輸出）
+- `tests/smart-read.test.mjs` — 69 項測試（language detection / JS / TS / Python / Go / Rust / SmartReader class / error handling），全部通過
+
+---
+
+## Phase 22：smart_edit_ast — AST 感知編輯 ✅
+
+> 參考：Zenith-MCP（AST-based editing with content-match / block-boundary / symbol-edit 三模式）
+> 核心洞察：傳統字串取代編輯（smart_edit）無法感知程式碼結構。AST 感知編輯可以：
+>   - 在函式/類別體內精準操作
+>   - 容錯 whitespace 差異
+>   - 提供行區間編輯（insert/replace/delete）
+> **完成日期：2026-06-13**
+
+### 設計
+
+```
+目前 smart_edit：
+  { oldString: "function foo()", newString: "function bar()" }
+  → 只能做 exact string match，無法感知結構
+
+Phase 22 smart_edit_ast 改為：
+  { mode: "content-match", match: "function authenticate", replace: "async function authenticate" }
+    → 上下文容錯取代（trim-tolerant） 
+  
+  { mode: "block-boundary", action: "replace", startLine: 10, endLine: 20, text: "..." }
+    → 精確行區間編輯
+  
+  { mode: "symbol-edit", symbol: "authenticate", action: "append", text: "console.log('called');" }
+    → 在 symbol body 內新增 log 語句
+```
+
+### 實作範圍
+
+| # | 項目 | 檔案 | 說明 |
+|---|------|------|------|
+| 1 | content-match mode | `src/plugins/standard/smart-edit-ast.mjs` | trim-tolerant 匹配 + context 顯示 |
+| 2 | block-boundary mode | `src/plugins/standard/smart-edit-ast.mjs` | insert-before/insert-after/replace/delete |
+| 3 | symbol-edit mode | `src/plugins/standard/smart-edit-ast.mjs` | 結合 smart_read extractSymbol 定位 + append/prepend/replace-body/delete |
+| 4 | Simple diff | `src/plugins/standard/smart-edit-ast.mjs` | 編輯前後 diff 預覽 |
+| 5 | Dry-run | `src/plugins/standard/smart-edit-ast.mjs` | 預設 dry-run，apply:true 才寫入 |
+| 6 | Agent config | `config/agents/smart-mcp.md` | Layer 2 sub-tool，透過 ssr() 存取 |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| 編輯精確度 | exact string match（易因空白/排版失敗） | 容錯 whitespace + 結構感知 |
+| 編輯安全 | 無 preview | dry-run + diff preview |
+| 行區間編輯 | 需手動計算行數 | block-boundary 直接操作 |
+| Symbol 內編輯 | 需先定位再編輯 | symbol-edit 一次搞定 |
+
+---
+
+## 長期願景（Phase 23+）
 
 | Phase | 名稱 | 說明 |
 |-------|------|------|
-| 21 | **External Cognitive Controller** | 參考 Meta-Reasoning — LLM 是 substrate，思考由外部治理。觀察思考軌跡 → 偵測 stall/redundancy → 強制分支或切換策略 |
-| 22 | **Self-Evolving Agent Prompts** | 參考 self-evolving-codegen — tool-strategy 的 pattern 匹配根據成功率自我進化 |
-| 23 | **Continuous Thought Vectors** | 參考 NeurIPS 2025 Coconut — 在 embedding 空間做推理（而非 token 空間） |
+| 23 | **External Cognitive Controller** | 參考 Meta-Reasoning — LLM 是 substrate，思考由外部治理。觀察思考軌跡 → 偵測 stall/redundancy → 強制分支或切換策略 |
+| 24 | **Self-Evolving Agent Prompts** | 參考 self-evolving-codegen — tool-strategy 的 pattern 匹配根據成功率自我進化 |
+| 25 | **Continuous Thought Vectors** | 參考 NeurIPS 2025 Coconut — 在 embedding 空間做推理（而非 token 空間） |
 
 ---
 

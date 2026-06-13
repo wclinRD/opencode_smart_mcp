@@ -24,6 +24,7 @@ permission:
   smart_security: allow     # 安全掃描
   smart_test: allow         # 測試執行
   smart_lsp: allow          # LSP 程式碼理解
+  smart_read: allow         # 🥇 漸進式檔案讀取（取代 raw read）— outline/signatures/symbol/full 四模式，省 60-80% token
   smart_rules: allow        # 專案規則查詢
   smart_hallucination_check: allow  # 幻覺檢測
   smart_academic_search: allow     # 學術文獻搜尋
@@ -71,6 +72,7 @@ permission:
 | `smart_context({command})` | Session 管理（含 context budget 查詢：`smart_context({command:"budget"})`） |
 | `smart_rules({file})` | 查詢專案規則（AGENTS.md / .cursorrules 等）— **編輯前必查** |
 | `smart_lsp({operation, file, line, character})` | **Type-aware 程式碼理解** — 找定義、查引用、看型別、診斷錯誤。支援 TS/JS/Python/Rust/Swift/PHP |
+| `smart_read({file, mode, symbol?, offset?, limit?})` | 🥇 **漸進式檔案讀取** — `outline`（結構輪廓）、`signatures`（簽名行）、`symbol`（單一 symbol 主體）、`full`（完整，支援 offset/limit 分頁）。取代 raw read，省 60-80% token |
 | `smart_compact({toolHistory})` | **零成本 context 壓縮** — 分析工具歷史，識別可安全丟棄或摘要的輸出。無 LLM 開銷 |
 | `smart_codebase_index({command})` | **持久化程式碼索引** — build/update/query/map/stats。用了之後 import_graph 自動快 5-50x |
 | `smart_hallucination_check({output, context?, query?})` | **輸出真實性驗證** — 檢查 LLM 輸出是否有幻覺（編造/錯誤歸因/偏離/矛盾/離題/過度自信）。`mode:"doi"` 可驗證文中 DOI 是否真實存在 |
@@ -93,7 +95,8 @@ permission:
 | 程式碼分析 | `code_query` | CKG 程式碼知識圖譜查詢 |
 | 編輯 | `fast_apply` | 🥇 套用 LLM patch（unified-diff / SEARCH-REPLACE） |
 | 編輯 | `edit` | 🥈 字串取代編輯 |
-| 編輯 | `patch_gen` | 🥉 從分析輸出產生 patch（串接 error_diagnose→patch_gen） |
+| 編輯 | `edit_ast` | 🥉 **AST 感知編輯** — 三模式：content-match（上下文容錯取代）、block-boundary（行區間 insert/replace/delete）、symbol-edit（在特定 symbol body 內編輯） |
+| 編輯 | `patch_gen` | 從分析輸出產生 patch（串接 error_diagnose→patch_gen） |
 | 編輯 | `cross_file_edit` | 跨檔案編輯 |
 | 編輯 | `rename_safety` | 安全重新命名 |
 | 程式碼分析 | `code_impact` | 變更影響半徑分析（git diff 或 file + symbol） |
@@ -199,6 +202,9 @@ permission:
 | 專案上手 | `smart_learn → smart_rules → smart_codebase_index({command:"build"}) → ssr(import_graph) → smart_test → smart_security` |
 | 索引程式碼 | `smart_codebase_index({command:"build"}) → smart_codebase_index({command:"map"}) → ssr(import_graph)` |
 | 查 Symbol | `smart_codebase_index({command:"query", symbol:"auth"})` → `smart_lsp({operation:"definition"})` |
+| 探索程式碼 | `smart_read({file, mode:"outline"}) → 看檔案結構 → smart_read({file, mode:"symbol", symbol:"targetFunc"}) → 精準讀函式` |
+| 大檔案分頁 | `smart_read({file, mode:"full", offset:1, limit:100}) → 第 1 頁 → smart_read({file, offset:101, limit:100}) → 第 2 頁` |
+| AST 編輯 | `smart_read({file, mode:"signatures"}) → 確認行範圍 → ssr(edit_ast args:{mode:"block-boundary", action:"replace", startLine:10, endLine:20, text:"...", apply:true})` |
 | 安全修復 | `smart_security → smart_grep → ssr(fast_apply) → smart_test → rescan` |
 | 文件分析 | `ssr(ingest_document) → 分析內容 → 摘要/回答問題` |
 | 掃描 PDF | `ssr(ingest_document args:{ocr:true}) → 自動 OCR → 分析內容` |
