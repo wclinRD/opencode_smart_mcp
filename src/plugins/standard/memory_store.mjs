@@ -27,6 +27,7 @@ export default {
       ttl: { type: 'string', description: 'Auto-expire after duration (e.g. "7d", "30d", "1h") — for store command' },
       keep: { type: 'string', enum: ['always'], description: 'Prevent auto-cleanup for this entry — for store command' },
       includeArchived: { type: 'boolean', description: 'Include archived entries in search/list results' },
+      agent: { type: 'string', description: 'Agent ID for cross-agent memory (e.g. "claude-code", "opencode", "codex"). Auto-detected from env if not specified. Use "all" to search across all agents.' },
     },
     required: ['command'],
   },
@@ -55,6 +56,7 @@ export default {
     if (a.ttl) cli.push('--ttl', String(a.ttl));
     if (a.keep) cli.push('--keep', String(a.keep));
     if (a.includeArchived) cli.push('--include-archived');
+    if (a.agent) cli.push('--agent', String(a.agent));
     return cli;
   },
 };

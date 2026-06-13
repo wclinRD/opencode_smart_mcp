@@ -91,6 +91,20 @@ let memoryInjected = false; // Phase 10.5: auto-inject once per session
 const MEMORY_PATH = env.SMART_MEMORY_PATH || join(homedir(), '.smart', 'memory', 'resolutions.json');
 
 /**
+ * Phase 19: Detect current agent ID from environment.
+ */
+function detectAgentId() {
+  if (env.SMART_AGENT_ID) return env.SMART_AGENT_ID;
+  if (env.CLAUDE_CODE || env.ANTHROPIC_API_KEY) return 'claude-code';
+  if (env.OPENCODE_CONFIG || env.OPENCODE_HOME) return 'opencode';
+  if (env.CODEX_HOME || env.CODEX_API_KEY) return 'codex';
+  if (env.COPILOT_HOME || env.GITHUB_COPILOT) return 'copilot';
+  if (env.HERMES_HOME) return 'hermes';
+  if (env.PI_HOME) return 'pi';
+  return 'unknown';
+}
+
+/**
  * Phase 10.5: Auto Memory Injection.
  * Reads memory store JSON directly and injects top entries (skill_patches
  * first, then by hitCount + recency) as accumulated findings.
@@ -104,14 +118,20 @@ function autoInjectMemory() {
     const memory = JSON.parse(raw);
     if (!Array.isArray(memory.entries) || memory.entries.length === 0) return;
 
+    // Phase 19: Detect current agent for priority injection
+    const currentAgent = detectAgentId();
+
     // Score: skill_patches always first, then by hitCount + recency
+    // Phase 19: Boost entries from current agent
     const now = Date.now();
     const scored = memory.entries.map(e => {
       const ts = e.timestamp ? new Date(e.timestamp).getTime() : 0;
       const recencyScore = ts > 0 ? Math.max(0, 1 - (now - ts) / 864000000) : 0; // decay over 10 days
       const typeBonus = e.type === 'skill_patch' ? 100 : 0;
       const hitScore = (e.hitCount || 1) * 10;
-      return { ...e, score: typeBonus + hitScore + recencyScore * 20 };
+      // Phase 19: Boost entries from current agent
+      const agentBonus = (e.agent_id && e.agent_id === currentAgent) ? 50 : 0;
+      return { ...e, score: typeBonus + hitScore + recencyScore * 20 + agentBonus };
     });
     scored.sort((a, b) => b.score - a.score);
 

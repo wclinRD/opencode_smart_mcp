@@ -23,6 +23,7 @@ const SCHEMA_SQL = `
     type TEXT NOT NULL DEFAULT 'error',
     category TEXT,
     status TEXT DEFAULT 'active',
+    agent_id TEXT,
     error_message TEXT,
     resolution TEXT,
     behavior_change TEXT,
@@ -42,6 +43,7 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_entries_hash ON entries(hash);
   CREATE INDEX IF NOT EXISTS idx_entries_type ON entries(type);
   CREATE INDEX IF NOT EXISTS idx_entries_status ON entries(status);
+  CREATE INDEX IF NOT EXISTS idx_entries_agent_id ON entries(agent_id);
   CREATE INDEX IF NOT EXISTS idx_entries_last_seen ON entries(last_seen);
 
   -- FTS5 external content: data lives in entries, FTS5 indexes it
@@ -164,6 +166,18 @@ export class MemoryDB {
       // Column already exists
     }
 
+    // Phase 19: Migration — add agent_id column for cross-agent memory
+    try {
+      this.#db.exec("ALTER TABLE entries ADD COLUMN agent_id TEXT");
+    } catch {
+      // Column already exists
+    }
+    try {
+      this.#db.exec("CREATE INDEX IF NOT EXISTS idx_entries_agent_id ON entries(agent_id)");
+    } catch {
+      // Index already exists
+    }
+
     // Rebuild FTS5 index on startup (handles any out-of-sync state)
     this.rebuildFTS();
 
@@ -216,12 +230,12 @@ export class MemoryDB {
     this.#ensureOpen();
     const stmt = this.#db.prepare(`
       INSERT OR REPLACE INTO entries
-        (id, hash, type, category, status, error_message, resolution,
+        (id, hash, type, category, status, agent_id, error_message, resolution,
          behavior_change, target_skill, tools_used, files_changed,
          success, hit_count, keep, expires_at, confirmed_at,
          created_at, last_seen, embedding)
       VALUES
-        (@id, @hash, @type, @category, @status, @error_message, @resolution,
+        (@id, @hash, @type, @category, @status, @agent_id, @error_message, @resolution,
          @behavior_change, @target_skill, @tools_used, @files_changed,
          @success, @hit_count, @keep, @expires_at, @confirmed_at,
          COALESCE(@created_at, datetime('now')),
@@ -235,6 +249,7 @@ export class MemoryDB {
       type: entry.type || 'error',
       category: entry.category || null,
       status: entry.status || 'active',
+      agent_id: entry.agent_id || null,
       error_message: entry.error_message || null,
       resolution: entry.resolution || null,
       behavior_change: entry.behavior_change || null,
@@ -281,7 +296,7 @@ export class MemoryDB {
   updateEntry(id, updates) {
     this.#ensureOpen();
     const allowed = new Set([
-      'type', 'category', 'status', 'error_message', 'resolution',
+      'type', 'category', 'status', 'agent_id', 'error_message', 'resolution',
       'behavior_change', 'target_skill', 'tools_used', 'files_changed',
       'success', 'hit_count', 'keep', 'expires_at', 'confirmed_at',
       'last_seen', 'embedding',
@@ -320,13 +335,14 @@ export class MemoryDB {
   /**
    * List entries with optional filters.
    */
-  listEntries({ type, category, status, limit = 100, offset = 0, includeArchived = false } = {}) {
+  listEntries({ type, category, status, agent_id, limit = 100, offset = 0, includeArchived = false } = {}) {
     this.#ensureOpen();
     const where = [];
     const params = {};
 
     if (type) { where.push('type = @type'); params.type = type; }
     if (category) { where.push('category = @category'); params.category = category; }
+    if (agent_id) { where.push('agent_id = @agent_id'); params.agent_id = agent_id; }
     if (!includeArchived) {
       where.push("(status IS NULL OR status != 'archived')");
     } else if (status) {
@@ -527,7 +543,7 @@ export class MemoryDB {
    * @returns {Array} [{ ...entry, _rrfScore, _ranks }]
    */
   searchHybrid(query, embedding, options = {}) {
-    const { k = 60, limit = 10, streamLimit = limit * 3 } = options;
+    const { k = 60, limit = 10, streamLimit = limit * 3, agent_id = null } = options;
 
     // Collect results from each stream
     const ranks = {}; // id → { rank_bm25, rank_vec }
@@ -558,7 +574,17 @@ export class MemoryDB {
     }
 
     scored.sort((a, b) => b.score - a.score);
-    const topIds = scored.slice(0, limit);
+    let topIds = scored.slice(0, limit);
+
+    // Phase 19: Filter by agent_id if specified
+    if (agent_id && topIds.length > 0) {
+      const placeholders = topIds.map(() => '?').join(',');
+      const filtered = this.#db.prepare(
+        `SELECT id FROM entries WHERE id IN (${placeholders}) AND agent_id = ?`
+      ).all(...topIds.map(s => s.id), agent_id);
+      const filteredIds = new Set(filtered.map(r => r.id));
+      topIds = topIds.filter(s => filteredIds.has(s.id));
+    }
 
     if (topIds.length === 0) return [];
 

@@ -71,6 +71,46 @@ const HIT_DECAY_RATE = 0.5;       // Layer 2: hitCount multiplier per decay peri
 const ARCHIVE_DAYS = 90;          // Layer 2: auto-archive after this many idle days
 const ARCHIVE_HIT_THRESHOLD = 1;  // Layer 2: max hitCount for auto-archive
 
+// Phase 19: Cross-agent memory — agent ID detection
+const AGENT_ALIASES = {
+  'claude-code': ['claude', 'claude-code', 'claude_code'],
+  'opencode': ['opencode', 'open-code', 'open_code'],
+  'codex': ['codex', 'codex-cli', 'codex_cli'],
+  'copilot': ['copilot', 'github-copilot', 'github_copilot'],
+  'hermes': ['hermes'],
+  'pi': ['pi', 'pi-agent'],
+};
+
+/**
+ * Detect the current agent ID from environment variables.
+ * Checks SMART_AGENT_ID env var first, then common agent-specific env vars.
+ * @returns {string} agent ID or "unknown"
+ */
+function detectAgentId() {
+  // Explicit override
+  if (process.env.SMART_AGENT_ID) return process.env.SMART_AGENT_ID;
+
+  // Claude Code
+  if (process.env.CLAUDE_CODE || process.env.ANTHROPIC_API_KEY) return 'claude-code';
+
+  // OpenCode
+  if (process.env.OPENCODE_CONFIG || process.env.OPENCODE_HOME) return 'opencode';
+
+  // Codex
+  if (process.env.CODEX_HOME || process.env.CODEX_API_KEY) return 'codex';
+
+  // GitHub Copilot
+  if (process.env.COPILOT_HOME || process.env.GITHUB_COPILOT) return 'copilot';
+
+  // Hermes
+  if (process.env.HERMES_HOME) return 'hermes';
+
+  // Pi
+  if (process.env.PI_HOME) return 'pi';
+
+  return 'unknown';
+}
+
 // ---------------------------------------------------------------------------
 // Data management
 // ---------------------------------------------------------------------------
@@ -1112,6 +1152,8 @@ async function cmdStoreDB(db, errorMsg, opts) {
     hit_count: 1,
     keep: opts.keep === 'always' ? 'always' : null,
     expires_at: opts.ttl ? new Date(parseTTL(opts.ttl)).toISOString() : null,
+    // Phase 19: Cross-agent memory — auto-detect or use explicit agent_id
+    agent_id: opts.agent || detectAgentId(),
   };
 
   if (opts.type === 'skill_patch') {
@@ -1167,7 +1209,7 @@ async function cmdSearchDB(db, query, opts) {
     if (isSentenceModelAvailable()) {
       const emb = await getSentenceEmbedding(query).catch(() => null);
       if (emb) {
-        const hybridResults = db.searchHybrid(query, emb, { limit });
+        const hybridResults = db.searchHybrid(query, emb, { limit, agent_id: opts.agent !== 'all' ? (opts.agent || detectAgentId()) : null });
         if (hybridResults.length > 0) {
           const entries = hybridResults.map(r => {
             const norm = normalizeDBEntry(r);
@@ -1568,6 +1610,7 @@ function parseArgs() {
       case '--ttl': opts.ttl = args[++i]; break;
       case '--keep': opts.keep = args[++i]; break;
       case '--include-archived': opts.includeArchived = true; break;
+      case '--agent': opts.agent = args[++i]; break;
       case '--auto': opts.auto = true; break;
       case '--miss': opts.miss = true; break;
       case '--cross-session': opts.crossSession = true; break;

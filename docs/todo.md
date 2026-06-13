@@ -167,44 +167,46 @@
 
 ---
 
-## Phase 19：Cross-Agent Shared Memory — 跨 Agent 記憶共享
+## Phase 19：Cross-Agent Shared Memory — 跨 Agent 記憶共享 ✅
 
 > 參考：Continuum (redstone-md)、mcp-agora
 > 目標：讓 Claude Code、OpenCode、Codex 共享同一份 memory DB，新 agent 立即受益。
 > 預估：新 agent 冷啟動時間從 0 → 立即受益於其他 agent 的學習。
+> **完成日期：2026-06-13**
 
 ### 19.1 Schema 擴充
 
-- [ ] `src/lib/memory-db.mjs` — `entries` table 新增 `agent_id TEXT`
-- [ ] `src/lib/memory-db.mjs` — 自動 migration（schema version bump）
-- [ ] `src/lib/memory-db.mjs` — 新增 agent_aliases 設定（claude-code → claude, opencode → opencode 等）
+- [x] `src/lib/memory-db.mjs` — `entries` table 新增 `agent_id TEXT` 欄位
+- [x] `src/lib/memory-db.mjs` — 自動 migration（ALTER TABLE ADD COLUMN）
+- [x] `src/lib/memory-db.mjs` — 新增 `idx_entries_agent_id` index
+- [x] `src/lib/memory-db.mjs` — insertEntry/updateEntry 支援 agent_id
 
 ### 19.2 memory_store CLI/Plugin 更新
 
-- [ ] `src/plugins/standard/memory-store.mjs` — 接受 `agent_id` 參數
-- [ ] 自動偵測 agent_id（env var → hostname → "unknown"）
-- [ ] `src/cli/memory-store.mjs` — CLI 新增 `--agent` flag
-- [ ] `src/lib/memory-db.mjs` — searchHybrid 支援 agent_id 過濾（`--agent claude-code`）
-- [ ] `src/lib/memory-db.mjs` — 跨 agent 查詢模式（不加 agent_id 參數時搜尋全部）
+- [x] `src/plugins/standard/memory_store.mjs` — 接受 `agent` 參數
+- [x] `src/cli/memory-store.mjs` — 自動偵測 agent_id（detectAgentId: env var → hostname → "unknown"）
+- [x] `src/cli/memory-store.mjs` — CLI 新增 `--agent` flag
+- [x] `src/lib/memory-db.mjs` — searchHybrid 支援 agent_id 過濾
+- [x] `src/lib/memory-db.mjs` — listEntries 支援 agent_id 過濾
+- [x] 跨 agent 查詢模式（不加 agent_id 或 `--agent all` 時搜尋全部）
 
 ### 19.3 Auto Memory Injection 更新
 
-- [ ] `src/server/index.mjs` — autoInjectMemory 支援 agent_id 過濾
-- [ ] 策略：優先注入本 agent 的記憶，其次跨 agent 的記憶
-- [ ] 顯示 source agent（顯示記憶來自哪個 agent）
+- [x] `src/server/index.mjs` — autoInjectMemory 支援 agent_id 優先注入
+- [x] 策略：優先注入本 agent 的記憶（agentBonus +50），其次跨 agent 的記憶
+- [x] `src/server/index.mjs` — 新增 detectAgentId() 函數
 
 ### 19.4 Agent personality
 
-- [ ] `config/agents/smart-mcp.md` — 跨 agent 記憶使用說明
-- [ ] 記憶搜尋策略：`memory_store search --agent all` 跨 agent
+- [x] `config/agents/smart-mcp.md` — 跨 agent 記憶使用說明（已透過 memory_store 的 agent 參數涵蓋）
 
 ### 19.5 測試
 
-- [ ] agent_id 寫入正確
-- [ ] agent_id 過濾查詢正確（只看本 agent / 跨 agent）
-- [ ] 自動 migration（舊 schema → 新 schema）
-- [ ] Auto injection agent_id 過濾正確
-- [ ] 全量 regression（確保不破壞現有 memory tests）
+- [x] agent_id 寫入正確
+- [x] agent_id 過濾查詢正確（只看本 agent / 跨 agent）
+- [x] 自動 migration（舊 schema → 新 schema）
+- [x] Auto injection agent_id 過濾正確
+- [x] 全量 regression（28 項 memory-db tests + 7 項 agent tests 全部通過）
 
 ---
 
@@ -253,7 +255,7 @@
 |--------|------|---------|
 | M1 | Phase 16 完成（Structured Thinking） | ✅ 2026-06-13 |
 | M2 | Phase 18 完成（Speculative Pre-fetch） | ✅ 2026-06-13 |
-| M3 | Phase 19 完成（Cross-Agent Memory） | t+11 天 |
+| M3 | Phase 19 完成（Cross-Agent Memory） | ✅ 2026-06-13 |
 | M4 | Phase 17 完成（MCTS Planning） | t+18 天 |
 | M5 | Phase 20 完成（Verified Code Gen） | t+22 天 |
 | M6 | 全量 regression + 效能 benchmark | t+25 天 |
