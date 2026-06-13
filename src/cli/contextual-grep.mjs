@@ -27,6 +27,8 @@
 import { readFileSync, statSync } from 'node:fs';
 import { resolve, relative, extname, dirname, sep } from 'node:path';
 import { globToRegex, matchGlob, findFiles, COLORS, useColor } from '../lib/utils.mjs';
+import { rankResults, applyRerankSignals } from '../lib/bm25.mjs';
+import { detectQueryType } from '../lib/query-detector.mjs';
 
 // ---------------------------------------------------------------------------
 // Scope detection — find enclosing function/class/block for a line
@@ -560,6 +562,8 @@ function parseArgs() {
     format: 'text',
     maxMatches: 100,
     filesOnly: false,
+    rank: 'bm25',       // default: BM25 ranking enabled
+    queryDetect: true,  // default: query type detection enabled
   };
   let i = 1;
 
@@ -583,6 +587,10 @@ function parseArgs() {
       case '--ignore-case': opts.ignoreCase = true; break;
       case '--max-matches': opts.maxMatches = parseInt(args[++i], 10); break;
       case '--files-only': opts.filesOnly = true; break;
+      case '--rank': opts.rank = args[++i]; break;
+      case '--no-rank': opts.rank = 'none'; break;
+      case '--query-detect': opts.queryDetect = true; break;
+      case '--no-query-detect': opts.queryDetect = false; break;
       default: break;
     }
     i++;
@@ -620,6 +628,10 @@ Options:
   --ignore-case         Case-insensitive search
   --max-matches <N>     Max matches per file (default: 100)
   --files-only          Only show filenames, not matches
+  --rank <mode>         Ranking mode: bm25 (default), none
+  --no-rank             Disable ranking (equivalent to --rank none)
+  --query-detect        Enable query type detection (default: on)
+  --no-query-detect     Disable query type detection
   -h, --help            Show this help
 
 Examples:
@@ -653,6 +665,18 @@ const totalFiles = files.length;
 
 // Search
 const results = searchFiles(files, regex, opts);
+
+// Query type detection
+let queryType = null;
+if (opts.queryDetect) {
+  queryType = detectQueryType(opts.pattern);
+}
+
+// BM25 ranking
+if (opts.rank !== 'none' && results.length > 0) {
+  rankResults(results, opts.pattern);
+  applyRerankSignals(results, opts.pattern);
+}
 
 // Enrich with import context if requested
 if (opts.withImports) {
@@ -693,13 +717,17 @@ if (opts.withImports) {
 // Output
 switch (opts.format) {
   case 'json':
-    console.log(formatJSON({
+    const jsonOutput = {
       root,
       totalFiles,
       matches: results.length,
       totalMatches: results.reduce((s, r) => s + r.matches.length, 0),
       results,
-    }));
+    };
+    if (queryType) {
+      jsonOutput.queryType = queryType;
+    }
+    console.log(formatJSON(jsonOutput));
     break;
   case 'markdown':
     console.log(formatMarkdown(results, opts));

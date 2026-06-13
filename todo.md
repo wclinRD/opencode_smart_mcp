@@ -45,28 +45,28 @@
 
 # smart_grep 強化待辦清單（v2 — 2026-06 技術更新）
 
-## Phase 1：排名與相關性 + Query Detection（2-3 天）
-- [ ] 建立 `src/lib/bm25.mjs` — 純 JS BM25 實作
-  - [ ] `tokenize(text)` — 支援 identifier-aware 分割（camelCase/PascalCase/snake_case）
-  - [ ] `bm25Score(query, doc)` — BM25 相關性分數計算
-  - [ ] `rankResults(results, query)` — 對搜尋結果排序
-- [ ] 建立 `src/lib/query-detector.mjs` 🆕 — 查詢類型偵測
-  - [ ] `detectQueryType(query)` — 回傳 symbol / natural_language / path
-  - [ ] 啟發式規則：全小寫+空格 → NL，camelCase/PascalCase → symbol，含 `/` 或 `.` → path
-- [ ] 整合到 `contextual-grep.mjs`
-  - [ ] 新增 `--rank bm25` / `--rank none` CLI 參數
-  - [ ] 預設啟用 BM25 排名
-  - [ ] 預設啟用 query type detection
-- [ ] Code-aware reranking signals（6 signals 🆕）
-  - [ ] `definitionBoost(match)` — 符號定義行 +0.25
-  - [ ] `testDemotion(filePath)` — test/spec 檔案 -0.30
-  - [ ] `fileCoherenceBoost(fileResults)` — 同檔案多匹配 +0.20
-  - [ ] 🆕 `gitRecencyBoost(filePath)` — git log 最近修改 +0.15
-  - [ ] 🆕 `pathMatchBoost(filePath, query)` — 路徑匹配 +0.20
-  - [ ] 🆕 `symbolNameBoost(match, query)` — 符號名稱精確匹配 +0.30
-- [ ] 測試：BM25 排名正確性
-- [ ] 測試：identifier-aware tokenization（camelCase/snake_case）
-- [ ] 測試：query type detection 三種類型
+## Phase 1：排名與相關性 + Query Detection ✅（2-3 天）
+- [x] 建立 `src/lib/bm25.mjs` — 純 JS BM25 實作
+  - [x] `tokenize(text)` — 支援 identifier-aware 分割（camelCase/PascalCase/snake_case）
+  - [x] `bm25Score(query, doc)` — BM25 相關性分數計算
+  - [x] `rankResults(results, query)` — 對搜尋結果排序
+- [x] 建立 `src/lib/query-detector.mjs` 🆕 — 查詢類型偵測
+  - [x] `detectQueryType(query)` — 回傳 symbol / natural_language / path
+  - [x] 啟發式規則：全小寫+空格 → NL，camelCase/PascalCase → symbol，含 `/` 或 `.` → path
+- [x] 整合到 `contextual-grep.mjs`
+  - [x] 新增 `--rank bm25` / `--rank none` CLI 參數
+  - [x] 預設啟用 BM25 排名
+  - [x] 預設啟用 query type detection
+- [x] Code-aware reranking signals（6 signals 🆕）
+  - [x] `definitionBoost(match)` — 符號定義行 +0.25
+  - [x] `testDemotion(filePath)` — test/spec 檔案 -0.30
+  - [x] `fileCoherenceBoost(fileResults)` — 同檔案多匹配 +0.20
+  - [x] 🆕 `gitRecencyBoost(filePath)` — git log 最近修改 +0.15
+  - [x] 🆕 `pathMatchBoost(filePath, query)` — 路徑匹配 +0.20
+  - [x] 🆕 `symbolNameBoost(match, query)` — 符號名稱精確匹配 +0.30
+- [x] 測試：BM25 排名正確性
+- [x] 測試：identifier-aware tokenization（camelCase/snake_case）
+- [x] 測試：query type detection 三種類型
 
 ## Phase 2：Hybrid Semantic Search 🆕（1 週）
 - [ ] `npm install @xenova/transformers`
@@ -82,7 +82,7 @@
   - [ ] `loadCache(root)` — 載入 `.smart/grep-embeddings.json`
   - [ ] `saveCache(root, cache)` — 儲存快取
   - [ ] `getCachedOrEmbed(file, mtime, embedder)` — mtime 檢查 + 嵌入
-- [ ] 整合到 `contextual-grep.mjs`
+- [x] 整合到 `contextual-grep.mjs`
   - [ ] `--semantic` 啟用 hybrid search
   - [ ] `--semantic-weight 0.0-1.0` 自訂 semantic 權重
   - [ ] 預設：symbol query → BM25 70% + semantic 30%
@@ -109,7 +109,7 @@
 - [ ] worker_threads 平行搜尋
   - [ ] 建立 `src/lib/parallel-search.mjs`
   - [ ] 檔案分組 → worker pool → 合併結果
-- [ ] 整合到 `contextual-grep.mjs`
+- [x] 整合到 `contextual-grep.mjs`
   - [ ] `--with-scope` 改用 tree-sitter（fallback regex）
   - [ ] `--parallel` 啟用 worker_threads
   - [ ] 🆕 `--structural` 啟用 AST 模式匹配
@@ -136,7 +136,7 @@
     - [ ] L0: signature only（檔名+行號+匹配行）
     - [ ] L1: +3 行 context
     - [ ] L2: full function body
-- [ ] 整合到 `contextual-grep.mjs`
+- [x] 整合到 `contextual-grep.mjs`
   - [ ] `--index build|search|update` CLI 參數
   - [ ] `--index-type trigram|sparse` 索引類型
   - [ ] 🆕 `--budget 500` token 預算限制
@@ -166,7 +166,7 @@
   - [ ] `initCrossEncoder(modelName)` — lazy 載入 ONNX cross-encoder
   - [ ] `rerank(query, candidates)` — 第二階段精排 top-20
   - [ ] 可選啟用（`--cross-encode`）
-- [ ] 整合到 `contextual-grep.mjs`
+- [x] 整合到 `contextual-grep.mjs`
   - [ ] `--callers symbol` / `--callees symbol` / `--impact symbol`
   - [ ] `--cross-encode` 啟用精排
   - [ ] `--signal-weights` 自訂信號權重
