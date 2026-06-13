@@ -5,12 +5,12 @@ model: opencode/big-pickle
 temperature: 0.3
 permission:
   # ── 原始工具（OS-level）──
-  read: allow       # 必要：無 smart_read 替代
+  read: allow       # ❗ 後備用。文字檔案優先使用 smart_read（省 60-80% token）。raw read 只用於：目錄列表、二進位檔、smart_read 無法處理的邊界案例
   write: allow      # 必要：無 smart_write 替代（新檔案建立）
   glob: allow       # 必要：無 smart_glob 替代
   
   # ⛔ 以下工具被禁用 → 強制走 Smart MCP 層
-  edit: deny        # 強制使用 ssr(fast_apply) 或 ssr(edit) — patch-based 更精確省 token
+  edit: deny        # 強制使用 ssr(fast_apply)、ssr(edit) 或 ssr(edit_ast) — patch-based 更精確省 token
   grep: deny        # 強制使用 smart_grep — 回傳 scope/imports/context
   webfetch: deny   # 強制使用 ssr(ingest_document) + exa_search — 更省 token
   
@@ -72,7 +72,7 @@ permission:
 | `smart_context({command})` | Session 管理（含 context budget 查詢：`smart_context({command:"budget"})`） |
 | `smart_rules({file})` | 查詢專案規則（AGENTS.md / .cursorrules 等）— **編輯前必查** |
 | `smart_lsp({operation, file, line, character})` | **Type-aware 程式碼理解** — 找定義、查引用、看型別、診斷錯誤。支援 TS/JS/Python/Rust/Swift/PHP |
-| `smart_read({file, mode, symbol?, offset?, limit?})` | 🥇 **漸進式檔案讀取** — `outline`（結構輪廓）、`signatures`（簽名行）、`symbol`（單一 symbol 主體）、`full`（完整，支援 offset/limit 分頁）。取代 raw read，省 60-80% token |
+| `smart_read({file, mode, symbol?, offset?, limit?})` | 🥇 **漸進式檔案讀取（優先於 raw read）** — `outline`（結構輪廓，省 90%+ token）、`signatures`（簽名行）、`symbol`（單一 symbol 主體）、`full`（完整，支援 offset/limit 分頁）。文字檔案一律用此工具；raw read 只用於目錄列表或二進位檔 |
 | `smart_compact({toolHistory})` | **零成本 context 壓縮** — 分析工具歷史，識別可安全丟棄或摘要的輸出。無 LLM 開銷 |
 | `smart_codebase_index({command})` | **持久化程式碼索引** — build/update/query/map/stats。用了之後 import_graph 自動快 5-50x |
 | `smart_hallucination_check({output, context?, query?})` | **輸出真實性驗證** — 檢查 LLM 輸出是否有幻覺（編造/錯誤歸因/偏離/矛盾/離題/過度自信）。`mode:"doi"` 可驗證文中 DOI 是否真實存在 |
@@ -383,6 +383,9 @@ LLM 也可以在 self-correction loop 中主動呼叫 smart_hallucination_check 
 | 修改來自其他工具輸出（error_diagnose 的 fix） | **fast_apply** 🥇 |
 | **單行/小區塊（1-3 行）精確修改** | **edit** 🥈 |
 | 我當下直接決定的簡單數值/字串修正 | **edit** 🥈 |
+| **需要在 symbol body 內編輯（append/prepend/replace）** | **edit_ast** 🥉 (ssr) |
+| **行區間操作（insert before/after / replace range / delete）** | **edit_ast** 🥉 (ssr) |
+| **內容匹配需容錯 whitespace 差異** | **edit_ast** 🥉 (ssr) |
 
 > ⚠️ 違反此規則多花 40-60% token，記入反省機制
 
@@ -409,7 +412,7 @@ Smart MCP 自動壓縮大型輸出（L0/L1/L2）。遇到 `_optimized`：
 絕對不能做的事：
   ❌ 自寫腳本測試 API（用 ssr({tool:"pw_browser"}) 取代）
   ❌ 手動 curl/wget 猜參數（用 ssr({tool:"pw_browser"}) + addInitScript 攔截）
-  ❌ 盲目 grep/read 大量檔案（用 smart_grep 取代）
+  ❌ 盲目 grep/read 大量檔案（用 smart_grep 或 smart_read 取代）
   ❌ 不查規則就編輯（先用 smart_rules({file:"目標檔案"}) 確認專案慣例）
   ❌ 用 grep 找定義/引用（用 smart_lsp({operation:"definition"|"references"}) — LSP 比 regex 精準且省 token）
 ❌ 用 webfetch 研究 GitHub repo（先用 `git clone` 下載到 `/tmp/`，再本地分析 — webfetch 只抓到 HTML 浪費 token，clone 後用 bash/find/read/grep 精準探索）
@@ -420,7 +423,7 @@ task 強制規則：
   ⚠️ 用 task 開 subagent 前，必須在 prompt「開頭」注入：
   """
   [Smart MCP Routing — injected by parent]
-  工具優先順序：smart_lsp > smart_grep > raw grep/read
+  工具優先順序：smart_lsp > smart_read > smart_grep > raw grep/read
   編輯用 ssr(fast_apply) 或 ssr(edit)，不可直接用 write/sed
   不確定工具 → ssr({tool:"hybrid_router", args:{question:"..."}})
   安全修復前必須跑 smart_think({mode:"beam"})
