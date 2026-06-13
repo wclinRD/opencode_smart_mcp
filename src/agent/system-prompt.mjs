@@ -27,12 +27,14 @@ opencode prefixes MCP server "smart" tools with \`smart_\`. So internal \`smart_
 - \`smart_smart_test\` — run tests (auto-detects vitest/jest/mocha/ava/node:test)
 - \`smart_smart_context\` — session context (summary/findings/reset/budget)
 - \`smart_smart_rules\` — project rules discovery (AGENTS.md, .cursorrules, etc.)
+- \`smart_smart_read\` 🥇 — progressive file reader (11 modes: auto/outline/signatures/symbol/explain/range/full/batch/project/image/directory). Session cache = zero disk I/O on repeat reads. Fully replaces raw read.
+- \`smart_smart_compact\` — zero-cost context compression (rules-based, no LLM cost)
 
 ### Layer 2: Router Tools (via \`smart_smart_run\`)
 Use: \`smart_smart_run({tool:"<name>", args:{...}})\`
 
 **Code**: hybrid_router, arch_overview, import_graph, code_call_graph, code_query(CKG), code_impact, code_ast, code_type_infer, coverage, naming  
-**Edit**: fast_apply🥇, edit🥈, patch_gen, cross_file_edit, rename_safety  
+**Edit**: patch_gen, cross_file_edit, rename_safety  
 **Debug**: error_diagnose, debug, test_suggest  
 **Git**: git_context, git_commit, git_review, git_pr  
 **Plan**: planner, workflow, compose, memory_store, agent_recommend, agent_plan, agent_execute  
@@ -45,6 +47,7 @@ Use: \`smart_smart_run({tool:"<name>", args:{...}})\`
 \`\`\`
 Task →
   ├─ Native tool fits? → smart_smart_<tool>({...})
+  │  編輯一律用 smart_smart_fast_apply（取代 write+edit+edit_ast）
   ├─ Router tool fits? → smart_smart_run({tool:"<name>", args:{...}})
   ├─ Unsure?           → smart_smart_run({tool:"hybrid_router", args:{question:"..."}})
   ├─ Need domain skill?→ skill("<skill-name>")
@@ -57,8 +60,8 @@ Always inject the following in the task prompt header:
 
 \`\`\`
 [Smart MCP Routing — injected by parent]
-工具優先順序：smart_lsp > smart_grep > raw grep/read
-編輯用 smart_smart_run({tool:"fast_apply"}) 或 smart_smart_run({tool:"edit"})
+工具優先順序：smart_read > smart_lsp > smart_grep > raw grep/read
+編輯用 smart_smart_fast_apply (取代 write+edit，直接呼叫)
 不確定工具 → smart_smart_run({tool:"hybrid_router", args:{question:"..."}})
 安全修復前必須跑 smart_smart_think({mode:"beam"})
 查專案慣例 → smart_smart_rules({file:"..."})

@@ -45,11 +45,18 @@ const TASK_PATTERNS = [
     reason: 'Security audit: scan credentials → scan injections → grep high-risk patterns → fix → verify',
   },
   {
+    patterns: [/read|view|show|display|open.*file|file.*content|look\s*at/i],
+    primary: 'smart_read',
+    alternatives: ['smart_grep', 'smart_learn'],
+    chain: ['smart_read', 'smart_grep', 'smart_learn'],
+    reason: 'File reading: read target file with progressive detail (auto/outline/symbol/range/full) → search patterns → learn context',
+  },
+  {
     patterns: [/understand|explore|learn|analyze.*codebase|document|onboard/i],
     primary: 'smart_learn',
-    alternatives: ['smart_import_graph', 'smart_grep', 'smart_naming'],
-    chain: ['smart_learn', 'smart_import_graph', 'smart_grep', 'smart_diagram'],
-    reason: 'Codebase exploration: learn project structure → analyze dependency graph → search key patterns → generate architecture diagram',
+    alternatives: ['smart_read', 'smart_import_graph', 'smart_grep', 'smart_naming'],
+    chain: ['smart_learn', 'smart_read', 'smart_import_graph', 'smart_grep', 'smart_diagram'],
+    reason: 'Codebase exploration: learn project structure → read key files → analyze dependency graph → search patterns → generate diagram',
   },
   {
     patterns: [/test|coverage|uncovered|test\s*case/i],

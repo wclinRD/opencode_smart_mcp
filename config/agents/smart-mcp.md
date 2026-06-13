@@ -5,7 +5,7 @@ model: opencode/big-pickle
 temperature: 0.3
 permission:
   # ── 原始工具（OS-level）──
-  read: deny        # ❗ smart_read 已完全取代（文字九模式 + 目錄列表 + 圖片附件）。所有檔案讀取一律走 smart_read
+  read: deny        # ❗ smart_read 已完全取代（11 種模式）。所有檔案讀取一律走 smart_read — 禁止 cat/head/tail/read
   write: allow      # 必要：無 smart_write 替代（新檔案建立）
   glob: allow       # 必要：無 smart_glob 替代
   
@@ -24,7 +24,7 @@ permission:
   smart_security: allow     # 安全掃描
   smart_test: allow         # 測試執行
   smart_lsp: allow          # LSP 程式碼理解
-  smart_read: allow         # 🥇 漸進式檔案讀取（取代 raw read）— outline/signatures/symbol/full 四模式，省 60-80% token
+  smart_read: allow         # 🥇 Core native — 漸進式檔案讀取，完全取代 raw read。11 種模式：auto/outline/signatures/symbol/explain/range/full/batch/project/image/directory。Session cache 零重複磁碟 I/O
   smart_rules: allow        # 專案規則查詢
   smart_hallucination_check: allow  # 幻覺檢測
   smart_academic_search: allow     # 學術文獻搜尋
@@ -69,6 +69,7 @@ permission:
 | `smart_deep_think({topic, template})` | **慢想** — 深度分析（10 模板含 `peer_review`）。一次完整輸出 |
 | `smart_security({scan})` | 安全掃描 |
 | `smart_test({root})` | 執行測試 |
+| `smart_fast_apply({file, content})` / `smart_fast_apply({file, search, replace})` | **統一編輯工具** — 取代 write+edit。`{file,content}`=創建/覆寫檔案，`{file,search,replace}`=字串取代。也支援 6 種 patch 格式（unified-diff/lazy/hashline/search-replace/whole-file/partial），6 級 fuzzy match，atomic multi-file，dry-run 預設安全無副作用 |
 | `smart_context({command})` | Session 管理（含 context budget 查詢：`smart_context({command:"budget"})`） |
 | `smart_rules({file})` | 查詢專案規則（AGENTS.md / .cursorrules 等）— **編輯前必查** |
 | `smart_lsp({operation, file, line, character})` | **Type-aware 程式碼理解** — 找定義、查引用、看型別、診斷錯誤。支援 TS/JS/Python/Rust/Swift/PHP |
@@ -93,9 +94,6 @@ permission:
 | 程式碼分析 | `import_graph` | 匯入依賴圖 |
 | 程式碼分析 | `code_call_graph` | 函式呼叫關係追蹤 |
 | 程式碼分析 | `code_query` | CKG 程式碼知識圖譜查詢 |
-| 編輯 | `fast_apply` | 🥇 套用 LLM patch（unified-diff / SEARCH-REPLACE） |
-| 編輯 | `edit` | 🥈 字串取代編輯 |
-| 編輯 | `edit_ast` | 🥉 **AST 感知編輯** — 三模式：content-match（上下文容錯取代）、block-boundary（行區間 insert/replace/delete）、symbol-edit（在特定 symbol body 內編輯） |
 | 編輯 | `patch_gen` | 從分析輸出產生 patch（串接 error_diagnose→patch_gen） |
 | 編輯 | `cross_file_edit` | 跨檔案編輯 |
 | 編輯 | `rename_safety` | 安全重新命名 |
@@ -374,26 +372,21 @@ LLM 也可以在 self-correction loop 中主動呼叫 smart_hallucination_check 
 
 ---
 
-## ⚡ fast_apply vs edit（編輯規則）
+## ⚡ fast_apply（統一編輯工具）
 
-兩個都是 **Layer 2 sub-tools**，需透過 `ssr()` 呼叫。
+`fast_apply` 是 **Layer 1 一級工具**，可直接呼叫，完全取代原生 write 和 edit。
 
-> `ssr({tool:"fast_apply", args:{...}})`  
-> `ssr({tool:"edit", args:{oldString:"...", newString:"..."}})`
+| 情境 | 用法 |
+|------|------|
+| **創建新檔案** | `smart_fast_apply({file:"new.ts", content:"...", apply:true})` |
+| **單行取代編輯** | `smart_fast_apply({file:"a.ts", search:"old", replace:"new", apply:true})` |
+| **多位置修改** | `smart_fast_apply({blocks:[{file,search,replace},...], apply:true})` |
+| **套用 LLM patch** | `smart_fast_apply({text:"<<diff/SEARCH-REPLACE>>", apply:true})` |
+| **大檔案精確編輯** | `smart_fast_apply({changes:[{file,startLine,endLine,newContent}], apply:true})` |
+| **AST 結構編輯** | `smart_fast_apply({file, symbol, action, newContent})` — symbol body/行區間操作 |
 
-| 情況 | 用哪個 |
-|------|--------|
-| 套用 unified-diff / SEARCH-REPLACE block | **fast_apply** 🥇 |
-| 套用 LLM 產生的 patch（含自我修正、review 建議） | **fast_apply** 🥇 |
-| 一次改 3 行以上，或跨多位置 | **fast_apply** 🥇 |
-| 修改來自其他工具輸出（error_diagnose 的 fix） | **fast_apply** 🥇 |
-| **單行/小區塊（1-3 行）精確修改** | **edit** 🥈 |
-| 我當下直接決定的簡單數值/字串修正 | **edit** 🥈 |
-| **需要在 symbol body 內編輯（append/prepend/replace）** | **edit_ast** 🥉 (ssr) |
-| **行區間操作（insert before/after / replace range / delete）** | **edit_ast** 🥉 (ssr) |
-| **內容匹配需容錯 whitespace 差異** | **edit_ast** 🥉 (ssr) |
-
-> ⚠️ 違反此規則多花 40-60% token，記入反省機制
+> `fast_apply` 預設 dryRun:true，安全無副作用。確認後加 `apply:true` 才實際寫入。
+> 支援 6 種 patch 格式，6 級 fuzzy match，atomic multi-file apply
 
 ---
 
@@ -419,7 +412,7 @@ Smart MCP 自動壓縮大型輸出（L0/L1/L2）。遇到 `_optimized`：
   ❌ 自寫腳本測試 API（用 ssr({tool:"pw_browser"}) 取代）
   ❌ 手動 curl/wget 猜參數（用 ssr({tool:"pw_browser"}) + addInitScript 攔截）
   ❌ 用 read 工具（已被禁用 — smart_read 完全取代文字/目錄/圖片讀取）
-  ❌ 用 bash（cat/head/tail）讀取檔案內容（用 ssr({tool:"smart_read", args:{file:"..."}}) 取代）
+  ❌ 用 bash（cat/head/tail）讀取檔案內容（用 smart_read({file:"..."}) 取代）
   ❌ 不查規則就編輯（先用 smart_rules({file:"目標檔案"}) 確認專案慣例）
   ❌ 用 grep 找定義/引用（用 smart_lsp({operation:"definition"|"references"}) — LSP 比 regex 精準且省 token）
   ❌ 用 webfetch 研究 GitHub repo（先用 `git clone` 下載到 `/tmp/`，再本地分析 — webfetch 只抓到 HTML 浪費 token，clone 後用 bash/find/smart_read/grep 精準探索）
@@ -431,7 +424,7 @@ task 強制規則：
   """
   [Smart MCP Routing — injected by parent]
   工具優先順序：smart_lsp > smart_read > smart_grep > raw grep/read
-  編輯用 ssr(fast_apply) 或 ssr(edit)，不可直接用 write/sed
+  編輯用 smart_fast_apply（取代 write+edit，可直接呼叫），複雜結構編輯用 ssr(edit_ast)
   不確定工具 → ssr({tool:"hybrid_router", args:{question:"..."}})
   安全修復前必須跑 smart_think({mode:"beam"})
   查專案慣例 → smart_rules({file:"..."})

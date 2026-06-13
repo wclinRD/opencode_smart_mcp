@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-13T03:20:42.594Z",
+  "generatedAt": "2026-06-13T04:22:45.811Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -42,6 +42,106 @@
         "required": [
           "toolHistory"
         ]
+      }
+    },
+    {
+      "name": "smart_read",
+      "description": "Progressive file reader — FULLY replaces raw read (text + dirs + images).\n  Session cache: same file unchanged = zero disk reads.\n\n  🥇 auto      — Smart mode by file size (<50 full, 50-300 sig, >300 outline)\n  📋 outline   — Structure: function/class/variable declarations + line numbers\n  📝 signatures — Structure + signature text + line ranges\n  🔍 symbol    — Extract specific symbol full body (by name)\n  🧠 explain   — Symbol + imports + callers in one call\n  📏 range     — Specific line range (startLine/endLine) + checksum\n  📄 full      — Traditional full read, offset/limit paging\n  📚 batch     — Read multiple files in one call\n  🗺  project   — Project symbol map <500 tokens\n  🖼  image     — PNG/JPG/GIF/WebP returned as viewable attachment\n  📁 directory  — Auto-detected, returns sorted listing\n\n  Output: text (default), compact, json\n  Session cache: repeat reads = zero disk I/O",
+      "category": "core",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": true,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "File path (relative to root or absolute)"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "outline",
+              "signatures",
+              "symbol",
+              "explain",
+              "range",
+              "full",
+              "batch",
+              "list",
+              "project",
+              "image"
+            ],
+            "description": "Read mode (default: auto)"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Symbol name (required for mode:symbol | explain)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: cwd)"
+          },
+          "offset": {
+            "type": "number",
+            "description": "Starting line (1-indexed, for full mode)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Max lines to read (for full/range mode)"
+          },
+          "startLine": {
+            "type": "number",
+            "description": "Start line (1-indexed, for range mode)"
+          },
+          "endLine": {
+            "type": "number",
+            "description": "End line (1-indexed, inclusive, for range mode)"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "File paths for batch mode"
+          },
+          "depth": {
+            "type": "number",
+            "description": "Max depth for project mode (default: 4)"
+          },
+          "maxFiles": {
+            "type": "number",
+            "description": "Max files for project mode (default: 40)"
+          },
+          "lang": {
+            "type": "string",
+            "description": "Force language (auto-detect if not provided)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "compact",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          },
+          "numbered": {
+            "type": "boolean",
+            "description": "Include line numbers (full/range mode, default: true)"
+          }
+        }
       }
     },
     {
@@ -2809,6 +2909,95 @@
       }
     },
     {
+      "name": "smart_edit_ast",
+      "description": "AST-aware code editor — more precise than smart_edit.\n\n  🥇 content-match — Context-aware replacement (whitespace-tolerant, shows surrounding code)\n  🥈 block-boundary — Line-range editing (insert/replace/delete at line boundaries)\n  🥉 symbol-edit — Edit within a specific symbol body (uses smart_read to locate)\n\n  Examples:\n    { mode: \"content-match\", file: \"src/auth.ts\", match: \"function login\", replace: \"function login(credentials)\" }\n    { mode: \"block-boundary\", file: \"src/auth.ts\", action: \"replace\", startLine: 10, endLine: 15, text: \"new code here\" }\n    { mode: \"symbol-edit\", file: \"src/auth.ts\", symbol: \"authenticate\", action: \"append\", text: \"  console.log('called');\" }",
+      "category": "standard",
+      "domain": "edit",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "File path (relative to root or absolute)"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "content-match",
+              "block-boundary",
+              "symbol-edit"
+            ],
+            "description": "Edit mode (default: content-match)"
+          },
+          "match": {
+            "type": "string",
+            "description": "Content to match (context-aware, trim-tolerant)"
+          },
+          "replace": {
+            "type": "string",
+            "description": "Replacement content (for content-match mode)"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "insert-before",
+              "insert-after",
+              "replace",
+              "delete"
+            ],
+            "description": "Block action (for block-boundary mode)"
+          },
+          "startLine": {
+            "type": "number",
+            "description": "Start line (1-indexed, for block-boundary mode)"
+          },
+          "endLine": {
+            "type": "number",
+            "description": "End line (inclusive, for block-boundary replace/delete)"
+          },
+          "text": {
+            "type": "string",
+            "description": "Text to insert (for block-boundary insert/replace)"
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Symbol name to edit within (for symbol-edit mode)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: cwd)"
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Apply changes (default: false — dry run with diff)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "file"
+        ]
+      }
+    },
+    {
       "name": "smart_hallucination_check",
       "description": "Check LLM output for hallucinations (fabrication, misattribution, unfaithful, self-contradiction, off-topic, confident-refusal).\n\nRuns 5 structural checks:\n  1. Factual — are mentioned identifiers present in context?\n  2. Consistency — are there internal contradictions?\n  3. Groundedness — can conclusions be traced to context?\n  4. Off-topic — does output address the query?\n  5. Confidence — overconfident language without evidence?\n\nDOI Verification mode (mode:\"doi\"):\n  Extracts all DOIs from the output and verifies each via doi.org liveness check.\n  Dead DOIs (404) = likely fabricated. Restricted (403) = paywalled but may exist.\n\nReturns: { overallScore: 1-10, verdict: \"pass\"|\"warn\"|\"fail\", issues[], summary }\n\nExamples:\n  { output: \"The bug is in parser.js...\", context: \"Error at parser.js:42\" }\n  { output: \"...\", query: \"Why does the parser crash?\", strictness: 7 }\n  { output: \"Smith (2024, doi:10.1234/fake) found...\", mode: \"doi\" }",
       "category": "standard",
@@ -3138,161 +3327,6 @@
         },
         "required": [
           "command"
-        ]
-      }
-    },
-    {
-      "name": "smart_edit",
-      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
-      "category": "standard",
-      "domain": "edit",
-      "safetyLevel": "high",
-      "routingRules": {
-        "autoRoute": true,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "file": {
-            "type": "string",
-            "description": "File path to edit (required)"
-          },
-          "oldString": {
-            "type": "string",
-            "description": "Text to find and replace (exact match by default, regex if regex=true)"
-          },
-          "newString": {
-            "type": "string",
-            "description": "Replacement text"
-          },
-          "files": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Multiple files to edit (alternative to file)"
-          },
-          "regex": {
-            "type": "boolean",
-            "description": "Use regex matching instead of exact (default: false)"
-          },
-          "apply": {
-            "type": "boolean",
-            "description": "Apply changes (default: false — dry run)"
-          },
-          "root": {
-            "type": "string",
-            "description": "Project root (default: current dir)"
-          },
-          "format": {
-            "type": "string",
-            "enum": [
-              "json",
-              "text"
-            ],
-            "description": "Output format (default: json — includes nextCommand)"
-          }
-        },
-        "required": [
-          "oldString",
-          "newString"
-        ]
-      }
-    },
-    {
-      "name": "smart_edit_ast",
-      "description": "AST-aware code editor — more precise than smart_edit.\n\n  🥇 content-match — Context-aware replacement (whitespace-tolerant, shows surrounding code)\n  🥈 block-boundary — Line-range editing (insert/replace/delete at line boundaries)\n  🥉 symbol-edit — Edit within a specific symbol body (uses smart_read to locate)\n\n  Examples:\n    { mode: \"content-match\", file: \"src/auth.ts\", match: \"function login\", replace: \"function login(credentials)\" }\n    { mode: \"block-boundary\", file: \"src/auth.ts\", action: \"replace\", startLine: 10, endLine: 15, text: \"new code here\" }\n    { mode: \"symbol-edit\", file: \"src/auth.ts\", symbol: \"authenticate\", action: \"append\", text: \"  console.log('called');\" }",
-      "category": "standard",
-      "domain": "edit",
-      "safetyLevel": "high",
-      "routingRules": {
-        "autoRoute": true,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "file": {
-            "type": "string",
-            "description": "File path (relative to root or absolute)"
-          },
-          "mode": {
-            "type": "string",
-            "enum": [
-              "content-match",
-              "block-boundary",
-              "symbol-edit"
-            ],
-            "description": "Edit mode (default: content-match)"
-          },
-          "match": {
-            "type": "string",
-            "description": "Content to match (context-aware, trim-tolerant)"
-          },
-          "replace": {
-            "type": "string",
-            "description": "Replacement content (for content-match mode)"
-          },
-          "action": {
-            "type": "string",
-            "enum": [
-              "insert-before",
-              "insert-after",
-              "replace",
-              "delete"
-            ],
-            "description": "Block action (for block-boundary mode)"
-          },
-          "startLine": {
-            "type": "number",
-            "description": "Start line (1-indexed, for block-boundary mode)"
-          },
-          "endLine": {
-            "type": "number",
-            "description": "End line (inclusive, for block-boundary replace/delete)"
-          },
-          "text": {
-            "type": "string",
-            "description": "Text to insert (for block-boundary insert/replace)"
-          },
-          "symbol": {
-            "type": "string",
-            "description": "Symbol name to edit within (for symbol-edit mode)"
-          },
-          "root": {
-            "type": "string",
-            "description": "Project root (default: cwd)"
-          },
-          "apply": {
-            "type": "boolean",
-            "description": "Apply changes (default: false — dry run with diff)"
-          },
-          "format": {
-            "type": "string",
-            "enum": [
-              "text",
-              "json"
-            ],
-            "description": "Output format (default: text)"
-          }
-        },
-        "required": [
-          "file"
         ]
       }
     },
@@ -4375,11 +4409,11 @@
       }
     },
     {
-      "name": "smart_read",
-      "description": "Progressive file reader — FULLY replaces raw read (text + dirs + images).\n  Session cache: same file unchanged = zero disk reads.\n\n  🥇 auto      — Smart mode by file size (<50 full, 50-300 sig, >300 outline)\n  📋 outline   — Structure: function/class/variable declarations + line numbers\n  📝 signatures — Structure + signature text + line ranges\n  🔍 symbol    — Extract specific symbol full body (by name)\n  🧠 explain   — Symbol + imports + callers in one call\n  📏 range     — Specific line range (startLine/endLine) + checksum\n  📄 full      — Traditional full read, offset/limit paging\n  📚 batch     — Read multiple files in one call\n  🗺  project   — Project symbol map <500 tokens\n  🖼  image     — PNG/JPG/GIF/WebP returned as viewable attachment\n  📁 directory  — Auto-detected, returns sorted listing\n\n  Output: text (default), compact, json\n  Session cache: repeat reads = zero disk I/O",
+      "name": "smart_edit",
+      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
       "category": "standard",
-      "domain": "general",
-      "safetyLevel": "medium",
+      "domain": "edit",
+      "safetyLevel": "high",
       "routingRules": {
         "autoRoute": true,
         "interceptorRequired": false,
@@ -4396,82 +4430,48 @@
         "properties": {
           "file": {
             "type": "string",
-            "description": "File path (relative to root or absolute)"
+            "description": "File path to edit (required)"
           },
-          "mode": {
+          "oldString": {
             "type": "string",
-            "enum": [
-              "auto",
-              "outline",
-              "signatures",
-              "symbol",
-              "explain",
-              "range",
-              "full",
-              "batch",
-              "list",
-              "project",
-              "image"
-            ],
-            "description": "Read mode (default: auto)"
+            "description": "Text to find and replace (exact match by default, regex if regex=true)"
           },
-          "symbol": {
+          "newString": {
             "type": "string",
-            "description": "Symbol name (required for mode:symbol | explain)"
-          },
-          "root": {
-            "type": "string",
-            "description": "Project root (default: cwd)"
-          },
-          "offset": {
-            "type": "number",
-            "description": "Starting line (1-indexed, for full mode)"
-          },
-          "limit": {
-            "type": "number",
-            "description": "Max lines to read (for full/range mode)"
-          },
-          "startLine": {
-            "type": "number",
-            "description": "Start line (1-indexed, for range mode)"
-          },
-          "endLine": {
-            "type": "number",
-            "description": "End line (1-indexed, inclusive, for range mode)"
+            "description": "Replacement text"
           },
           "files": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "File paths for batch mode"
+            "description": "Multiple files to edit (alternative to file)"
           },
-          "depth": {
-            "type": "number",
-            "description": "Max depth for project mode (default: 4)"
+          "regex": {
+            "type": "boolean",
+            "description": "Use regex matching instead of exact (default: false)"
           },
-          "maxFiles": {
-            "type": "number",
-            "description": "Max files for project mode (default: 40)"
+          "apply": {
+            "type": "boolean",
+            "description": "Apply changes (default: false — dry run)"
           },
-          "lang": {
+          "root": {
             "type": "string",
-            "description": "Force language (auto-detect if not provided)"
+            "description": "Project root (default: current dir)"
           },
           "format": {
             "type": "string",
             "enum": [
-              "text",
-              "compact",
-              "json"
+              "json",
+              "text"
             ],
-            "description": "Output format (default: text)"
-          },
-          "numbered": {
-            "type": "boolean",
-            "description": "Include line numbers (full/range mode, default: true)"
+            "description": "Output format (default: json — includes nextCommand)"
           }
-        }
+        },
+        "required": [
+          "oldString",
+          "newString"
+        ]
       }
     },
     {

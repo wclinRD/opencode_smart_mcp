@@ -1,4 +1,4 @@
-// smart-read.mjs → smart_read (via smart_smart_run router)
+// smart-read.mjs → smart_read (native tool, direct call — no router)
 // Phase 24: Session cache + explain + project map
 //
 // 九種模式：
@@ -86,7 +86,7 @@ function storeInCache(key, filePath, result) {
 
 export default {
   name: 'smart_read',
-  category: 'standard',
+  category: 'core',
   description: `Progressive file reader — FULLY replaces raw read (text + dirs + images).
   Session cache: same file unchanged = zero disk reads.
 
@@ -220,7 +220,7 @@ export default {
       };
 
       // Session cache: skip disk read if file unchanged
-      const result = cacheWrap(reader, filePath, readOpts);
+      const result = await cacheWrap(reader, filePath, readOpts);
 
       // Image content — return raw _imageContent for server to construct MCP image response
       if (result._imageContent) return result;

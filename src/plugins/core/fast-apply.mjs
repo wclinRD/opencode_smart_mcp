@@ -19,7 +19,8 @@
 //   patch_gen → fast_apply → test
 
 import { readFileSync } from 'node:fs';
-import { relative, resolve } from 'node:path';
+import { relative, resolve, extname } from 'node:path';
+import { extractSymbol, detectLanguage } from '../../lib/smart-read.mjs';
 import {
   applySearchReplace,
   applySearchReplaceWithLazy,
@@ -43,7 +44,7 @@ export default {
   name: 'smart_fast_apply',
   category: 'edit',
   cli: 'fast-apply.mjs',
-  description: `Use when: need to apply LLM-suggested code edits faster and more accurately.
+  description: `Unified editing tool — replaces write + edit + edit_ast.
 Supports 6 input formats (ordered by token efficiency):
   - unified-diff: git diff format — MOST token-efficient (40-60% savings). Use +/- lines only, no unchanged lines needed.
   - lazy: SEARCH/REPLACE with // ... existing code ... markers (80-98% savings for large files)
@@ -107,6 +108,38 @@ Dry-run by default — safe to use without side effects.`,
         },
         description: 'Hashline edit changes (for format=hashline). Specify line range directly with content verification — most robust for large files.',
       },
+      // ── Flat shortcut syntax (替代原生 write/edit，LLM 不需選工具) ──
+      file: {
+        type: 'string',
+        description: 'Target file path (flat syntax). Combine with content to create file, or with search+replace to edit.',
+      },
+      search: {
+        type: 'string',
+        description: 'Text to find (flat syntax, paired with replace and file)',
+      },
+      replace: {
+        type: 'string',
+        description: 'Replacement text (flat syntax, paired with search and file)',
+      },
+      content: {
+        type: 'string',
+        description: 'New file content (flat syntax, paired with file — creates or overwrites entire file)',
+      },
+      // ── Symbol-aware editing (取代 edit_ast) ──
+      symbol: {
+        type: 'string',
+        description: 'Symbol name (function/class) for symbol-aware editing. Combines with action+newContent to edit a specific symbol body.',
+      },
+      newContent: {
+        type: 'string',
+        description: 'Content for symbol-aware editing (paired with symbol+action) or block-boundary action (paired with action+startLine)',
+      },
+      action: {
+        type: 'string',
+        enum: ['append', 'prepend', 'replace', 'insert-before', 'insert-after', 'delete'],
+        description: 'Edit action. With symbol: append/prepend/replace. With startLine: insert-before/insert-after/delete.',
+      },
+
       files: {
         type: 'array',
         items: { type: 'string' },
@@ -200,10 +233,46 @@ Dry-run by default — safe to use without side effects.`,
         }
       }
 
+      // ── Flat shortcut syntax ──
+      if (changes.length === 0 && args.file) {
+        if (args.content !== undefined) {
+          // file+content → whole-file create/write
+          changes = [{ file: args.file, content: args.content, type: 'whole' }];
+        } else if (args.search !== undefined && args.replace !== undefined) {
+          // file+search+replace → search-replace edit
+          changes = [{ file: args.file, search: args.search, replace: args.replace, type: 'search-replace' }];
+        } else if (args.symbol) {
+          // file+symbol+action+newContent → symbol-edit (取代 edit_ast)
+          const filePath = resolve(root, args.file);
+          const symContent = readFileSafe(filePath);
+          if (symContent === null) {
+            return formatOutput({ status: 'error', error: `File not found: ${args.file}` }, outputFormat);
+          }
+          const lang = detectLanguage(filePath);
+          const sym = extractSymbol(symContent, lang, args.symbol);
+          if (!sym) {
+            return formatOutput({ status: 'error', error: `Symbol "${args.symbol}" not found in ${args.file}` }, outputFormat);
+          }
+          const act = args.action || 'replace';
+          const nc = args.newContent || '';
+          if (act === 'prepend') {
+            changes = [{ file: args.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineStart, newContent: nc, action: 'insert-before' }];
+          } else if (act === 'append') {
+            changes = [{ file: args.file, type: 'hashline', startLine: sym.lineEnd, endLine: sym.lineEnd, newContent: nc, action: 'insert-after' }];
+          } else {
+            // replace: replace entire symbol body
+            changes = [{ file: args.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineEnd, newContent: nc, action: 'replace' }];
+          }
+        } else if (args.action && ['insert-before','insert-after','delete'].includes(args.action)) {
+          // file+action+startLine+newContent → block-boundary action
+          changes = [{ file: args.file, type: 'hashline', startLine: args.startLine, endLine: args.endLine || args.startLine, newContent: args.newContent || '', action: args.action }];
+        }
+      }
+
       if (changes.length === 0) {
         return formatOutput({
           status: 'error',
-          error: 'No changes parsed from input. Provide blocks, text, diff, or whole.',
+          error: 'No changes parsed from input. Provide blocks, text, diff, whole, or flat syntax (file+content / file+search+replace).',
         }, outputFormat);
       }
 
@@ -228,8 +297,8 @@ Dry-run by default — safe to use without side effects.`,
     const multiFile = changes.length > 2;
 
     for (const ch of changes) {
-      // File access check for all types
-      if (ch.file) {
+      // File access check for all types (skip whole-file — creates new files)
+      if (ch.file && ch.type !== 'whole') {
         const access = checkFileAccess(ch.file);
         if (!access.ok) {
           previewResults.push({ file: ch.file, status: 'error', error: access.errors.join('; ') });
@@ -393,7 +462,7 @@ Dry-run by default — safe to use without side effects.`,
         } else if (ch.type === 'whole') {
           r = applyWholeFile(ch.file, ch.content, { undo });
         } else if (ch.type === 'hashline') {
-          r = applyHashline(ch.file, { startLine: ch.startLine, endLine: ch.endLine, oldContent: ch.oldContent || '', newContent: ch.newContent }, { undo });
+          r = applyHashline(ch.file, { startLine: ch.startLine, endLine: ch.endLine, oldContent: ch.oldContent || '', newContent: ch.newContent, action: ch.action }, { undo });
         }
         appResults.push(r || { status: 'error', file: ch.file, error: 'Unknown type' });
       }

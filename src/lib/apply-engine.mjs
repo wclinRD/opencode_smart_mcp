@@ -356,10 +356,11 @@ export function verifyLineFingerprint(content, lineNum, expectedContent) {
  * @returns {{ status: 'applied'|'conflict'|'error', file: string, ... }}
  */
 export function applyHashline(filePath, change, opts = {}) {
-  const { startLine, endLine, oldContent, newContent } = change;
+  const { startLine, endLine, oldContent, newContent, action = 'replace' } = change;
   const { undo = false } = opts;
 
-  if (!startLine || !endLine || startLine > endLine) {
+  // For insert-before/insert-after, endLine can equal startLine
+  if (!startLine || ((action === 'replace' || action === 'delete') && (!endLine || startLine > endLine))) {
     return { status: 'error', file: filePath, error: `Invalid line range: ${startLine}-${endLine}` };
   }
 
@@ -372,58 +373,89 @@ export function applyHashline(filePath, change, opts = {}) {
   }
 
   const lines = content.split('\n');
-  if (endLine > lines.length) {
+  const eLine = action === 'replace' || action === 'delete' ? endLine : startLine;
+  if (eLine > lines.length) {
     return {
       status: 'conflict', file: filePath,
-      error: `Line range ${startLine}-${endLine} exceeds file length (${lines.length} lines)`,
+      error: `Line ${eLine} exceeds file length (${lines.length} lines)`,
     };
   }
 
-  // Verify oldContent against the line range
-  const actualRange = lines.slice(startLine - 1, endLine).join('\n');
-  const oldNorm = normalizeWS(oldContent || '');
-  const actualNorm = normalizeWS(actualRange);
+  // oldContent verification only for replace/delete
+  if ((action === 'replace' || action === 'delete') && oldContent) {
+    const actualRange = lines.slice(startLine - 1, endLine).join('\n');
+    const oldNorm = normalizeWS(oldContent || '');
+    const actualNorm = normalizeWS(actualRange);
 
-  if (oldNorm !== actualNorm) {
-    // Try line-by-line fingerprint verification for better error reporting
-    const fpOld = computeLineFingerprints(oldContent || '', { includeRaw: true });
-    const fpActual = computeLineFingerprints(actualRange, { includeRaw: true });
+    if (oldNorm !== actualNorm) {
+      const fpOld = computeLineFingerprints(oldContent || '', { includeRaw: true });
+      const fpActual = computeLineFingerprints(actualRange, { includeRaw: true });
 
-    const mismatches = [];
-    for (let i = 0; i < Math.max(fpOld.length, fpActual.length); i++) {
-      const o = fpOld[i];
-      const a = fpActual[i];
-      if (!o || !a || o.fingerprint !== a.fingerprint) {
-        mismatches.push({
-          line: startLine + i,
-          expected: o?.raw || '(missing)',
-          actual: a?.raw || '(missing)',
-        });
+      const mismatches = [];
+      for (let i = 0; i < Math.max(fpOld.length, fpActual.length); i++) {
+        const o = fpOld[i];
+        const a = fpActual[i];
+        if (!o || !a || o.fingerprint !== a.fingerprint) {
+          mismatches.push({
+            line: startLine + i,
+            expected: o?.raw || '(missing)',
+            actual: a?.raw || '(missing)',
+          });
+        }
       }
+
+      return {
+        status: 'conflict', file: filePath,
+        error: `Content mismatch at line ${startLine}. File has changed since LLM read it.`,
+        details: {
+          expected: oldContent,
+          actual: actualRange,
+          mismatches: mismatches.slice(0, 5),
+          hint: 'The file has drifted — re-read the file and generate a new edit.',
+        },
+      };
     }
-
-    return {
-      status: 'conflict', file: filePath,
-      error: `Content mismatch at line ${startLine}. File has changed since LLM read it.`,
-      details: {
-        expected: oldContent,
-        actual: actualRange,
-        mismatches: mismatches.slice(0, 5), // show first 5 mismatches
-        hint: 'The file has drifted — re-read the file and generate a new edit.',
-      },
-    };
   }
-
-  // Apply replacement
-  const before = lines.slice(0, startLine - 1).join('\n');
-  const after = lines.slice(endLine).join('\n');
-  const prefix = before ? before + '\n' : '';
-  const suffix = after ? '\n' + after : '';
-  const newContent_full = prefix + newContent + suffix;
 
   // Create undo snapshot
   if (undo) {
     try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* */ }
+  }
+
+  let newContent_full;
+
+  switch (action) {
+    case 'insert-before':
+      {
+        const beforeIns = lines.slice(0, startLine - 1).join('\n');
+        const afterIns = lines.slice(startLine - 1).join('\n');
+        newContent_full = (beforeIns ? beforeIns + '\n' : '') + newContent + (afterIns ? '\n' + afterIns : '');
+        break;
+      }
+    case 'insert-after':
+      {
+        const bef = lines.slice(0, startLine).join('\n');
+        const aft = lines.slice(startLine).join('\n');
+        newContent_full = (bef ? bef + '\n' : '') + newContent + (aft ? '\n' + aft : '');
+        break;
+      }
+    case 'delete':
+      {
+        const beforeDel = lines.slice(0, startLine - 1).join('\n');
+        const afterDel = lines.slice(endLine).join('\n');
+        newContent_full = beforeDel + (beforeDel && afterDel ? '\n' : '') + afterDel;
+        break;
+      }
+    case 'replace':
+    default:
+      {
+        const beforeRep = lines.slice(0, startLine - 1).join('\n');
+        const afterRep = lines.slice(endLine).join('\n');
+        const prefix = beforeRep ? beforeRep + '\n' : '';
+        const suffix = afterRep ? '\n' + afterRep : '';
+        newContent_full = prefix + newContent + suffix;
+        break;
+      }
   }
 
   try {
