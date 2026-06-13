@@ -417,6 +417,8 @@ function findBodyEnd(lines, startLine, lang) {
       if (ch === '}') braceDepth--;
     }
 
+    if (braceDepth <= 0) return startFrom + 1; // Balanced on same line: exclusive end
+
     // Continue scanning subsequent lines
     for (let i = startFrom + 1; i < lines.length; i++) {
       const line = lines[i];

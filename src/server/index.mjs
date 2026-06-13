@@ -913,6 +913,10 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
   if (success && toolName === 'smart_fast_apply' && result.output) {
     result._pendingImpact = triggerImpactWarning(args);
   }
+  // Phase 1: LSP Diagnostics — auto-trigger after fast_apply to catch type errors
+  if (success && toolName === 'smart_fast_apply' && result.output) {
+    result._pendingLsp = triggerLspDiagnostics(args);
+  }
   // Phase 6: Hallucination Detection — auto-trigger for high-risk tool outputs
   if (success && isHighRiskOutput(toolName) && result.output) {
     result._pendingHallucination = triggerHallucinationCheck(toolName, args, result);
@@ -1018,6 +1022,66 @@ async function triggerImpactWarning(args) {
     return '';
   } catch (e) {
     debugLog('Impact warning error:', e.message);
+    return '';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1: LSP Diagnostics — post-edit type checking
+// ---------------------------------------------------------------------------
+
+/**
+ * Fire-and-forget: run LSP diagnostics on files modified by smart_fast_apply.
+ * Appends structured diagnostics to result output so LLM can auto-fix errors.
+ */
+async function triggerLspDiagnostics(args) {
+  try {
+    const files = extractFilesFromFastApplyArgs(args);
+    if (files.length === 0) return '';
+
+    // Only run on supported LSP file types
+    const SUPPORTED_EXTS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.py', '.rs', '.swift', '.php'];
+    const lspFiles = files.filter(f => SUPPORTED_EXTS.some(ext => f.endsWith(ext)));
+    if (lspFiles.length === 0) return '';
+
+    const { default: lspPlugin } = await import('../plugins/core/lsp.mjs');
+    if (typeof lspPlugin?.handler !== 'function') return '';
+
+    const root = args.root || process.cwd();
+    const results = [];
+
+    for (const file of lspFiles) {
+      try {
+        const diagOutput = await lspPlugin.handler({ operation: 'diagnostics', file, root });
+        const parsed = typeof diagOutput === 'string' ? JSON.parse(diagOutput) : diagOutput;
+        if (parsed?.diagnostics?.length > 0) {
+          results.push({ file, diagnostics: parsed.diagnostics });
+        }
+      } catch {
+        // Skip files where LSP fails (e.g., language server not running)
+      }
+    }
+
+    if (results.length === 0) return '';
+
+    // Format diagnostics as compact, actionable output
+    const lines = ['\n\n---\n🔍 LSP 診斷 (自動驗證)'];
+    for (const r of results) {
+      lines.push(`\n📄 ${r.file}:`);
+      for (const d of r.diagnostics.slice(0, 5)) { // Cap at 5 per file
+        const severity = d.severity === 1 ? '❌' : d.severity === 2 ? '⚠️' : '💡';
+        lines.push(`  ${severity} L${d.line}:${d.character} — ${d.message}`);
+      }
+      if (r.diagnostics.length > 5) {
+        lines.push(`  ... 還有 ${r.diagnostics.length - 5} 個問題`);
+      }
+    }
+    lines.push('\n💡 請根據以上 LSP 診斷結果修正程式碼。');
+    lines.push('---');
+
+    return lines.join('\n');
+  } catch (e) {
+    debugLog('LSP diagnostics error:', e.message);
     return '';
   }
 }
@@ -1444,6 +1508,14 @@ function respond(id, result, opts = {}) {
       delete result._pendingHallucination;
       if (hcText && result?.content?.[0]?.type === 'text') {
         result.content[0].text += hcText;
+      }
+    }
+    // Phase 1: Await LSP diagnostics result
+    if (result._pendingLsp) {
+      const lspText = await result._pendingLsp;
+      delete result._pendingLsp;
+      if (lspText && result?.content?.[0]?.type === 'text') {
+        result.content[0].text += lspText;
       }
     }
     writeMsg({ jsonrpc: '2.0', id, result });
