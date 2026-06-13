@@ -433,6 +433,146 @@ describe('quickThought / quickThink', () => {
     assert.ok(result.output.includes('2/3 trees'));
     assert.ok(result.output.includes('Bug C with supporting'));
   });
+
+  // ── Structured Thinking mode tests (Phase 16) ──
+
+  it('structured mode shows all 5 sections (GOAL/STATE/ALGO/EDGE/VERIFY)', () => {
+    const result = quickThought({
+      thought: '',
+      nextThoughtNeeded: false,
+      mode: 'structured',
+      goal: '找出 login API 的 null pointer 錯誤',
+      state: '錯誤發生在 auth.ts:142，stack trace 指向 parseToken()',
+      algo: '1. 檢查 parseToken() 的 null check\n2. 追蹤呼叫鏈\n3. 確認修復方案',
+      edge: '不影響其他 API endpoint，只改 auth.ts',
+      verify: '修復後跑 smart_test 確認 login flow 正常',
+    });
+    assert.ok(result.output.includes('Structured Thinking'));
+    assert.ok(result.output.includes('GOAL:'));
+    assert.ok(result.output.includes('找出 login API 的 null pointer 錯誤'));
+    assert.ok(result.output.includes('STATE:'));
+    assert.ok(result.output.includes('auth.ts:142'));
+    assert.ok(result.output.includes('ALGO:'));
+    assert.ok(result.output.includes('parseToken()'));
+    assert.ok(result.output.includes('EDGE:'));
+    assert.ok(result.output.includes('不影響其他 API endpoint'));
+    assert.ok(result.output.includes('VERIFY:'));
+    assert.ok(result.output.includes('smart_test'));
+  });
+
+  it('structured mode with partial fields works correctly', () => {
+    const result = quickThought({
+      thought: '',
+      nextThoughtNeeded: true,
+      mode: 'structured',
+      goal: '簡單任務',
+      state: '已知資訊',
+      // algo, edge, verify omitted
+    });
+    assert.ok(result.output.includes('Structured Thinking'));
+    assert.ok(result.output.includes('GOAL:'));
+    assert.ok(result.output.includes('STATE:'));
+    // Should NOT show empty sections
+    assert.equal(result.output.includes('ALGO:'), false);
+    assert.equal(result.output.includes('EDGE:'), false);
+    assert.equal(result.output.includes('VERIFY:'), false);
+  });
+
+  it('structured mode with supplementary thought appends free-form', () => {
+    const result = quickThought({
+      thought: '補充說明：這個問題也可能跟 race condition 有關',
+      nextThoughtNeeded: false,
+      mode: 'structured',
+      goal: 'Debug null pointer',
+      state: 'auth.ts:142',
+    });
+    assert.ok(result.output.includes('Structured Thinking'));
+    assert.ok(result.output.includes('[Supplementary]'));
+    assert.ok(result.output.includes('race condition'));
+  });
+
+  it('structured mode fallback when no structured fields provided', () => {
+    const result = quickThought({
+      thought: 'Free-form fallback thinking...',
+      nextThoughtNeeded: false,
+      mode: 'structured',
+      // No goal/state/algo/edge/verify
+    });
+    assert.ok(result.output.includes('Structured Thinking (free-form fallback)'));
+    assert.ok(result.output.includes('Free-form fallback thinking...'));
+  });
+
+  it('structured mode output is more compact than equivalent free-form', () => {
+    // Simulate a realistic verbose free-form thought (LLM-style with scaffolding)
+    const freeFormThought = [
+      'Let me think about this carefully.',
+      '',
+      'First, I need to understand what the error is. The error appears to be a null pointer exception. Let me trace through the code to understand where it occurs.',
+      '',
+      'Looking at the stack trace, the error occurs in the auth.ts file at line 142. The function that seems to be causing the issue is parseToken(). This is likely because the token being passed to parseToken() is null or undefined.',
+      '',
+      'I should check if there is a null check before the parseToken() call. If there is no null check, that would explain why we are getting a null pointer exception.',
+      '',
+      'The fix should be straightforward: add a null check before calling parseToken(). This should be isolated to the auth.ts file and should not affect other API endpoints since parseToken() is only called from within auth.ts.',
+      '',
+      'After implementing the fix, I will need to verify it works. I should run the test suite, particularly the login flow tests, to make sure everything still works correctly.',
+      '',
+      'In conclusion, the root cause is a missing null check in parseToken() at auth.ts:142. The fix is to add a null check. The impact is limited to auth.ts. Verification will be done via smart_test.',
+    ].join('\n');
+    const freeFormResult = quickThought({
+      thought: freeFormThought,
+      nextThoughtNeeded: false,
+    });
+    const structuredResult = quickThought({
+      thought: '',
+      nextThoughtNeeded: false,
+      mode: 'structured',
+      goal: 'Fix null pointer in auth.ts:142 parseToken()',
+      state: 'Stack trace points to parseToken(), null check missing',
+      algo: 'Add null check in parseToken()',
+      edge: 'Isolated to auth.ts, no other endpoints affected',
+      verify: 'Run smart_test on login flow',
+    });
+    // Structured output should be significantly shorter
+    assert.ok(structuredResult.output.length < freeFormResult.output.length,
+      `Structured (${structuredResult.output.length} chars) should be shorter than free-form (${freeFormResult.output.length} chars)`);
+    // Should save at least 50%
+    const savings = (1 - structuredResult.output.length / freeFormResult.output.length) * 100;
+    assert.ok(savings >= 50, `Expected >=50% savings, got ${savings.toFixed(1)}%`);
+  });
+
+  it('structured mode with template guidance still works', () => {
+    const result = quickThought({
+      thought: '',
+      nextThoughtNeeded: true,
+      mode: 'structured',
+      goal: 'Debug the crash',
+      state: 'Crash in production',
+      template: 'debug',
+    });
+    assert.ok(result.output.includes('Structured Thinking'));
+    assert.ok(result.output.includes('Debug Analysis guidance'));
+  });
+
+  it('structured mode with nextThoughtNeeded=true shows continue indicator', () => {
+    const result = quickThought({
+      thought: '',
+      nextThoughtNeeded: true,
+      mode: 'structured',
+      goal: 'Ongoing analysis',
+    });
+    assert.ok(result.output.includes('Continue reasoning'));
+  });
+
+  it('structured mode with nextThoughtNeeded=false shows complete indicator', () => {
+    const result = quickThought({
+      thought: '',
+      nextThoughtNeeded: false,
+      mode: 'structured',
+      goal: 'Final analysis',
+    });
+    assert.ok(result.output.includes('Reasoning complete'));
+  });
 });
 
 // ---------------------------------------------------------------------------

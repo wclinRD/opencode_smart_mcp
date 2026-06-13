@@ -250,13 +250,19 @@ export function quickThought(args) {
     branchFromThought = null,
     branchId = null,
     template = null,
-    mode = null,      // "beam" | "cit" | "forest"
+    mode = null,      // "beam" | "cit" | "forest" | "structured"
     beams = null,     // Pre-parsed beam paths (array of {name, content, confidence?})
     selectedBeam = null, // Name of the selected beam path
     branchingNeeded = null, // CiT BN-DP: true=need branch, false=chain
     branchReasoning = null, // CiT BN-DP: why branching is/isn't needed
     trees = null,     // FoT: array of {name, branches: [{name, content, confidence}], selectedBranch}
     consensus = null, // FoT: {conclusion, agreeingTrees, totalTrees, confidence}
+    // Structured thinking fields (mode:"structured")
+    goal = null,      // GOAL: one-sentence objective
+    state = null,     // STATE: known information and context
+    algo = null,      // ALGO: reasoning path and method
+    edge = null,      // EDGE: boundary conditions and constraints
+    verify = null,    // VERIFY: self-verification logic
   } = args;
 
   const effectiveTotal = adjustTotalThoughts ?? totalThoughts;
@@ -441,8 +447,33 @@ export function quickThought(args) {
       }
     }
     // Skip the normal main content below
+  // ── Structured Thinking mode (Grammar-Constrained CoT) ──
+  } else if (mode === 'structured') {
+    const hasStructured = goal || state || algo || edge || verify;
+    if (hasStructured) {
+      lines.push(`┌─ Structured Thinking ─────────────────────`);
+      if (goal) lines.push(`│ GOAL:  ${goal}`);
+      if (state) lines.push(`│ STATE: ${state}`);
+      if (algo) lines.push(`│ ALGO:  ${algo}`);
+      if (edge) lines.push(`│ EDGE:  ${edge}`);
+      if (verify) lines.push(`│ VERIFY: ${verify}`);
+      lines.push(`└───────────────────────────────────────────`);
+      lines.push('');
+      // Append free-form thought as supplementary if provided
+      if (thought && thought.trim()) {
+        lines.push(`[Supplementary]`);
+        lines.push(thought);
+        lines.push('');
+      }
+    } else {
+      // Fallback: no structured fields, treat as free-form
+      lines.push(`┌─ Structured Thinking (free-form fallback) ──`);
+      lines.push(`│ ${thought || '(no content)'}`);
+      lines.push(`└──────────────────────────────────────────────`);
+      lines.push('');
+    }
   } else {
-    // ── Main content (non-beam, non-cit mode) ──
+    // ── Main content (non-beam, non-cit, non-structured mode) ──
     lines.push(thought);
     lines.push('');
   }

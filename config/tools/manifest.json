@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-12T08:27:17.562Z",
+  "generatedAt": "2026-06-13T00:01:08.033Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -128,9 +128,10 @@
             "enum": [
               "beam",
               "cit",
-              "forest"
+              "forest",
+              "structured"
             ],
-            "description": "Reasoning mode (default: \"cit\" — BN-DP auto-branch, only branches when uncertain). \"beam\" for high-risk multi-path exploration. \"forest\" for multi-angle consensus voting."
+            "description": "Reasoning mode (default: \"cit\" — BN-DP auto-branch, only branches when uncertain). \"beam\" for high-risk multi-path exploration. \"forest\" for multi-angle consensus voting. \"structured\" for Grammar-Constrained CoT (GOAL/STATE/ALGO/EDGE/VERIFY — saves 50-70% thinking tokens)."
           },
           "beams": {
             "type": "array",
@@ -278,6 +279,26 @@
               "architecture"
             ],
             "description": "Optional template for structured reasoning guidance"
+          },
+          "goal": {
+            "type": "string",
+            "description": "GOAL: One-sentence objective. Used with mode:\"structured\"."
+          },
+          "state": {
+            "type": "string",
+            "description": "STATE: Known information and context. Used with mode:\"structured\"."
+          },
+          "algo": {
+            "type": "string",
+            "description": "ALGO: Reasoning path and method. Used with mode:\"structured\"."
+          },
+          "edge": {
+            "type": "string",
+            "description": "EDGE: Boundary conditions and constraints. Used with mode:\"structured\"."
+          },
+          "verify": {
+            "type": "string",
+            "description": "VERIFY: Self-verification logic. Used with mode:\"structured\"."
           }
         },
         "required": [

@@ -266,7 +266,7 @@ Phase 20 改為：
 
 | 優先 | Phase | 名稱 | 難度 | 影響 | 估時 |
 |:----:|-------|------|:----:|:----:|:----:|
-| 🥇 | **16** | Structured Thinking (Grammar-Constrained CoT) | 🟡 中 | 🔥 高（省 50-70% 思考 token） | 3-5 天 |
+| 🥇 | **16** | Structured Thinking (Grammar-Constrained CoT) | 🟡 中 | 🔥 高（省 50-70% 思考 token） | ✅ 完成 (2026-06-13) |
 | 🥇 | **18** | Speculative Tool Pre-fetch | 🟢 低 | 🔥 高（省 1-2 輪 round-trip） | 2-3 天 |
 | 🥈 | **19** | Cross-Agent Shared Memory | 🟢 低 | 🟡 中（跨 agent 學習） | 2-3 天 |
 | 🥈 | **17** | MCTS Tool Planning | 🔴 高 | 🟡 中（複雜任務工具選擇） | 5-7 天 |

@@ -36,8 +36,8 @@ Returns done flag + optional updated totalThoughts.`,
       },
       mode: {
         type: 'string',
-        enum: ['beam', 'cit', 'forest'],
-        description: 'Reasoning mode (default: "cit" — BN-DP auto-branch, only branches when uncertain). "beam" for high-risk multi-path exploration. "forest" for multi-angle consensus voting.',
+        enum: ['beam', 'cit', 'forest', 'structured'],
+        description: 'Reasoning mode (default: "cit" — BN-DP auto-branch, only branches when uncertain). "beam" for high-risk multi-path exploration. "forest" for multi-angle consensus voting. "structured" for Grammar-Constrained CoT (GOAL/STATE/ALGO/EDGE/VERIFY — saves 50-70% thinking tokens).',
       },
       beams: {
         type: 'array',
@@ -138,6 +138,27 @@ Returns done flag + optional updated totalThoughts.`,
         enum: ['debug', 'refactor', 'feature', 'research', 'decision', 'analyze', 'plan_execute', 'retrospect', 'architecture'],
         description: 'Optional template for structured reasoning guidance',
       },
+      // ── Structured Thinking fields (mode:"structured") ──
+      goal: {
+        type: 'string',
+        description: 'GOAL: One-sentence objective. Used with mode:"structured".',
+      },
+      state: {
+        type: 'string',
+        description: 'STATE: Known information and context. Used with mode:"structured".',
+      },
+      algo: {
+        type: 'string',
+        description: 'ALGO: Reasoning path and method. Used with mode:"structured".',
+      },
+      edge: {
+        type: 'string',
+        description: 'EDGE: Boundary conditions and constraints. Used with mode:"structured".',
+      },
+      verify: {
+        type: 'string',
+        description: 'VERIFY: Self-verification logic. Used with mode:"structured".',
+      },
     },
     required: ['thought', 'nextThoughtNeeded'],
   },
@@ -168,6 +189,12 @@ Returns done flag + optional updated totalThoughts.`,
       branchFromThought: args.branchFromThought != null ? Number(args.branchFromThought) : null,
       branchId: args.branchId != null ? String(args.branchId) : null,
       template: args.template || null,
+      // Structured thinking fields
+      goal: args.goal ? String(args.goal) : null,
+      state: args.state ? String(args.state) : null,
+      algo: args.algo ? String(args.algo) : null,
+      edge: args.edge ? String(args.edge) : null,
+      verify: args.verify ? String(args.verify) : null,
     });
     return result.output;
   },

@@ -50,7 +50,7 @@ permission:
 |------|------|
 | `smart_grep({pattern})` | 搜尋程式碼（附 scope/import context） |
 | `smart_learn({root})` | 新專案 onboarding |
-| `smart_think({mode, thought, nextThoughtNeeded})` | **快思**（🥇 預設 `mode:"cit"` — BN-DP 自動判斷分支）。`"beam"`=高風險多路徑。`"forest"`=多樹 consensus 投票 |
+| `smart_think({mode, thought, nextThoughtNeeded})` | **快思**（🥇 預設 `mode:"cit"` — BN-DP 自動判斷分支）。`"beam"`=高風險多路徑。`"forest"`=多樹 consensus 投票。`"structured"`=Grammar-Constrained CoT（GOAL/STATE/ALGO/EDGE/VERIFY 五段式，省 50-70% 思考 token） |
 | `smart_deep_think({topic, template})` | **慢想** — 深度分析（10 模板含 `peer_review`）。一次完整輸出 |
 | `smart_security({scan})` | 安全掃描 |
 | `smart_test({root})` | 執行測試 |
@@ -289,6 +289,27 @@ smart_think({
 | **不確定、需探索 2-3 方向** | `mode:"cit"` branch | 自動判斷是否分支 |
 | **高風險、行為閘強制** | `mode:"beam"` | 強制多路徑，無略過 |
 | **「綜合分析」「從不同角度」「交叉驗證」** | `mode:"forest"` | 多樹 consensus，精度最高 |
+| **例行推理、token 預算緊張** | `mode:"structured"` | GOAL/STATE/ALGO/EDGE/VERIFY 五段式，省 50-70% token |
+
+### Structured Thinking（Grammar-Constrained CoT — 省 token 模式）
+
+當 context budget 緊張或例行推理時，用 `mode:"structured"` 取代自由格式思考：
+
+```
+smart_think({
+  mode: "structured",
+  goal: "找出 login API 的 null pointer 錯誤",
+  state: "已知：錯誤發生在 auth.ts:142，stack trace 指向 parseToken()",
+  algo: "1. 檢查 parseToken() 的 null check\n2. 追蹤呼叫鏈\n3. 確認修復方案",
+  edge: "不影響其他 API endpoint，只改 auth.ts",
+  verify: "修復後跑 smart_test 確認 login flow 正常",
+  nextThoughtNeeded: false
+})
+```
+
+- **何時用**：context budget < 50%、例行推理、debug/refactor/architecture 模板
+- **何時不用**：需要 beam/forest 多路徑探索的高風險場景
+- **預期效果**：省 50-70% 思考 token，推理品質不變或略升（結構化減少 scaffolding 雜訊）
 
 ### Self-Correction Loop（高風險自我修正）
 

@@ -44,6 +44,11 @@ export class ContextBudget {
     this._compressedCount = 0;
     this._savingsChars = 0;
     this._history = []; // [{ tool, chars, compressed, timestamp }]
+    // Phase 16: Structured thinking token savings tracking
+    this._structuredCount = 0;
+    this._structuredSavingsChars = 0;
+    this._freeFormCount = 0;
+    this._freeFormTotalChars = 0;
   }
 
   // -----------------------------------------------------------------------
@@ -86,6 +91,10 @@ export class ContextBudget {
     this._compressedCount = 0;
     this._savingsChars = 0;
     this._history = [];
+    this._structuredCount = 0;
+    this._structuredSavingsChars = 0;
+    this._freeFormCount = 0;
+    this._freeFormTotalChars = 0;
   }
 
   // -----------------------------------------------------------------------
@@ -161,6 +170,47 @@ export class ContextBudget {
   }
 
   /**
+   * Phase 16: Track structured vs free-form thinking token usage.
+   * @param {boolean} isStructured - true if mode:"structured" was used
+   * @param {number} outputChars - size of the thinking output
+   * @param {number} [estimatedFreeFormChars] - estimated chars if free-form was used
+   */
+  trackStructuredThinking(isStructured, outputChars, estimatedFreeFormChars = 0) {
+    if (isStructured) {
+      this._structuredCount++;
+      if (estimatedFreeFormChars > 0) {
+        this._structuredSavingsChars += Math.max(0, estimatedFreeFormChars - outputChars);
+      }
+    } else {
+      this._freeFormCount++;
+      this._freeFormTotalChars += outputChars;
+    }
+  }
+
+  /**
+   * Get structured thinking savings statistics.
+   * @returns {{ structuredCount, freeFormCount, savingsChars, savingsPct, avgSavingsPct }}
+   */
+  getStructuredThinkingStats() {
+    const total = this._structuredCount + this._freeFormCount;
+    const avgFreeForm = this._freeFormCount > 0
+      ? Math.round(this._freeFormTotalChars / this._freeFormCount)
+      : 0;
+    const savingsPct = avgFreeForm > 0 && this._structuredCount > 0
+      ? ((avgFreeForm - (this._structuredSavingsChars / this._structuredCount + avgFreeForm)) / avgFreeForm * 100).toFixed(0) + '%'
+      : 'N/A';
+
+    return {
+      structuredCount: this._structuredCount,
+      freeFormCount: this._freeFormCount,
+      totalThinkingCalls: total,
+      savingsChars: this._structuredSavingsChars,
+      avgFreeFormChars: avgFreeForm,
+      savingsPct,
+    };
+  }
+
+  /**
    * Get budget status for LLM consumption.
    * @returns {object}
    */
@@ -203,6 +253,7 @@ export class ContextBudget {
         ? (this._savingsChars / (this._totalChars + this._savingsChars) * 100).toFixed(1) + '%'
         : '0%',
       toolBreakdown,
+      structuredThinking: this.getStructuredThinkingStats(),
       rotWarning: this.getRotWarning(),
       recommendation: status === 'critical'
         ? '⚠️ Context budget critical. Use format:"full" sparingly. Prefer smart_grep over read for large files. Use hashline for edits.'
