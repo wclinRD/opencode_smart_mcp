@@ -1288,6 +1288,31 @@ function invokeTool(def, args, timeoutOverride, signal, opts = {}) {
   // Direct handler path — no process spawn overhead
   // Inject context summary into args for handler-based tools
   const contextArgs = contextManager.inject(def.name, args);
+
+  // ── Auto-Fix Layer: correct common LLM parameter mistakes before handler runs ──
+  // Silent auto-correction — eliminates wasteful LLM round-trips for known mistakes.
+  //
+  // 1. fast_apply: oldString/newString → search/replace (from old edit tool habit)
+  // 2. generic: filePath → file (schema inconsistency)
+  // 3. generic: object query → stringified (avoids [[object Object]])
+  if (def.name === 'smart_fast_apply' || def.name === 'smart_n') {
+    if (contextArgs.oldString !== undefined && contextArgs.search === undefined) {
+      contextArgs.search = contextArgs.oldString;
+      delete contextArgs.oldString;
+    }
+    if (contextArgs.newString !== undefined && contextArgs.replace === undefined) {
+      contextArgs.replace = contextArgs.newString;
+      delete contextArgs.newString;
+    }
+  }
+  if (contextArgs.filePath !== undefined && contextArgs.file === undefined) {
+    contextArgs.file = contextArgs.filePath;
+    delete contextArgs.filePath;
+  }
+  if (contextArgs.query && typeof contextArgs.query === 'object') {
+    contextArgs.query = JSON.stringify(contextArgs.query);
+  }
+
   if (typeof def.handler === 'function') {
     debugLog('Handler:', def.name, 'args:', JSON.stringify(contextArgs));
     try {
@@ -1712,13 +1737,14 @@ function respond(id, result, opts = {}) {
       debugLog(`Output opt: ${opt.meta._optimized.savings} saved (L${opt.meta._optimized.level})${compressionDecision.shouldCompress ? ' [budget: ' + compressionDecision.reason + ']' : ''}`);
     }
 
-    // Track output size for context budget
+    // Track output size for context budget (Phase 30: pass text for metadata exclusion)
     const finalSize = result.content[0].text.length;
     budget.track(
       result._toolName || 'unknown',
       finalSize,
       opt.meta?._optimized?.level > 0,
-      originalSize
+      originalSize,
+      result.content[0].text  // Phase 30: pass full text for metadata exclusion
     );
 
     // Phase 14.4: Context Rot Warning — inject threshold-specific actionable advice
@@ -1728,8 +1754,8 @@ function respond(id, result, opts = {}) {
       result.content[0].text += `\n\n---\n📊 Context Budget: ${status.usedPct} used (${status.remainingPct} remaining) — ${rotWarning}\n---`;
     }
 
-    // Phase 14.1: Auto-trigger clear_tool_results at 70% budget (fire-and-forget, once per session)
-    if (budget.usedFraction >= 0.7 && !_autoCleared) {
+    // Phase 30: Auto-trigger clear_tool_results at 80% budget (fire-and-forget, once per session)
+    if (budget.usedFraction >= 0.80 && !_autoCleared) {
       _autoCleared = true;
       try {
         ensureContext();
@@ -1740,9 +1766,9 @@ function respond(id, result, opts = {}) {
       }
     }
   } else if (result?.content?.[0]?.type === 'text' && typeof result.content[0].text === 'string') {
-    // Track even non-optimized outputs
+    // Track even non-optimized outputs (Phase 30: pass text for metadata exclusion)
     const budget = getContextBudget();
-    budget.track(result._toolName || 'unknown', result.content[0].text.length);
+    budget.track(result._toolName || 'unknown', result.content[0].text.length, false, 0, result.content[0].text);
   }
 
   // Write chain — awaits pending async work (e.g. Phase 10.2 impact warning),
@@ -2029,6 +2055,17 @@ function handleRequest(req) {
                   respond(id, { content: [{ type: 'image', data: _img1.data, mimeType: _img1.mimeType }] });
                   return;
                 }
+                // AUTO-FIX: normalize {ok,output} object → string (fixes [object Object] bug)
+                if (typeof resolvedOutput === "object" && resolvedOutput !== null && "ok" in resolvedOutput) {
+                  if (!resolvedOutput.ok) {
+                    const _errMsg = resolvedOutput.error ?? "Tool returned error";
+                    const _cr = captureAndReturn(tName, origArgs, { ok: false, error: _errMsg }, elapsedMs);
+                    respond(id, { content: [{ type: "text", text: _cr.error }], isError: true }, { optimize: false });
+                    return;
+                  }
+                  resolvedOutput = resolvedOutput.output ?? "";
+                }
+
                 const output = String(resolvedOutput ?? '');
                 // Structured error from safe-handler wrapper → route through isError path
                 if (isStructuredError(output)) {
@@ -2058,13 +2095,13 @@ function handleRequest(req) {
               respond(id, { content: [{ type: 'image', data: _img2.data, mimeType: _img2.mimeType }] });
               return;
             }
-            const resp2 = { content: [{ type: 'text', text: result.output }] };
+            const resp2 = { content: [{ type: 'text', text: String(result.output ?? "") }] };
             if (result._responsePolicy) resp2._responsePolicy = result._responsePolicy;
             if (result._pendingImpact) resp2._pendingImpact = result._pendingImpact;
             respond(id, resp2);
           } else {
             respond(id, {
-              content: [{ type: 'text', text: result.error }],
+              content: [{ type: 'text', text: String(result.error ?? "") }],
               isError: true,
             }, { optimize: false });
           }
@@ -2106,6 +2143,17 @@ function handleRequest(req) {
                 respond(id, { content: [{ type: 'image', data: _img3.data, mimeType: _img3.mimeType }] });
                 return;
               }
+              // AUTO-FIX: normalize {ok,output} object → string (fixes [object Object] bug)
+              if (typeof resolvedOutput === "object" && resolvedOutput !== null && "ok" in resolvedOutput) {
+                if (!resolvedOutput.ok) {
+                  const _errMsg = resolvedOutput.error ?? "Tool returned error";
+                  const _cr = captureAndReturn(tName, origArgs, { ok: false, error: _errMsg }, elapsedMs);
+                  respond(id, { content: [{ type: "text", text: _cr.error }], isError: true }, { optimize: false });
+                  return;
+                }
+                resolvedOutput = resolvedOutput.output ?? "";
+              }
+
               const output = String(resolvedOutput ?? '');
               // Structured error from safe-handler wrapper → route through isError path
               if (isStructuredError(output)) {
@@ -2138,13 +2186,13 @@ function handleRequest(req) {
             respond(id, { content: [{ type: 'image', data: _img4.data, mimeType: _img4.mimeType }] });
             return;
           }
-          const resp4 = { content: [{ type: 'text', text: result.output }] };
+          const resp4 = { content: [{ type: 'text', text: String(result.output ?? "") }] };
           if (result._responsePolicy) resp4._responsePolicy = result._responsePolicy;
           if (result._pendingImpact) resp4._pendingImpact = result._pendingImpact;
           respond(id, resp4);
         } else {
           respond(id, {
-            content: [{ type: 'text', text: result.error }],
+            content: [{ type: 'text', text: String(result.error ?? "") }],
             isError: true,
           }, { optimize: false });
         }

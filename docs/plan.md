@@ -640,33 +640,312 @@ Phase 27 改為：
 | 🥇 | **25** | Tool Transition Learning | 🟡 中 | 🔥 高（自適應 prefetch） | 2-3h |
 | 🥇 | **26** | Tool Selection Feedback | 🟡 中 | 🔥 高（自適應路由） | 2-3h |
 | 🥈 | **27** | Semantic Cache Routing | 🔴 高 | 🟡 中（長期累積效益） | 3-4h |
-
-## 里程碑（更新後）
+| 🔴 | **28** | Semantic Tool Router（embedding 語意匹配） | 🟡 中 | 🔥 高（推薦準確率 +30-50%） | 3-4h |
+| 🔴 | **29** | Self-Reflection & Adaptive Learning | 🟡 中 | 🔥 高（錯誤重複率 -50%） | 4-5h |
+| 🔴 | **30** | Smart Output Management（截斷+壓縮+streaming） | 🟡 中 | 🔥 高（token -15-25%） | 3-4h |
+| 🟡 | **31** | Parallel Execution & Pre-Indexing | 🟡 中 | 🔥 高（速度 2-3x） | 4-5h |
+| 🟡 | **32** | Multi-Agent Collaboration Enhancement | 🟡 中 | 🟡 中（跨 agent 共享） | 3-4h |
+| 🟢 | **33** | Skill Auto-Generation & Knowledge Graph | 🔴 高 | 🟡 中（長期累積） | 5-6h |
 
 | 里程碑 | 內容 | 預計日期 |
 |--------|------|---------|
 | M1-M10 | Phase 16-24 完成 | ✅ 2026-06-13 |
-| M11 | Phase 25 (Transition Learning) 完成 | 📅 本期 |
-| M12 | Phase 26 (Tool Selection Feedback) 完成 | 📅 本期 |
-| M13 | Phase 27 (Semantic Cache Routing) 完成 | 📅 本期 |
-| M14 | Phase 25-27 全量 regression | 📅 本期 |
+| M11 | Phase 25-27 完成 | 📅 本期 |
+| M12 | Phase 25-27 全量 regression | 📅 本期 |
+| M13 | Phase 28-30 (P0：語意路由+自我反思+輸出管理) 完成 | 📅 下期 |
+| M14 | Phase 31-32 (P1：平行執行+多Agent協作) 完成 | 📅 下期 |
+| M15 | Phase 33 (P2：Skill自動生成+知識圖譜) 完成 | 📅 下下期 |
+| M16 | Phase 28-33 全量 regression | 📅 下下期 |
 
-## 長期研究方向（Phase 28+）
+> 基於 2026-06-14 競爭品研究與前沿技術分析，Phase 28-33 聚焦三大方向：
+> **效率**（推測預取、平行執行、token 壓縮）、**智能**（語意匹配、自我反思、adaptive routing）、**協作**（多 agent 記憶共享、role specialization、知識圖譜）
 
-| Phase | 研究方向 | 說明 | 前置 |
-|-------|---------|------|------|
-| 28 | **External Cognitive Controller** | 參考 Meta-Reasoning — LLM 思考由外部治理，偵測 stall/redundancy 強制分支 | 需 Phase 25-27 穩定 |
-| 29 | **Self-Evolving Tool Patterns** | 參考 self-evolving-codegen — pattern 規則根據 Phase 26 回饋自動進化 | 需 Phase 26 數據 |
-| 30 | **Cross-Session Learning** | 跨 session 的工具使用模式遷移學習 | 需 Phase 25 DB |
+---
+
+## Phase 28：Semantic Tool Router — Embedding 語意工具匹配
+
+> 參考：OpenAI Agents SDK（semantic tool matching）、Cursor（relevance-based context）
+> 核心洞察：目前 `tool-strategy.mjs` 用 12 條 regex 規則匹配工具，無法處理模糊/新穎的任務描述。
+> 加入 TF-IDF + embedding 語意匹配，讓工具推薦更精準。
+
+### 設計
+
+```
+目前 tool-strategy：
+  任務描述 → regex 匹配 12 條規則 → 靜態推薦
+
+Phase 28 改為：
+  任務描述 →
+    1. Regex 快速匹配（現有，作為 fallback）
+    2. TF-IDF 語意相似度計算（對工具 description + inputSchema）
+    3. Embedding 向量相似度（sqlite-vec，384-dim）
+    4. 融合分數（regex × 0.3 + TF-IDF × 0.3 + embedding × 0.4）
+    → 最佳工具推薦 + 信心分數
+```
+
+### 實作範圍
+
+| # | 項目 | 檔案 | 說明 |
+|---|------|------|------|
+| 1 | TF-IDF 向量化器 | `src/lib/tfidf-matcher.mjs` | 對工具 description + schema 建 TF-IDF 矩陣 |
+| 2 | Embedding 語意匹配 | `src/lib/semantic-router.mjs` | sqlite-vec ANN 搜尋，384-dim embedding |
+| 3 | 融合評分引擎 | `src/lib/semantic-router.mjs` | regex + TF-IDF + embedding 三路融合 |
+| 4 | tool-strategy 整合 | `smart-agent/src/agent/tool-strategy.mjs` | `recommendTools()` 改用 semantic router |
+| 5 | 工具 description 強化 | 各 `src/plugins/**/*.mjs` | 加入 `avoidWhen` 欄位（anti-pattern 指引） |
+| 6 | Agent personality | `config/agents/smart-mcp.md` | semantic router 使用時機 |
+| 7 | 測試 | `tests/semantic-router.test.mjs` | 匹配準確率 / 融合權重 / 邊界案例 |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| 工具推薦準確率 | ~70%（純 regex） | ~90%+（三路融合） |
+| 模糊任務匹配 | 經常失敗 | TF-IDF + embedding 覆蓋 |
+| 新任務適應性 | 需手動加 regex | 自動語意匹配 |
+
+---
+
+## Phase 29：Self-Reflection & Adaptive Learning — 自我反思與自適應學習
+
+> 參考：Reflexion Pattern（agent 自我反思）、OpenAI Agents SDK（tool guardrails）
+> 核心洞察：目前 agent 完成任務後不會反思「哪些步驟多餘？哪個工具效果差？」。
+> 加入 self-reflection hook + adaptive routing，讓 agent 從每次執行中學習。
+
+### 設計
+
+```
+目前：
+  任務 → 執行 → 完成（無反思）
+
+Phase 29 改為：
+  任務 → 執行 →
+    Post-Task Reflection Hook：
+      1. 分析 tool call history：哪些工具被呼叫但結果未使用？
+      2. 分析 tool chain：哪些步驟可以跳過？
+      3. 分析 tool stats：哪個工具最常失敗？
+      4. 產生 reflection summary → 寫入 memory_store
+    →
+    Adaptive Routing：
+      1. 下次相似任務 → pre-execution memory check
+      2. 根據歷史 toolStats 動態調整 recommendTools() 權重
+      3. 低成功率 pattern 自動降級
+```
+
+### 實作範圍
+
+| # | 項目 | 檔案 | 說明 |
+|---|------|------|------|
+| 1 | Reflection engine | `src/lib/reflection-engine.mjs` | 分析 tool history，產生 reflection summary |
+| 2 | Post-task hook | `src/server/index.mjs` | 任務完成後自動觸發 reflection |
+| 3 | Adaptive weight adjuster | `src/lib/reflection-engine.mjs` | 根據 toolStats 動態調整 pattern 權重 |
+| 4 | Pre-execution memory check | `smart-agent/src/agent/tool-strategy.mjs` | `buildToolChain()` 前先搜 memory |
+| 5 | Tool input validation | `src/lib/tool-validator.mjs` | JSON Schema 驗證層，呼叫前檢查參數 |
+| 6 | Agent personality | `config/agents/smart-mcp.md` | reflection 使用說明 |
+| 7 | 測試 | `tests/reflection-engine.test.mjs` | reflection / adaptive / validation |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| 錯誤重複率 | 高（無記憶） | -50%（pre-execution memory check） |
+| 工具呼叫錯誤 | 頻繁（無驗證） | -70%（JSON Schema validation） |
+| 工具鏈效率 | 固定（無優化） | 持續改善（adaptive routing） |
+
+---
+
+## Phase 30：Smart Output Management — 智能輸出管理
+
+> 參考：Sophon（21 種 domain filter）、Anthropic prompt caching、structured-cot（22× token 壓縮）
+> 核心洞察：目前工具輸出無自動截斷，大輸出直接塞進 context。Context budget 警告頻繁但無自動節流。
+> 加入智能截斷 + caveman 通用壓縮 + streaming 輸出 + 自動 budget 管理。
+
+### 設計
+
+```
+目前：
+  工具輸出 → 直接回傳（可能 50K+ chars）→ context budget 爆表
+
+Phase 30 改為：
+  工具輸出 →
+    1. 智能截斷：超過 threshold 自動摘要 + "[展開完整輸出]" 連結
+    2. Caveman 通用壓縮：所有工具輸出可選 compress:"caveman"（省 20-40%）
+    3. Streaming 輸出：大結果分批回傳，不必等完整結果
+    4. 自動 budget 管理：
+       - budget < 80%：溫和提示
+       - budget < 95%：強烈建議 compact
+       - budget < 100%：自動 compact + 提示 agent 簡化回應
+    5. Budget 計算優化：不重複計算 session cache 命中內容、排除 metadata
+```
+
+### 實作範圍
+
+| # | 項目 | 檔案 | 說明 |
+|---|------|------|------|
+| 1 | 智能截斷引擎 | `src/lib/truncation-engine.mjs` | 保留關鍵段落 + 摘要其餘 + 展開連結 |
+| 2 | Caveman 通用壓縮 | `src/lib/caveman-compress.mjs` | 從 exa_search 擴展到所有工具輸出 |
+| 3 | Streaming 輸出 | `src/server/index.mjs` | MCP 協定 streaming 支援 |
+| 4 | 自動 budget 管理 | `src/lib/context-budget.mjs` | 分級警告 + 自動 compact |
+| 5 | Budget 計算優化 | `src/lib/context-budget.mjs` | 排除 cache hit + metadata |
+| 6 | 提高預設 threshold | `src/lib/context-budget.mjs` | 200K → 400K chars（反映實際 LLM window） |
+| 7 | Agent personality | `config/agents/smart-mcp.md` | 輸出管理使用說明 |
+| 8 | 測試 | `tests/output-management.test.mjs` | 截斷/壓縮/streaming/budget |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| Context budget 觸發頻率 | 頻繁（每 10-15 次呼叫） | 減少 60%+ |
+| 平均輸出 token | 基準 | -15-25%（截斷+壓縮） |
+| Budget 警告準確度 | 單一 threshold | 三級分級警告 |
+| 大輸出體驗 | 阻塞等待 | streaming 漸進顯示 |
+
+---
+
+## Phase 31：Parallel Execution & Pre-Indexing — 平行執行與預索引
+
+> 參考：Anthropic parallel tool calling、Cursor codebase indexing
+> 核心洞察：目前 workflow dispatch 是 sequential 執行，無法利用平行化加速。
+smart_learn 是 on-demand 分析，非 pre-indexed，首次使用慢。
+
+### 設計
+
+```
+目前：
+  workflow dispatch → tool A → tool B → tool C（sequential）
+  smart_learn → 每次 on-demand 分析（慢）
+
+Phase 31 改為：
+  workflow dispatch →
+    group A: [tool A, tool B]（平行，無相依）
+    group B: [tool C]（相依於 A 結果）
+    group C: [tool D, tool E]（平行，相依於 B）
+
+  Pre-Indexing：
+    專案首次開啟 → 自動建立 smart_learn 快取索引（background）
+    → 後續查詢直接命中 cache（<100ms vs 2-5s）
+```
+
+### 實作範圍
+
+| # | 項目 | 檔案 | 說明 |
+|---|------|------|------|
+| 1 | Parallel dispatch engine | `src/lib/parallel-executor.mjs` | 分析 DAG 相依性，平行執行無相依 group |
+| 2 | Workflow 整合 | `src/plugins/standard/workflow.mjs` | `dispatch` 支援 parallel group |
+| 3 | Pre-indexing engine | `src/lib/pre-indexer.mjs` | 專案開啟時 background 建立索引 |
+| 4 | smart_learn cache | `src/lib/pre-indexer.mjs` | SQLite 持久化專案分析結果 |
+| 5 | smart_learn 整合 | `src/plugins/core/learn.mjs` | 優先查 cache，miss 才重新分析 |
+| 6 | Agent personality | `config/agents/smart-mcp.md` | parallel + pre-index 使用說明 |
+| 7 | 測試 | `tests/parallel-executor.test.mjs` | DAG 分析 / 平行執行 / cache |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| 多步任務速度 | sequential（基準） | 2-3x（平行 group） |
+| smart_learn 首次速度 | 2-5s（on-demand） | <100ms（cache hit） |
+| 專案切換速度 | 每次重新分析 | 即時（pre-indexed） |
+
+---
+
+## Phase 32：Multi-Agent Collaboration Enhancement — 多 Agent 協作強化
+
+> 參考：Continuum（跨 agent daemon + AST KG）、mcp-agora（ChromaDB 語義路由）
+> 核心洞察：Phase 19 已加入 agent_id 標記，但缺少真正的共享記憶池與 role-based 工具權限。
+
+### 設計
+
+```
+目前：
+  memory_store → 單一 agent 記憶（有 agent_id 標記但無共享查詢）
+  subagent → 相同工具權限（無 allowlist/denylist）
+
+Phase 32 改為：
+  Shared Memory Pool：
+    memory_store search → 可選 scope:"all"（跨 agent）或 scope:"self"
+    → 跨 agent 搜尋時顯示來源 agent + 信心分數
+
+  Role-Based Tool Access：
+    subagent 定義 tool allowlist/denylist
+    → security agent 只能用 security 相關工具
+    → 減少 subagent 誤用工具的風險
+
+  Agent-to-Agent Message Bus：
+    agent A → structured message → agent B
+    → 傳遞 context + findings + tool results
+```
+
+### 實作範圍
+
+| # | 項目 | 檔案 | 說明 |
+|---|------|------|------|
+| 1 | Shared memory search | `src/lib/memory-db.mjs` | `searchHybrid` 支援 `scope` 參數 |
+| 2 | memory_store 更新 | `src/plugins/standard/memory-store.mjs` | search 支援跨 agent 查詢 |
+| 3 | Role-based tool access | `src/lib/role-manager.mjs` | subagent tool allowlist/denylist |
+| 4 | Agent message bus | `src/lib/agent-bus.mjs` | structured message 傳遞 |
+| 5 | Agent personality | `config/agents/smart-mcp.md` | 多 agent 協作使用說明 |
+| 6 | 測試 | `tests/multi-agent.test.mjs` | shared memory / role / bus |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| 跨 agent 知識覆蓋 | 單 agent 孤立 | 跨 agent 共享 |
+| subagent 工具誤用 | 高（全工具可用） | 低（role-based 限制） |
+| agent 間協作 | 手動傳遞 context | structured message bus |
+
+---
+
+## Phase 33：Skill Auto-Generation & Knowledge Graph — 技能自動生成與知識圖譜
+
+> 參考：self-evolving-codegen（tester agent 自我進化）、Continuum（AST 知識圖譜）
+> 核心洞察：目前 skill 需手動編寫。累積足夠的成功 pattern 後應自動生成。
+> memory entries 之間缺少結構化關係（entity-relation graph）。
+
+### 設計
+
+```
+Skill Auto-Generator：
+  1. 監控 tool call history → 識別重複出現的成功 pattern（≥5 次）
+  2. 自動萃取：trigger condition + tool chain + expected outcome
+  3. 產生 skill 檔案（YAML frontmatter + Markdown body）
+  4. 寫入 ~/.config/opencode/skills/ → 下次自動載入
+
+Knowledge Graph：
+  1. 從 memory entries 自動萃取 entity（tool/error/pattern/file）
+  2. 建立 relation（causes/fixes/depends_on/similar_to）
+  3. sqlite-vec 向量索引 → 支援語意查詢
+  4. 視覺化：Mermaid.js graph 輸出
+```
+
+### 實作範圍
+
+| # | 項目 | 檔案 | 說明 |
+|---|------|------|------|
+| 1 | Pattern miner | `src/lib/pattern-miner.mjs` | 從 tool history 識別重複成功 pattern |
+| 2 | Skill generator | `src/lib/skill-generator.mjs` | 自動產生 skill 檔案 |
+| 3 | Entity extractor | `src/lib/kg-builder.mjs` | 從 memory entries 萃取 entity |
+| 4 | Relation builder | `src/lib/kg-builder.mjs` | 建立 entity 間關係 |
+| 5 | KG query engine | `src/lib/kg-builder.mjs` | sqlite-vec 語意查詢 |
+| 6 | KG visualization | `src/lib/kg-builder.mjs` | Mermaid.js graph 輸出 |
+| 7 | Agent personality | `config/agents/smart-mcp.md` | skill auto-gen + KG 使用說明 |
+| 8 | 測試 | `tests/skill-autogen.test.mjs` | pattern mining / skill gen / KG |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| Skill 建立 | 手動編寫（30min+/skill） | 自動生成（<1min） |
+| 知識結構 | 平面 memory entries | 結構化 entity-relation graph |
+| 跨任務理解 | 無（孤立記憶） | KG 語意查詢 |
 
 ## 不上什麼（競爭品分析後的取捨）
 
 | 項目 | 競爭品有 | 不做的原因 |
 |------|---------|-----------|
-| MCP Proxy 層工具路由 | smart-mcp, MCPlex, Tool Compass | Smart MCP 已有 hybrid_router + Layer 1/2 分層，不需再做 proxy |
-| RBAC + Audit + Dashboard | MCPlex | 單開發者不需要企業級功能 |
-| 跨 agent daemon | Continuum | 架構複雜度高，Phase 19 的 agent_id 標記已足夠 |
+| MCP Proxy 層工具路由 | smart-mcp, MCPlex, Tool Compass | Smart MCP 已有 hybrid_router + Layer 1/2 分層 + Phase 28 semantic router |
+| RBAC + Audit + Dashboard | MCPlex | 單開發者不需要企業級功能（Phase 32 role-based access 已足夠） |
+| 跨 agent daemon | Continuum | 架構複雜度高，Phase 19 + Phase 32 共享記憶池已足夠 |
 | Rust 重寫 | MCPlex, agent-context-mcp | Node.js 生態整合更好，效能瓶頸不在語言 |
 | 外部 LLM API 依賴 | ReasonKit Think | Smart MCP 是 MCP server，不應依賴外部 API |
 | Multi-Agent Debate | — | Beam Search / Forest-of-Thought 已達類似效果 |
-| DSPy Prompt Optimization | — | Skill-level Learning (skill_patch) 為輕量替代 |
+| DSPy Prompt Optimization | — | Skill-level Learning (skill_patch) + Phase 33 auto-gen 為輕量替代 |

@@ -395,21 +395,35 @@ Dry-run by default — safe to use without side effects.`,
     // Conflict count
     const conflicts = previewResults.filter(r => r.status === 'conflict');
 
-    // ---- Step 3: If dry-run, return preview ----
+    // ---- Step 3: If dry-run, conditionally auto-apply when safe ----
     if (dryRun) {
-      return formatOutput({
-        status: 'preview',
-        dryRun: true,
-        totalChanges: changes.length,
-        files: changes.map(c => c.file),
-        preview: previewResults,
-        conflicts: conflicts.length,
-        conflictFiles: conflicts.map(c => c.file),
-        multiFileWarning: multiFile ? `Multi-file change (${changes.length} files). Set apply=true to proceed.` : undefined,
-        hint: multiFile
-          ? 'Re-run with apply=true to apply all changes.'
-          : 'Re-run with apply=true to apply changes.',
-      }, outputFormat);
+      // Auto-apply when:
+      //   ✅ No conflicts (match found)
+      //   ✅ Single file (or 2 files, all ready)
+      //   ✅ NOT explicitly set to dryRun: true (user wants preview)
+      // This eliminates the wasteful LLM round-trip (re-call with apply=true)
+      const safeForAutoApply = conflicts.length === 0 && !multiFile && args.dryRun !== true;
+
+      if (safeForAutoApply) {
+        // ⚡ Auto-apply: skip dry-run, go directly to apply
+        // (falls through to Step 5 below — saves ~1 LLM round-trip)
+      } else {
+        return formatOutput({
+          status: 'preview',
+          dryRun: true,
+          totalChanges: changes.length,
+          files: changes.map(c => c.file),
+          preview: previewResults,
+          conflicts: conflicts.length,
+          conflictFiles: conflicts.map(c => c.file),
+          multiFileWarning: multiFile ? `Multi-file change (${changes.length} files). Set apply=true to proceed.` : undefined,
+          hint: multiFile
+            ? 'Re-run with apply=true to apply all changes.'
+            : conflicts.length > 0
+              ? 'Fix match conflicts first, then re-run.'
+              : 'Re-run with apply=true to apply changes.',
+        }, outputFormat);
+      }
     }
 
     // ---- Step 4: Safety gate for multi-file ----
