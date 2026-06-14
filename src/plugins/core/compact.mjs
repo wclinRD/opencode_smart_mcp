@@ -59,7 +59,7 @@ const GIT_PREFIX = 'git_';
  * @param {{ tool: string, ok?: boolean, result?: string, error?: string }} entry
  * @returns {'DROP' | 'KEEP_SUMMARY' | 'KEEP'}
  */
-function classifyEntry(entry) {
+export function classifyEntry(entry) {
   const tool = entry.tool || '';
 
   if (DROP_TOOLS.has(tool)) return 'DROP';
@@ -75,7 +75,7 @@ function classifyEntry(entry) {
  * Generate a brief summary from a tool output.
  * Extracts key findings, error counts, or first meaningful line.
  */
-function summarizeOutput(entry) {
+export function summarizeOutput(entry) {
   const text = entry.result || entry.error || '';
   if (!text) return '(empty output)';
 

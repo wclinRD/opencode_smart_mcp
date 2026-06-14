@@ -153,6 +153,7 @@ export class ContextBudget {
     this._structuredSavingsChars = 0;
     this._freeFormCount = 0;
     this._freeFormTotalChars = 0;
+    this._lastWarnedPct = 0;  // Phase 32: suppress repetitive rot warnings
     this._modelKey = _detected.modelKey;
     this._modelTokens = _detected.window.tokens;
     this._detectionSource = _detected.source;
@@ -184,6 +185,40 @@ export class ContextBudget {
     this._history = [];
     this._structuredCount = 0; this._structuredSavingsChars = 0;
     this._freeFormCount = 0; this._freeFormTotalChars = 0;
+    this._lastWarnedPct = 0;
+  }
+
+  /**
+   * Phase 32: Free budget tracking for N oldest entries.
+   * Called after clearToolResults() removes N entries from toolHistory.
+   * Both histories are FIFO and grow in sync — we splice the N oldest
+   * from budget._history and subtract their effectiveChars.
+   *
+   * More precise than resetContextBudget() which zeroes everything.
+   *
+   * @param {number} count - Number of oldest entries to remove
+   * @returns {{ freed: number, removedCount: number }}
+   */
+  freeEntries(count) {
+    if (count <= 0 || !this._history.length) return { freed: 0, removedCount: 0 };
+
+    const removeCount = Math.min(count, this._history.length);
+    const removed = this._history.splice(0, removeCount);
+
+    let freedChars = 0, freedMetadata = 0, totalRemoved = 0;
+    for (const entry of removed) {
+      totalRemoved += entry.chars;
+      freedChars += entry.effectiveChars;
+      freedMetadata += entry.metadataChars || 0;
+      if (entry.compressed) this._compressedCount--;
+    }
+
+    this._totalChars -= totalRemoved;
+    this._effectiveChars -= freedChars;
+    this._metadataChars -= freedMetadata;
+    this._callCount -= removeCount;
+
+    return { freed: freedChars, removedCount: removeCount };
   }
 
   get totalChars() { return this._totalChars; }
@@ -205,16 +240,30 @@ export class ContextBudget {
 
   getRotWarning() {
     const used = this.usedFraction;
+    const pct = used * 100;
+
+    // Dedup: suppress repetitive warnings unless:
+    //   - crossed a threshold bracket (50→70→90)
+    //   - increased ≥5% since last warning
+    //   - at critical level (≥90%) — always warn
+    //   - first warning ever (_lastWarnedPct === 0)
+    if (this._lastWarnedPct > 0 && pct < 90 && (pct - this._lastWarnedPct) < 5) {
+      const bracket = Math.floor(pct / 10) * 10;
+      const lastBracket = Math.floor(this._lastWarnedPct / 10) * 10;
+      if (bracket === lastBracket) return null;  // same threshold bracket, no progress
+    }
+
+    let msg = null;
     if (used >= 0.90) {
-      return `⚠️ Budget ${(used * 100).toFixed(1)}%。強烈建議執行 smart_compact 或開始新的 session`;
+      msg = `⚠️ Budget ${(used * 100).toFixed(1)}%。強烈建議執行 smart_compact 或開始新的 session`;
+    } else if (used >= 0.70) {
+      msg = `⚡ Budget ${(used * 100).toFixed(1)}%。建議執行 smart_context({command:"clear_tool_results", olderThan:10}) 或 smart_compact`;
+    } else if (used >= 0.50) {
+      msg = `💡 Budget ${(used * 100).toFixed(1)}%。可考慮 smart_context({command:"clear_tool_results", olderThan:10}) 釋放 context 空間`;
     }
-    if (used >= 0.70) {
-      return `⚡ Budget ${(used * 100).toFixed(1)}%。建議執行 smart_context({command:"clear_tool_results", olderThan:10}) 或 smart_compact`;
-    }
-    if (used >= 0.50) {
-      return `💡 Budget ${(used * 100).toFixed(1)}%。可考慮 smart_context({command:"clear_tool_results", olderThan:10}) 釋放 context 空間`;
-    }
-    return null;
+
+    if (msg) this._lastWarnedPct = pct;
+    return msg;
   }
 
   trackStructuredThinking(isStructured, outputChars, estimatedFreeFormChars = 0) {

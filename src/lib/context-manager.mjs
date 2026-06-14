@@ -21,6 +21,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { env } from 'node:process';
+import { classifyEntry, summarizeOutput } from '../plugins/core/compact.mjs';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -227,6 +228,61 @@ export class ContextManager {
     if (this._autoSave) this._save();
 
     return { removed: removeCount, kept: keepCount };
+  }
+
+  /**
+   * Phase 32: Compact tool history using smart classification.
+   * Uses classifyEntry() to identify DROP/KEEP_SUMMARY/KEEP entries.
+   * DROP entries are removed. KEEP_SUMMARY entries are replaced with summary.
+   * Last `protectLast` entries are always preserved (safety).
+   * Zero LLM cost — rules-based classification from compact.mjs.
+   *
+   * @param {object} [opts]
+   * @param {number} [opts.protectLast=3] - Never touch last N entries
+   * @param {boolean} [opts.summarize=false] - Replace KEEP_SUMMARY output with summary
+   * @returns {{ removed: number, summarized: number }}
+   */
+  compactHistory({ protectLast = 3, summarize = false } = {}) {
+    if (!this._context || !this._context.toolHistory.length) {
+      return { removed: 0, summarized: 0 };
+    }
+
+    const history = this._context.toolHistory;
+    const total = history.length;
+    const analyzableEnd = total - Math.min(protectLast, total);
+
+    const newHistory = [];
+    let removed = 0;
+    let summarized = 0;
+
+    for (let i = 0; i < total; i++) {
+      // Protected zone: always keep as-is
+      if (i >= analyzableEnd) {
+        newHistory.push(history[i]);
+        continue;
+      }
+
+      const action = classifyEntry(history[i]);
+
+      if (action === 'DROP') {
+        removed++;  // Don't push → effectively removed
+      } else if (action === 'KEEP_SUMMARY' && summarize) {
+        newHistory.push({
+          ...history[i],
+          result: summarizeOutput(history[i]),
+          _summarized: true,
+        });
+        summarized++;
+      } else {
+        newHistory.push(history[i]);
+      }
+    }
+
+    this._context.toolHistory = newHistory;
+    this._context.metadata.updatedAt = nowISO();
+    if (this._autoSave) this._save();
+
+    return { removed, summarized };
   }
 
   /** Get env vars for CLI tool context injection. */

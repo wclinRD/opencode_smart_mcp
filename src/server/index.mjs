@@ -657,17 +657,10 @@ function autoStoreToMemory(toolName, args, result, errorCategory) {
     child.unref();
     setTimeout(() => { try { child.kill(); } catch { /* ok */ } }, 2000).unref();
 
-    // Write to SQLite with embedding (--db --semantic) so FTS5/vector
-    // search can find past errors via semantic similarity — not just
-    // exact BM25 keyword match. 384-dim all-MiniLM-L6-v2 embedding via
-    // @huggingface/transformers (optional dep — silently skips if unavail).
-    const SEMANTIC_TIMEOUT = 15000;
-    const childDb = spawn('node', [...baseArgs, '--db', '--semantic'], { timeout: SEMANTIC_TIMEOUT, stdio: 'ignore' });
+    // Write to SQLite (--db) so FTS5 BM25 search can find new entries
+    const childDb = spawn('node', [...baseArgs, '--db'], { timeout: 3000, stdio: 'ignore' });
     childDb.unref();
-    // Entry is stored BEFORE embedding generation (see cmdStoreDB flow:
-    //   insertEntry → tryLoadSentenceModel → getSentenceEmbedding → storeEmbedding)
-    // If timeout kills mid-load, entry exists in DB but has no embedding — graceful.
-    setTimeout(() => { try { childDb.kill(); } catch { /* ok */ } }, SEMANTIC_TIMEOUT - 1000).unref();
+    setTimeout(() => { try { childDb.kill(); } catch { /* ok */ } }, 2000).unref();
   } catch {
     // Best-effort — never throw from auto-store
   }
@@ -1908,6 +1901,7 @@ function writeMsg(msg) { stdout.write(JSON.stringify(msg) + '\n'); }
 
 let _respondChain = Promise.resolve();
 let _autoCleared = false; // Phase 14.1: fire-once flag for auto clear_tool_results
+let _autoCompacted = false; // Phase 32: fire-once flag for auto compact
 
 /**
  * Extract image content from a result object if it has _imageContent flag.
@@ -1984,9 +1978,27 @@ function respond(id, result, opts = {}) {
       try {
         ensureContext();
         const cleared = contextManager.clearToolResults({ olderThan: 10, keepLatest: 2 });
+        // Subtract freed entries from budget instead of full reset — keeps tracking accurate
+        budget.freeEntries(cleared.removed);
         debugLog(`Auto clear_tool_results: removed ${cleared.removed}, kept ${cleared.kept} (budget=${(budget.usedFraction * 100).toFixed(0)}%)`);
       } catch (e) {
         debugLog('Auto clear_tool_results error:', e.message);
+      }
+    }
+
+    // Phase 32: Auto-trigger aggressive clear + budget reset at 88% budget
+    // compactHistory doesn't affect budget tracking — use clearToolResults + reset instead
+    if (budget.usedFraction >= 0.88 && !_autoCompacted) {
+      _autoCompacted = true;
+      try {
+        ensureContext();
+        const cleared = contextManager.clearToolResults({ olderThan: 5, keepLatest: 2 });
+        budget.freeEntries(cleared.removed);
+        if (cleared.removed > 0) {
+          debugLog(`Auto clear (Phase 32): removed ${cleared.removed}, kept ${cleared.kept} (budget reset)`);
+        }
+      } catch (e) {
+        debugLog('Auto clear (Phase 32) error:', e.message);
       }
     }
   } else if (result?.content?.[0]?.type === 'text' && typeof result.content[0].text === 'string') {

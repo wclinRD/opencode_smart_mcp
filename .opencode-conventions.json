@@ -8,14 +8,14 @@
         "other": 88
       },
       "variable": {
-        "camelCase": 8576,
+        "camelCase": 8614,
         "PascalCase": 42,
-        "UPPER_CASE": 305,
-        "other": 64,
+        "UPPER_CASE": 306,
+        "other": 65,
         "snake_case": 1
       },
       "function": {
-        "camelCase": 1341,
+        "camelCase": 1343,
         "other": 1,
         "PascalCase": 3
       },
@@ -47,9 +47,9 @@
     ],
     "exports": {
       "default": 92,
-      "named": 323
+      "named": 325
     }
   },
   "preferences": {},
-  "lastAnalyzed": "2026-06-14T07:38:59.783Z"
+  "lastAnalyzed": "2026-06-14T17:15:36.698Z"
 }
