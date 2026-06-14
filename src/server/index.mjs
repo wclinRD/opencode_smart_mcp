@@ -657,10 +657,17 @@ function autoStoreToMemory(toolName, args, result, errorCategory) {
     child.unref();
     setTimeout(() => { try { child.kill(); } catch { /* ok */ } }, 2000).unref();
 
-    // Also write to SQLite (--db) so FTS5/vector read paths find new entries
-    const childDb = spawn('node', [...baseArgs, '--db'], { timeout: 3000, stdio: 'ignore' });
+    // Write to SQLite with embedding (--db --semantic) so FTS5/vector
+    // search can find past errors via semantic similarity — not just
+    // exact BM25 keyword match. 384-dim all-MiniLM-L6-v2 embedding via
+    // @huggingface/transformers (optional dep — silently skips if unavail).
+    const SEMANTIC_TIMEOUT = 15000;
+    const childDb = spawn('node', [...baseArgs, '--db', '--semantic'], { timeout: SEMANTIC_TIMEOUT, stdio: 'ignore' });
     childDb.unref();
-    setTimeout(() => { try { childDb.kill(); } catch { /* ok */ } }, 2000).unref();
+    // Entry is stored BEFORE embedding generation (see cmdStoreDB flow:
+    //   insertEntry → tryLoadSentenceModel → getSentenceEmbedding → storeEmbedding)
+    // If timeout kills mid-load, entry exists in DB but has no embedding — graceful.
+    setTimeout(() => { try { childDb.kill(); } catch { /* ok */ } }, SEMANTIC_TIMEOUT - 1000).unref();
   } catch {
     // Best-effort — never throw from auto-store
   }
