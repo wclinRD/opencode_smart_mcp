@@ -771,7 +771,7 @@ function preCheckMemory(toolName, args) {
 
     // Check for high-confidence match (similarity ≥ 0.8)
     const topMatch = parsed.entries[0];
-    if (topMatch.similarity >= 0.8) {
+    if (topMatch.similarity >= 0.5) {
       stats.memoryPreCheckHitCount++;
       stats.memoryPreCheckSavedMs += 1500; // rough avg saved per tool execution skipped
 
@@ -865,6 +865,32 @@ function contextualMemorySearch(toolName, args) {
                 category: 'memory',
                 severity: 'low',
               }]);
+            }
+            return resolve();
+          }
+        } catch { /* SQLite parse failed — fall through to JSON */ }
+
+        // Fallback: JSON file (no --db). SQLite may be empty.
+        try {
+          const fallback = spawnSync('node', [
+            MEMORY_CLI_PATH, 'search', query.slice(0, 200),
+            '--format', 'json',
+            '--limit', '2',
+            '--threshold', '0.3',
+          ], { encoding: 'utf-8', timeout: 3000, maxBuffer: 1024 * 10 });
+          if (fallback.status === 0 && fallback.stdout) {
+            const fbParsed = JSON.parse(fallback.stdout);
+            if (fbParsed?.found && Array.isArray(fbParsed.entries) && fbParsed.entries.length > 0) {
+              const top = fbParsed.entries[0];
+              const hint = top.resolution || top.errorMessage || top.behaviorChange || '';
+              if (hint.length > 5) {
+                contextManager.addFindings([{
+                  source: 'memory',
+                  finding: `💡 [Contextual Memory] ${toolName}: ${hint.slice(0, 100)}`,
+                  category: 'memory',
+                  severity: 'low',
+                }]);
+              }
             }
           }
         } catch { /* best effort */ }
