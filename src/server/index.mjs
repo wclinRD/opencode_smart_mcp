@@ -51,6 +51,75 @@ const MAX_OUTPUT_SIZE = 512 * 1024;
 const MAX_OUTPUT_CHARS = 200_000;
 const TOOL_TIMEOUT = 30_000;
 
+// ---------------------------------------------------------------------------
+// Model size: 'large' | 'small' | 'micro'
+// Controls tool manifest, output compression, emoji stripping.
+// Set via --model-size CLI flag or SMART_MODEL_SIZE env var.
+// The smart-small.md agent calls smart_config({set:{modelSize:'small'}})
+// at session start to switch dynamically.
+// ---------------------------------------------------------------------------
+const MODEL_SIZE = (() => {
+  const idx = argv.indexOf('--model-size');
+  if (idx >= 0 && idx + 1 < argv.length) {
+    const val = argv[idx + 1].toLowerCase();
+    if (['small', 'micro'].includes(val)) return val;
+  }
+  if (env.SMART_MODEL_SIZE) {
+    const val = env.SMART_MODEL_SIZE.toLowerCase();
+    if (['small', 'micro'].includes(val)) return val;
+  }
+  return 'large'; // default: full feature set
+})();
+
+// Native tools (top-level MCP) hidden per model size.
+// Hidden tools remain accessible via smart_run router.
+const HIDDEN_NATIVE_TOOLS = {
+  small: new Set([
+    'smart_exa_search', 'smart_exa_crawl', 'smart_github_search',
+    'smart_hallucination_check', 'smart_academic_search',
+    'smart_academic_review', 'smart_docx_generate',
+    'smart_deep_think', 'smart_security', 'smart_learn',
+    'smart_codebase_index',
+  ]),
+  micro: new Set([
+    'smart_exa_search', 'smart_exa_crawl', 'smart_github_search',
+    'smart_hallucination_check', 'smart_academic_search',
+    'smart_academic_review', 'smart_docx_generate',
+    'smart_deep_think', 'smart_security', 'smart_learn',
+    'smart_codebase_index', 'smart_lsp', 'smart_rules',
+    'smart_fast_apply', 'smart_compact',
+  ]),
+};
+
+/**
+ * Strip or replace emoji for small/micro model output.
+ * Maps diagnostic emoji to text equivalents; strips decorative ones.
+ */
+function formatForModelSize(text, modelSize) {
+  if (modelSize === 'large') return text;
+
+  // Replace diagnostic emoji with text equivalents
+  const replacements = {
+    '✅': '[OK] ', '❌': '[ERR] ', '⚠️': '[WARN] ', '🔒': '[GATE] ',
+    '💡': '[TIP] ', '🧠': '', '🔍': '', '🎯': '', '🚀': '',
+    '📊': '', '📄': '', '🧩': '', '🛡': '', '📋': '', '📝': '',
+    '🏆': '', '🌐': '', '⚡': '', '🔵': '', '🟠': '',
+    '🗺': '', '📁': '', '🖼': '', '🌲': '', '🥇': '', '🥈': '', '🥉': '',
+    '📍': '', 'ℹ️': '', '➕': '', '➖': '',
+    '└─': '  ', '├─': '  ', '──': '--',
+  };
+  let result = text;
+  for (const [emoji, replacement] of Object.entries(replacements)) {
+    result = result.split(emoji).join(replacement);
+  }
+
+  // Micro: additional compression — collapse multi-blank lines
+  if (modelSize === 'micro') {
+    result = result.replace(/\n{3,}/g, '\n\n');
+  }
+  return result;
+}
+
 function debugLog(...args) {
   if (DEBUG) stderr.write(`[smart-mcp] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`);
 }
@@ -221,7 +290,7 @@ function resetStats() { stats.startTime = Date.now(); stats.totalCalls = 0; stat
 // ---------------------------------------------------------------------------
 // Runtime config
 // ---------------------------------------------------------------------------
-const runtimeConfig = { debug: DEBUG, timeoutMs: TOOL_TIMEOUT, maxOutputSize: MAX_OUTPUT_SIZE, maxOutputChars: MAX_OUTPUT_CHARS };
+const runtimeConfig = { debug: DEBUG, timeoutMs: TOOL_TIMEOUT, maxOutputSize: MAX_OUTPUT_SIZE, maxOutputChars: MAX_OUTPUT_CHARS, modelSize: MODEL_SIZE };
 
 // ---------------------------------------------------------------------------
 // Output optimization (Phase 2: pipeline-based L0/L1/L2 + semantic truncation)
@@ -1771,6 +1840,13 @@ function respond(id, result, opts = {}) {
     budget.track(result._toolName || 'unknown', result.content[0].text.length, false, 0, result.content[0].text);
   }
 
+  // Phase: Apply modelSize-specific formatting (emoji stripping for small/micro)
+  // Runs after optimization — does not affect optimization metadata or budget tracking
+  const curSize = runtimeConfig.modelSize;
+  if (curSize !== 'large' && result?.content?.[0]?.type === 'text' && typeof result.content[0].text === 'string') {
+    result.content[0].text = formatForModelSize(result.content[0].text, curSize);
+  }
+
   // Write chain — awaits pending async work (e.g. Phase 10.2 impact warning),
   // then serializes writes to maintain MCP JSON-RPC ordering.
   _respondChain = _respondChain.then(async () => {
@@ -1986,18 +2062,25 @@ function handleRequest(req) {
 
     case 'tools/list': {
       // Only native tools appear in tools/list — reduces token usage by ~70%
-      const tools = nativeTools.map(t => ({
+      // Filter by model size: small/micro hides certain tools from manifest
+      const modelSize = runtimeConfig.modelSize;
+      const hiddenSet = modelSize !== 'large' ? HIDDEN_NATIVE_TOOLS[modelSize] : null;
+      const filteredTools = hiddenSet
+        ? nativeTools.filter(t => !hiddenSet.has(t.name))
+        : nativeTools;
+
+      const tools = filteredTools.map(t => ({
         name: t.name,
         description: `[${t.category || 'core'}] ${t.description}`,
         inputSchema: t.inputSchema,
       }));
-      // Add the router tool
+      // Add the router tool (always available, MCP standard)
       tools.push({
         name: 'smart_run',
         description: ROUTER_DESCRIPTION,
         inputSchema: ROUTER_SCHEMA,
       });
-      // Add the context tool
+      // Add the context tool (always available)
       tools.push({
         name: 'smart_context',
         description: CONTEXT_TOOL_DESCRIPTION,
@@ -2011,6 +2094,25 @@ function handleRequest(req) {
             projectRoot: { type: 'string', description: 'Project root path' },
             olderThan: { type: 'number', description: 'Keep only the last N turns (for clear_tool_results). Default: 10' },
             keepLatest: { type: 'number', description: 'Safety floor: always keep at least N recent entries (for clear_tool_results). Default: 2' },
+          },
+        },
+      });
+      // Add the config tool (allows LLM to switch modelSize at runtime)
+      tools.push({
+        name: 'smart_config',
+        description: '[config] Get or set server runtime configuration. Supports modelSize (large/small/micro), debug, timeoutMs.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            set: {
+              type: 'object',
+              description: 'Configuration values to set. Use {\"modelSize\":\"small\"} to switch modes.',
+              properties: {
+                modelSize: { type: 'string', enum: ['large', 'small', 'micro'], description: 'Switch model size mode' },
+                debug: { type: 'boolean', description: 'Enable/disable debug logging' },
+                timeoutMs: { type: 'number', description: 'Default tool timeout in ms' },
+              },
+            },
           },
         },
       });
@@ -2106,6 +2208,24 @@ function handleRequest(req) {
             }, { optimize: false });
           }
         } finally { if (id != null) pendingCalls.delete(String(id)); }
+        break;
+      }
+
+      // smart_config → server config (same as smart/config JSON-RPC method)
+      if (toolName === 'smart_config') {
+        const args4 = (params?.arguments || {});
+        if (args4.set && typeof args4.set === 'object') {
+          const changes = args4.set;
+          const applied = {};
+          const rejected = {};
+          if (typeof changes.debug === 'boolean') { runtimeConfig.debug = changes.debug; applied.debug = runtimeConfig.debug; }
+          if (typeof changes.timeoutMs === 'number' && changes.timeoutMs > 0) { runtimeConfig.timeoutMs = changes.timeoutMs; applied.timeoutMs = runtimeConfig.timeoutMs; }
+          if (typeof changes.modelSize === 'string' && ['large', 'small', 'micro'].includes(changes.modelSize)) { runtimeConfig.modelSize = changes.modelSize; applied.modelSize = runtimeConfig.modelSize; }
+          for (const key of Object.keys(changes)) { if (!(key in applied)) rejected[key] = 'Unknown or invalid'; }
+          respond(id, { content: [{ type: 'text', text: JSON.stringify({ applied, rejected }) }] });
+        } else {
+          respond(id, { content: [{ type: 'text', text: JSON.stringify({ ...runtimeConfig }) }] });
+        }
         break;
       }
 
@@ -2238,6 +2358,7 @@ function handleRequest(req) {
         if (typeof changes.debug === 'boolean') { runtimeConfig.debug = changes.debug; applied.debug = runtimeConfig.debug; }
         if (typeof changes.timeoutMs === 'number' && changes.timeoutMs > 0) { runtimeConfig.timeoutMs = changes.timeoutMs; applied.timeoutMs = runtimeConfig.timeoutMs; }
         if (typeof changes.maxOutputChars === 'number' && changes.maxOutputChars > 0) { runtimeConfig.maxOutputChars = changes.maxOutputChars; applied.maxOutputChars = runtimeConfig.maxOutputChars; }
+        if (typeof changes.modelSize === 'string' && ['large', 'small', 'micro'].includes(changes.modelSize)) { runtimeConfig.modelSize = changes.modelSize; applied.modelSize = runtimeConfig.modelSize; }
         for (const key of Object.keys(changes)) { if (!(key in applied)) rejected[key] = 'Unknown or invalid'; }
         respond(id, { applied, rejected });
       } else {
