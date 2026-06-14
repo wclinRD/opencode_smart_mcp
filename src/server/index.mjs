@@ -1900,8 +1900,16 @@ const PROTOCOL_VERSION = '2024-11-05';
 function writeMsg(msg) { stdout.write(JSON.stringify(msg) + '\n'); }
 
 let _respondChain = Promise.resolve();
-let _autoCleared = false; // Phase 14.1: fire-once flag for auto clear_tool_results
-let _autoCompacted = false; // Phase 32: fire-once flag for auto compact
+
+// Phase 33: Tiered auto context management (replaces fire-once _autoCleared/_autoCompacted)
+let _autoState = {
+  enabled: true,
+  mode: 'normal',        // 'normal' | 'aggressive' | 'off'
+  thresholds: { warn: 0.70, critical: 0.85, emergency: 0.95 },
+  lastLevel: 0,          // last triggered tier level
+  lastAction: 0,         // timestamp of last action
+  cooldownMs: 60000,     // 60s cooldown between same-tier actions
+};
 
 /**
  * Extract image content from a result object if it has _imageContent flag.
@@ -1929,6 +1937,68 @@ function buildToolContent(resolvedOutput, result) {
     ? String(resolvedOutput ?? '')
     : String(result?.output ?? '');
   return [{ type: 'text', text }];
+}
+
+/**
+ * Phase 33: Tiered auto context management.
+ * Replaces fire-once _autoCleared/_autoCompacted with a proper tiered system.
+ * Tier 1 (70%): Show droppable stats suggestion
+ * Tier 2 (85%): Auto-clear low-value outputs
+ * Tier 3 (95%): Emergency aggressive clear
+ */
+function autoManageContext(budget) {
+  const s = _autoState;
+  if (!s.enabled || s.mode === 'off') return '';
+
+  const used = budget.usedFraction;
+  const now = Date.now();
+  const inCooldown = (now - s.lastAction) < s.cooldownMs;
+
+  // Tier 3: Emergency (95%) — always trigger, no cooldown
+  if (used >= s.thresholds.emergency) {
+    s.lastLevel = 3; s.lastAction = now;
+    try {
+      ensureContext();
+      const cleared = contextManager.clearToolResults({ olderThan: 3, keepLatest: 2 });
+      budget.freeEntries(cleared.removed);
+      const stats = budget.getDroppableStats();
+      debugLog(`AutoManage Tier3: cleared ${cleared.removed} entries (budget=${(used*100).toFixed(0)}%)`);
+      return `\n\n---\n🚨 Context 危急：${(used*100).toFixed(0)}%。已緊急清除 ${cleared.removed} 筆輸出。\n可丟棄: ${(stats.discardable/1024).toFixed(1)}KB, 可摘要: ${(stats.summarizable/1024).toFixed(1)}KB\n---`;
+    } catch (e) {
+      debugLog('AutoManage Tier3 error:', e.message);
+    }
+    return '';
+  }
+
+  // Tier 2: Warning (85%) — cooldown-gated
+  if (used >= s.thresholds.critical && (!inCooldown || s.lastLevel < 2)) {
+    s.lastLevel = 2; s.lastAction = now;
+    try {
+      ensureContext();
+      const cleared = contextManager.clearToolResults({ olderThan: 5, keepLatest: 3 });
+      budget.freeEntries(cleared.removed);
+      const stats = budget.getDroppableStats();
+      debugLog(`AutoManage Tier2: cleared ${cleared.removed} entries (budget=${(used*100).toFixed(0)}%)`);
+      if (cleared.removed > 0) {
+        return `\n\n---\n⚠️ Context ${(used*100).toFixed(0)}%。已自動清除 ${cleared.removed} 筆輸出（釋放約 ${(stats.discardable/1024).toFixed(1)}KB）。\n保留：錯誤訊息、活躍搜尋結果、編輯記錄\n---`;
+      }
+    } catch (e) {
+      debugLog('AutoManage Tier2 error:', e.message);
+    }
+    return '';
+  }
+
+  // Tier 1: Reminder (70%) — cooldown-gated, suggestion only
+  if (used >= s.thresholds.warn && (!inCooldown || s.lastLevel < 1)) {
+    s.lastLevel = 1; s.lastAction = now;
+    const stats = budget.getDroppableStats();
+    const droppableKB = ((stats.discardable + stats.summarizable) / 1024).toFixed(1);
+    if (stats.discardable + stats.summarizable > 2000) {
+      return `\n\n---\n💡 Context ${(used*100).toFixed(0)}%。可釋放約 ${droppableKB}KB：\n  - 無匹配搜尋: ${(stats.discardable/1024).toFixed(1)}KB\n  - 可摘要輸出: ${(stats.summarizable/1024).toFixed(1)}KB\n👉 執行 smart_compact({auto:true}) 或忽略\n---`;
+    }
+  }
+
+  return '';
 }
 
 function respond(id, result, opts = {}) {
@@ -1972,34 +2042,10 @@ function respond(id, result, opts = {}) {
       result.content[0].text += `\n\n---\n📊 Context Budget: ${status.usedPct} used (${status.remainingPct} remaining) — ${rotWarning}\n---`;
     }
 
-    // Phase 30: Auto-trigger clear_tool_results at 80% budget (fire-and-forget, once per session)
-    if (budget.usedFraction >= 0.80 && !_autoCleared) {
-      _autoCleared = true;
-      try {
-        ensureContext();
-        const cleared = contextManager.clearToolResults({ olderThan: 10, keepLatest: 2 });
-        // Subtract freed entries from budget instead of full reset — keeps tracking accurate
-        budget.freeEntries(cleared.removed);
-        debugLog(`Auto clear_tool_results: removed ${cleared.removed}, kept ${cleared.kept} (budget=${(budget.usedFraction * 100).toFixed(0)}%)`);
-      } catch (e) {
-        debugLog('Auto clear_tool_results error:', e.message);
-      }
-    }
-
-    // Phase 32: Auto-trigger aggressive clear + budget reset at 88% budget
-    // compactHistory doesn't affect budget tracking — use clearToolResults + reset instead
-    if (budget.usedFraction >= 0.88 && !_autoCompacted) {
-      _autoCompacted = true;
-      try {
-        ensureContext();
-        const cleared = contextManager.clearToolResults({ olderThan: 5, keepLatest: 2 });
-        budget.freeEntries(cleared.removed);
-        if (cleared.removed > 0) {
-          debugLog(`Auto clear (Phase 32): removed ${cleared.removed}, kept ${cleared.kept} (budget reset)`);
-        }
-      } catch (e) {
-        debugLog('Auto clear (Phase 32) error:', e.message);
-      }
+    // Phase 33: Tiered auto context management (replaces fire-once _autoCleared/_autoCompacted)
+    const autoMsg = autoManageContext(budget);
+    if (autoMsg) {
+      result.content[0].text += autoMsg;
     }
   } else if (result?.content?.[0]?.type === 'text' && typeof result.content[0].text === 'string') {
     // Track even non-optimized outputs (Phase 30: pass text for metadata exclusion)
@@ -2121,7 +2167,8 @@ function handleSmartContext(id, args) {
       case 'reset': {
         contextManager.reset();
         resetContextBudget();
-        _autoCleared = false;
+        _autoState.lastLevel = 0;
+        _autoState.lastAction = 0;
         result = `Session reset. SessionId: ${contextManager.get()?.sessionId}\nContext budget also reset.`;
         break;
       }
@@ -2181,6 +2228,32 @@ function handleSmartContext(id, args) {
         const cleared = contextManager.clearToolResults({ olderThan, keepLatest });
         result = JSON.stringify(cleared, null, 2);
         debugLog(`clear_tool_results: removed ${cleared.removed}, kept ${cleared.kept} (olderThan=${olderThan}, keepLatest=${keepLatest})`);
+        break;
+      }
+
+      case 'auto': {
+        const mode = args.mode || 'status';
+        if (mode === 'on') {
+          _autoState.enabled = true;
+          _autoState.mode = 'normal';
+        } else if (mode === 'off') {
+          _autoState.enabled = false;
+        } else if (mode === 'aggressive') {
+          _autoState.enabled = true;
+          _autoState.mode = 'aggressive';
+          _autoState.thresholds = { warn: 0.55, critical: 0.70, emergency: 0.85 };
+        }
+        if (args.thresholds && typeof args.thresholds === 'object') {
+          if (typeof args.thresholds.warn === 'number') _autoState.thresholds.warn = args.thresholds.warn;
+          if (typeof args.thresholds.critical === 'number') _autoState.thresholds.critical = args.thresholds.critical;
+          if (typeof args.thresholds.emergency === 'number') _autoState.thresholds.emergency = args.thresholds.emergency;
+        }
+        const budget = getContextBudget();
+        result = JSON.stringify({
+          autoManage: { enabled: _autoState.enabled, mode: _autoState.mode, thresholds: _autoState.thresholds },
+          currentBudget: budget.getStatus(),
+          droppableStats: budget.getDroppableStats(),
+        }, null, 2);
         break;
       }
 
@@ -2394,6 +2467,21 @@ function handleRequest(req) {
           respond(id, { content: [{ type: 'text', text: JSON.stringify({ ...runtimeConfig }) }] });
         }
         break;
+      }
+
+      // Phase 33: Inject toolHistory for smart_compact auto mode
+      if (toolName === 'smart_compact' && args.auto) {
+        ensureContext();
+        const ctx = contextManager.get();
+        if (ctx && Array.isArray(ctx.toolHistory)) {
+          args.toolHistory = ctx.toolHistory.map(h => ({
+            tool: h.tool,
+            ok: h.ok,
+            result: h.result,
+            error: h.error,
+            timestamp: h.timestamp,
+          }));
+        }
       }
 
       // Native tool

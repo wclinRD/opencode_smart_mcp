@@ -62,6 +62,16 @@ const METADATA_PATTERNS = [
 ];
 
 // ---------------------------------------------------------------------------
+// Phase 33: Output value tracking for smart auto-clear
+// Higher value = more important to keep. Used by autoManageContext to
+// prioritize which outputs to drop when budget is tight.
+// ---------------------------------------------------------------------------
+export const VALUE_CRITICAL = 3;     // Error messages, user instructions
+export const VALUE_USEFUL = 2;       // Search results with matches, test failures
+export const VALUE_SUMMARIZABLE = 1; // Successful commands, consumed outputs
+export const VALUE_DISCARDABLE = 0;  // No-match searches, duplicate reads
+
+// ---------------------------------------------------------------------------
 // Model Detection
 // ---------------------------------------------------------------------------
 
@@ -163,7 +173,7 @@ export class ContextBudget {
   get modelTokens() { return this._modelTokens; }
   get detectionSource() { return this._detectionSource; }
 
-  track(toolName, outputChars, compressed = false, originalChars = 0, outputText = '') {
+  track(toolName, outputChars, compressed = false, originalChars = 0, outputText = '', valueLevel = null) {
     const { effective, metadata } = outputText
       ? countEffectiveChars(outputText)
       : { effective: outputChars, metadata: 0 };
@@ -175,7 +185,14 @@ export class ContextBudget {
       this._compressedCount++;
       this._savingsChars += Math.max(0, originalChars - outputChars);
     }
-    this._history.push({ tool: toolName, chars: outputChars, effectiveChars: effective, metadataChars: metadata, compressed, timestamp: Date.now() });
+    const inferredValue = valueLevel ?? this._inferValue(toolName, outputText);
+    this._history.push({
+      tool: toolName, chars: outputChars, effectiveChars: effective,
+      metadataChars: metadata, compressed, timestamp: Date.now(),
+      value: inferredValue,
+      consumed: false,
+      _index: this._history.length,
+    });
     if (this._history.length > 200) this._history = this._history.slice(-200);
   }
 
@@ -186,6 +203,50 @@ export class ContextBudget {
     this._structuredCount = 0; this._structuredSavingsChars = 0;
     this._freeFormCount = 0; this._freeFormTotalChars = 0;
     this._lastWarnedPct = 0;
+  }
+
+  /**
+   * Phase 33: Infer output value from tool type + output content.
+   * Used when caller doesn't provide explicit valueLevel.
+   */
+  _inferValue(toolName, outputText) {
+    const head = (outputText || '').slice(0, 800);
+    if (/error|exception|failed|crash|traceback|TypeError|ReferenceError|SyntaxError/i.test(head)) {
+      return VALUE_CRITICAL;
+    }
+    if (/no matches|0 matches|not found|no results/i.test(head)) {
+      return VALUE_DISCARDABLE;
+    }
+    if (toolName === 'bash') return VALUE_SUMMARIZABLE;
+    return VALUE_USEFUL;
+  }
+
+  /**
+   * Phase 33: Mark a history entry as consumed by a later tool.
+   * Downgrades USEFUL → SUMMARIZABLE so auto-clear can free it.
+   */
+  markConsumed(index) {
+    const entry = this._history.find(e => e._index === index);
+    if (entry && entry.value === VALUE_USEFUL) {
+      entry.value = VALUE_SUMMARIZABLE;
+      entry.consumed = true;
+    }
+  }
+
+  /**
+   * Phase 33: Get breakdown of droppable chars by value level.
+   * Used by autoManageContext to decide how aggressively to clear.
+   */
+  getDroppableStats() {
+    const stats = { critical: 0, useful: 0, summarizable: 0, discardable: 0 };
+    for (const entry of this._history) {
+      if (entry.value === VALUE_CRITICAL) stats.critical += entry.effectiveChars;
+      else if (entry.value === VALUE_USEFUL) stats.useful += entry.effectiveChars;
+      else if (entry.value === VALUE_SUMMARIZABLE) stats.summarizable += entry.effectiveChars;
+      else stats.discardable += entry.effectiveChars;
+    }
+    stats.total = stats.critical + stats.useful + stats.summarizable + stats.discardable;
+    return stats;
   }
 
   /**

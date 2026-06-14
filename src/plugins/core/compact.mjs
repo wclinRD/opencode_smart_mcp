@@ -269,7 +269,11 @@ export default {
     properties: {
       toolHistory: {
         type: 'array',
-        description: 'Array of tool call entries: [{ tool, ok, result?, error?, timestamp? }]',
+        description: 'Array of tool call entries: [{ tool, ok, result?, error?, timestamp? }]. Auto-populated from server context when auto:true.',
+      },
+      auto: {
+        type: 'boolean',
+        description: 'Auto mode: server injects toolHistory from current session context. No need to pass toolHistory manually.',
       },
       conversationLength: {
         type: 'number',
@@ -284,7 +288,7 @@ export default {
         description: 'Current TODO items for recovery context',
       },
     },
-    required: ['toolHistory'],
+    required: [],
   },
 
   handler,
