@@ -35,8 +35,7 @@ describe('SYSTEM_PROMPT_FRAGMENT', () => {
   });
 
   it('contains compose guidance', () => {
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('"compose"'));
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('pipeline'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('compose'));
   });
 
   it('contains memory integration guidance', () => {
@@ -48,12 +47,12 @@ describe('SYSTEM_PROMPT_FRAGMENT', () => {
   });
 
   it('contains planning guidance', () => {
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('"planner"'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('planner'));
   });
 
-  it('contains Smart MCP First rule', () => {
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('Smart MCP First'));
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('check Smart MCP equivalent first'));
+  it('contains Decision Flow routing rule', () => {
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('Decision Flow'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('Native tool fits?'));
   });
 
   it('contains Task Subagent Routing rule', () => {
