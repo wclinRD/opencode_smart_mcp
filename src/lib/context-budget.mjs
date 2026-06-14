@@ -46,9 +46,13 @@ const MODEL_CONTEXT_WINDOWS = {
 };
 
 const BUDGET_FRACTION = 0.85;
+// Thresholds are compared against remainingFraction:
+//   warning  → remaining <= 80% (used >= 20%)
+//   low      → remaining <= 50% (used >= 50%)
+//   critical → remaining <= 20% (used >= 80%)
 const WARN_THRESHOLD = 0.80;
-const LOW_THRESHOLD = 0.95;
-const CRITICAL_THRESHOLD = 1.0;
+const LOW_THRESHOLD = 0.50;
+const CRITICAL_THRESHOLD = 0.20;
 
 const METADATA_PATTERNS = [
   /^🔐 checksum:/, /^\{$/, /^\s*"_optimized":/, /^\s*"originalSize":/,
@@ -201,13 +205,13 @@ export class ContextBudget {
 
   getRotWarning() {
     const used = this.usedFraction;
-    if (used >= 1.0) {
-      return `⚠️ Budget 剩 ${(this.remainingFraction * 100).toFixed(0)}%。強烈建議執行 smart_compact 或開始新的 session`;
+    if (used >= 0.90) {
+      return `⚠️ Budget ${(used * 100).toFixed(1)}%。強烈建議執行 smart_compact 或開始新的 session`;
     }
-    if (used >= 0.95) {
+    if (used >= 0.70) {
       return `⚡ Budget ${(used * 100).toFixed(1)}%。建議執行 smart_context({command:"clear_tool_results", olderThan:10}) 或 smart_compact`;
     }
-    if (used >= 0.80) {
+    if (used >= 0.50) {
       return `💡 Budget ${(used * 100).toFixed(1)}%。可考慮 smart_context({command:"clear_tool_results", olderThan:10}) 釋放 context 空間`;
     }
     return null;

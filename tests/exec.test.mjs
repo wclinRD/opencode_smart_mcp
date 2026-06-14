@@ -23,7 +23,8 @@ describe('plugin structure', () => {
 
   it('has inputSchema with required fields', () => {
     assert.ok(plugin.inputSchema);
-    assert.deepEqual(plugin.inputSchema.required, ['language', 'code']);
+    // language is optional (auto-detected from code content)
+    assert.deepEqual(plugin.inputSchema.required, ['code']);
     assert.ok(plugin.inputSchema.properties.language.enum.includes('bash'));
     assert.ok(plugin.inputSchema.properties.language.enum.includes('node'));
     assert.ok(plugin.inputSchema.properties.language.enum.includes('python'));

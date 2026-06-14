@@ -92,6 +92,13 @@ function nextRunTime(cronExpr) {
 // Plugin
 // ---------------------------------------------------------------------------
 
+// Test cleanup: stop all scheduled tasks and clear all timers
+export function __test_cleanup() {
+  for (const [name] of _runningTasks) {
+    stopScheduledTask(name);
+  }
+}
+
 export default {
   name: 'smart_schedule',
   description: 'Schedule recurring background tasks with cron expressions. Tasks run automatically and results are stored in memory.',

@@ -19,6 +19,7 @@ function cleanup() {
 
 describe('Scheduled Background Tasks', () => {
   let plugin;
+  let schedulerModule;
 
   before(async () => {
     cleanup();
@@ -30,10 +31,13 @@ describe('Scheduled Background Tasks', () => {
     // Override DB path via env-like approach — use the test DB
     process.env.SMART_MEMORY_PATH = TEST_DB;
 
-    plugin = (await import('../src/plugins/standard/scheduler.mjs')).default;
+    schedulerModule = await import('../src/plugins/standard/scheduler.mjs');
+    plugin = schedulerModule.default;
   });
 
   after(() => {
+    // Stop all setInterval timers to prevent event loop leak
+    if (schedulerModule?.__test_cleanup) schedulerModule.__test_cleanup();
     cleanup();
     delete process.env.SMART_MEMORY_PATH;
   });
