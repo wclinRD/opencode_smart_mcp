@@ -164,7 +164,8 @@ function fileGlob(root, pattern) {
     try {
       const entries = readdirSync(fullDir);
       return entries.filter(e => {
-        const re = new RegExp('^' + parts[parts.length - 1].replace(/\*/g, '.*') + '$');
+        const escaped = parts[parts.length - 1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\*/g, '.*');
+        const re = new RegExp('^' + escaped + '$');
         return re.test(e);
       }).map(e => join(dir, e));
     } catch {

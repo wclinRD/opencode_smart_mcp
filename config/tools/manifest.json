@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-14T19:14:17.337Z",
+  "generatedAt": "2026-06-14T19:32:38.572Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -2333,7 +2333,7 @@
           },
           "connection": {
             "type": "string",
-            "description": "SQLite: path to .db file. PostgreSQL: postgresql://user:pass@host/db"
+            "description": "SQLite: path to .db file. PostgreSQL: postgresql: //<user>:<password>@<host>/<db>"
           },
           "sql": {
             "type": "string",

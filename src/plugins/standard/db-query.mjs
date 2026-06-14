@@ -25,7 +25,7 @@ Use when: need to explore database schema, verify data, or answer data questions
       },
       connection: {
         type: 'string',
-        description: 'SQLite: path to .db file. PostgreSQL: postgresql://user:pass@host/db',
+        description: 'SQLite: path to .db file. PostgreSQL: postgresql: //<user>:<password>@<host>/<db>',
       },
       sql: {
         type: 'string',
