@@ -608,7 +608,24 @@ function extractErrorKey(toolName, args, result) {
 }
 
 /**
+ * Classify error type for fix lookup (maps to ERROR_FIXES keys).
+ */
+function classifyErrorType(errorMsg) {
+  const l = (errorMsg || '').toLowerCase();
+  if (!l) return 'generic';
+  if (l.includes('timeout') || l.includes('timed out')) return 'timeout';
+  if (l.includes('syntax') || l.includes('unexpected token') || l.includes('parse')) return 'syntax';
+  if (l.includes('required') || l.includes('missing')) return 'missing';
+  if (l.includes('not found') || l.includes('unknown tool') || l.includes('unknown command')) return 'notFound';
+  if (l.includes('exit') || l.includes('non-zero')) return 'exit';
+  if (l.includes('cancel')) return 'cancel';
+  if (l.includes('enforc')) return 'enforcement';
+  return 'generic';
+}
+
+/**
  * D.1 Auto-Store: Non-blocking write of failed tool result to memory store.
+ * Uses ERROR_FIXES map for meaningful resolutions instead of raw error text.
  * Fast async spawn with unref — does NOT block the response.
  */
 function autoStoreToMemory(toolName, args, result, errorCategory) {
@@ -619,7 +636,11 @@ function autoStoreToMemory(toolName, args, result, errorCategory) {
     const errorKey = extractErrorKey(toolName, args, result);
     if (!errorKey || errorKey.length < 10) return; // skip noise
 
-    const resolution = `Tool ${toolName} returned error. Fix: ${(result && result.error) ? result.error.split('\n')[0] : 'Check tool args and input.'}`;
+    // Use ERROR_FIXES map for a meaningful resolution
+    const errorMsg = result?.error || errorKey || '';
+    const errorType = classifyErrorType(errorMsg);
+    const resolution = getErrorFix(toolName, errorType, errorMsg);
+
     const toolsUsed = toolName;
     const category = errorCategory || classifyErrorForMemory(errorKey);
 
