@@ -73,9 +73,14 @@ Always inject the following in the task prompt header:
 → \`dispatch\` → \`replan\` (on fail) → \`summary\`
 
 ### Memory
-- Search: \`smart_smart_run({tool:"memory_store", args:{command:"search", query:"..."}})\`
-- Store: \`smart_smart_run({tool:"memory_store", args:{command:"store", query:"...", resolution:"..."}})\`
+- **Auto-injected at session start**: project-aware memory hint appears as 💡 [Memory] finding
+- **Contextual search** (Phase 2): smart_fast_apply, smart_think, smart_refactor_plan auto-search past memory for relevant context (non-blocking, injects 💡 [Contextual Memory] finding)
+- **Blocking pre-check** (Phase D): smart_debug, smart_test, smart_cross_file_edit check memory before execution — returns known fix if high-confidence match
+- Search intentionally: \`smart_smart_run({tool:"memory_store", args:{command:"search", query:"..."}})\`
+- Store intentionally: \`smart_smart_run({tool:"memory_store", args:{command:"store", query:"...", resolution:"..."}})\`
+- Session checkpoints auto-save on shutdown (Phase 3)
 - Skill patches auto-extract from findings every 5 calls + on session end
+- 💡 When stuck on an error, check memory FIRST: past sessions may have the fix. The 💡 [Memory] hints at session start are a lightweight preview — use memory_store search for full results.
 `;
 
 export { SYSTEM_PROMPT_FRAGMENT };

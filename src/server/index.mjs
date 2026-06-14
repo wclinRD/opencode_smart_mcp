@@ -24,7 +24,7 @@ import { spawnSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { stdin, stdout, stderr, env } from 'node:process';
@@ -146,7 +146,42 @@ function gracefulShutdown(signal) {
   isShuttingDown = true;
   debugLog(`Shutdown: ${signal}`);
   for (const [id, controller] of pendingCalls) { controller.abort(); pendingCalls.delete(id); }
+  // Phase 3: Fire-and-forget session checkpoint
+  saveSessionCheckpoint();
   setTimeout(() => { debugLog('Shutdown complete'); process.exit(0); }, 500).unref();
+}
+
+/**
+ * Phase 3: Session Checkpoint — save current context summary as memory entry.
+ * Fire-and-forget via spawn + unref, never delays shutdown.
+ */
+function saveSessionCheckpoint() {
+  try {
+    if (!existsSync(MEMORY_CLI_PATH) || !contextManager) return;
+    const ctx = contextManager.get();
+    if (!ctx) return;
+    const projectName = basename(process.cwd());
+    const toolCount = ctx.metadata?.toolCount || 0;
+    if (toolCount < 3) return; // skip if basically nothing happened
+
+    const summary = JSON.stringify({
+      projectName,
+      toolCount,
+      sessionId: ctx.sessionId,
+      timestamp: new Date().toISOString(),
+    });
+
+    const child = spawn('node', [
+      MEMORY_CLI_PATH, 'store', `checkpoint:${projectName}`,
+      '--resolution', `Session checkpoint for ${projectName}: ${toolCount} tools called`,
+      '--tools', 'checkpoint',
+      '--category', 'checkpoint',
+      '--success', 'true',
+      '--metadata', summary.slice(0, 1000),
+    ], { timeout: 3000, stdio: 'ignore' });
+    child.unref();
+    setTimeout(() => { try { child.kill(); } catch { /* ok */ } }, 2000).unref();
+  } catch { /* best effort */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -178,49 +213,87 @@ function detectAgentId() {
 }
 
 /**
- * Phase 10.5: Auto Memory Injection.
- * Reads memory store JSON directly and injects top entries (skill_patches
- * first, then by hitCount + recency) as accumulated findings.
+ * Phase 1: Auto Memory Injection.
+ * Spawns CLI for project-aware BM25 SQLite search, injects single light hint (<100t).
+ * Falls back to JSON with project filter if SQLite DB unavailable.
  * Fire-and-forget: called once after first context init, non-blocking.
  */
 function autoInjectMemory() {
   if (memoryInjected) return;
   try {
+    const projectName = basename(process.cwd());
+
+    // Try SQLite BM25 search first (Phase 1)
+    if (existsSync(MEMORY_CLI_PATH)) {
+      const result = spawnSync('node', [
+        MEMORY_CLI_PATH, 'search', projectName,
+        '--db',
+        '--format', 'json',
+        '--limit', '3',
+        '--threshold', '0.3',
+      ], { encoding: 'utf-8', timeout: 3000, maxBuffer: 1024 * 10 });
+
+      if (result.status === 0 && result.stdout) {
+        const parsed = JSON.parse(result.stdout);
+        if (parsed?.found && Array.isArray(parsed.entries) && parsed.entries.length > 0) {
+          const top = parsed.entries[0];
+          const hint = top.resolution || top.errorMessage || '';
+          if (hint.length > 5) {
+            contextManager.addFindings([{
+              source: 'memory',
+              finding: `💡 [Memory] Rel "${projectName}": ${hint.slice(0, 100)}`,
+              category: 'memory',
+              severity: 'low',
+            }]);
+            memoryInjected = true;
+            debugLog(`Auto-injected SQLite memory hint for: ${projectName}`);
+            return;
+          }
+        }
+      }
+    }
+
+    // Fallback: JSON file with project filter (backward compat)
     if (!existsSync(MEMORY_PATH)) return;
     const raw = readFileSync(MEMORY_PATH, 'utf-8');
     const memory = JSON.parse(raw);
     if (!Array.isArray(memory.entries) || memory.entries.length === 0) return;
 
-    // Phase 19: Detect current agent for priority injection
     const currentAgent = detectAgentId();
-
-    // Score: skill_patches always first, then by hitCount + recency
-    // Phase 19: Boost entries from current agent
     const now = Date.now();
-    const scored = memory.entries.map(e => {
+    const projectLower = projectName.toLowerCase();
+    const cwdLower = process.cwd().toLowerCase();
+
+    const filtered = memory.entries.filter(e => {
+      const text = ((e.query || '') + ' ' + (e.errorMessage || '') + ' ' + (e.resolution || '')).toLowerCase();
+      return text.includes(projectLower) || text.includes(cwdLower);
+    });
+    if (filtered.length === 0) return;
+
+    const scored = filtered.map(e => {
       const ts = e.timestamp ? new Date(e.timestamp).getTime() : 0;
-      const recencyScore = ts > 0 ? Math.max(0, 1 - (now - ts) / 864000000) : 0; // decay over 10 days
+      const recencyScore = ts > 0 ? Math.max(0, 1 - (now - ts) / 864000000) : 0;
       const typeBonus = e.type === 'skill_patch' ? 100 : 0;
       const hitScore = (e.hitCount || 1) * 10;
-      // Phase 19: Boost entries from current agent
       const agentBonus = (e.agent_id && e.agent_id === currentAgent) ? 50 : 0;
       return { ...e, score: typeBonus + hitScore + recencyScore * 20 + agentBonus };
     });
     scored.sort((a, b) => b.score - a.score);
 
-    const topEntries = scored.slice(0, 3);
-    const findings = topEntries.map(e => ({
-      source: 'memory',
-      finding: e.type === 'skill_patch'
-        ? `🧠 ${e.targetSkill || 'general'}: ${(e.behaviorChange || e.errorMessage || '').slice(0, 200)}`
-        : `🧠 ${e.category}: ${(e.errorMessage || '').slice(0, 100)} → ${(e.resolution || '').slice(0, 100)}`,
-      category: 'memory',
-      severity: 'low',
-    }));
-
-    contextManager.addFindings(findings);
-    memoryInjected = true;
-    debugLog(`Auto-injected ${findings.length} memory entries`);
+    const top = scored[0];
+    const hint = top.type === 'skill_patch'
+      ? (top.behaviorChange || top.errorMessage || '')
+      : (top.resolution || top.errorMessage || '');
+    if (hint.length > 5) {
+      contextManager.addFindings([{
+        source: 'memory',
+        finding: `💡 [Memory] ${hint.slice(0, 100)}`,
+        category: 'memory',
+        severity: 'low',
+      }]);
+      memoryInjected = true;
+      debugLog(`Auto-injected JSON memory hint for: ${projectName}`);
+    }
   } catch (e) {
     debugLog('Auto memory injection:', e.message);
   }
@@ -724,6 +797,62 @@ function preCheckMemory(toolName, args) {
   } catch {
     return null; // best-effort
   }
+}
+
+/**
+ * Phase 2: Contextual Memory Search — non-blocking BM25 for editing/thinking tools.
+ * Spawns async search to inject relevant past findings for current tool context.
+ * Never blocks tool execution — findings available for next tool call.
+ */
+const CONTEXTUAL_MEMORY_TOOLS = new Set(['smart_fast_apply', 'smart_think', 'smart_refactor_plan']);
+
+function contextualMemorySearch(toolName, args) {
+  if (!existsSync(MEMORY_CLI_PATH)) return Promise.resolve();
+
+  // Extract query from tool args
+  let query = null;
+  if (args.file && typeof args.file === 'string') query = args.file;
+  else if (args.symbol && typeof args.symbol === 'string') query = args.symbol;
+  else if (args.search && typeof args.search === 'string') query = args.search;
+  else if (args.pattern && typeof args.pattern === 'string') query = args.pattern;
+  else if (args.query && typeof args.query === 'string') query = args.query;
+
+  if (!query || query.length < 5) return Promise.resolve();
+
+  return new Promise(resolve => {
+    try {
+      const child = spawn('node', [
+        MEMORY_CLI_PATH, 'search', query.slice(0, 200),
+        '--db',
+        '--format', 'json',
+        '--limit', '2',
+        '--threshold', '0.3',
+      ], { timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] });
+
+      let stdout = '';
+      child.stdout.on('data', chunk => { stdout += chunk; });
+      child.on('close', () => {
+        try {
+          const parsed = JSON.parse(stdout);
+          if (parsed?.found && Array.isArray(parsed.entries) && parsed.entries.length > 0) {
+            const top = parsed.entries[0];
+            const hint = top.resolution || top.errorMessage || '';
+            if (hint.length > 5) {
+              contextManager.addFindings([{
+                source: 'memory',
+                finding: `💡 [Contextual Memory] ${toolName}: ${hint.slice(0, 100)}`,
+                category: 'memory',
+                severity: 'low',
+              }]);
+            }
+          }
+        } catch { /* best effort */ }
+        resolve();
+      });
+      child.on('error', () => resolve());
+      setTimeout(() => { try { child.kill(); } catch { /* ok */ } resolve(); }, 3000).unref();
+    } catch { resolve(); }
+  });
 }
 
 /**
@@ -1336,6 +1465,11 @@ function invokeTool(def, args, timeoutOverride, signal, opts = {}) {
       const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
       return emit({ ok: true, output: precheck.output }, elapsedMs);
     }
+  }
+
+  // Phase 2: Contextual memory search for editing/thinking tools (non-blocking)
+  if (CONTEXTUAL_MEMORY_TOOLS.has(def.name)) {
+    contextualMemorySearch(def.name, args);
   }
 
   // Phase 18: Pre-fetch cache check — before executing, check if result was pre-fetched
