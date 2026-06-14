@@ -644,18 +644,23 @@ function autoStoreToMemory(toolName, args, result, errorCategory) {
     const toolsUsed = toolName;
     const category = errorCategory || classifyErrorForMemory(errorKey);
 
-    const child = spawn('node', [
+    const baseArgs = [
       MEMORY_CLI_PATH, 'store', errorKey,
       '--resolution', resolution.slice(0, 500),
       '--tools', toolsUsed,
       '--category', category,
       '--success', 'false',
-    ], {
-      timeout: 3000,
-      stdio: 'ignore',
-    });
+    ];
+
+    // Write to JSON (legacy backward compat)
+    const child = spawn('node', baseArgs, { timeout: 3000, stdio: 'ignore' });
     child.unref();
     setTimeout(() => { try { child.kill(); } catch { /* ok */ } }, 2000).unref();
+
+    // Also write to SQLite (--db) so FTS5/vector read paths find new entries
+    const childDb = spawn('node', [...baseArgs, '--db'], { timeout: 3000, stdio: 'ignore' });
+    childDb.unref();
+    setTimeout(() => { try { childDb.kill(); } catch { /* ok */ } }, 2000).unref();
   } catch {
     // Best-effort — never throw from auto-store
   }
