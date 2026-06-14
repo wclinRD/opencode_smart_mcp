@@ -731,95 +731,57 @@ function autoExtractSkillPatches(force = false) {
 }
 
 /**
- * Word-overlap similarity between two strings (0-1).
- * Used for resolution conflict detection.
- */
-function wordOverlapSimilarity(a, b) {
-  if (!a || !b) return 0;
-  const wordsA = new Set(a.toLowerCase().split(/\W+/).filter(Boolean));
-  const wordsB = new Set(b.toLowerCase().split(/\W+/).filter(Boolean));
-  if (wordsA.size === 0 && wordsB.size === 0) return 1;
-  let intersection = 0;
-  for (const w of wordsA) if (wordsB.has(w)) intersection++;
-  return intersection / Math.max(wordsA.size, wordsB.size);
-}
-
-/**
- * D.2 Pre-Check: Query memory store for known resolution before tool execution.
- * Returns { found: true, output: string } if high-confidence hit, null otherwise.
+ * D.2 Pre-Check: Look up known tool errors by toolName.
+ * Reads resolutions.json directly — no spawn overhead.
+ * Returns { found: true, output: string } if a previous error exists for this tool.
  */
 function preCheckMemory(toolName, args) {
   stats.memoryPreCheckCount++;
   try {
-    if (!existsSync(MEMORY_CLI_PATH)) return null;
+    if (!existsSync(MEMORY_PATH)) return null;
 
-    // Extract search query from tool args — what error is the user trying to fix?
-    let query = null;
-    if (args.error && typeof args.error === 'string') query = args.error;
-    else if (args.pattern && typeof args.pattern === 'string') query = args.pattern;
-    else if (args.query && typeof args.query === 'string') query = args.query;
-    else if (args.diff && typeof args.diff === 'string') query = args.diff;
+    const raw = readFileSync(MEMORY_PATH, 'utf-8');
+    const memory = JSON.parse(raw);
+    const entries = memory.entries;
+    if (!Array.isArray(entries) || entries.length === 0) return null;
 
-    if (!query || query.length < 10) return null;
+    // Match entries where this toolName appears in toolsUsed
+    const toolEntries = entries.filter(e => {
+      const toolsUsed = e.toolsUsed;
+      if (!toolsUsed || !Array.isArray(toolsUsed)) return false;
+      return toolsUsed.some(t => t === toolName || t === toolName.replace('smart_', ''));
+    });
 
-    const result = spawnSync('node', [
-      MEMORY_CLI_PATH, 'search', query,
-      '--threshold', '0.4',
-      '--limit', '3',
-      '--format', 'json',
-    ], { encoding: 'utf-8', timeout: 3000, maxBuffer: 1024 * 10 });
+    if (toolEntries.length === 0) return null;
 
-    if (result.status !== 0 || !result.stdout) return null;
+    // Only error-type entries trigger pre-check (skill_patches are behavioral hints)
+    const errorEntries = toolEntries.filter(e => e.type === 'error');
+    if (errorEntries.length === 0) return null;
 
-    const parsed = JSON.parse(result.stdout);
-    if (!parsed || !parsed.found || !parsed.entries || parsed.entries.length === 0) return null;
+    // Sort by hitCount descending, pick best
+    errorEntries.sort((a, b) => (b.hitCount || 0) - (a.hitCount || 0));
+    const top = errorEntries[0];
 
-    // Check for high-confidence match (similarity ≥ 0.8)
-    const topMatch = parsed.entries[0];
-    if (topMatch.similarity >= 0.5) {
-      stats.memoryPreCheckHitCount++;
-      stats.memoryPreCheckSavedMs += 1500; // rough avg saved per tool execution skipped
+    const resolution = (top.resolution || '').trim();
+    if (resolution.length < 5) return null;
 
-      // Conflict detection: entries with same hash but different resolutions
-      const conflicts = parsed.entries.filter(e =>
-        e.id !== topMatch.id &&
-        e.hash && e.hash === topMatch.hash &&
-        e.resolution && topMatch.resolution &&
-        wordOverlapSimilarity(e.resolution, topMatch.resolution) < 0.6
-      );
+    stats.memoryPreCheckHitCount++;
+    stats.memoryPreCheckSavedMs += 1500;
 
-      if (conflicts.length > 0) {
-        stats.memoryPreCheckConflictCount++;
-        return {
-          found: true,
-          conflict: true,
-          id: topMatch.id,
-          score: topMatch.similarity,
-          entries: [topMatch, ...conflicts].map(e => ({
-            id: e.id,
-            resolution: e.resolution,
-            score: e.similarity,
-          })),
-          output: `[Memory Pre-Check: Multiple conflicting resolutions found (top confidence ${(topMatch.similarity * 100).toFixed(0)}%)]\n\nMultiple past resolutions conflict:\n${[topMatch, ...conflicts].map((e, i) => `${i+1}. (confidence ${(e.similarity * 100).toFixed(0)}%) ${e.resolution}`).join('\n')}\n\nPlease review and pick the correct one. Use memory_store confirm to mark your choice.`,
-        };
-      }
-
-      // Fire-and-forget increment hitCount for this match
-      try {
-        const child = spawn('node', [MEMORY_CLI_PATH, 'confirm', topMatch.id, '--auto'], { timeout: 2000, stdio: 'ignore' });
+    // Fire-and-forget increment hitCount
+    try {
+      if (top.id) {
+        const child = spawn('node', [MEMORY_CLI_PATH, 'confirm', top.id, '--auto'], { timeout: 2000, stdio: 'ignore' });
         child.unref();
-      } catch { /* best effort */ }
+      }
+    } catch { /* best effort */ }
 
-      return {
-        found: true,
-        id: topMatch.id,
-        score: topMatch.similarity,
-        resolution: topMatch.resolution || '(no resolution stored)',
-        output: `[Memory Pre-Check: Known resolution found (confidence ${(topMatch.similarity * 100).toFixed(0)}%)]\n\n${topMatch.resolution || '(no resolution stored)'}\n\n(Pre-check skipped tool execution — returned known fix from memory)`,
-      };
-    }
-
-    return null;
+    return {
+      found: true,
+      id: top.id,
+      resolution,
+      output: `[Memory Pre-Check: Known fix for "${toolName}" (hit ${top.hitCount || 1}x)]\n\n${resolution}\n\n(Pre-check intercepted — applying known fix from memory)`,
+    };
   } catch {
     return null; // best-effort
   }

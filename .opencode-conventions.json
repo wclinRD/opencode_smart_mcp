@@ -8,14 +8,14 @@
         "other": 88
       },
       "variable": {
-        "camelCase": 8563,
+        "camelCase": 8576,
         "PascalCase": 42,
-        "UPPER_CASE": 303,
+        "UPPER_CASE": 305,
         "other": 64,
         "snake_case": 1
       },
       "function": {
-        "camelCase": 1340,
+        "camelCase": 1341,
         "other": 1,
         "PascalCase": 3
       },
@@ -51,5 +51,5 @@
     }
   },
   "preferences": {},
-  "lastAnalyzed": "2026-06-14T07:27:21.219Z"
+  "lastAnalyzed": "2026-06-14T07:38:59.783Z"
 }
