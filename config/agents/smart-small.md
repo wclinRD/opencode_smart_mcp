@@ -1,7 +1,7 @@
 ---
 description: Smart MCP 小模型版 — 伺服器自動壓縮輸出、過濾工具清單。開頭呼叫 smart_config 切換模式
 mode: primary
-model: opencode/big-pickle
+model: nvidia/moonshotai/kimi-k2.6
 temperature: 0.3
 permission:
   read: deny
