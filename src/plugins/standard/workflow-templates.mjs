@@ -49,18 +49,13 @@ export default {
           estimatedTools: wf.steps.length
         }));
 
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
+        return { ok: true, output: JSON.stringify({
               ok: true,
               command: 'list',
               count: list.length,
               workflows: list,
               usage: 'Use smart_workflow({command:"run", name:"<name>", context:{...}}) to execute a workflow.'
-            }, null, 2)
-          }]
-        };
+            }, null, 2) };
       }
 
       case 'run': {
