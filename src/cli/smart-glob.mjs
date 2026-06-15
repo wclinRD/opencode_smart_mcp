@@ -13,7 +13,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { resolve, normalize } from 'node:path';
 import { existsSync } from 'node:fs';
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -87,11 +87,13 @@ if (result.status !== 0 && result.status !== null) {
 
 // ── Process output ─────────────────────────────────────────────────────
 // Convert to absolute paths to match built-in glob behavior
+// resolve() handles both absolute and relative --path; normalize() removes
+// trailing slashes, ./ segments, and // duplicates for consistency
 let files = result.stdout
   .trim()
   .split('\n')
   .filter(Boolean)
-  .map(f => resolve(cwd, f));
+  .map(f => normalize(resolve(cwd, f)));
 
 // ── Truncate if needed ─────────────────────────────────────────────────
 const total = files.length;

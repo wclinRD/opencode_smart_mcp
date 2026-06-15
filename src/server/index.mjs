@@ -2062,33 +2062,35 @@ function respond(id, result, opts = {}) {
 
   // Write chain — awaits pending async work (e.g. Phase 10.2 impact warning),
   // then serializes writes to maintain MCP JSON-RPC ordering.
+  // Each hook individually try/catched so one failure never blocks writeMsg.
   _respondChain = _respondChain.then(async () => {
-    // Await any pending async post-processing before writing
-    if (result._pendingImpact) {
-      const impactText = await result._pendingImpact;
-      delete result._pendingImpact;
-      if (impactText && result?.content?.[0]?.type === 'text') {
-        result.content[0].text += impactText;
+    try {
+      if (result._pendingImpact) {
+        const impactText = await result._pendingImpact;
+        delete result._pendingImpact;
+        if (impactText && result?.content?.[0]?.type === 'text') {
+          result.content[0].text += impactText;
+        }
       }
-    }
-    // Phase 6: Await hallucination check result
-    if (result._pendingHallucination) {
-      const hcText = await result._pendingHallucination;
-      delete result._pendingHallucination;
-      if (hcText && result?.content?.[0]?.type === 'text') {
-        result.content[0].text += hcText;
+    } catch (e) { debugLog('respond._pendingImpact error:', e?.message); delete result._pendingImpact; }
+    try {
+      if (result._pendingHallucination) {
+        const hcText = await result._pendingHallucination;
+        delete result._pendingHallucination;
+        if (hcText && result?.content?.[0]?.type === 'text') {
+          result.content[0].text += hcText;
+        }
       }
-    }
-    // Phase 1: Await LSP diagnostics result
-    if (result._pendingLsp) {
-      const lspText = await result._pendingLsp;
-      delete result._pendingLsp;
-      if (lspText && result?.content?.[0]?.type === 'text') {
-        result.content[0].text += lspText;
+    } catch (e) { debugLog('respond._pendingHallucination error:', e?.message); delete result._pendingHallucination; }
+    try {
+      if (result._pendingLsp) {
+        const lspText = await result._pendingLsp;
+        delete result._pendingLsp;
+        if (lspText && result?.content?.[0]?.type === 'text') {
+          result.content[0].text += lspText;
+        }
       }
-    }
-    writeMsg({ jsonrpc: '2.0', id, result });
-  }).catch(() => {
+    } catch (e) { debugLog('respond._pendingLsp error:', e?.message); delete result._pendingLsp; }
     writeMsg({ jsonrpc: '2.0', id, result });
   });
 }
@@ -2545,6 +2547,8 @@ function handleRequest(req) {
               const rp = cr._responsePolicy || _responsePolicy;
               if (rp) resp3._responsePolicy = rp;
               if (cr._pendingImpact) resp3._pendingImpact = cr._pendingImpact;
+              if (cr._pendingLsp) resp3._pendingLsp = cr._pendingLsp;
+              if (cr._pendingHallucination) resp3._pendingHallucination = cr._pendingHallucination;
               respond(id, resp3);
             })
             .catch(err => {

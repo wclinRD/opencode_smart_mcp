@@ -24,7 +24,7 @@
 //   - 需要行範圍     → range
 //   - 一次看多檔     → batch
 
-import { existsSync, statSync, readFileSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { cwd } from 'node:process';
 import { SmartReader, hashContent } from '../../lib/smart-read.mjs';
@@ -225,14 +225,15 @@ export default {
 
       // Resolve auto mode at plugin level so cacheWrap gets concrete mode
       // (the lib's auto-mode recursion bypasses the session cache)
+      // Use stat.size estimation (~40 bytes/line avg) to avoid full file read
+      // that would defeat the session cache below.
       let resolvedMode = args.mode || 'auto';
       if (resolvedMode === 'auto' && existsSync(filePath)) {
         const stat = statSync(filePath);
         if (stat.isFile()) {
-          const content = readFileSync(filePath, 'utf-8');
-          const totalLines = content.split('\n').length;
-          if (totalLines < 50) resolvedMode = 'full';
-          else if (totalLines < 300) resolvedMode = 'signatures';
+          const estLines = Math.ceil(stat.size / 40);
+          if (estLines < 50) resolvedMode = 'full';
+          else if (estLines < 300) resolvedMode = 'signatures';
           else resolvedMode = 'outline';
         }
       }

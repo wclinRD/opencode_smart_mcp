@@ -22,7 +22,7 @@
 // 整合:
 //   patch_gen → fast_apply → test
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, unlinkSync } from 'node:fs';
 import { relative, resolve, extname } from 'node:path';
 import { extractSymbol, detectLanguage } from '../../lib/smart-read.mjs';
 import {
@@ -213,13 +213,19 @@ Dry-run by default — safe to use without side effects.`,
       },
 
       // Safety gates
+      // ⚠️ DEFAULT BEHAVIOR (no dryRun, no apply):
+      //   Single-file + no conflicts → auto-apply (saves 1 LLM round-trip)
+      //   Multi-file (3+ files)     → preview + requires apply:true
+      //   Has conflicts             → preview + requires fix
+      // To force preview: pass dryRun:true
+      // To explicitly confirm: pass apply:true
       dryRun: {
         type: 'boolean',
-        description: 'Preview only — show changes without applying (default: true)',
+        description: 'Preview only — show changes without applying. Without this flag or apply:true, safe single-file edits auto-apply immediately.',
       },
       apply: {
         type: 'boolean',
-        description: 'Actually apply changes (default: false, explicit opt-in for 3+ files)',
+        description: 'Actually apply changes (required for 3+ files). Without this flag or dryRun:true, safe single-file edits auto-apply immediately.',
       },
 
       output: {
@@ -498,7 +504,7 @@ Dry-run by default — safe to use without side effects.`,
       if (allSucceeded && results.length > 0) {
         for (const r of results) {
           if (r.backup) {
-            try { const { unlinkSync } = await import('node:fs'); unlinkSync(r.backup); } catch { /* */ }
+            try { unlinkSync(r.backup); } catch { /* */ }
           }
         }
       }
