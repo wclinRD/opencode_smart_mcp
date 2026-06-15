@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-15T04:48:11.140Z",
+  "generatedAt": "2026-06-15T05:52:28.120Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -604,9 +604,12 @@
               "unified-diff",
               "whole-file",
               "hashline",
-              "block-diff"
+              "block-diff",
+              "sed",
+              "multi-hunk",
+              "batch"
             ],
-            "description": "Input format (default: search-replace). Token efficiency: unified-diff (best, +/- only) > lazy > hashline > partial > search-replace > whole-file. Use hashline for large files (>400 lines) where SEARCH/REPLACE matching is unreliable."
+            "description": "Input format (default: search-replace). Token efficiency: unified-diff (best, +/- only) > lazy > hashline > partial > search-replace > whole-file. Use hashline for large files (>400 lines) where SEARCH/REPLACE matching is unreliable. sed: single sed expression. multi-hunk: multiple sed/search-replace in one file. batch: glob+sed across multiple files."
           },
           "blocks": {
             "type": "array",
@@ -705,6 +708,51 @@
               ]
             },
             "description": "Hashline edit changes (for format=hashline). Specify line range directly with content verification — most robust for large files."
+          },
+          "sed": {
+            "type": "string",
+            "description": "Sed expression (required for format=sed or format=batch). E.g. \"s/foo/bar/g\", \"/pattern/d\"."
+          },
+          "glob": {
+            "type": "string",
+            "description": "Glob pattern (required for format=batch). E.g. \"src/**/*.ts\"."
+          },
+          "hunks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sed": {
+                  "type": "string",
+                  "description": "Sed expression for this hunk"
+                },
+                "search": {
+                  "type": "string",
+                  "description": "Text to search within hunk range"
+                },
+                "replace": {
+                  "type": "string",
+                  "description": "Replacement text"
+                },
+                "line": {
+                  "type": "number",
+                  "description": "Target line number (1-indexed)"
+                },
+                "endLine": {
+                  "type": "number",
+                  "description": "End line (inclusive, 1-indexed)"
+                }
+              }
+            },
+            "description": "Hunks array for format=multi-hunk. Each hunk can have sed or search+replace, optionally restricted to line range."
+          },
+          "line": {
+            "type": "number",
+            "description": "Line number (1-indexed). For format=sed: restrict sed to this line (or line+endLine range)."
+          },
+          "endLine": {
+            "type": "number",
+            "description": "End line (inclusive, 1-indexed). Pair with line for sed range restriction."
           },
           "file": {
             "type": "string",
