@@ -237,7 +237,9 @@ Dry-run by default — safe to use without side effects.`,
     const validate = args.validate === true;
     const undo = args.undo !== false;
     const atomic = args.atomic === true;
-    const dryRun = args.dryRun !== false && args.apply !== true;
+    const explicitlyDryRun = args.dryRun === true;
+    const explicitlyApply = args.apply === true;
+    const isDefaultMode = !explicitlyDryRun && !explicitlyApply;
     const outputFormat = args.output || 'text';
     const root = args.root || process.cwd();
     const allowedFiles = args.files;
@@ -276,7 +278,10 @@ Dry-run by default — safe to use without side effects.`,
         // Auto-detect: try SEARCH/REPLACE blocks first, then unified diff
         const sr = parseSearchReplaceText(args.text);
         if (sr.length > 0) {
-          changes = sr.map(b => ({ ...b, type: 'search-replace' }));
+          // Check if any block uses lazy markers (// ... existing code ...)
+          const lazyRe = /^\s*(\/\/|#|--|;|%|<!--|\/\*)\s*(\.\.\.\s*)?(existing\s+code\s*)?(\.\.\.\s*)?(\*\/|-->)?\s*$/im;
+          const hasLazy = sr.some(b => lazyRe.test(b.search) || lazyRe.test(b.replace));
+          changes = sr.map(b => ({ ...b, type: hasLazy ? 'lazy' : 'search-replace' }));
         } else {
           const ud = parseUnifiedDiff(args.text);
           if (ud.length > 0) {
@@ -436,17 +441,18 @@ Dry-run by default — safe to use without side effects.`,
     // Conflict count
     const conflicts = previewResults.filter(r => r.status === 'conflict');
 
-    // ---- Step 3: If dry-run, conditionally auto-apply when safe ----
-    if (dryRun) {
+    // ---- Step 3: Conditionally auto-apply when safe (saves ~1 LLM round-trip) ----
+    // In default mode (no explicit dryRun/apply flags), safe single-file edits
+    // are applied immediately without a preview round-trip.
+    if (!explicitlyApply) {
       // Auto-apply when:
-      //   ✅ No conflicts (match found)
-      //   ✅ Single file (or 2 files, all ready)
-      //   ✅ NOT explicitly set to dryRun: true (user wants preview)
-      // This eliminates the wasteful LLM round-trip (re-call with apply=true)
-      const safeForAutoApply = conflicts.length === 0 && !multiFile && args.dryRun !== true;
+      //   ✅ Default mode (no explicit dryRun:true or apply:true)
+      //   ✅ No conflicts (all matches found)
+      //   ✅ Single file (or 2 files)
+      const safeForAutoApply = isDefaultMode && conflicts.length === 0 && !multiFile;
 
       if (safeForAutoApply) {
-        // ⚡ Auto-apply: skip dry-run, go directly to apply
+        // ⚡ Auto-apply: skip preview, go directly to apply
         // (falls through to Step 5 below — saves ~1 LLM round-trip)
       } else {
         return formatOutput({
@@ -724,6 +730,7 @@ function formatOutput(data, format) {
       out.push(ANSI_DIM + (data.hint || 'Run with apply=true to apply.') + ANSI_RESET);
       return out.join('\n');
     }
+    if (data.status === 'safety_gate') return ANSI_BOLD + '\u26A0\uFE0F Safety Gate: ' + data.error + ANSI_RESET;
     if (data.status === 'error') return ANSI_RED + '\u274C Error: ' + data.error + ANSI_RESET;
     return JSON.stringify(data, null, 2);
   }
@@ -749,6 +756,7 @@ function formatOutput(data, format) {
       return out.join('\n');
     }
     if (data.status === 'error') return '# Error: ' + data.error;
+    if (data.status === 'safety_gate') return '# ⚠ Safety Gate: ' + data.error;
     return JSON.stringify(data, null, 2);
   }
 
@@ -786,6 +794,11 @@ function formatOutput(data, format) {
       }
     }
     out.push(`\n\uD83D\uDCA1 ${data.hint || 'Run with apply=true to apply.'}`);
+    return out.join('\n');
+  }
+
+  if (data.status === 'safety_gate') {
+    out.push(`\u26A0\uFE0F Safety Gate: ${data.error}`);
     return out.join('\n');
   }
 

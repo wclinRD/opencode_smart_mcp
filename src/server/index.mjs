@@ -2420,6 +2420,8 @@ function handleRequest(req) {
                 const rp = cr._responsePolicy || _responsePolicy;
                 if (rp) resp1._responsePolicy = rp;
                 if (cr._pendingImpact) resp1._pendingImpact = cr._pendingImpact;
+                if (cr._pendingLsp) resp1._pendingLsp = cr._pendingLsp;
+                if (cr._pendingHallucination) resp1._pendingHallucination = cr._pendingHallucination;
                 respond(id, resp1);
               })
               .catch(err => {
@@ -2440,6 +2442,8 @@ function handleRequest(req) {
             const resp2 = { content: [{ type: 'text', text: String(result.output ?? "") }] };
             if (result._responsePolicy) resp2._responsePolicy = result._responsePolicy;
             if (result._pendingImpact) resp2._pendingImpact = result._pendingImpact;
+            if (result._pendingLsp) resp2._pendingLsp = result._pendingLsp;
+            if (result._pendingHallucination) resp2._pendingHallucination = result._pendingHallucination;
             respond(id, resp2);
           } else {
             respond(id, {

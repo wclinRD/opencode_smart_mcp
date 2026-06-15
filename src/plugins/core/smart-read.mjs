@@ -24,7 +24,7 @@
 //   - 需要行範圍     → range
 //   - 一次看多檔     → batch
 
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, statSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { cwd } from 'node:process';
 import { SmartReader, hashContent } from '../../lib/smart-read.mjs';
@@ -35,6 +35,7 @@ import { SmartReader, hashContent } from '../../lib/smart-read.mjs';
 
 const _readCache = new Map();
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+const MAX_CACHE_ENTRIES = 500;
 
 function getCacheKey(filePath, opts) {
   const mode = opts.mode || 'auto';
@@ -76,6 +77,12 @@ function storeInCache(key, filePath, result) {
     if (existsSync(filePath) && result?.status === 'ok') {
       const stat = statSync(filePath);
       _readCache.set(key, { mtime: stat.mtimeMs, result, timestamp: Date.now() });
+      // Evict oldest entries when over limit (FIFO — simplest, no LRU overhead)
+      if (_readCache.size > MAX_CACHE_ENTRIES) {
+        const entries = [..._readCache.entries()].sort((a, b) => a[1].timestamp - b[1].timestamp);
+        const toEvict = entries.slice(0, entries.length - MAX_CACHE_ENTRIES);
+        for (const [k] of toEvict) _readCache.delete(k);
+      }
     }
   } catch { /* ignore */ }
 }
@@ -185,8 +192,14 @@ export default {
         return formatOutput(result, args);
       }
 
-      // Batch mode
+      // Batch mode (with session cache via batch cache key)
       if (args.mode === 'batch') {
+        // Build batch cache key from all files + root
+        const batchFiles = args.files || [];
+        const batchKey = `batch|${root}|${batchFiles.join(',')}`;
+        const cached = _readCache.get(batchKey);
+        if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) return cached.result;
+
         const result = await reader.readBatch({
           filePath: args.file,
           mode: 'batch',
@@ -194,6 +207,9 @@ export default {
           root,
           entryMode: args.entryMode,
         });
+        if (result.status === 'ok') {
+          _readCache.set(batchKey, { mtime: Date.now(), result, timestamp: Date.now() });
+        }
         if (result._imageContent) return result;
         if (format === 'json') return JSON.stringify(result, null, 2);
         if (format === 'compact') return formatCompact(result, args);
@@ -206,9 +222,24 @@ export default {
       }
 
       const filePath = resolve(root, args.file);
+
+      // Resolve auto mode at plugin level so cacheWrap gets concrete mode
+      // (the lib's auto-mode recursion bypasses the session cache)
+      let resolvedMode = args.mode || 'auto';
+      if (resolvedMode === 'auto' && existsSync(filePath)) {
+        const stat = statSync(filePath);
+        if (stat.isFile()) {
+          const content = readFileSync(filePath, 'utf-8');
+          const totalLines = content.split('\n').length;
+          if (totalLines < 50) resolvedMode = 'full';
+          else if (totalLines < 300) resolvedMode = 'signatures';
+          else resolvedMode = 'outline';
+        }
+      }
+
       const readOpts = {
         filePath: args.file,
-        mode: args.mode || 'auto',
+        mode: resolvedMode,
         symbol: args.symbol,
         root,
         offset: args.offset,

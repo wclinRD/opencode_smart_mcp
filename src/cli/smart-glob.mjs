@@ -45,6 +45,17 @@ if (flags.path && !existsSync(cwd)) {
   process.exit(1);
 }
 
+// ── Check ripgrep availability ─────────────────────────────────────────
+// Provide a clear error message instead of cryptic ENOENT
+const rgCheck = spawnSync('rg', ['--version'], { encoding: 'utf-8', timeout: 5000 });
+if (rgCheck.error && rgCheck.error.code === 'ENOENT') {
+  process.stderr.write('Error: ripgrep (rg) is required by smart_glob but not found.\n');
+  process.stderr.write('Install it with: brew install ripgrep   # macOS\n');
+  process.stderr.write('                apt install ripgrep     # Debian/Ubuntu\n');
+  process.stderr.write('                cargo install ripgrep   # via Rust\n');
+  process.exit(1);
+}
+
 // ── Build rg command ───────────────────────────────────────────────────
 // rg --files lists all non-ignored files, output order matches built-in glob
 const rgArgs = ['--files', '--glob', pattern, '--no-messages'];
