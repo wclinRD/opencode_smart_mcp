@@ -5,8 +5,8 @@
 //   - Regex-based language detection
 //   - Brace/balance checking for syntax validation
 //
-// Integrates with fuzzyMatch L7 fallback in apply-engine.mjs.
-// When L1-L6 all fail, L7 hint triggers retry through this engine.
+// Standalone text-matching utilities, not wired into apply-engine.mjs
+// (circular dep via checkBalance import prevents that direction).
 
 import { extractSymbol, detectLanguage } from './smart-read.mjs';
 import { checkBalance } from './apply-engine.mjs';

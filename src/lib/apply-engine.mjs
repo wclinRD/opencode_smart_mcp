@@ -589,8 +589,8 @@ export function fuzzyMatch(content, search, opts = {}) {
   r = matchL5(cl, sl);                if (r !== -1) return { line: r, level: 5 };
   r = matchL6(cl, sl);                if (r !== -1) return { line: r, level: 6 };
 
-  // Level 7 hint: AST engine may find it. Set level:7 to trigger retry in calling code.
-  if (opts.lang) return { line: -1, level: 7, hint: 'AST fallback available', lang: opts.lang };
+  // Level 7 hint: structural fallback may find it. Set level:7 to trigger retry in calling code.
+  if (opts.lang) return { line: -1, level: 7, hint: 'structural fallback available', lang: opts.lang };
 
   return null;
 }
@@ -669,7 +669,7 @@ export function detectMultiOccurrence(content, search, opts = {}) {
 // Apply: SEARCH/REPLACE
 // ---------------------------------------------------------------------------
 
-/** File extension → language name for AST fallback */
+/** File extension → language name for structural fallback */
 function detectApplyLang(filePath) {
   const ext = filePath?.split('.').pop()?.toLowerCase();
   const map = {
@@ -684,10 +684,10 @@ function detectApplyLang(filePath) {
 }
 
 /**
- * AST fallback retry for Level 7 fuzzy match failures.
- * Inlines matchByAST from ast-engine.mjs synchronously (no circular dep).
+ * Structural fallback retry for Level 7 fuzzy match failures.
+ * Whitespace-normalized text matching (not tree-sitter AST).
  */
-function tryASTMatch(content, search, lang) {
+function tryStructuralMatch(content, search, lang) {
   if (!content || !search) return null;
   const lines = content.split('\n');
   const searchLines = search.split('\n');
@@ -738,7 +738,7 @@ export function applySearchReplace(filePath, block, opts = {}) {
     return applyWholeFile(filePath, replace, opts);
   }
 
-  // Detect language from file extension for AST fallback
+  // Detect language from file extension for structural fallback
   const lang = detectApplyLang(filePath);
 
   // Find match position
@@ -762,11 +762,11 @@ export function applySearchReplace(filePath, block, opts = {}) {
     match = fuzzyMatch(content, search, { lang });
   }
 
-  // Level 7 → try AST engine retry
-  if (match && match.level === 7 && match.hint === 'AST fallback available') {
-    const astMatch = tryASTMatch(content, search, lang);
-    if (astMatch) {
-      match = astMatch;
+  // Level 7 → try structural retry
+  if (match && match.level === 7 && match.hint === 'structural fallback available') {
+    const structMatch = tryStructuralMatch(content, search, lang);
+    if (structMatch) {
+      match = structMatch;
     } else {
       match = null;
     }
