@@ -10,7 +10,7 @@ permission:
   glob: deny        # ❗ smart_glob 已取代（rg --files --glob，絕對路徑，100 筆上限）
   
   # ⛔ 以下工具被禁用 → 強制走 Smart MCP 層
-  edit: deny        # 強制使用 ssr(fast_apply)、ssr(edit) 或 ssr(edit_ast) — patch-based 更精確省 token
+  edit: deny        # 強制使用 smart_fast_apply — patch-based 更精確省 token
   grep: deny        # 強制使用 smart_grep — 回傳 scope/imports/context
   webfetch: deny   # 強制使用 smart_exa_search + smart_exa_crawl — 更省 token
   
@@ -215,7 +215,7 @@ permission:
 | 行範圍讀取 | `smart_read({file, mode:"range", startLine:50, endLine:100}) → 精準讀 L50-100，含 checksum` |
 | 多檔案讀取 | `smart_read({mode:"batch", files:["src/a.ts","src/b.ts","src/c.ts"], format:"compact"}) → 一次讀三個檔` |
 | 緊湊輸出 | `smart_read({file, mode:"full", format:"compact"}) → 最小 token 輸出（無 emoji/裝飾）` |
-| AST 編輯 | `smart_read({file, mode:"signatures"}) → 確認行範圍 → ssr(edit_ast args:{mode:"block-boundary", action:"replace", startLine:10, endLine:20, text:"...", apply:true})` |
+| AST 編輯 | `smart_read({file, mode:"signatures"}) → 確認行範圍 → smart_fast_apply({changes:[{file,startLine,endLine,newContent}], apply:true})` |
 | 安全修復 | `smart_security → smart_grep → ssr(fast_apply) → smart_test → rescan` |
 | 文件分析 | `ssr(ingest_document) → 分析內容 → 摘要/回答問題` |
 | 掃描 PDF | `ssr(ingest_document args:{ocr:true}) → 自動 OCR → 分析內容` |
@@ -394,6 +394,9 @@ LLM 也可以在 self-correction loop 中主動呼叫 smart_hallucination_check 
 | **套用 LLM patch** | `smart_fast_apply({text:"<<diff/SEARCH-REPLACE>>", apply:true})` |
 | **大檔案精確編輯** | `smart_fast_apply({changes:[{file,startLine,endLine,newContent}], apply:true})` |
 | **AST 結構編輯** | `smart_fast_apply({file, symbol, action, newContent})` — symbol body/行區間操作 |
+| **Symbol 區塊編輯** | `smart_fast_apply({format:"block-diff", file, symbol, newContent, action?})` — 以 symbol 為單位編輯，免 fuzzy match（NEW, most reliable）|
+| **ANSI 彩色輸出** | `smart_fast_apply({output:"ansi",...})` — 終端機著色 diff（取代 emoji 為彩色文字）|
+| **Diff 純文字輸出** | `smart_fast_apply({output:"diff",...})` — 純 unified diff（無 ANSI/無 emoji）|
 | **Sed 取代** | `smart_fast_apply({format:"sed", file:"a.ts", sed:"s/foo/bar/g", apply:true})` — 單一 sed expression |
 | **多 hunk 編輯** | `smart_fast_apply({format:"multi-hunk", file:"a.ts", hunks:[{sed:"s/foo/bar/"},{search:"old", replace:"new", line:42}], apply:true})` |
 | **批次 glob+sed** | `smart_fast_apply({format:"batch", glob:"src/**/*.ts", sed:"s/foo/bar/g", apply:true})` |
@@ -437,7 +440,7 @@ task 強制規則：
   """
   [Smart MCP Routing — injected by parent]
   工具優先順序：smart_lsp > smart_read > smart_grep > raw grep/read
-  編輯用 smart_fast_apply（取代 write+edit，可直接呼叫），複雜結構編輯用 ssr(edit_ast)
+  編輯用 smart_fast_apply（取代 write+edit+edit_ast，可直接呼叫）
   不確定工具 → ssr({tool:"hybrid_router", args:{question:"..."}})
   安全修復前必須跑 smart_think({mode:"beam"})
   查專案慣例 → smart_rules({file:"..."})

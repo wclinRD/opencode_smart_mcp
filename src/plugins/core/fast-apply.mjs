@@ -587,23 +587,30 @@ function generatePreview(content, search, replace, lineNum) {
 // ── Diff rendering ──
 //
 // ANSI color codes for terminal diff display
-const ANSI_RED    = '\x1b[31m';
-const ANSI_GREEN  = '\x1b[32m';
-const ANSI_CYAN   = '\x1b[36m';
-const ANSI_RESET  = '\x1b[0m';
+const ANSI_RED      = '\x1b[31m';
+const ANSI_GREEN    = '\x1b[32m';
+const ANSI_CYAN     = '\x1b[36m';
+const ANSI_BOLD     = '\x1b[1m';
+const ANSI_DIM      = '\x1b[2m';
+const ANSI_RESET    = '\x1b[0m';
 
 /**
- * Colorize unified diff text with ANSI escape codes.
+ * Colorize unified diff text with enhanced ANSI escape codes.
+ *   ---/+++ file headers → bold red/green
  *   + lines → green
  *   - lines → red
- *   @@ lines → cyan
+ *   @@ lines → bold cyan
+ *   context (space-prefixed) → dim
  */
 function ansiColorizeDiff(diffText) {
   if (!diffText) return '';
   return diffText.split('\n').map(line => {
+    if (line.startsWith('--- ')) return ANSI_BOLD + ANSI_RED + line + ANSI_RESET;
+    if (line.startsWith('+++ ')) return ANSI_BOLD + ANSI_GREEN + line + ANSI_RESET;
+    if (line.startsWith('@@'))   return ANSI_BOLD + ANSI_CYAN + line + ANSI_RESET;
     if (line.startsWith('+') && !line.startsWith('+++ ')) return ANSI_GREEN + line + ANSI_RESET;
     if (line.startsWith('-') && !line.startsWith('--- ')) return ANSI_RED + line + ANSI_RESET;
-    if (line.startsWith('@@')) return ANSI_CYAN + line + ANSI_RESET;
+    if (line.startsWith(' '))    return ANSI_DIM + line + ANSI_RESET;
     return line;
   }).join('\n');
 }
@@ -686,68 +693,111 @@ function formatAnsiDiff(diffText) {
 function formatOutput(data, format) {
   if (format === 'json') return data;
 
+  // ── ANSI output: pure colored diff, minimal status ──
   if (format === 'ansi') {
-    // Pure ANSI-colored diff (no markdown code blocks, no status text)
-    // Works great with opencode run or direct terminal output
     if (data.results) {
+      // Post-apply: colored diffs
       return data.results.filter(r => r.diff).map(r => formatAnsiDiff(r.diff)).join('\n\n');
     }
+    if (data.dryRun) {
+      // Dry-run: colored summary (no markdown, just ANSI)
+      const out = [];
+      const header = ANSI_BOLD + '🔍 DRY RUN' + ANSI_RESET;
+      out.push(header + ' \u2014 ' + data.totalChanges + ' change(s)');
+      if (data.conflicts > 0) {
+        out.push(ANSI_RED + '\u26A0 ' + data.conflicts + ' file(s) with match conflicts:' + ANSI_RESET);
+        for (const cf of data.conflictFiles) out.push(ANSI_RED + '  \u274C ' + cf + ANSI_RESET);
+      }
+      for (const p of data.preview) {
+        if (p.status === 'ready') {
+          out.push(ANSI_GREEN + '\u2705' + ANSI_RESET + ' ' + p.file);
+          if (p.type === 'hashline') {
+            out.push(ANSI_DIM + '  Lines ' + p.startLine + '-' + p.endLine + ANSI_RESET);
+          } else {
+            out.push(ANSI_DIM + '  ~' + p.searchLines + ' \u2192 ~' + p.replaceLines + ' lines' + ANSI_RESET);
+          }
+        } else {
+          out.push(ANSI_RED + '\u274C ' + p.file + ANSI_RESET);
+          out.push(ANSI_RED + '  Cannot find search block' + ANSI_RESET);
+        }
+      }
+      out.push(ANSI_DIM + (data.hint || 'Run with apply=true to apply.') + ANSI_RESET);
+      return out.join('\n');
+    }
+    if (data.status === 'error') return ANSI_RED + '\u274C Error: ' + data.error + ANSI_RESET;
     return JSON.stringify(data, null, 2);
   }
 
+  // ── Diff output: raw unified diff text (no ANSI, no markdown) ──
   if (format === 'diff') {
     if (data.results) {
       return data.results.filter(r => r.diff).map(r => r.diff).join('\n');
     }
+    if (data.dryRun) {
+      const out = [];
+      out.push('# DRY RUN \u2014 ' + data.totalChanges + ' change(s)');
+      for (const p of data.preview) {
+        const status = p.status === 'ready' ? 'ready' : 'CONFLICT';
+        out.push('# ' + status + ': ' + p.file);
+        if (p.type === 'hashline') {
+          out.push('#   Lines ' + p.startLine + '-' + p.endLine);
+        } else if (p.searchLines !== undefined) {
+          out.push('#   ~' + p.searchLines + ' \u2192 ~' + p.replaceLines + ' lines');
+        }
+      }
+      out.push('# ' + (data.hint || 'Run with apply=true to apply.'));
+      return out.join('\n');
+    }
+    if (data.status === 'error') return '# Error: ' + data.error;
     return JSON.stringify(data, null, 2);
   }
 
-  // text format
+  // ── Text output: rich status with markdown-wrapped colored diffs ──
   const out = [];
   if (data.status === 'error') {
-    out.push(`❌ Error: ${data.error}`);
+    out.push(`\u274C Error: ${data.error}`);
     return out.join('\n');
   }
 
   if (data.dryRun) {
-    out.push(`🔍 DRY RUN — ${data.totalChanges} change(s) detected`);
+    out.push(`\uD83D\uDD0D DRY RUN \u2014 ${data.totalChanges} change(s) detected`);
     out.push('='.repeat(50));
-    if (data.multiFileWarning) out.push(`\n⚠️  ${data.multiFileWarning}`);
-    if (data.conflicts > 0) out.push(`\n⚠️  ${data.conflicts} file(s) with match conflicts:`);
-    for (const cf of data.conflictFiles) out.push(`  ❌ ${cf}`);
+    if (data.multiFileWarning) out.push(`\n\u26A0\uFE0F  ${data.multiFileWarning}`);
+    if (data.conflicts > 0) out.push(`\n\u26A0\uFE0F  ${data.conflicts} file(s) with match conflicts:`);
+    for (const cf of data.conflictFiles) out.push(`  \u274C ${cf}`);
     out.push('');
     for (const p of data.preview) {
-      const icon = p.status === 'ready' ? '✅' : '❌';
+      const icon = p.status === 'ready' ? '\u2705' : '\u274C';
       const matchInfo = p.matchLevel ? ` (fuzzy L${p.matchLevel})` : '';
       out.push(`${icon} ${p.file}${matchInfo}`);
       if (p.status === 'ready') {
         if (p.type === 'hashline') {
           out.push(`   Lines ${p.startLine}-${p.endLine} (file: ${p.fileLines} lines)`);
-          if (p.contentVerified && p.fingerprintMatch) out.push(`   ✅ Content verified (fuzzy fingerprint match)`);
-          else if (p.contentVerified) out.push(`   ✅ Content verified (exact match)`);
-          else if (!p.oldContent) out.push(`   ⚡ Line range mode (no oldContent verification)`);
+          if (p.contentVerified && p.fingerprintMatch) out.push(`   \u2705 Content verified (fuzzy fingerprint match)`);
+          else if (p.contentVerified) out.push(`   \u2705 Content verified (exact match)`);
+          else if (!p.oldContent) out.push(`   \u26A1 Line range mode (no oldContent verification)`);
         } else {
-          out.push(`   Search: ${p.searchLines} lines → Replace: ${p.replaceLines} lines`);
+          out.push(`   Search: ${p.searchLines} lines \u2192 Replace: ${p.replaceLines} lines`);
         }
-        if (p.matchLevel > 2) out.push(`   ⚡ Fuzzy match level ${p.matchLevel}`);
-        if (p.balanced === false) out.push(`   ⚠️  Brace balance issue detected`);
+        if (p.matchLevel > 2) out.push(`   \u26A1 Fuzzy match level ${p.matchLevel}`);
+        if (p.balanced === false) out.push(`   \u26A0\uFE0F  Brace balance issue detected`);
       } else if (p.status === 'conflict') {
-        out.push(`   ❌ Cannot find search block`);
+        out.push(`   \u274C Cannot find search block`);
       }
     }
-    out.push(`\n💡 ${data.hint || 'Run with apply=true to apply.'}`);
+    out.push(`\n\uD83D\uDCA1 ${data.hint || 'Run with apply=true to apply.'}`);
     return out.join('\n');
   }
 
   if (data.status === 'applied' || data.status === 'partial') {
-    out.push(`✅ Applied ${data.summary?.applied || 0}/${data.totalChanges || 0} change(s)`);
-    if (data.summary?.conflicts > 0) out.push(`⚠️  ${data.summary.conflicts} conflict(s) — need manual fix`);
-    if (data.summary?.failed > 0) out.push(`❌ ${data.summary.failed} error(s)`);
+    out.push(`\u2705 Applied ${data.summary?.applied || 0}/${data.totalChanges || 0} change(s)`);
+    if (data.summary?.conflicts > 0) out.push(`\u26A0\uFE0F  ${data.summary.conflicts} conflict(s) \u2014 need manual fix`);
+    if (data.summary?.failed > 0) out.push(`\u274C ${data.summary.failed} error(s)`);
     out.push('');
     for (const r of (data.results || [])) {
-      const icon = r.status === 'applied' ? '✅' : r.status === 'conflict' ? '❌' : '⚠️';
+      const icon = r.status === 'applied' ? '\u2705' : r.status === 'conflict' ? '\u274C' : '\u26A0\uFE0F';
       out.push(`${icon} ${r.file}`);
-      if (r.matchLevel && r.matchLevel > 2) out.push(`   ⚡ Fuzzy match level ${r.matchLevel}`);
+      if (r.matchLevel && r.matchLevel > 2) out.push(`   \u26A1 Fuzzy match level ${r.matchLevel}`);
       if (r.error) out.push(`   ${r.error}`);
     }
     if (data.results?.some(r => r.diff)) {

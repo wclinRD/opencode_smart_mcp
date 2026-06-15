@@ -1358,53 +1358,113 @@ export function applyBatch(globPattern, sedExpr, opts = {}) {
 // ---------------------------------------------------------------------------
 
 /**
- * Generate a unified-diff-style summary of changes.
+ * Generate a unified-diff-style summary of changes using Myers diff algorithm.
+ * Uses diff-match-patch's diff_linesToChars for correct line-level diffing.
  */
 function generateDiffSummary(oldContent, newContent, filePath) {
   const rel = (() => {
     const r = relative(process.cwd(), filePath);
-    // If path goes above project root, use basename for clean display
     if (r.startsWith('../') || r.includes('/../')) {
       const parts = filePath.split('/');
       return parts[parts.length - 1];
     }
     return r;
   })();
-  const ol = oldContent.split('\n');
-  const nl = newContent.split('\n');
-  const added = [], removed = [];
-  const max = Math.max(ol.length, nl.length);
 
-  // Simple line-by-line diff (not a real Myers diff, but sufficient for reporting)
-  let firstDiff = -1, lastDiff = -1;
-  for (let i = 0; i < max; i++) {
-    if (ol[i] !== nl[i]) {
-      if (firstDiff === -1) firstDiff = i;
-      lastDiff = i;
-      if (i < ol.length) removed.push({ line: i + 1, text: ol[i] });
-      if (i < nl.length) added.push({ line: i + 1, text: nl[i] });
-    }
-  }
-
-  // Build unified diff
   const out = [];
   out.push(`--- a/${rel}`);
   out.push(`+++ b/${rel}`);
-  if (firstDiff !== -1) {
-    const ctxStart = Math.max(0, firstDiff - 2);
-    const ctxEnd = Math.min(max, lastDiff + 3);
-    out.push(`@@ -${firstDiff + 1},${lastDiff - firstDiff + 1} +${firstDiff + 1},${lastDiff - firstDiff + 1} @@`);
-    for (let i = ctxStart; i < firstDiff; i++) out.push(` ${ol[i] || ''}`);
-    for (let i = firstDiff; i <= lastDiff; i++) {
-      if (i < ol.length && i < nl.length && ol[i] !== nl[i]) {
-        out.push(`-${ol[i]}`);
-        out.push(`+${nl[i]}`);
-      } else if (i >= ol.length || i >= nl.length) {
-        if (i < ol.length) out.push(`-${ol[i]}`);
-        if (i < nl.length) out.push(`+${nl[i]}`);
+
+  // Use diff-match-patch Myers diff for correct line-level alignment
+  const dmp = getDMP();
+  const a = dmp.diff_linesToChars_(oldContent, newContent);
+  let diffs = dmp.diff_main(a.chars1, a.chars2, false);
+  dmp.diff_charsToLines_(diffs, a.lineArray);
+  dmp.diff_cleanupSemantic(diffs);
+
+  // Convert diffs to flat entry sequence with line tracking
+  let oldLine = 1, newLine = 1;
+  const entries = [];
+
+  for (const [op, text] of diffs) {
+    if (!text) continue;
+    // Split by \n; if text ends with \n, last element is empty string
+    const lines = text.endsWith('\n') ? text.slice(0, -1).split('\n') : text.split('\n');
+    for (const line of lines) {
+      if (op === 0) {
+        entries.push({ line, oldLine: oldLine++, newLine: newLine++, type: 'ctx' });
+      } else if (op === -1) {
+        entries.push({ line, oldLine: oldLine++, newLine: null, type: 'del' });
+      } else if (op === 1) {
+        entries.push({ line, oldLine: null, newLine: newLine++, type: 'ins' });
       }
     }
-    for (let i = lastDiff + 1; i < ctxEnd && i < max; i++) out.push(` ${ol[i] || ''}`);
+  }
+
+  if (entries.length === 0) return out.join('\n');
+
+  // Find change indices (non-context entries)
+  const changeIdx = [];
+  for (let i = 0; i < entries.length; i++) {
+    if (entries[i].type !== 'ctx') changeIdx.push(i);
+  }
+
+  if (changeIdx.length === 0) {
+    out.push(`@@ -1,${entries.length} +1,${entries.length} @@`);
+    for (const e of entries) out.push(` ${e.line}`);
+    return out.join('\n');
+  }
+
+  // Build hunks: group contiguous changes with context, merge overlapping hunks
+  const CTX = 3;
+  const hunks = [];
+  let currentHunk = null;
+
+  for (let ci = 0; ci < changeIdx.length; ci++) {
+    // Find contiguous change region
+    let regionEnd = ci;
+    while (regionEnd + 1 < changeIdx.length && changeIdx[regionEnd + 1] === changeIdx[regionEnd] + 1) {
+      regionEnd++;
+    }
+
+    const regionStartIdx = changeIdx[ci];
+    const regionEndIdx = changeIdx[regionEnd];
+
+    const hunkStart = Math.max(0, regionStartIdx - CTX);
+    const hunkEnd = Math.min(entries.length - 1, regionEndIdx + CTX);
+
+    if (currentHunk && hunkStart <= currentHunk.end + 1) {
+      currentHunk.end = hunkEnd;
+    } else {
+      if (currentHunk) hunks.push(currentHunk);
+      currentHunk = { start: hunkStart, end: hunkEnd };
+    }
+
+    ci = regionEnd; // skip to end of region
+  }
+  if (currentHunk) hunks.push(currentHunk);
+
+  // Output hunks with @@ headers
+  for (const hunk of hunks) {
+    let oldCount = 0, newCount = 0;
+    let firstOld = null, firstNew = null;
+
+    for (let i = hunk.start; i <= hunk.end; i++) {
+      const e = entries[i];
+      if (firstOld === null && e.oldLine !== null) firstOld = e.oldLine;
+      if (firstNew === null && e.newLine !== null) firstNew = e.newLine;
+      if (e.type !== 'ins') oldCount++;
+      if (e.type !== 'del') newCount++;
+    }
+
+    out.push(`@@ -${firstOld},${oldCount} +${firstNew},${newCount} @@`);
+
+    for (let i = hunk.start; i <= hunk.end; i++) {
+      const e = entries[i];
+      if (e.type === 'ctx') out.push(` ${e.line}`);
+      else if (e.type === 'del') out.push(`-${e.line}`);
+      else if (e.type === 'ins') out.push(`+${e.line}`);
+    }
   }
 
   return out.join('\n');

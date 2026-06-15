@@ -20,7 +20,7 @@
 //   --undo                Create .bak snapshots (default: true)
 //   --no-undo             Skip backups
 //   --atomic              Atomic multi-file apply
-//   --format <fmt>        Output: text, json, diff (default: text)
+//   --format <fmt>        Output: text, json, diff, ansi (default: text)
 //   --root <path>         Project root
 //   -h, --help            Show this help
 
@@ -73,7 +73,7 @@ BEHAVIOR:
   --undo / --no-undo  Create .apply.bak snapshots (default: on)
   --atomic            Apply all changes atomically with rollback
   --root <dir>        Project root (default: cwd)
-  --format <fmt>      Output: text, json, diff (default: text)
+  --format <fmt>      Output: text, json, diff, ansi (default: text)
   -h, --help          Show this help
 
 EXAMPLES:
@@ -172,11 +172,43 @@ function readStdinSync() {
   }
 }
 
-function log(...args) { console.log(...args); }
+// ── ANSI color helpers (for --format=ansi) ──
+const CLI_ANSI = {
+  red:    (s) => `\x1b[31m${s}\x1b[0m`,
+  green:  (s) => `\x1b[32m${s}\x1b[0m`,
+  yellow: (s) => `\x1b[33m${s}\x1b[0m`,
+  cyan:   (s) => `\x1b[36m${s}\x1b[0m`,
+  bold:   (s) => `\x1b[1m${s}\x1b[0m`,
+  dim:    (s) => `\x1b[2m${s}\x1b[0m`,
+};
+
+let _cliOpts = null;
+function useAnsi() { return _cliOpts && _cliOpts.format === 'ansi'; }
+
+/** Replace emoji with ANSI-colored text when --format=ansi */
+function ansiFormat(msg) {
+  return msg
+    .replace(/🔍 /g,     CLI_ANSI.bold(CLI_ANSI.cyan('◆ ')))
+    .replace(/✅ /g,     CLI_ANSI.green('✓ '))
+    .replace(/❌ /g,     CLI_ANSI.red('✗ '))
+    .replace(/⚠️  /g,   CLI_ANSI.yellow('⚠ '))
+    .replace(/📄 /g,    CLI_ANSI.cyan('file: '))
+    .replace(/💡 /g,    CLI_ANSI.dim('tip: '))
+    .replace(/^=+$/gm, (m) => CLI_ANSI.dim(m));
+}
+
+function log(...args) {
+  if (useAnsi()) {
+    console.log(...args.map(a => typeof a === 'string' ? ansiFormat(a) : a));
+  } else {
+    console.log(...args);
+  }
+}
 
 // ---- Main ----
 async function main() {
   const opts = parseArgs();
+  _cliOpts = opts;
 
   if (opts.mode === 'search-replace' || opts.mode === 'lazy' || opts.mode === 'partial') {
     let blocks = opts.blocks;
