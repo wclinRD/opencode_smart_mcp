@@ -31,6 +31,10 @@ import {
   suggestNearest,
   applyPartial,
   checkFileAccess,
+  parseSedExpression,
+  applySed,
+  applyMultiHunk,
+  applyBatch,
 } from '../src/lib/apply-engine.mjs';
 
 import { parseBlockDiff } from '../src/plugins/core/fast-apply.mjs';
@@ -908,5 +912,249 @@ describe('checkFileAccess', () => {
     const r = checkFileAccess(fp);
     assert.equal(r.ok, true);
     assert.ok(Array.isArray(r.warnings));
+  });
+});
+
+
+// ===========================================================================
+// 13. Sed Expression Parsing — parseSedExpression
+// ===========================================================================
+
+describe('parseSedExpression', () => {
+  it('parses basic substitution', () => {
+    const r = parseSedExpression('s/foo/bar/');
+    assert.equal(r.operation, 'substitute');
+    assert.equal(r.pattern, 'foo');
+    assert.equal(r.replacement, 'bar');
+    assert.equal(r.flags, '');
+  });
+
+  it('parses global substitution', () => {
+    const r = parseSedExpression('s/foo/bar/g');
+    assert.equal(r.operation, 'substitute');
+    assert.equal(r.pattern, 'foo');
+    assert.equal(r.replacement, 'bar');
+    assert.equal(r.flags, 'g');
+  });
+
+  it('parses delete operation', () => {
+    const r = parseSedExpression('/pattern/d');
+    assert.equal(r.operation, 'delete');
+    assert.equal(r.pattern, 'pattern');
+  });
+
+  it('parses invert-delete (keep) operation', () => {
+    const r = parseSedExpression('/pattern/!d');
+    assert.equal(r.operation, 'keep');
+    assert.equal(r.pattern, 'pattern');
+  });
+
+  it('parses custom delimiter', () => {
+    const r = parseSedExpression('s|foo|bar|g');
+    assert.equal(r.operation, 'substitute');
+    assert.equal(r.pattern, 'foo');
+    assert.equal(r.replacement, 'bar');
+    assert.equal(r.flags, 'g');
+  });
+
+  it('handles escaped delimiter in pattern', () => {
+    const r = parseSedExpression('s/a\\/b/c/');
+    assert.equal(r.pattern, 'a/b');
+    assert.equal(r.replacement, 'c');
+  });
+
+  it('handles multiple flags', () => {
+    const r = parseSedExpression('s/foo/bar/gi');
+    assert.equal(r.flags, 'gi');
+  });
+
+  it('throws on empty input', () => {
+    assert.throws(() => parseSedExpression(''), /Invalid sed expression/);
+  });
+
+  it('throws on invalid format', () => {
+    assert.throws(() => parseSedExpression('not valid'), /must start/);
+  });
+
+  it('throws on missing delimiter after s', () => {
+    assert.throws(() => parseSedExpression('s'), /missing delimiter/);
+  });
+});
+
+// ===========================================================================
+// 14. Sed Apply — applySed
+// ===========================================================================
+
+describe('applySed', () => {
+  it('applies basic substitution', () => {
+    const fp = tempFile('foo bar baz\n');
+    const r = applySed(fp, 's/foo/hello/');
+    assert.equal(r.status, 'applied');
+    assert.equal(readFileSync(fp, 'utf-8'), 'hello bar baz\n');
+  });
+
+  it('applies global substitution (multiple per line)', () => {
+    const fp = tempFile('a foo b foo c\n');
+    const r = applySed(fp, 's/foo/bar/g');
+    assert.equal(r.status, 'applied');
+    assert.equal(readFileSync(fp, 'utf-8'), 'a bar b bar c\n');
+  });
+
+  it('replaces first occurrence without g flag (not per-line)', () => {
+    const fp = tempFile('a foo b foo c\n');
+    const r = applySed(fp, 's/foo/bar/');
+    assert.equal(r.status, 'applied');
+    assert.equal(readFileSync(fp, 'utf-8'), 'a bar b foo c\n');
+  });
+
+  it('deletes lines matching pattern', () => {
+    const fp = tempFile('keep1\ndelete this\nkeep2\n');
+    const r = applySed(fp, '/delete/d');
+    assert.equal(r.status, 'applied');
+    assert.equal(readFileSync(fp, 'utf-8'), 'keep1\nkeep2\n');
+  });
+
+  it('keeps only lines matching pattern', () => {
+    const fp = tempFile('keep1\ndelete this\nkeep2\n');
+    const r = applySed(fp, '/^keep/!d');
+    assert.equal(r.status, 'applied');
+    // Trailing newline is consumed because empty last line doesn't match /^keep/
+    const result = readFileSync(fp, 'utf-8');
+    assert.ok(result === 'keep1\nkeep2' || result === 'keep1\nkeep2\n');
+  });
+
+  it('returns nochange when no match', () => {
+    const fp = tempFile('hello world\n');
+    const r = applySed(fp, 's/foo/bar/');
+    assert.equal(r.status, 'nochange');
+    assert.equal(readFileSync(fp, 'utf-8'), 'hello world\n');
+  });
+
+  it('returns error for invalid sed expression', () => {
+    const fp = tempFile('hello\n');
+    const r = applySed(fp, 'not valid');
+    assert.equal(r.status, 'error');
+    assert.ok(r.error.includes('Invalid sed expression'));
+  });
+
+  it('returns error for non-existent file', () => {
+    const r = applySed('/nonexistent/path.js', 's/foo/bar/');
+    assert.equal(r.status, 'error');
+    assert.ok(r.error.includes('Cannot read'));
+  });
+
+  it('creates backup when undo is true', () => {
+    const fp = tempFile('original content\n');
+    const r = applySed(fp, 's/original/modified/', { undo: true });
+    assert.equal(r.status, 'applied');
+    assert.ok(r.backup);
+    assert.equal(r.backup, fp + '.apply.bak');
+    const bakContent = readFileSync(fp + '.apply.bak', 'utf-8');
+    assert.equal(bakContent, 'original content\n');
+  });
+});
+
+// ===========================================================================
+// 15. Multi-Hunk Apply — applyMultiHunk
+// ===========================================================================
+
+describe('applyMultiHunk', () => {
+  it('applies single numbered hunk with sed', () => {
+    const fp = tempFile('line1\nline2\nline3\nline4\nline5\n');
+    const hunks = [{ line: 2, endLine: 2, sed: 's/line2/MODIFIED/' }];
+    const r = applyMultiHunk(fp, hunks);
+    assert.equal(r.status, 'applied');
+    assert.equal(readFileSync(fp, 'utf-8'), 'line1\nMODIFIED\nline3\nline4\nline5\n');
+  });
+
+  it('processes multiple numbered hunks bottom-up', () => {
+    const fp = tempFile('a\nb\nc\nd\ne\n');
+    const hunks = [
+      { line: 2, endLine: 2, sed: 's/b/B2/' },
+      { line: 4, endLine: 4, sed: 's/d/D4/' },
+    ];
+    const r = applyMultiHunk(fp, hunks);
+    assert.equal(r.status, 'applied');
+    assert.equal(r.appliedCount, 2);
+    assert.equal(readFileSync(fp, 'utf-8'), 'a\nB2\nc\nD4\ne\n');
+  });
+
+  it('applies file-level hunk (no line number)', () => {
+    const fp = tempFile('foo bar\nhello world\nfoo baz\n');
+    const hunks = [{ sed: 's/foo/test/g' }];
+    const r = applyMultiHunk(fp, hunks);
+    assert.equal(r.status, 'applied');
+    assert.equal(readFileSync(fp, 'utf-8'), 'test bar\nhello world\ntest baz\n');
+  });
+
+  it('mixes numbered and file-level hunks', () => {
+    const fp = tempFile('a\nb\nc\nd\n');
+    const hunks = [
+      { line: 2, endLine: 2, sed: 's/b/B2/' },
+      { sed: 's/a/X/g' },
+    ];
+    const r = applyMultiHunk(fp, hunks);
+    assert.equal(r.status, 'applied');
+    const result = readFileSync(fp, 'utf-8');
+    assert.ok(result.includes('B2'));
+    assert.ok(result.includes('X'));
+  });
+
+  it('applies search+replace hunk', () => {
+    const fp = tempFile('line1\nold text\nline3\n');
+    const hunks = [{ line: 2, endLine: 2, search: 'old text', replace: 'new text' }];
+    const r = applyMultiHunk(fp, hunks);
+    assert.equal(r.status, 'applied');
+    assert.equal(readFileSync(fp, 'utf-8'), 'line1\nnew text\nline3\n');
+  });
+
+  it('reports error when line is out of range', () => {
+    const fp = tempFile('only one line\n');
+    const hunks = [{ line: 99, endLine: 99, sed: 's/foo/bar/' }];
+    const r = applyMultiHunk(fp, hunks);
+    assert.equal(r.status, 'nochange');
+    assert.ok(r.results.some(rr => rr.status === 'error'));
+  });
+
+  it('returns error for no hunks', () => {
+    const fp = tempFile('content\n');
+    const r = applyMultiHunk(fp, []);
+    assert.equal(r.status, 'error');
+    assert.ok(r.error.includes('No hunks'));
+  });
+
+  it('returns nochange when nothing matches', () => {
+    const fp = tempFile('hello\n');
+    const hunks = [{ sed: 's/xyz/abc/' }];
+    const r = applyMultiHunk(fp, hunks);
+    assert.equal(r.status, 'nochange');
+  });
+});
+
+// ===========================================================================
+// 16. Batch Apply — applyBatch
+// ===========================================================================
+
+describe('applyBatch', () => {
+  it('applies sed to glob-matched files', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'batch-test-'));
+    writeFileSync(join(dir, 'a.txt'), 'foo\n', 'utf-8');
+    writeFileSync(join(dir, 'b.txt'), 'foo\n', 'utf-8');
+    writeFileSync(join(dir, 'c.txt'), 'bar\n', 'utf-8');
+    const r = applyBatch(join(dir, '*.txt'), 's/foo/hello/g', { root: dir });
+    assert.equal(r.status, 'applied');
+    assert.equal(r.summary.succeeded, 2);
+    assert.equal(r.summary.nochange, 1);
+    assert.equal(r.totalFiles, 3);
+    assert.equal(readFileSync(join(dir, 'a.txt'), 'utf-8'), 'hello\n');
+    assert.equal(readFileSync(join(dir, 'b.txt'), 'utf-8'), 'hello\n');
+    assert.equal(readFileSync(join(dir, 'c.txt'), 'utf-8'), 'bar\n');
+  });
+
+  it('returns error when no files match glob', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'batch-empty-'));
+    const r = applyBatch(join(dir, '*.nonexistent'), 's/foo/bar/', { root: dir });
+    assert.equal(r.status, 'error');
+    assert.ok(r.error.includes('No files matching'));
   });
 });

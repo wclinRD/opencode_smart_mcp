@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-14T20:45:23.726Z",
+  "generatedAt": "2026-06-15T04:48:11.140Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -24,7 +24,11 @@
         "properties": {
           "toolHistory": {
             "type": "array",
-            "description": "Array of tool call entries: [{ tool, ok, result?, error?, timestamp? }]"
+            "description": "Array of tool call entries: [{ tool, ok, result?, error?, timestamp? }]. Auto-populated from server context when auto:true."
+          },
+          "auto": {
+            "type": "boolean",
+            "description": "Auto mode: server injects toolHistory from current session context. No need to pass toolHistory manually."
           },
           "conversationLength": {
             "type": "number",
@@ -39,9 +43,7 @@
             "description": "Current TODO items for recovery context"
           }
         },
-        "required": [
-          "toolHistory"
-        ]
+        "required": []
       }
     },
     {

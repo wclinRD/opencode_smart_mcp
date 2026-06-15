@@ -75,7 +75,7 @@ permission:
 | `smart_deep_think({topic, template})` | **慢想** — 深度分析（10 模板含 `peer_review`）。一次完整輸出 |
 | `smart_security({scan})` | 安全掃描 |
 | `smart_test({root})` | 執行測試 |
-| `smart_fast_apply({file, content})` / `smart_fast_apply({file, search, replace})` | **統一編輯工具** — 取代 write+edit。`{file,content}`=創建/覆寫檔案，`{file,search,replace}`=字串取代。也支援 6 種 patch 格式（unified-diff/lazy/hashline/search-replace/whole-file/partial），6 級 fuzzy match，atomic multi-file，dry-run 預設安全無副作用 |
+| `smart_fast_apply({file, content})` / `smart_fast_apply({file, search, replace})` / `smart_fast_apply({format:"sed", file, sed})` | **統一編輯工具** — 取代 write+edit 及 sed。`{file,content}`=創建/覆寫，`{file,search,replace}`=字串取代。支援 10 種格式（unified-diff/lazy/hashline/search-replace/whole-file/partial/block-diff/sed/multi-hunk/batch），6 級 fuzzy match，atomic multi-file，dry-run 預設安全無副作用 |
 | `smart_context({command})` | Session 管理（含 context budget 查詢：`smart_context({command:"budget"})`） |
 | `smart_rules({file})` | 查詢專案規則（AGENTS.md / .cursorrules 等）— **編輯前必查** |
 | `smart_lsp({operation, file, line, character})` | **Type-aware 程式碼理解** — 找定義、查引用、看型別、診斷錯誤。支援 TS/JS/Python/Rust/Swift/PHP |
@@ -394,9 +394,12 @@ LLM 也可以在 self-correction loop 中主動呼叫 smart_hallucination_check 
 | **套用 LLM patch** | `smart_fast_apply({text:"<<diff/SEARCH-REPLACE>>", apply:true})` |
 | **大檔案精確編輯** | `smart_fast_apply({changes:[{file,startLine,endLine,newContent}], apply:true})` |
 | **AST 結構編輯** | `smart_fast_apply({file, symbol, action, newContent})` — symbol body/行區間操作 |
+| **Sed 取代** | `smart_fast_apply({format:"sed", file:"a.ts", sed:"s/foo/bar/g", apply:true})` — 單一 sed expression |
+| **多 hunk 編輯** | `smart_fast_apply({format:"multi-hunk", file:"a.ts", hunks:[{sed:"s/foo/bar/"},{search:"old", replace:"new", line:42}], apply:true})` |
+| **批次 glob+sed** | `smart_fast_apply({format:"batch", glob:"src/**/*.ts", sed:"s/foo/bar/g", apply:true})` |
 
 > `fast_apply` 預設 dryRun:true，安全無副作用。確認後加 `apply:true` 才實際寫入。
-> 支援 6 種 patch 格式，6 級 fuzzy match，atomic multi-file apply
+> 支援 10 種格式（unified-diff/lazy/hashline/search-replace/whole-file/partial/block-diff/sed/multi-hunk/batch），6 級 fuzzy match，atomic multi-file apply
 
 ---
 

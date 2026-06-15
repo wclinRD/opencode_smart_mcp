@@ -33,6 +33,9 @@ import {
   applyUnifiedDiff,
   applyAtomic,
   applyHashline,
+  applySed,
+  applyMultiHunk,
+  applyBatch,
   parseSearchReplace,
   parseSearchReplaceText,
   parseUnifiedDiff,
@@ -66,8 +69,8 @@ Dry-run by default — safe to use without side effects.`,
     properties: {
       format: {
         type: 'string',
-        enum: ['search-replace', 'lazy', 'partial', 'unified-diff', 'whole-file', 'hashline', 'block-diff'],
-        description: 'Input format (default: search-replace). Token efficiency: unified-diff (best, +/- only) > lazy > hashline > partial > search-replace > whole-file. Use hashline for large files (>400 lines) where SEARCH/REPLACE matching is unreliable.',
+        enum: ['search-replace', 'lazy', 'partial', 'unified-diff', 'whole-file', 'hashline', 'block-diff', 'sed', 'multi-hunk', 'batch'],
+        description: 'Input format (default: search-replace). Token efficiency: unified-diff (best, +/- only) > lazy > hashline > partial > search-replace > whole-file. Use hashline for large files (>400 lines) where SEARCH/REPLACE matching is unreliable. sed: single sed expression. multi-hunk: multiple sed/search-replace in one file. batch: glob+sed across multiple files.',
       },
       blocks: {
         type: 'array',
@@ -117,6 +120,38 @@ Dry-run by default — safe to use without side effects.`,
         },
         description: 'Hashline edit changes (for format=hashline). Specify line range directly with content verification — most robust for large files.',
       },
+      // ── Sed / Multi-hunk / Batch formats ──
+      sed: {
+        type: 'string',
+        description: 'Sed expression (required for format=sed or format=batch). E.g. "s/foo/bar/g", "/pattern/d".',
+      },
+      glob: {
+        type: 'string',
+        description: 'Glob pattern (required for format=batch). E.g. "src/**/*.ts".',
+      },
+      hunks: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            sed: { type: 'string', description: 'Sed expression for this hunk' },
+            search: { type: 'string', description: 'Text to search within hunk range' },
+            replace: { type: 'string', description: 'Replacement text' },
+            line: { type: 'number', description: 'Target line number (1-indexed)' },
+            endLine: { type: 'number', description: 'End line (inclusive, 1-indexed)' },
+          },
+        },
+        description: 'Hunks array for format=multi-hunk. Each hunk can have sed or search+replace, optionally restricted to line range.',
+      },
+      line: {
+        type: 'number',
+        description: 'Line number (1-indexed). For format=sed: restrict sed to this line (or line+endLine range).',
+      },
+      endLine: {
+        type: 'number',
+        description: 'End line (inclusive, 1-indexed). Pair with line for sed range restriction.',
+      },
+
       // ── Flat shortcut syntax (替代原生 write/edit，LLM 不需選工具) ──
       file: {
         type: 'string',
@@ -231,6 +266,12 @@ Dry-run by default — safe to use without side effects.`,
         changes = args.changes.map(c => ({ ...c, type: 'hashline' }));
       } else if (format === 'whole-file' && args.whole) {
         changes = [{ ...args.whole, type: 'whole' }];
+      } else if (format === 'sed' && args.file && args.sed) {
+        changes = [{ file: args.file, sed: args.sed, line: args.line, endLine: args.endLine, type: 'sed' }];
+      } else if (format === 'multi-hunk') {
+        changes = [{ file: args.file, hunks: args.hunks, type: 'multi-hunk' }];
+      } else if (format === 'batch') {
+        changes = [{ glob: args.glob, sed: args.sed, line: args.line, endLine: args.endLine, root, type: 'batch' }];
       } else if (args.text) {
         // Auto-detect: try SEARCH/REPLACE blocks first, then unified diff
         const sr = parseSearchReplaceText(args.text);
@@ -488,6 +529,12 @@ Dry-run by default — safe to use without side effects.`,
           r = applyWholeFile(ch.file, ch.content, { undo });
         } else if (ch.type === 'hashline') {
           r = applyHashline(ch.file, { startLine: ch.startLine, endLine: ch.endLine, oldContent: ch.oldContent || '', newContent: ch.newContent, action: ch.action }, { undo });
+        } else if (ch.type === 'sed') {
+          r = applySed(ch.file, ch.sed, { undo });
+        } else if (ch.type === 'multi-hunk') {
+          r = applyMultiHunk(ch.file, ch.hunks, { undo });
+        } else if (ch.type === 'batch') {
+          r = applyBatch(ch.glob, ch.sed, { root: ch.root, undo });
         }
         appResults.push(r || { status: 'error', file: ch.file, error: 'Unknown type' });
       }

@@ -15,7 +15,7 @@
 //   const r = applySearchReplace('file.js', { search: 'old', replace: 'new' });
 //   if (r.status === 'applied') console.log('OK');
 
-import { readFileSync, writeFileSync, existsSync, copyFileSync, unlinkSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, copyFileSync, unlinkSync, statSync, openSync, readSync, closeSync, globSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 import { diff_match_patch } from 'diff-match-patch';
@@ -68,6 +68,81 @@ export function parseSearchReplaceText(text) {
 // ---------------------------------------------------------------------------
 
 const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
+
+/**
+ * Parse sed-like expression into { pattern, replacement, flags, operation }.
+ *
+ * Supports:
+ *   s/pattern/replacement/flags  — substitute (flags: g, i, m, u, s, y)
+ *   s|pattern|replacement|flags  — pipe delimiter
+ *   s#pattern#replacement#flags  — hash delimiter
+ *   /pattern/d                   — delete matching lines
+ *   /pattern/!d                  — delete non-matching lines (invert)
+ *
+ * Escaped delimiters (\/) are supported in both pattern and replacement.
+ *
+ * @param {string} sed — sed expression string
+ * @returns {{ pattern: string, replacement: string, flags: string, operation: 'substitute'|'delete'|'keep' }}
+ * @throws {Error} on invalid syntax
+ */
+export function parseSedExpression(sed) {
+  if (!sed || typeof sed !== 'string') {
+    throw new Error(`Invalid sed expression: ${JSON.stringify(sed)}`);
+  }
+
+  const trimmed = sed.trim();
+
+  // --- Delete operation: /pattern/d or /pattern/!d ---
+  const delMatch = trimmed.match(/^\/(.+)\/!?d$/);
+  if (delMatch) {
+    return {
+      pattern: delMatch[1].replace(/\\\//g, '/'),
+      replacement: '',
+      flags: '',
+      operation: trimmed.endsWith('!d') ? 'keep' : 'delete',
+    };
+  }
+
+  // --- Substitute operation: s<delim>pattern<delim>replacement<delim>flags ---
+  if (!trimmed.startsWith('s')) {
+    throw new Error(`Invalid sed expression: "${sed}" — must start with s/ or /`);
+  }
+
+  const delim = trimmed[1];
+  if (!delim || delim === ' ' || delim === '\t') {
+    throw new Error(`Invalid sed expression: "${sed}" — missing delimiter after s`);
+  }
+
+  // Split after "s<delim>" by delimiter (respecting escaping)
+  const rest = trimmed.slice(2);
+  const parts = [];
+  let current = '';
+  for (let i = 0; i < rest.length; i++) {
+    if (rest[i] === '\\' && i + 1 < rest.length && rest[i + 1] === delim) {
+      current += delim;
+      i++;
+    } else if (rest[i] === delim) {
+      parts.push(current);
+      current = '';
+    } else {
+      current += rest[i];
+    }
+  }
+  // Push last part (content after final delimiter — the flags)
+  if (current !== '') parts.push(current);
+
+  if (parts.length < 2) {
+    throw new Error(`Invalid sed expression: "${sed}" — expected at least 2 delimiter-separated parts, got ${parts.length}`);
+  }
+
+  return {
+    pattern: parts[0],
+    replacement: parts[1] !== undefined ? parts[1] : '',
+    flags: parts.slice(2).join(''),
+    operation: 'substitute',
+  };
+}
+
 
 /**
  * Parse unified diff string into per-file change objects.
@@ -997,6 +1072,285 @@ export function applyAtomic(changes, opts = {}) {
   }
 
   return { results, allSucceeded: allOk };
+}
+
+// ---------------------------------------------------------------------------
+// Sed Family — applySed, applyMultiHunk, applyBatch
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert sed-style replacement backreferences to JavaScript $1/$2/$& style.
+ * sed: \1, \2, & → JS: $1, $2, $&
+ */
+function sedToJSReplacement(sed) {
+  let result = '';
+  for (let i = 0; i < sed.length; i++) {
+    if (sed[i] === '\\' && i + 1 < sed.length) {
+      if (/[1-9]/.test(sed[i + 1])) {
+        result += '$' + sed[i + 1];
+        i++;
+      } else if (sed[i + 1] === '&') {
+        result += '$&';
+        i++;
+      } else {
+        result += sed[i + 1];
+        i++;
+      }
+    } else if (sed[i] === '&') {
+      result += '$&';
+    } else {
+      result += sed[i];
+    }
+  }
+  return result;
+}
+
+/**
+ * Apply a sed expression to a text string (no file I/O).
+ * Internal helper used by applySed and applyMultiHunk.
+ */
+function applySedToText(text, sedExpr) {
+  const parsed = parseSedExpression(sedExpr);
+
+  if (parsed.operation === 'substitute') {
+    const jsFlags = [...parsed.flags].filter(f => 'gimsuy'.includes(f)).join('');
+    const regex = new RegExp(parsed.pattern, jsFlags);
+    const replacement = sedToJSReplacement(parsed.replacement);
+    return text.replace(regex, replacement);
+  } else if (parsed.operation === 'delete') {
+    const regex = new RegExp(parsed.pattern);
+    return text.split('\n').filter(l => !regex.test(l)).join('\n');
+  } else if (parsed.operation === 'keep') {
+    const regex = new RegExp(parsed.pattern);
+    return text.split('\n').filter(l => regex.test(l)).join('\n');
+  }
+
+  return text;
+}
+
+/**
+ * Apply a sed expression to a single file.
+ *
+ * @param {string} filePath - Absolute or relative path
+ * @param {string} sedExpr - Sed expression (e.g. "s/foo/bar/g", "/pattern/d")
+ * @param {{ undo?: boolean }} [opts]
+ * @returns {{ status: 'applied'|'nochange'|'error', file: string, sed: string, operation?: string, diff?: string, backup?: string, error?: string }}
+ */
+export function applySed(filePath, sedExpr, opts = {}) {
+  const { undo = false } = opts;
+
+  let parsed;
+  try {
+    parsed = parseSedExpression(sedExpr);
+  } catch (e) {
+    return { status: 'error', file: filePath, sed: sedExpr, error: `Invalid sed expression: ${e.message}` };
+  }
+
+  let content;
+  try {
+    content = readFileSync(filePath, 'utf-8');
+  } catch (e) {
+    return { status: 'error', file: filePath, error: `Cannot read: ${e.message}` };
+  }
+
+  const newContent = applySedToText(content, sedExpr);
+
+  if (newContent === content) {
+    return { status: 'nochange', file: filePath, sed: sedExpr, message: 'No matches found — content unchanged' };
+  }
+
+  if (undo) {
+    try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* best effort */ }
+  }
+
+  try {
+    writeFileSync(filePath, newContent, 'utf-8');
+  } catch (e) {
+    return { status: 'error', file: filePath, error: `Cannot write: ${e.message}` };
+  }
+
+  const diff = generateDiffSummary(content, newContent, filePath);
+
+  return {
+    status: 'applied',
+    file: filePath,
+    sed: sedExpr,
+    operation: parsed.operation,
+    diff,
+    backup: undo ? (filePath + '.apply.bak') : undefined,
+  };
+}
+
+/**
+ * Apply multiple sed/search-replace hunks to a single file.
+ * Processes bottom-up by line number for offset-safe editing.
+ *
+ * @param {string} filePath
+ * @param {Array<{ sed?: string, search?: string, replace?: string, line?: number, endLine?: number }>} hunks
+ * @param {{ undo?: boolean }} [opts]
+ * @returns {{ status: 'applied'|'nochange'|'error', file: string, hunkCount?: number, appliedCount?: number, results?: Array, diff?: string, error?: string }}
+ */
+export function applyMultiHunk(filePath, hunks, opts = {}) {
+  const { undo = false } = opts;
+  if (!hunks || !hunks.length) {
+    return { status: 'error', file: filePath, error: 'No hunks provided' };
+  }
+
+  let content;
+  try {
+    content = readFileSync(filePath, 'utf-8');
+  } catch (e) {
+    return { status: 'error', file: filePath, error: `Cannot read: ${e.message}` };
+  }
+
+  const numbered = hunks
+    .map((h, i) => ({ ...h, _idx: i }))
+    .filter(h => h.line !== undefined)
+    .sort((a, b) => b.line - a.line);
+  const fileLevel = hunks
+    .map((h, i) => ({ ...h, _idx: i }))
+    .filter(h => h.line === undefined);
+
+  const results = [];
+  let currentContent = content;
+
+  // Line-numbered hunks: process bottom-up (safe offset order)
+  for (const hunk of numbered) {
+    const lines = currentContent.split('\n');
+    const startLine = hunk.line;
+    const endLine = hunk.endLine || hunk.line;
+
+    if (startLine < 1 || endLine > lines.length) {
+      results.push({ ...hunk, status: 'error', error: `Line ${startLine}-${endLine} out of range (file has ${lines.length} lines)` });
+      continue;
+    }
+
+    const targetText = lines.slice(startLine - 1, endLine).join('\n');
+    let newTarget;
+
+    if (hunk.sed) {
+      newTarget = applySedToText(targetText, hunk.sed);
+    } else if (hunk.search !== undefined && hunk.replace !== undefined) {
+      const idx = targetText.indexOf(hunk.search);
+      if (idx === -1) {
+        newTarget = targetText;
+      } else {
+        newTarget = targetText.substring(0, idx) + hunk.replace + targetText.substring(idx + hunk.search.length);
+      }
+    } else {
+      results.push({ ...hunk, status: 'error', error: 'Hunk must have sed or search+replace' });
+      continue;
+    }
+
+    if (newTarget === targetText) {
+      results.push({ ...hunk, status: 'nochange' });
+      continue;
+    }
+
+    const oldLineCount = endLine - startLine + 1;
+    const newLineCount = newTarget.split('\n').length;
+    const delta = newLineCount - oldLineCount;
+
+    const before = lines.slice(0, startLine - 1);
+    const after = lines.slice(endLine);
+    currentContent = [...before, newTarget, ...after].join('\n');
+
+    results.push({ ...hunk, status: 'applied', delta });
+  }
+
+  // File-level hunks (no line number → apply to whole file)
+  for (const hunk of fileLevel) {
+    if (hunk.sed) {
+      const newContent = applySedToText(currentContent, hunk.sed);
+      if (newContent !== currentContent) {
+        currentContent = newContent;
+        results.push({ ...hunk, status: 'applied' });
+      } else {
+        results.push({ ...hunk, status: 'nochange' });
+      }
+    } else if (hunk.search !== undefined && hunk.replace !== undefined) {
+      const idx = currentContent.indexOf(hunk.search);
+      if (idx !== -1) {
+        currentContent = currentContent.substring(0, idx) + hunk.replace + currentContent.substring(idx + hunk.search.length);
+        results.push({ ...hunk, status: 'applied' });
+      } else {
+        results.push({ ...hunk, status: 'nochange' });
+      }
+    } else {
+      results.push({ ...hunk, status: 'error', error: 'Hunk must have sed or search+replace' });
+    }
+  }
+
+  if (currentContent === content) {
+    return { status: 'nochange', file: filePath, results, message: 'No changes applied' };
+  }
+
+  if (undo) {
+    try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* best effort */ }
+  }
+
+  try {
+    writeFileSync(filePath, currentContent, 'utf-8');
+  } catch (e) {
+    return { status: 'error', file: filePath, error: `Cannot write: ${e.message}` };
+  }
+
+  const diff = generateDiffSummary(content, currentContent, filePath);
+
+  return {
+    status: 'applied',
+    file: filePath,
+    hunkCount: hunks.length,
+    appliedCount: results.filter(r => r.status === 'applied').length,
+    results,
+    diff,
+    backup: undo ? (filePath + '.apply.bak') : undefined,
+  };
+}
+
+/**
+ * Apply a sed expression to multiple files matching a glob pattern.
+ * Uses Node 22+ fs.globSync for zero-dependency glob expansion.
+ *
+ * @param {string} globPattern - Glob pattern (e.g. "*.ts" or "src/*.ts")
+ * @param {string} sedExpr - Sed expression
+ * @param {{ root?: string, undo?: boolean }} [opts]
+ * @returns {{ status: 'applied'|'error'|'nochange', pattern: string, sed: string, totalFiles: number, summary: { succeeded: number, failed: number, nochange: number }, results: Array }}
+ */
+export function applyBatch(globPattern, sedExpr, opts = {}) {
+  const { root = process.cwd(), undo = false } = opts;
+
+  let files;
+  try {
+    const pattern = resolve(root, globPattern);
+    files = [...globSync(pattern)];
+  } catch (e) {
+    return { status: 'error', error: `Glob expansion failed: ${e.message}`, pattern: globPattern, sed: sedExpr };
+  }
+
+  if (files.length === 0) {
+    return { status: 'error', error: `No files matching "${globPattern}"`, pattern: globPattern, sed: sedExpr };
+  }
+
+  const results = [];
+  let succeeded = 0, failed = 0, nochange = 0;
+
+  for (const file of files) {
+    const r = applySed(file, sedExpr, { undo });
+    results.push(r);
+    if (r.status === 'applied') succeeded++;
+    else if (r.status === 'error') failed++;
+    else nochange++;
+  }
+
+  return {
+    status: succeeded > 0 ? 'applied' : (failed > 0 ? 'error' : 'nochange'),
+    pattern: globPattern,
+    sed: sedExpr,
+    totalFiles: files.length,
+    summary: { succeeded, failed, nochange },
+    results,
+  };
 }
 
 // ---------------------------------------------------------------------------
