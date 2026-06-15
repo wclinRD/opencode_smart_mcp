@@ -68,15 +68,13 @@ export default {
         case 'build': {
           const result = index.buildIndex(projectRoot, { include, exclude });
           return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                ok: true,
-                command: 'build',
-                ...result,
-                message: `Indexed ${result.files} files with ${result.symbols} symbols in ${result.elapsedMs}ms`
-              }, null, 2)
-            }]
+            ok: true,
+            output: JSON.stringify({
+              ok: true,
+              command: 'build',
+              ...result,
+              message: `Indexed ${result.files} files with ${result.symbols} symbols in ${result.elapsedMs}ms`
+            }, null, 2)
           };
         }
 
@@ -85,76 +83,56 @@ export default {
           if (strategy) opts.strategy = strategy;
           const result = index.updateIndex(projectRoot, opts);
           return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                ok: true,
-                command: 'update',
-                strategy: result.strategy || (strategy || 'hash'),
-                ...result,
-                message: `Updated (${result.strategy || 'hash'}): ${result.added} added, ${result.updated} changed, ${result.removed} removed`
-              }, null, 2)
-            }]
+            ok: true,
+            output: JSON.stringify({
+              ok: true,
+              command: 'update',
+              strategy: result.strategy || (strategy || 'hash'),
+              ...result,
+              message: `Updated (${result.strategy || 'hash'}): ${result.added} added, ${result.updated} changed, ${result.removed} removed`
+            }, null, 2)
           };
         }
 
         case 'query': {
           if (!symbol) {
-            return {
-              content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'symbol parameter is required for query command' }) }],
-              isError: true
-            };
+            return { ok: false, error: 'symbol parameter is required for query command' };
           }
           const results = index.querySymbol(symbol, { limit: limit || 20, kind: kind || null });
           return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                ok: true,
-                command: 'query',
-                query: symbol,
-                count: results.length,
-                results
-              }, null, 2)
-            }]
+            ok: true,
+            output: JSON.stringify({
+              ok: true,
+              command: 'query',
+              query: symbol,
+              count: results.length,
+              results
+            }, null, 2)
           };
         }
 
         case 'map': {
           const map = index.generateRepoMap({ maxSymbols: limit || 200 });
-          return {
-            content: [{
-              type: 'text',
-              text: map
-            }]
-          };
+          return { ok: true, output: map };
         }
 
         case 'stats': {
           const stats = index.getStats();
           return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                ok: true,
-                command: 'stats',
-                ...stats
-              }, null, 2)
-            }]
+            ok: true,
+            output: JSON.stringify({
+              ok: true,
+              command: 'stats',
+              ...stats
+            }, null, 2)
           };
         }
 
         default:
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ ok: false, error: `Unknown command: ${command}` }) }],
-            isError: true
-          };
+          return { ok: false, error: `Unknown command: ${command}` };
       }
     } catch (err) {
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ ok: false, error: err.message }) }],
-        isError: true
-      };
+      return { ok: false, error: err.message };
     }
   }
 };

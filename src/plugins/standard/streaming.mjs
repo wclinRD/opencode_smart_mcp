@@ -169,23 +169,15 @@ export default {
     switch (command) {
       case 'status': {
         if (!taskId) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'taskId is required for status command' }) }],
-            isError: true
-          };
+          return { ok: false, error: 'taskId is required for status command' };
         }
 
         const state = getProgress(taskId);
         if (!state) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ ok: true, command: 'status', taskId, found: false, message: 'No progress tracked for this task.' }) }]
-          };
+          return { ok: true, output: JSON.stringify({ ok: true, command: 'status', taskId, found: false, message: 'No progress tracked for this task.' }) };
         }
 
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
+        return { ok: true, output: JSON.stringify({
               ok: true,
               command: 'status',
               task: {
@@ -193,9 +185,7 @@ export default {
                 percentage: state.total > 0 ? Math.round((state.current / state.total) * 100) : 0,
                 recentMessages: state.messages.slice(-5)
               }
-            }, null, 2)
-          }]
-        };
+            }, null, 2) };
       }
 
       case 'all': {
@@ -211,35 +201,22 @@ export default {
           startedAt: s.startedAt
         }));
 
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
+        return { ok: true, output: JSON.stringify({
               ok: true,
               command: 'all',
               count: tasks.length,
               active: tasks.filter(t => t.status === 'running').length,
               tasks
-            }, null, 2)
-          }]
-        };
+            }, null, 2) };
       }
 
       case 'clear': {
         cleanupProgress(0); // Clear all completed immediately
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({ ok: true, command: 'clear', message: 'Completed tasks cleared.' })
-          }]
-        };
+        return { ok: true, output: JSON.stringify({ ok: true, command: 'clear', message: 'Completed tasks cleared.' }) };
       }
 
       default:
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: `Unknown command: ${command}` }) }],
-          isError: true
-        };
+        return { ok: false, error: `Unknown command: ${command}` };
     }
   }
 };

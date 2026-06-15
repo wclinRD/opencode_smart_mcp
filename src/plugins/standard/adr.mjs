@@ -129,17 +129,9 @@ export default {
 };
 
 function okResponse(command, data) {
-  return {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({ ok: true, command, ...data }, null, 2)
-    }]
-  };
+  return { ok: true, output: JSON.stringify({ ok: true, command, ...data }, null, 2) };
 }
 
 function errorResponse(error) {
-  return {
-    content: [{ type: 'text', text: JSON.stringify({ ok: false, error }) }],
-    isError: true
-  };
+  return { ok: false, error };
 }

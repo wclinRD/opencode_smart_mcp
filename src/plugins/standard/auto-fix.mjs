@@ -346,8 +346,9 @@ async function runSingleVerification(step, files, projectRoot, timeout) {
 
 function formatResponse(results) {
   const text = JSON.stringify(results, null, 2);
-  return {
-    content: [{ type: 'text', text }],
-    isError: !results.ok && !results.allPassed
-  };
+  const ok = results.ok || results.allPassed;
+  if (!ok) {
+    return { ok: false, error: text };
+  }
+  return { ok: true, output: text };
 }

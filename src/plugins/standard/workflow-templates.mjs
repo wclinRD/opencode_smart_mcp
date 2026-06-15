@@ -65,24 +65,13 @@ export default {
 
       case 'run': {
         if (!name) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'name parameter is required for run command' }) }],
-            isError: true
-          };
+          return { ok: false, error: 'name parameter is required for run command' };
         }
 
         const workflow = workflows[name];
         if (!workflow) {
           const available = Object.keys(workflows).join(', ');
-          return {
-            content: [{ type: 'text', text: JSON.stringify({
-              ok: false,
-              error: `Unknown workflow: "${name}"`,
-              available,
-              hint: 'Use smart_workflow({command:"list"}) to see all workflows.'
-            }) }],
-            isError: true
-          };
+          return { ok: false, error: `Unknown workflow: "${name}"` };
         }
 
         // Generate the workflow plan — LLM will execute each step
@@ -101,19 +90,11 @@ export default {
           instruction: `Execute each step in order. Use the tool and args provided. After each step, evaluate the result before proceeding to the next step.`
         };
 
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify(plan, null, 2)
-          }]
-        };
+        return { ok: true, output: JSON.stringify(plan, null, 2) };
       }
 
       default:
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ ok: false, error: `Unknown command: ${command}` }) }],
-          isError: true
-        };
+        return { ok: false, error: `Unknown command: ${command}` };
     }
   }
 };
