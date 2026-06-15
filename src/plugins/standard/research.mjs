@@ -85,18 +85,22 @@ async function research(args = {}) {
     const output = JSON.parse(result.stdout);
     return {
       ok: true,
-      depth,
-      duration,
-      results: output.results,
-      _meta: output._meta,
+      output: JSON.stringify({
+        depth,
+        duration,
+        results: output.results,
+        _meta: output._meta,
+      }, null, 2),
     };
   } catch {
     // Fallback: return raw text if JSON parsing fails
     return {
       ok: true,
-      depth,
-      duration,
-      text: result.stdout,
+      output: JSON.stringify({
+        depth,
+        duration,
+        text: result.stdout,
+      }, null, 2),
     };
   }
 }
