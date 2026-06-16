@@ -149,6 +149,73 @@ export class ContextManager {
     return this._context;
   }
 
+  /**
+   * Mark current session as cleanly ended.
+   * Called from graceful shutdown (SIGINT/SIGTERM).
+   * If the process is killed (SIGKILL), this won't run — the absence
+   * of this flag on the NEXT session start indicates an interruption.
+   */
+  markSessionEnd() {
+    if (!this._context) return false;
+    this._context._sessionEnded = true;
+    this._context.metadata.sessionEndedAt = nowISO();
+    this._save();
+    return true;
+  }
+
+  /**
+   * Get the previous session (the one immediately before current).
+   * Returns full session data, or null if no previous session.
+   */
+  getPreviousSession() {
+    if (!this._context) return null;
+    const currentId = this._context.sessionId;
+    const allSessions = this.listSessionsSummary();
+    const previous = allSessions
+      .filter(s => s.sessionId !== currentId)
+      .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))[0];
+    if (!previous) return null;
+    return this._loadFromDisk(previous.sessionId);
+  }
+
+  /**
+   * Detect if the previous session was abnormally interrupted.
+   *
+   * Heuristic:
+   *   - Previous session has >= 2 tool calls (something meaningful)
+   *   - Previous session was NOT cleanly ended (no markSessionEnd)
+   *   - Last tool call exists (session wasn't empty)
+   *
+   * Returns recovery context object, or null if no interruption detected.
+   */
+  detectAbnormalEnd() {
+    const prev = this.getPreviousSession();
+    if (!prev) return null;
+
+    const toolCount = prev.metadata?.toolCount || 0;
+    if (toolCount < 2) return null; // nothing meaningful lost
+
+    const history = prev.toolHistory || [];
+    const lastEntry = history[history.length - 1];
+    const cleanEnd = prev._sessionEnded === true;
+
+    if (cleanEnd) return null; // normal session end
+
+    return {
+      interrupted: true,
+      sessionId: prev.sessionId,
+      toolCount,
+      lastTool: lastEntry?.tool || null,
+      lastOk: lastEntry?.ok !== false,
+      lastTimestamp: lastEntry?.timestamp || prev.metadata?.updatedAt,
+      lastError: !lastEntry?.ok ? (lastEntry?.error || null) : null,
+      // Best guess: if last tool wasn't ok, that tool was the failure point
+      lastToolResult: lastEntry?.ok
+        ? (lastEntry?.result ? lastEntry.result.slice(0, 200) : null)
+        : (lastEntry?.error ? lastEntry.error.slice(0, 200) : null),
+    };
+  }
+
   /** Get a read-only clone of current context. */
   get() {
     return this._context ? JSON.parse(JSON.stringify(this._context)) : null;

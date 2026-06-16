@@ -19,7 +19,9 @@
 
 import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
+import { existsSync } from 'node:fs';
 import { getMemoryDB } from '../lib/memory-db.mjs';
+import { ContextManager } from '../lib/context-manager.mjs';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -64,10 +66,19 @@ Usage:
     [--context "..."] [--task <id>]
     [--files "f1,f2"] [--decisions "d1;d2"] [--next "..."]
 
+  boulder plan pause <id>        Pause a plan (stop-continuation)
+    [--name "..."]               Optionally rename while pausing
+
+  boulder plan resume <id>       Resume a paused plan
+
   boulder status                 Show current active plan status
     [--plan <id>]                Show specific plan status
 
   boulder resume <planId>        Output continuation directive
+
+  boulder recovery [<planId>]    Check for session interruption recovery
+                                 Detects if previous session was interrupted
+                                 and provides synthetic context for recovery
 
   --json                         JSON output
   --help                         Show this help
@@ -227,6 +238,39 @@ function cmdPlanUpdate(args) {
       name: plan.name,
       status: plan.status,
     },
+  };
+}
+
+function cmdPlanPause(args) {
+  const db = getDB();
+  const id = args._[0];
+  if (!id) throw new Error('Plan ID required');
+
+  const updates = { status: 'paused' };
+  if (args.name) updates.name = args.name;
+
+  const plan = db.updatePlan(id, updates);
+  if (!plan) throw new Error(`Plan not found: ${id}`);
+
+  return {
+    ok: true,
+    action: 'plan-paused',
+    plan: { id: plan.id, name: plan.name, status: 'paused' },
+  };
+}
+
+function cmdPlanResume(args) {
+  const db = getDB();
+  const id = args._[0];
+  if (!id) throw new Error('Plan ID required');
+
+  const plan = db.updatePlan(id, { status: 'active' });
+  if (!plan) throw new Error(`Plan not found: ${id}`);
+
+  return {
+    ok: true,
+    action: 'plan-resumed',
+    plan: { id: plan.id, name: plan.name, status: 'active' },
   };
 }
 
@@ -410,7 +454,17 @@ function cmdResume(args) {
 
   const { plan, currentTask, checkpoint, progress } = ctx;
 
-  const directive = [
+  // Phase 4.4: Check for session recovery context
+  let recovery = null;
+  try {
+    const cm = new ContextManager();
+    cm.init(); // load or create current session
+    recovery = cm.detectAbnormalEnd();
+  } catch {
+    // Best-effort — recovery check is non-critical
+  }
+
+  const directiveParts = [
     '[SYSTEM DIRECTIVE - BOULDER CONTINUATION]',
     `Plan: ${plan.name} (${progress})`,
     currentTask ? `Current task: ${currentTask.name} [${currentTask.status}]` : 'No active task',
@@ -418,12 +472,29 @@ function cmdResume(args) {
     checkpoint?.context_summary ? `Context: ${checkpoint.context_summary}` : null,
     `Started: ${plan.started_at}`,
     '',
-    'Resume from last checkpoint. Continue working on the current task.',
-  ].filter(Boolean).join('\n');
+  ];
+
+  if (recovery) {
+    directiveParts.push('[RECOVERY: Previous session interrupted]');
+    directiveParts.push(`Last session had ${recovery.toolCount} tool calls and ended abnormally.`);
+    if (recovery.lastTool) {
+      directiveParts.push(`Last tool called: ${recovery.lastTool} (${recovery.lastOk ? 'completed' : 'failed'})`);
+    }
+    if (recovery.lastError) {
+      directiveParts.push(`Last error: ${recovery.lastError.slice(0, 200)}`);
+    }
+    if (recovery.lastToolResult) {
+      directiveParts.push(`Last output: ${recovery.lastToolResult}`);
+    }
+    directiveParts.push('');
+  }
+
+  directiveParts.push('Resume from last checkpoint. Continue working on the current task.');
 
   return {
     ok: true,
-    directive,
+    recovered: recovery ? true : false,
+    directive: directiveParts.filter(Boolean).join('\n'),
     plan: {
       id: plan.id,
       name: plan.name,
@@ -438,7 +509,61 @@ function cmdResume(args) {
       context_summary: checkpoint.context_summary,
       next_intent: checkpoint.next_intent,
     } : null,
+    recovery: recovery ? {
+      interrupted: true,
+      toolCount: recovery.toolCount,
+      lastTool: recovery.lastTool,
+      lastOk: recovery.lastOk,
+      lastError: recovery.lastError ? recovery.lastError.slice(0, 200) : null,
+      lastToolResult: recovery.lastToolResult,
+    } : null,
   };
+}
+
+function cmdRecovery(args) {
+  const cm = new ContextManager();
+  cm.init();
+  const recovery = cm.detectAbnormalEnd();
+
+  const result = {
+    ok: true,
+    recoveryDetected: recovery ? true : false,
+    recovery,
+  };
+
+  // If planId given, also check Boulder plan state
+  const planId = args._[0];
+  if (planId) {
+    try {
+      const db = getDB();
+      const plan = db.getPlan(planId);
+      if (plan) {
+        const tasks = db.listTasks(planId);
+        const inProgressTasks = tasks.filter(t => t.status === 'in_progress');
+        result.plan = {
+          id: plan.id,
+          name: plan.name,
+          status: plan.status,
+          inProgressTasks: inProgressTasks.length,
+        };
+      }
+    } catch {
+      // Best-effort
+    }
+  }
+
+  // If recovery detected and plan has in-progress tasks, suggest synthetic context
+  if (recovery && result.plan?.inProgressTasks > 0) {
+    result.syntheticContext = (
+      `[SYNTHETIC TOOL_RESULT — Session Recovery]\n` +
+      `Previous session was interrupted during execution.\n` +
+      `Last tool: ${recovery.lastTool || 'unknown'}\n` +
+      `Result: tool execution did not complete — treat as cancelled.\n` +
+      `Continue from Boulder checkpoint.`
+    );
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -490,6 +615,17 @@ function formatOutput(cmd, result) {
     }
     case 'plan-update': {
       lines.push(`✅ Plan updated: ${result.plan.name} → ${result.plan.status}`);
+      break;
+    }
+    case 'plan-pause': {
+      lines.push(`⏸ Plan paused: ${result.plan.name}`);
+      lines.push(`   Continuation directive will NOT be injected.`);
+      lines.push(`   Resume with: boulder plan resume ${result.plan.id}`);
+      break;
+    }
+    case 'plan-resume': {
+      lines.push(`▶ Plan resumed: ${result.plan.name}`);
+      lines.push(`   Continuation directive will be injected on next session start.`);
       break;
     }
     case 'task-list': {
@@ -547,6 +683,33 @@ function formatOutput(cmd, result) {
     }
     case 'resume': {
       lines.push(result.directive);
+      break;
+    }
+    case 'recovery': {
+      if (!result.recoveryDetected) {
+        lines.push('✅ No session interruption detected. Previous session ended cleanly.');
+        break;
+      }
+      const r = result.recovery;
+      lines.push('⚠️  Previous session was interrupted!');
+      lines.push(`   Session had ${r.toolCount} tool calls and ended abnormally.`);
+      if (r.lastTool) {
+        lines.push(`   Last tool: ${r.lastTool} (${r.lastOk ? 'completed' : '⚠️ failed'})`);
+      }
+      if (r.lastError) {
+        lines.push(`   Last error: ${r.lastError.slice(0, 120)}`);
+      }
+      if (result.plan) {
+        lines.push(`   Boulder plan: ${result.plan.name} [${result.plan.status}]`);
+        lines.push(`   In-progress tasks: ${result.plan.inProgressTasks}`);
+      }
+      if (result.syntheticContext) {
+        lines.push('');
+        lines.push('   ── Synthetic Context ──');
+        lines.push(result.syntheticContext);
+      }
+      lines.push('');
+      lines.push(`   To resume: boulder resume <planId>`);
       break;
     }
   }
@@ -646,6 +809,18 @@ function main() {
             out(JSON_MODE ? result : formatOutput('plan-update', result));
             break;
           }
+          case 'pause': {
+            args._.splice(0, 2);
+            result = cmdPlanPause(args);
+            out(JSON_MODE ? result : formatOutput('plan-pause', result));
+            break;
+          }
+          case 'resume': {
+            args._.splice(0, 2);
+            result = cmdPlanResume(args);
+            out(JSON_MODE ? result : formatOutput('plan-resume', result));
+            break;
+          }
           default:
             throw new Error(`Unknown subcommand: plan ${subcmd}. See --help`);
         }
@@ -685,6 +860,12 @@ function main() {
         args._.splice(0, 1);
         result = cmdResume(args);
         out(JSON_MODE ? result : formatOutput('resume', result));
+        break;
+      }
+      case 'recovery': {
+        args._.splice(0, 1);
+        result = cmdRecovery(args);
+        out(JSON_MODE ? result : formatOutput('recovery', result));
         break;
       }
       case '--help':

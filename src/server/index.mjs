@@ -146,6 +146,8 @@ function gracefulShutdown(signal) {
   isShuttingDown = true;
   debugLog(`Shutdown: ${signal}`);
   for (const [id, controller] of pendingCalls) { controller.abort(); pendingCalls.delete(id); }
+  // Phase 4.4: Mark session as cleanly ended (for session-recovery detection)
+  if (contextManager) contextManager.markSessionEnd();
   // Phase 3: Fire-and-forget session checkpoint
   saveSessionCheckpoint();
   setTimeout(() => { debugLog('Shutdown complete'); process.exit(0); }, 500).unref();
