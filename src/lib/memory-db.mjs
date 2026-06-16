@@ -115,6 +115,64 @@ const ADR_SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_adr_status ON adr(status);
 `;
 
+// ── Boulder (狀態持久化) ──
+const BOULDER_SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS boulder_plans (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    status TEXT DEFAULT 'active',
+    agent_id TEXT,
+    total_tasks INTEGER DEFAULT 0,
+    completed_tasks INTEGER DEFAULT 0,
+    current_task_id TEXT,
+    started_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT,
+    plan_data TEXT,
+    metadata TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_boulder_plans_status ON boulder_plans(status);
+  CREATE INDEX IF NOT EXISTS idx_boulder_plans_updated ON boulder_plans(updated_at);
+
+  CREATE TABLE IF NOT EXISTS boulder_tasks (
+    id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    status TEXT DEFAULT 'pending',
+    sort_order INTEGER DEFAULT 0,
+    started_at TEXT,
+    completed_at TEXT,
+    elapsed_ms INTEGER,
+    result TEXT,
+    error TEXT,
+    metadata TEXT,
+    FOREIGN KEY (plan_id) REFERENCES boulder_plans(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_boulder_tasks_plan ON boulder_tasks(plan_id);
+  CREATE INDEX IF NOT EXISTS idx_boulder_tasks_status ON boulder_tasks(status);
+
+  CREATE TABLE IF NOT EXISTS boulder_checkpoints (
+    id TEXT PRIMARY KEY,
+    plan_id TEXT NOT NULL,
+    session_id TEXT,
+    context_summary TEXT,
+    task_id TEXT,
+    files_changed TEXT,
+    decisions TEXT,
+    next_intent TEXT,
+    token_usage INTEGER,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (plan_id) REFERENCES boulder_plans(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_boulder_checkpoints_plan ON boulder_checkpoints(plan_id);
+  CREATE INDEX IF NOT EXISTS idx_boulder_checkpoints_session ON boulder_checkpoints(session_id);
+`;
+
 // ---------------------------------------------------------------------------
 // MemoryDB class
 // ---------------------------------------------------------------------------
@@ -158,6 +216,9 @@ export class MemoryDB {
 
     // Phase 24: ADR schema
     this.#db.exec(ADR_SCHEMA_SQL);
+
+    // Phase 25: Boulder schema
+    this.#db.exec(BOULDER_SCHEMA_SQL);
 
     // Migration: add miss_count column for miss tracking
     try {
@@ -1206,6 +1267,346 @@ export class MemoryDB {
    */
   deleteADR(id) {
     this.#db.prepare('DELETE FROM adr WHERE id = ?').run(id);
+  }
+
+  // -----------------------------------------------------------------------
+  // Phase 25: Boulder — 狀態持久化
+  // -----------------------------------------------------------------------
+
+  // ── Plans ──
+
+  /**
+   * Create a new plan with optional initial tasks.
+   * @param {string} name
+   * @param {string} [description]
+   * @param {Array<string|object>} [tasks] - Array of task names or {name, description} objects
+   * @returns {object} The created plan
+   */
+  createPlan(name, description, tasks = []) {
+    this.#ensureOpen();
+    const id = `plan_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const planData = JSON.stringify({ name, description, tasks });
+
+    this.#db.prepare(`
+      INSERT INTO boulder_plans (id, name, description, plan_data, total_tasks)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(id, name, description || null, planData, tasks.length);
+
+    if (tasks.length > 0) {
+      this.addTasks(id, tasks);
+    }
+
+    return this.getPlan(id);
+  }
+
+  /**
+   * Get a plan by id.
+   * @param {string} id
+   * @returns {object|null} Plan with task counts
+   */
+  getPlan(id) {
+    this.#ensureOpen();
+    const row = this.#db.prepare('SELECT * FROM boulder_plans WHERE id = ?').get(id);
+    if (!row) return null;
+    return {
+      ...row,
+      plan_data: row.plan_data ? JSON.parse(row.plan_data) : null,
+      metadata: row.metadata ? JSON.parse(row.metadata) : null,
+    };
+  }
+
+  /**
+   * Update a plan's fields.
+   * @param {string} id
+   * @param {object} updates - Fields to update (name, description, status, completed_tasks, current_task_id, agent_id, metadata)
+   * @returns {object} Updated plan
+   */
+  updatePlan(id, updates) {
+    this.#ensureOpen();
+    const allowed = new Set(['name', 'description', 'status', 'completed_tasks', 'current_task_id', 'agent_id', 'plan_data', 'metadata']);
+    const setClauses = ["updated_at = datetime('now')"];
+    const params = { id };
+
+    if (updates.status === 'completed') {
+      setClauses.push("completed_at = datetime('now')");
+    }
+
+    for (const [key, value] of Object.entries(updates)) {
+      if (allowed.has(key)) {
+        setClauses.push(`${key} = @${key}`);
+        params[key] = value;
+      }
+    }
+
+    if (setClauses.length <= 1) return this.getPlan(id);
+    this.#db.prepare(`UPDATE boulder_plans SET ${setClauses.join(', ')} WHERE id = @id`).run(params);
+    return this.getPlan(id);
+  }
+
+  /**
+   * List plans, optionally filtered by status.
+   * @param {string} [status] - Filter by status
+   * @param {number} [limit=20]
+   * @returns {Array<object>}
+   */
+  listPlans(status, limit = 20) {
+    this.#ensureOpen();
+    let sql = 'SELECT * FROM boulder_plans';
+    const params = [];
+    if (status) {
+      sql += ' WHERE status = ?';
+      params.push(status);
+    }
+    sql += ' ORDER BY updated_at DESC LIMIT ?';
+    params.push(limit);
+    return this.#db.prepare(sql).all(...params);
+  }
+
+  /**
+   * Delete a plan and all related tasks/checkpoints (CASCADE).
+   * @param {string} id
+   * @returns {boolean}
+   */
+  deletePlan(id) {
+    this.#ensureOpen();
+    const info = this.#db.prepare('DELETE FROM boulder_plans WHERE id = ?').run(id);
+    return info.changes > 0;
+  }
+
+  // ── Tasks ──
+
+  /**
+   * Add tasks to a plan in batch.
+   * @param {string} planId
+   * @param {Array<string|object>} tasks - Array of task names or {name, description, sort_order} objects
+   */
+  addTasks(planId, tasks) {
+    this.#ensureOpen();
+    const stmt = this.#db.prepare(`
+      INSERT INTO boulder_tasks (id, plan_id, name, description, sort_order)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+
+    const insertMany = this.#db.transaction((items) => {
+      for (let i = 0; i < items.length; i++) {
+        const task = items[i];
+        const name = typeof task === 'string' ? task : task.name;
+        const desc = typeof task === 'string' ? null : (task.description || null);
+        const id = `task_${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${i}`;
+        const order = typeof task === 'object' && task.sort_order !== undefined ? task.sort_order : i;
+        stmt.run(id, planId, name, desc, order);
+      }
+    });
+
+    insertMany(tasks);
+
+    // Update total_tasks count
+    const count = this.#db.prepare('SELECT COUNT(*) as cnt FROM boulder_tasks WHERE plan_id = ?').get(planId);
+    this.#db.prepare('UPDATE boulder_plans SET total_tasks = ?, updated_at = datetime(\'now\') WHERE id = ?')
+      .run(count.cnt, planId);
+  }
+
+  /**
+   * Get a task by id.
+   * @param {string} id
+   * @returns {object|null} Task with plan name
+   */
+  getTask(id) {
+    this.#ensureOpen();
+    const row = this.#db.prepare(`
+      SELECT t.*, p.name as plan_name
+      FROM boulder_tasks t
+      JOIN boulder_plans p ON p.id = t.plan_id
+      WHERE t.id = ?
+    `).get(id);
+    if (!row) return null;
+    return {
+      ...row,
+      metadata: row.metadata ? JSON.parse(row.metadata) : null,
+    };
+  }
+
+  /**
+   * Update a task's fields.
+   * Auto-tracks started_at, completed_at, elapsed_ms.
+   * @param {string} id
+   * @param {object} updates - Fields: status, result, error, elapsed_ms, metadata
+   * @returns {object} Updated task
+   */
+  updateTask(id, updates) {
+    this.#ensureOpen();
+    const allowed = new Set(['status', 'result', 'error', 'elapsed_ms', 'metadata', 'description', 'name']);
+    const setClauses = [];
+    const params = { id };
+
+    // Auto-track timing
+    if (updates.status === 'in_progress' && !updates.elapsed_ms) {
+      const task = this.#db.prepare('SELECT * FROM boulder_tasks WHERE id = ?').get(id);
+      if (task && !task.started_at) {
+        setClauses.push("started_at = datetime('now')");
+      }
+    }
+    if (updates.status === 'completed' || updates.status === 'failed') {
+      setClauses.push("completed_at = datetime('now')");
+    }
+
+    for (const [key, value] of Object.entries(updates)) {
+      if (allowed.has(key)) {
+        setClauses.push(`${key} = @${key}`);
+        params[key] = value;
+      }
+    }
+
+    if (setClauses.length === 0) return this.getTask(id);
+    this.#db.prepare(`UPDATE boulder_tasks SET ${setClauses.join(', ')} WHERE id = @id`).run(params);
+
+    // Sync plan progress
+    if (updates.status === 'completed') {
+      this.#db.prepare(`
+        UPDATE boulder_plans SET
+          completed_tasks = (SELECT COUNT(*) FROM boulder_tasks WHERE plan_id = boulder_plans.id AND status = 'completed'),
+          updated_at = datetime('now')
+        WHERE id = (SELECT plan_id FROM boulder_tasks WHERE id = ?)
+      `).run(id);
+    }
+
+    return this.getTask(id);
+  }
+
+  /**
+   * List tasks for a plan, optionally filtered by status.
+   * @param {string} planId
+   * @param {string} [status]
+   * @returns {Array<object>}
+   */
+  listTasks(planId, status) {
+    this.#ensureOpen();
+    let sql = 'SELECT * FROM boulder_tasks WHERE plan_id = ?';
+    const params = [planId];
+    if (status) {
+      sql += ' AND status = ?';
+      params.push(status);
+    }
+    sql += ' ORDER BY sort_order ASC';
+    return this.#db.prepare(sql).all(...params);
+  }
+
+  // ── Checkpoints ──
+
+  /**
+   * Save a checkpoint for a plan.
+   * @param {string} planId
+   * @param {object} data - { sessionId?, contextSummary?, taskId?, filesChanged?, decisions?, nextIntent?, tokenUsage? }
+   * @returns {object} The created checkpoint
+   */
+  saveCheckpoint(planId, data = {}) {
+    this.#ensureOpen();
+    const id = `ckpt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+    this.#db.prepare(`
+      INSERT INTO boulder_checkpoints (id, plan_id, session_id, context_summary, task_id, files_changed, decisions, next_intent, token_usage)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id, planId,
+      data.sessionId || null,
+      data.contextSummary || null,
+      data.taskId || null,
+      data.filesChanged ? JSON.stringify(data.filesChanged) : null,
+      data.decisions ? JSON.stringify(data.decisions) : null,
+      data.nextIntent || null,
+      data.tokenUsage || null
+    );
+
+    // Update plan updated_at
+    this.#db.prepare("UPDATE boulder_plans SET updated_at = datetime('now') WHERE id = ?").run(planId);
+
+    return this.#db.prepare('SELECT * FROM boulder_checkpoints WHERE id = ?').get(id);
+  }
+
+  /**
+   * Get the latest checkpoint for a plan.
+   * @param {string} planId
+   * @returns {object|null}
+   */
+  getLatestCheckpoint(planId) {
+    this.#ensureOpen();
+    return this.#db.prepare(`
+      SELECT * FROM boulder_checkpoints
+      WHERE plan_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(planId) || null;
+  }
+
+  /**
+   * List checkpoints for a plan.
+   * @param {string} planId
+   * @param {number} [limit=10]
+   * @returns {Array<object>}
+   */
+  listCheckpoints(planId, limit = 10) {
+    this.#ensureOpen();
+    return this.#db.prepare(`
+      SELECT * FROM boulder_checkpoints
+      WHERE plan_id = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    `).all(planId, limit);
+  }
+
+  // ── Continuation ──
+
+  /**
+   * Get continuation context for resuming a plan.
+   * Returns { plan, currentTask, checkpoint, progress }.
+   * @param {string} planId
+   * @returns {object|null}
+   */
+  getContinuationContext(planId) {
+    this.#ensureOpen();
+    const plan = this.getPlan(planId);
+    if (!plan) return null;
+
+    const tasks = this.listTasks(planId);
+    const currentTask = plan.current_task_id
+      ? tasks.find(t => t.id === plan.current_task_id) || null
+      : (tasks.find(t => t.status === 'in_progress') || null);
+
+    const checkpoint = this.getLatestCheckpoint(planId);
+    const done = plan.completed_tasks || 0;
+    const total = plan.total_tasks || 0;
+    const progress = total > 0 ? `${done}/${total}` : '0/0';
+
+    return { plan, currentTask, checkpoint, progress };
+  }
+
+  /**
+   * Get the latest active plan.
+   * @returns {object|null}
+   */
+  getActivePlan() {
+    this.#ensureOpen();
+    const row = this.#db.prepare(`
+      SELECT * FROM boulder_plans
+      WHERE status = 'active'
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `).get();
+    if (!row) return null;
+    return {
+      ...row,
+      plan_data: row.plan_data ? JSON.parse(row.plan_data) : null,
+      metadata: row.metadata ? JSON.parse(row.metadata) : null,
+    };
+  }
+
+  /**
+   * Mark a plan as completed.
+   * @param {string} id
+   * @returns {object} Updated plan
+   */
+  completePlan(id) {
+    return this.updatePlan(id, { status: 'completed' });
   }
 }
 

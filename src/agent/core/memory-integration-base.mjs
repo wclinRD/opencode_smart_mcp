@@ -8,6 +8,8 @@
 //   const decision = shouldRemember('smart_error_diagnose', args, result);
 //   if (decision) { /* auto-store result */ }
 
+import { getMemoryDB } from '../../lib/memory-db.mjs';
+
 // ---------------------------------------------------------------------------
 // Memory-worthy event detectors
 // ---------------------------------------------------------------------------
@@ -71,6 +73,24 @@ const MEMORY_RULES = [
     type: 'test-failure',
     score: 0.6,
     reason: 'Test suite failure: remember failing test patterns',
+  },
+  // Task completed → auto-checkpoint
+  {
+    test: (toolName, args, result) =>
+      toolName === 'boulder_task_update' &&
+      args.status === 'completed',
+    type: 'boulder-checkpoint',
+    score: 0.6,
+    reason: 'Task completed: save checkpoint for continuation',
+  },
+  // Session ending with active plan → remember state
+  {
+    test: (toolName, args, result) =>
+      toolName === 'smart_session_end' ||
+      (toolName === 'smart_context' && args.command === 'reset'),
+    type: 'boulder-session-end',
+    score: 0.7,
+    reason: 'Session ending with active plan: preserve state for resume',
   },
 ];
 
@@ -183,4 +203,36 @@ function buildResolution(toolName, args, result) {
   return parts.length > 0
     ? parts.join('; ')
     : `${toolName} executed with ${JSON.stringify(args)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Boulder integration
+// ---------------------------------------------------------------------------
+
+/**
+ * Query active Boulder plan context for agent injection.
+ * Returns structured data for core_memory sync.
+ * @returns {{ hasActivePlan: boolean, goal: string, progress: string, currentTask: string|null, nextIntent: string|null }|null}
+ */
+export function getBoulderContext() {
+  try {
+    const db = getMemoryDB();
+    const plan = db.getActivePlan();
+    if (!plan) return null;
+
+    const ctx = db.getContinuationContext(plan.id);
+    if (!ctx) return null;
+
+    return {
+      hasActivePlan: true,
+      goal: plan.name,
+      progress: ctx.progress,
+      currentTask: ctx.currentTask?.name || null,
+      nextIntent: ctx.checkpoint?.next_intent || null,
+      currentTaskId: ctx.currentTask?.id || null,
+    };
+  } catch {
+    // DB not available — skip Boulder context
+    return null;
+  }
 }

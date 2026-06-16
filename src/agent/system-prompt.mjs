@@ -6,6 +6,7 @@
 // Usage:
 //   import { SYSTEM_PROMPT_FRAGMENT } from 'smart-agent/system-prompt';
 
-import { SYSTEM_PROMPT_BASE } from './core/system-prompt-base.mjs';
+import { SYSTEM_PROMPT_BASE, BOULDER_PROMPT_LINE } from './core/system-prompt-base.mjs';
 
 export const SYSTEM_PROMPT_FRAGMENT = SYSTEM_PROMPT_BASE;
+export { BOULDER_PROMPT_LINE } from './core/system-prompt-base.mjs';

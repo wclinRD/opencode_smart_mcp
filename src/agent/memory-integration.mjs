@@ -6,4 +6,5 @@
 // Usage:
 //   import { shouldRemember, buildStoreCommand, formatMemoryResult } from 'smart-agent/memory-integration';
 
+export { getBoulderContext } from './core/memory-integration-base.mjs';
 export * from './core/memory-integration-base.mjs';

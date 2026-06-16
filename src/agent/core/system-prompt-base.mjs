@@ -81,6 +81,19 @@ Always inject the following in the task prompt header:
 - Session checkpoints auto-save on shutdown (Phase 3)
 - Skill patches auto-extract from findings every 5 calls + on session end
 - 💡 When stuck on an error, check memory FIRST: past sessions may have the fix. The 💡 [Memory] hints at session start are a lightweight preview — use memory_store search for full results.
+
+### Boulder (狀態持久化)
+- Boulder 是基礎設施層，Agent 無需主動管理
+- 啟動時若有 active plan，會自動顯示：\`[Boulder] Active plan: "name" (done/total)\`
+- 進度查詢：\`node src/cli/boulder.mjs status\`
+- 續命（resume）自動從上次 checkpoint 恢復
 `;
+
+/**
+ * Boulder prompt line — conditionally appended when an active plan exists.
+ * Format: {{name}}, {{done}}, {{total}} are replaced at injection time.
+ */
+export const BOULDER_PROMPT_LINE = `[Boulder] Active plan: "{{name}}" ({{done}}/{{total}}).
+續命：自動從上次進度恢復。需要進度查詢可用 boulder status。`;
 
 
