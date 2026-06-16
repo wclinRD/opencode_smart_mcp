@@ -8,7 +8,7 @@
 //   const rec = smart.recommendTools('debug login error');
 //   console.log(smart.explainRecommendation(rec));
 
-export { SYSTEM_PROMPT_FRAGMENT, BOULDER_PROMPT_LINE } from './agent/system-prompt.mjs';
+export { SYSTEM_PROMPT_FRAGMENT, BOULDER_PROMPT_LINE, buildSystemPrompt } from './agent/system-prompt.mjs';
 export { recommendTools, buildToolChain, explainRecommendation } from './agent/tool-strategy.mjs';
 export {
   selectTemplate,
@@ -24,6 +24,7 @@ export {
   buildStoreCommand,
   formatMemoryResult,
   getBoulderContext,
+  getBoulderSyncCommands,
 } from './agent/memory-integration.mjs';
 export {
   planAndExecute,

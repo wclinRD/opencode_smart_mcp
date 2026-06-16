@@ -210,6 +210,34 @@ function buildResolution(toolName, args, result) {
 // ---------------------------------------------------------------------------
 
 /**
+ * 取得 core_memory 同步指令陣列。
+ * 有 active plan 時回傳 [{ block, operation, content }, ...]，
+ * 無 active plan 時回傳空陣列（不影響正常啟動）。
+ *
+ * 消費端（agent 啟動流程）應迭代執行 core_memory_update：
+ *   const cmds = getBoulderSyncCommands();
+ *   for (const cmd of cmds) {
+ *     core_memory_update(cmd);
+ *   }
+ *
+ * @returns {Array<{ block: string, operation: string, content: string }>}
+ */
+export function getBoulderSyncCommands() {
+  try {
+    const ctx = getBoulderContext();
+    if (!ctx || !ctx.hasActivePlan) return [];
+
+    return [
+      { block: 'goal', operation: 'replace', content: ctx.goal },
+      { block: 'progress', operation: 'replace', content: ctx.progress },
+    ];
+  } catch {
+    // DB 不可用 — 跳過 Boulder
+    return [];
+  }
+}
+
+/**
  * Query active Boulder plan context for agent injection.
  * Returns structured data for core_memory sync.
  * @returns {{ hasActivePlan: boolean, goal: string, progress: string, currentTask: string|null, nextIntent: string|null }|null}
