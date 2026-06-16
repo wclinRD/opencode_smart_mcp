@@ -31,4 +31,6 @@ export {
   analyzePlan,
   determineNextAction,
   needsPlanning,
+  createBoulderPlan,
+  completeBoulderTask,
 } from './agent/planner-integration.mjs';

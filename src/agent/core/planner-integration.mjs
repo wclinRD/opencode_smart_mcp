@@ -2,10 +2,14 @@
 //
 // Bridges opencode agent goals with smart-mcp's smart_planner tool.
 // Generates decomposed plans with DAG dependencies and parallel hints.
+// Phase 4: Boulder integration for persistent plan + task tracking.
 //
 // Usage:
-//   import { planAndExecute, analyzePlan } from 'smart-agent/planner-integration';
+//   import { planAndExecute, analyzePlan, createBoulderPlan, completeBoulderTask }
+//     from 'smart-agent/planner-integration';
 //   const plan = planAndExecute('find and fix all security vulnerabilities');
+
+import { getMemoryDB } from '../../lib/memory-db.mjs';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -167,6 +171,80 @@ export function needsPlanning(goal) {
   ];
 
   return complexityIndicators.filter(Boolean).length >= 2;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 — Boulder Integration
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a Boulder plan from a goal and step array.
+ * Automatically creates the plan + all tasks in Boulder storage.
+ *
+ * Call AFTER the planner returns steps. The returned boulderPlanId
+ * should be tracked for subsequent task completions.
+ *
+ * @param {string} goal - Plan name (the high-level goal)
+ * @param {Array<string|{name:string, description?:string}>} steps - Step descriptions or objects
+ * @param {object} [options]
+ * @param {string} [options.description] - Optional plan description
+ * @returns {{
+ *   plan: object,
+ *   tasks: object[],
+ *   boulderPlanId: string
+ * }}
+ */
+export function createBoulderPlan(goal, steps = [], options = {}) {
+  const taskNames = steps.map(s =>
+    typeof s === 'string' ? s : (s.name || s.description || String(s)),
+  );
+
+  const db = getMemoryDB();
+  const plan = db.createPlan(goal, options.description || null, taskNames);
+  const tasks = db.listTasks(plan.id);
+
+  return { plan, tasks, boulderPlanId: plan.id };
+}
+
+/**
+ * Complete a Boulder task with auto-checkpoint.
+ *
+ * Combines updateTask(status=completed) + saveCheckpoint() in one call.
+ * Agents use this instead of separate task-update + checkpoint steps.
+ *
+ * @param {string} taskId - Boulder task ID
+ * @param {object} [options]
+ * @param {string} [options.result] - Summary of what was done
+ * @param {string[]} [options.filesChanged] - Files modified during this task
+ * @param {string[]} [options.decisions] - Key decisions made
+ * @param {string} [options.nextIntent] - What to do next
+ * @returns {{ task: object, checkpoint: object }}
+ */
+export function completeBoulderTask(taskId, options = {}) {
+  const db = getMemoryDB();
+  const task = db.getTask(taskId);
+  if (!task) throw new Error(`Boulder task not found: ${taskId}`);
+
+  // Update task to completed
+  const updatedTask = db.updateTask(taskId, {
+    status: 'completed',
+    result: options.result || null,
+  });
+
+  // Auto-save checkpoint with context
+  // saveCheckpoint 內部會做 JSON.stringify，傳陣列即可
+  const summary = `Completed: ${task.name}` +
+    (options.result ? ` — ${options.result}` : '');
+
+  const checkpoint = db.saveCheckpoint(task.plan_id, {
+    taskId,
+    contextSummary: summary,
+    filesChanged: options.filesChanged || null,
+    decisions: options.decisions || null,
+    nextIntent: options.nextIntent || null,
+  });
+
+  return { task: updatedTask, checkpoint };
 }
 
 // ---------------------------------------------------------------------------

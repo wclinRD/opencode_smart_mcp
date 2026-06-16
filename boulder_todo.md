@@ -102,16 +102,16 @@
 ## Phase 4 — Workflow Integration
 
 ### 4.1 planner 整合
-- [ ] `planner.mjs` 輸出計畫時自動呼叫 `boulder plan create`
-- [ ] 每個 step 自動建立 task
+- [x] 新增 `createBoulderPlan(goal, steps)` — 從 goal + steps 建立 plan + tasks
+- [x] 新增 `completeBoulderTask(taskId, options)` — 完成 task + 自動存 checkpoint
 
 ### 4.2 auto-checkpoint
-- [ ] agent 完成 task 時自動存 checkpoint
-- [ ] 記錄 files_changed + decisions
+- [x] `completeBoulderTask` 內建 auto-checkpoint（files_changed + decisions）
+- [x] 記錄 files_changed + decisions + next_intent
 
 ### 4.3 續命流程測試
-- [ ] 測試：建立 plan → 完成 2 task → 模擬中斷 → resume → 確認正確
-- [ ] 測試：跨 session 續命
+- [x] 測試：建立 plan → 完成 2 task → 模擬中斷 → resume → 確認正確
+- [x] 測試：跨 session 續命（6 步驟完整流程）
 
 ---
 

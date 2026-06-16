@@ -1503,9 +1503,10 @@ export class MemoryDB {
     this.#ensureOpen();
     const id = `ckpt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
+    const now = new Date().toISOString(); // 毫秒級精度
     this.#db.prepare(`
-      INSERT INTO boulder_checkpoints (id, plan_id, session_id, context_summary, task_id, files_changed, decisions, next_intent, token_usage)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO boulder_checkpoints (id, plan_id, session_id, context_summary, task_id, files_changed, decisions, next_intent, token_usage, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id, planId,
       data.sessionId || null,
@@ -1514,7 +1515,8 @@ export class MemoryDB {
       data.filesChanged ? JSON.stringify(data.filesChanged) : null,
       data.decisions ? JSON.stringify(data.decisions) : null,
       data.nextIntent || null,
-      data.tokenUsage || null
+      data.tokenUsage || null,
+      now
     );
 
     // Update plan updated_at
