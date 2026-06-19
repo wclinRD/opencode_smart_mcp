@@ -98,6 +98,17 @@ task({
 \`smart_smart_run({tool:"workflow", args:{command:"create", goal:"...", template:"<debug-flow|refactor-flow|security-flow|research-flow|git-flow|default-flow>"}})\`
 → \`dispatch\` → \`replan\` (on fail) → \`summary\`
 
+### Todo & Recovery
+Use \`smart_todo\` to manage task items that persist across sessions and survive compaction:
+  - \`smart_todo({command:"add", items:["..."]})\` — add task items
+  - \`smart_todo({command:"done", id:1})\` — mark item completed
+  - \`smart_todo({command:"list"})\` — show all items
+
+When context compaction occurs (budget >75%), the server auto-injects a **📋 [Recovery Context]** block
+into the response with pending todos, recent edits, and a ▶️ Continue directive.
+Always check for this block after compaction — it tells you what task to resume.
+Use \`smart_todo done\` to mark items complete as you finish them.
+
 ### Memory
 - **Auto-injected at session start**: project-aware memory hint appears as 💡 [Memory] finding
 - **Contextual search** (Phase 2): smart_fast_apply, smart_think, smart_refactor_plan auto-search past memory for relevant context (non-blocking, injects 💡 [Contextual Memory] finding)

@@ -1185,6 +1185,7 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
   // level=1 (>75%): keep 5, 產生結構化摘要
   // level=2 (>85%): keep 3, 移除舊條目
   // level=3 (>95%): keep 2, 緊急壓縮
+  let didCompact = false;
   if (toolCount > MICRO_COMPACT_MIN_CALLS && toolName !== 'smart_memory_store') {
     const budget = getContextBudget();
     const usedPct = budget.usedFraction;
@@ -1199,7 +1200,17 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
         debugLog(`FullCompact L${compactLevel}: cleared ${fcResult.cleared}, kept ${fcResult.kept}, budget ${(usedPct * 100).toFixed(0)}%`);
         // 同步更新 context budget
         budget.freeEntries(fcResult.cleared);
+        didCompact = true;
       }
+    }
+  }
+
+  // D.4 Recovery Context: after fullCompact, inject todo-aware resume hint.
+  // This tells the LLM what was in progress before compaction cleared the history.
+  if (didCompact) {
+    const recoveryText = contextManager.formatRecoveryContext();
+    if (recoveryText) {
+      result._pendingRecovery = Promise.resolve(recoveryText);
     }
   }
 
@@ -2183,6 +2194,15 @@ function respond(id, result, opts = {}) {
         }
       }
     } catch (e) { debugLog('respond._pendingLsp error:', e?.message); delete result._pendingLsp; }
+    try {
+      if (result._pendingRecovery) {
+        const recoveryText = await result._pendingRecovery;
+        delete result._pendingRecovery;
+        if (recoveryText && result?.content?.[0]?.type === 'text') {
+          result.content[0].text += '\n\n' + recoveryText;
+        }
+      }
+    } catch (e) { debugLog('respond._pendingRecovery error:', e?.message); delete result._pendingRecovery; }
     writeMsg({ jsonrpc: '2.0', id, result });
   });
 }
@@ -2550,6 +2570,7 @@ function handleRequest(req) {
                 if (cr._pendingImpact) resp1._pendingImpact = cr._pendingImpact;
                 if (cr._pendingLsp) resp1._pendingLsp = cr._pendingLsp;
                 if (cr._pendingHallucination) resp1._pendingHallucination = cr._pendingHallucination;
+                if (cr._pendingRecovery) resp1._pendingRecovery = cr._pendingRecovery;
                 respond(id, resp1);
               })
               .catch(err => {

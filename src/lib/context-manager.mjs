@@ -21,7 +21,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { env } from 'node:process';
-import { classifyEntry, summarizeOutput } from '../plugins/core/compact.mjs';
+import { classifyEntry, summarizeOutput, shouldPrefetchCompact } from '../plugins/core/compact.mjs';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -130,6 +130,8 @@ export class ContextManager {
         this._context = loaded;
         this._context.metadata.updatedAt = nowISO();
         if (opts.projectRoot) this._context.projectRoot = opts.projectRoot;
+        // Ensure todoItems exists on resumed sessions
+        if (!this._context.todoItems) this._context.todoItems = [];
         return this._context;
       }
     }
@@ -141,6 +143,7 @@ export class ContextManager {
       projectRoot: opts.projectRoot || env.PWD || env.CWD || process.cwd(),
       toolHistory: [],
       accumulatedFindings: [],
+      todoItems: [],
       lastResult: null,
       metadata: {
         createdAt: nowISO(),
@@ -551,6 +554,7 @@ export class ContextManager {
       findings: highFindings,
       keyDecisions,
       recentTools,
+      todoItems: this.listTodos(),
       compactedAt: nowISO(),
     };
   }
@@ -652,6 +656,177 @@ export class ContextManager {
       }
     }
     if (changed && this._autoSave) this._save();
+  }
+
+  // -----------------------------------------------------------------------
+  // Todo management
+  // -----------------------------------------------------------------------
+
+  /**
+   * Add one or more todo items.
+   * @param {string|string[]} items - Item text or array of texts
+   * @returns {{ added: number, items: Array }}
+   */
+  addTodo(items) {
+    if (!this._context) return { added: 0, items: [] };
+    if (!Array.isArray(items)) items = [String(items)];
+    const added = [];
+    for (const text of items) {
+      if (!text || typeof text !== 'string') continue;
+      const id = this._context.todoItems.length + 1;
+      this._context.todoItems.push({
+        id,
+        text: text.slice(0, 200),
+        status: 'pending',
+        createdAt: nowISO(),
+      });
+      added.push({ id, text: text.slice(0, 200), status: 'pending' });
+    }
+    this._context.metadata.updatedAt = nowISO();
+    if (this._autoSave) this._save();
+    return { added: added.length, items: added };
+  }
+
+  /**
+   * Mark a todo item as completed.
+   * @param {number} id - Todo item id
+   * @returns {{ ok: boolean, item: object|null }}
+   */
+  doneTodo(id) {
+    return this.updateTodoStatus(id, 'completed');
+  }
+
+  /**
+   * Update todo item status.
+   * @param {number} id - Todo item id
+   * @param {string} status - 'pending' | 'in_progress' | 'completed' | 'cancelled'
+   * @returns {{ ok: boolean, item: object|null }}
+   */
+  updateTodoStatus(id, status) {
+    if (!this._context || !this._context.todoItems) return { ok: false, item: null };
+    const item = this._context.todoItems.find(t => t.id === id);
+    if (!item) return { ok: false, item: null };
+    item.status = status;
+    item.updatedAt = nowISO();
+    this._context.metadata.updatedAt = nowISO();
+    if (this._autoSave) this._save();
+    return { ok: true, item };
+  }
+
+  /**
+   * List all todo items.
+   * @returns {Array}
+   */
+  listTodos() {
+    if (!this._context || !this._context.todoItems) return [];
+    return this._context.todoItems.map(t => ({ ...t }));
+  }
+
+  /**
+   * Auto-detect if a tool call completed a todo item.
+   * Rules-based matching: tool name + file args + output heuristics.
+   * Zero LLM cost.
+   * @param {string} toolName
+   * @param {object} args
+   * @param {object} result
+   * @returns {{ matched: boolean, todoId: number|null, todoText: string|null }}
+   */
+  matchTodo(toolName, args, result) {
+    if (!this._context || !this._context.todoItems) return { matched: false, todoId: null, todoText: null };
+    const pending = this._context.todoItems.filter(t => t.status === 'pending' || t.status === 'in_progress');
+    if (pending.length === 0) return { matched: false, todoId: null, todoText: null };
+
+    const output = (result.output || result.error || '').toLowerCase();
+    const fileRef = ((args.file || args.files?.[0] || '') + ' ' + (args.symbol || '')).toLowerCase();
+    const toolSig = toolName.replace('smart_', '');
+
+    for (const todo of pending) {
+      const todoText = todo.text.toLowerCase();
+      let score = 0;
+
+      // Tool name matches keyword in todo
+      if (todoText.includes(toolSig)) score += 2;
+
+      // File ref matches todo text
+      if (fileRef && todoText.includes(fileRef)) score += 3;
+
+      // Tool is fast_apply + output indicates success
+      if (toolSig.includes('fast_apply') && result.ok) score += 1;
+
+      // Tool is test + all passed
+      if (toolSig.includes('test') && result.ok && output.includes('pass')) score += 2;
+
+      // High confidence match
+      if (score >= 3) {
+        return { matched: true, todoId: todo.id, todoText: todo.text };
+      }
+    }
+    return { matched: false, todoId: null, todoText: null };
+  }
+
+  /**
+   * Format recovery context as injectable text for the LLM.
+   * Called after fullCompact to remind the LLM what to continue.
+   * Includes: tool summary, pending todos, recent edits.
+   * @returns {string|null} Formatted text, or null if nothing to inject
+   */
+  _syncTodosFromFile() {
+    // Sync todo items from shared file (~/.smart/todos.json)
+    // so the smart_todo plugin and contextManager stay in sync.
+    try {
+      const dataFile = resolve(homedir(), '.smart', 'todos.json');
+      if (existsSync(dataFile)) {
+        const raw = readFileSync(dataFile, 'utf-8');
+        this._context.todoItems = JSON.parse(raw);
+      }
+    } catch { /* file may not exist, ignore */ }
+  }
+
+  formatRecoveryContext() {
+    const rc = this.getRecoveryContext();
+    if (!rc) return null;
+
+    // Sync with shared file so smart_todo plugin changes are visible
+    this._syncTodosFromFile();
+
+    const parts = [];
+    parts.push('📋 [Recovery Context]');
+
+    // Summary
+    const s = rc.summary || {};
+    parts.push(`   ${s.totalCalls || 0} calls, ${s.errorCount || 0} errors, ${s.uniqueTools || 0} tools`);
+
+    // Pending todos
+    const todos = this.listTodos();
+    const activeTodos = todos.filter(t => t.status === 'pending' || t.status === 'in_progress');
+    const doneTodos = todos.filter(t => t.status === 'completed');
+    if (todos.length > 0) {
+      parts.push('   📝 Todos:');
+      for (const t of todos) {
+        const icon = t.status === 'completed' ? '✅' : t.status === 'in_progress' ? '⏳' : t.status === 'cancelled' ? '❌' : '☐';
+        parts.push(`      ${icon} ${t.id}. ${t.text}`);
+      }
+    }
+
+    // Recent edits
+    const edits = rc.keyDecisions || [];
+    if (edits.length > 0) {
+      const files = [...new Set(edits.map(e => e.file))];
+      parts.push(`   📂 Edited: ${files.join(', ')}`);
+    }
+
+    // Active findings
+    const findings = rc.findings || [];
+    if (findings.length > 0) {
+      parts.push(`   🔍 Issues: ${findings.map(f => f.severity + ':' + f.category).join(', ')}`);
+    }
+
+    // Resume directive
+    if (activeTodos.length > 0) {
+      parts.push(`   ▶️ Continue: todo #${activeTodos[0].id} — "${activeTodos[0].text}"`);
+    }
+
+    return parts.join('\n');
   }
 
   // -----------------------------------------------------------------------
@@ -773,6 +948,25 @@ export class ContextManager {
     this._context.toolHistory.push(entry);
     if (this._context.toolHistory.length > this._maxHistory) {
       this._context.toolHistory = this._context.toolHistory.slice(-this._maxHistory);
+    }
+
+    // P5: Prefetch Compact — 低價值條目在 capture 當下就預壓縮
+    // 不讓它進 context (value 0 → drop, value 1 → preview)
+    if (this._prefetchCompact !== false) {
+      const verdict = shouldPrefetchCompact(entry);
+      if (verdict.compress) {
+        if (verdict.action === 'drop') {
+          entry.result = '[Prefetch: low-value result compacted]';
+          entry.error = undefined;
+          entry._prefetchCompacted = 'dropped';
+        } else if (verdict.action === 'preview') {
+          const full = entry.result || '';
+          entry.result = full.length > 200
+            ? full.slice(0, 200) + `\n\n--- [Prefetch: preview — ${full.length} chars total] ---`
+            : full;
+          entry._prefetchCompacted = 'preview';
+        }
+      }
     }
 
     this._context.metadata.toolCount++;
