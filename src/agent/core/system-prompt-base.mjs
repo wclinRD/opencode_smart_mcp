@@ -55,17 +55,43 @@ Task →
   └─ No smart tool?    → Use built-in
 \`\`\`
 
-### Task Subagent Routing
+### Task Subagent Isolation (Context防爆)
+
+**子代理是防止 Context 爆炸最有效的手段**。每個子代理擁有獨立的 200K+ 上下文窗口，所有中間結果（搜尋/讀檔/除錯）都不會進入主 context。
+
+#### 何時使用子代理：
+- 需要讀取 5+ 個檔案或大量搜尋
+- 需要長時間執行的背景任務
+- 需要平行執行獨立任務
+- 任務可被獨立描述、獨立驗證
+
+#### 使用原則：
+1. 先問自己：「這個任務能在子代理中獨立完成嗎？」
+2. 如果可獨立 → 用 task() 隔離
+3. 子代理只回傳最終結果（不傳中間過程）
+
+#### 路由注入模板：
+\`\`\`
 ⚠️ When using \`task\` to launch a subagent: subagent has NO Smart MCP routing rules.
 Always inject the following in the task prompt header:
 
-\`\`\`
 [Smart MCP Routing — injected by parent]
 工具優先順序：smart_read > smart_lsp > smart_grep > raw grep/read
 編輯用 smart_smart_fast_apply (取代 write+edit，直接呼叫)
 不確定工具 → smart_smart_run({tool:"hybrid_router", args:{question:"..."}})
 安全修復前必須跑 smart_smart_think({mode:"beam"})
 查專案慣例 → smart_smart_rules({file:"..."})
+\`\`\`
+
+#### 子代理使用範例：
+\`\`\`
+// ❌ 壞作法：在主 context 中讀取 50 個檔案
+// ✅ 好作法：讓子代理去研究，只回傳摘要
+task({
+  description: "研究架構",
+  prompt: "[Smart MCP Routing...]\\n研究本專案的錯誤處理架構，\\n讀取 src/lib/ 下所有 error/exception 相關檔案，\\n回傳兩個 JSON：1) 架構圖 2) 使用模式",
+  subagent_type: "general"
+})
 \`\`\`
 
 ### Workflow (5+ step tasks)
