@@ -63,7 +63,7 @@ describe('smart_compact — classification rules', () => {
   });
 
   it('classifies code_impact as DROP', () => {
-    const r = call({ toolHistory: [makeEntry('code_impact', true, '3 files affected')] });
+    const r = call({ toolHistory: [makeEntry('code_impact', true, 'analysis complete')] });
     assert.equal(r.toolCallsToDrop.length, 1);
   });
 
@@ -321,5 +321,118 @@ describe('smart_compact — edge cases', () => {
 
     const r2 = call({ toolHistory: [makeEntry('smart_think', true, 'thinking')] });
     assert.ok(r2.note.includes('No entries can be safely dropped'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P5: Content-aware classification patterns (Round 5 enhancement)
+// ---------------------------------------------------------------------------
+
+describe('smart_compact — content-aware patterns', () => {
+
+  // ── Upgrade patterns ──
+
+  it('upgrades error output to KEEP', () => {
+    const r = call({ toolHistory: [makeEntry('smart_grep', true, 'TypeError: cannot read property')] });
+    assert.equal(r.toolCallsToDrop.length, 0, 'error output should not be dropped');
+  });
+
+  it('upgrades security findings to KEEP_SUMMARY', () => {
+    const r = call({ toolHistory: [makeEntry('smart_grep', true, 'vulnerability found in dep: CVE-2024-1234')] });
+    assert.equal(r.toolCallsToDrop.length, 0);
+    assert.equal(r.toolOutputsToSummarize.length, 1);
+  });
+
+  it('upgrades test failure to KEEP', () => {
+    const r = call({ toolHistory: [makeEntry('smart_test', true, 'failed 2, passed 3')] });
+    assert.equal(r.toolCallsToDrop.length, 0, 'test failure should not be dropped');
+  });
+
+  it('upgrades file-change stats to KEEP_SUMMARY', () => {
+    const r = call({ toolHistory: [makeEntry('smart_grep', true, '5 files changed')] });
+    assert.equal(r.toolCallsToDrop.length, 0);
+    assert.equal(r.toolOutputsToSummarize.length, 1);
+  });
+
+  it('upgrades deprecated pattern to KEEP_SUMMARY', () => {
+    const r = call({ toolHistory: [makeEntry('smart_grep', true, 'deprecated: will be removed in v3')] });
+    assert.equal(r.toolCallsToDrop.length, 0);
+    assert.equal(r.toolOutputsToSummarize.length, 1);
+  });
+
+  it('upgrades ✅ completion to KEEP', () => {
+    const r = call({ toolHistory: [makeEntry('smart_grep', true, '✅ done - refactored auth')] });
+    assert.equal(r.toolCallsToDrop.length, 0, 'completion marker should preserve output');
+  });
+
+  it('upgrades LSP diagnostics — error count is KEEP (generic error upgrade wins)', () => {
+    const r = call({ toolHistory: [makeEntry('smart_grep', true, '3 errors, 5 warnings found')] });
+    assert.equal(r.toolCallsToDrop.length, 0, 'error diagnostic should not be dropped');
+    // KEEP (from error pattern) > KEEP_SUMMARY (from diagnostic count) — correct
+  });
+
+  it('upgrades LSP warnings without error to KEEP_SUMMARY', () => {
+    const r = call({ toolHistory: [makeEntry('smart_grep', true, '5 warnings, 2 problems found')] });
+    assert.equal(r.toolCallsToDrop.length, 0);
+    assert.equal(r.toolOutputsToSummarize.length, 1, 'warnings/problems should be summarized');
+  });
+
+  // ── Downgrade patterns ──
+
+  it('downgrades no-matches result to DROP', () => {
+    const r = call({ toolHistory: [makeEntry('smart_security', true, 'No matches found. 0 results.')] });
+    assert.equal(r.toolCallsToDrop.length, 1, 'empty security scan should be dropped');
+  });
+
+  it('downgrades git no-change to DROP', () => {
+    const r = call({ toolHistory: [makeEntry('git_status', true, 'nothing to commit, working tree clean')] });
+    assert.equal(r.toolCallsToDrop.length, 1, 'no-op git status should be dropped');
+  });
+
+  it('downgrades empty security to DROP', () => {
+    const r = call({ toolHistory: [makeEntry('smart_security', true, '0 vulnerabilities, 0 issues')] });
+    assert.equal(r.toolCallsToDrop.length, 1, 'empty security scan should be dropped');
+  });
+
+  it('downgrades no-data result to DROP', () => {
+    const r = call({ toolHistory: [makeEntry('smart_grep', true, 'no data available')] });
+    assert.equal(r.toolCallsToDrop.length, 1);
+  });
+
+  it('downgrades very short reply to DROP for base DROP tools', () => {
+    const r = call({ toolHistory: [makeEntry('smart_grep', true, 'ok')] });
+    assert.equal(r.toolCallsToDrop.length, 1);
+  });
+
+  // ── Priority: upgrade before downgrade ──
+
+  it('upgrade takes priority over downgrade (error > no-match)', () => {
+    const r = call({ toolHistory: [makeEntry('smart_test', true, 'Error: failed 2 tests. No matches.')] });
+    assert.equal(r.toolCallsToDrop.length, 0, 'error should win over no-match');
+  });
+
+  it('upgrade takes priority over short output', () => {
+    const r = call({ toolHistory: [makeEntry('smart_grep', true, '✅ done')] });
+    assert.equal(r.toolCallsToDrop.length, 0, '✅ marker should preserve even short output');
+  });
+
+  // ── Base tool classification preserved when no content trigger ──
+
+  it('neutral DROP tool remains DROP without content triggers', () => {
+    const r = call({ toolHistory: [makeEntry('smart_grep', true, 'found 3 function call sites')] });
+    assert.equal(r.toolCallsToDrop.length, 1);
+    assert.equal(r.toolOutputsToSummarize.length, 0);
+  });
+
+  it('neutral KEEP tool remains KEEP', () => {
+    const r = call({ toolHistory: [makeEntry('smart_think', true, 'considering two approaches for auth')] });
+    assert.equal(r.toolCallsToDrop.length, 0);
+    assert.equal(r.toolOutputsToSummarize.length, 0);
+  });
+
+  it('neutral KEEP_SUMMARY tool remains KEEP_SUMMARY', () => {
+    const r = call({ toolHistory: [makeEntry('smart_rules', true, 'Project uses tabs for indentation')] });
+    assert.equal(r.toolCallsToDrop.length, 0);
+    assert.equal(r.toolOutputsToSummarize.length, 1);
   });
 });

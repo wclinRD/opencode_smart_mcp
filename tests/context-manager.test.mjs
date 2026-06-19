@@ -2,7 +2,7 @@
 //
 // Run: node --test tests/context-manager.test.mjs
 
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -711,5 +711,203 @@ describe('ContextManager — clearToolResults', () => {
     assert.equal(ctx.metadata.toolCount, 10);
     assert.equal(ctx.toolHistory.length, 3);
     cleanup();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// matchTodo — rules-based todo auto-detection (Round 3 enhancement)
+// ---------------------------------------------------------------------------
+
+describe('ContextManager — matchTodo', () => {
+  afterEach(cleanup);
+
+  it('returns no match when no todo items exist', () => {
+    const cm = freshManager({ autoSave: false });
+    cm.init();
+    const r = cm.matchTodo('smart_grep', { pattern: 'foo' }, { ok: true, output: 'found 2 matches' });
+    assert.equal(r.matched, false);
+    assert.equal(r.todoId, null);
+  });
+
+  it('matches todo by keyword in output', () => {
+    const cm = freshManager({ autoSave: false });
+    cm.init();
+    cm.addTodo(['Fix the login module']);
+    const r = cm.matchTodo('smart_grep', { pattern: 'login' }, { ok: true, output: 'found login handler at auth.ts' });
+    assert.ok(r.matched, 'should match by keyword:login in grep output');
+    assert.ok(r.todoId > 0);
+  });
+
+  it('matches todo by file path', () => {
+    const cm = freshManager({ autoSave: false });
+    cm.init();
+    cm.addTodo(['Refactor auth.ts']);
+    const r = cm.matchTodo('smart_fast_apply', { file: 'src/auth.ts' }, { ok: true, output: '✅ applied' });
+    assert.ok(r.matched, 'should match by file path + apply success');
+    assert.ok(r.todoId > 0);
+  });
+
+  it('matches test success to relevant todo', () => {
+    const cm = freshManager({ autoSave: false });
+    cm.init();
+    cm.addTodo(['Add tests for login flow']);
+    const r = cm.matchTodo('smart_test', { include: 'login' }, { ok: true, output: 'all pass 5/5' });
+    assert.ok(r.matched, 'test pass matching todo content');
+  });
+
+  it('returns no match for completely unrelated tool', () => {
+    const cm = freshManager({ autoSave: false });
+    cm.init();
+    cm.addTodo(['Refactor payment module']);
+    const r = cm.matchTodo('smart_lsp', { file: 'weather.ts' }, { ok: true, output: 'no diagnostics' });
+    assert.equal(r.matched, false);
+    assert.equal(r.borderline, false);
+  });
+
+  it('marks matched todo completed via doneTodo after successful match', () => {
+    const cm = freshManager({ autoSave: false });
+    cm.init();
+    cm.addTodo(['Fix the auth timeout bug']);
+    const r = cm.matchTodo('smart_fast_apply', { file: 'auth.ts' }, { ok: true, output: '✅ applied' });
+    assert.ok(r.matched, 'should match by file path');
+    assert.ok(r.todoId > 0);
+    // Simulate what the caller does: call doneTodo on match
+    const done = cm.doneTodo(r.todoId);
+    assert.ok(done.ok);
+    const list = cm.listTodos();
+    const found = list.find(t => t.id === r.todoId);
+    assert.equal(found.status, 'completed');
+  });
+
+  it('handles completed and cancelled todos (skips them)', () => {
+    const cm = freshManager({ autoSave: false });
+    cm.init();
+    cm.addTodo(['Done task']);
+    cm.updateTodoStatus(1, 'completed');
+    cm.addTodo(['Cancelled task']);
+    cm.updateTodoStatus(2, 'cancelled');
+    const r = cm.matchTodo('smart_grep', { pattern: 'task' }, { ok: true, output: 'task found' });
+    assert.equal(r.matched, false, 'should skip completed/cancelled');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// matchTodo — subtask progress tracking (Round 2)
+// ---------------------------------------------------------------------------
+
+describe('ContextManager — matchTodo subtask', () => {
+  afterEach(cleanup);
+
+  it('tracks sub-task progress without auto-completing the parent', () => {
+    const cm = freshManager({ autoSave: false });
+    cm.init();
+    // Single todo with sub-tasks: "→" delimiter
+    cm.addTodo(['Add auth → implement JWT middleware → add refresh logic']);
+    // Use bare 'jwt' (no extension) so fileRef matches sub-task text 'implement JWT middleware'
+    const r = cm.matchTodo('smart_fast_apply', { file: 'jwt' }, { ok: true, output: '✅ applied' });
+    // Since 'jwt' appears in 'implement JWT middleware' sub-task:
+    // matched should be false (parent not done), subTaskOnly true
+    assert.equal(r.matched, false, 'should not auto-complete parent when sub-task remains');
+    assert.ok(r.subTaskOnly, 'should indicate sub-task progress');
+    assert.ok(r.subTaskProgress, 'should include progress like "1/3"');
+  });
+
+  it('auto-completes sub-task when all sub-tasks are done', () => {
+    const cm = freshManager({ autoSave: false });
+    cm.init();
+    // 2-sub-task todo for simpler test
+    cm.addTodo(['Update middleware → test login']);
+    // First sub-task: update middleware
+    const r1 = cm.matchTodo('smart_fast_apply', { file: 'middleware' }, { ok: true, output: '✅ applied' });
+    assert.equal(r1.matched, false);
+    assert.ok(r1.subTaskOnly);
+    // Second sub-task: test login
+    const r2 = cm.matchTodo('smart_test', { include: 'login' }, { ok: true, output: 'all pass 3/3' });
+    // Both sub-tasks done → parent should auto-complete
+    assert.ok(r2.matched, 'should auto-complete when all sub-tasks done');
+    assert.equal(r2.todoId, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatRecoveryContext — recovery context generation (Round 3)
+// ---------------------------------------------------------------------------
+
+describe('ContextManager — formatRecoveryContext', () => {
+  afterEach(cleanup);
+
+  it('returns null when no recovery context exists', () => {
+    const cm = freshManager({ autoSave: false });
+    cm.init();
+    const rc = cm.formatRecoveryContext();
+    assert.equal(rc, null);
+  });
+
+  it('formats recovery context with todos', () => {
+    const cm = freshManager({ autoSave: false });
+    const ctx = cm.init();
+    cm.addTodo(['Fix login bug', 'Add tests']);
+    // Set recovery context manually (normally set by compact flow)
+    ctx._recoveryContext = {
+      summary: { totalCalls: 5, errorCount: 1, uniqueTools: 3 },
+      keyDecisions: [{ file: 'auth.ts' }],
+      findings: [{ severity: 'warning', category: 'unhandled error' }],
+      lastErrors: [{ tool: 'smart_test', error: 'timeout' }],
+    };
+    const text = cm.formatRecoveryContext();
+    assert.ok(text !== null, 'should produce recovery text');
+    assert.ok(text.includes('Recovery Context'), 'should include header');
+    assert.ok(text.includes('Fix login bug'), 'should include todo text');
+    assert.ok(text.includes('Add tests'), 'should include second todo');
+    assert.ok(text.includes('5 calls'), 'should include session summary');
+    assert.ok(text.includes('auth.ts'), 'should include recent files');
+    assert.ok(text.includes('smart_test'), 'should include recent errors');
+    cleanup();
+  });
+
+  it('includes active todos sorted by status and priority', () => {
+    const cm = freshManager({ autoSave: false });
+    const ctx = cm.init();
+    cm.addTodo(['Setup CI']);
+    cm.addTodo(['Fix crash bug']);  // higher priority (crash), but pending
+    cm.addTodo(['Write docs']);  // lowest priority
+    cm.updateTodoStatus(2, 'in_progress'); // Fix crash bug first
+    ctx._recoveryContext = {
+      summary: { totalCalls: 3, errorCount: 0, uniqueTools: 2 },
+    };
+    const text = cm.formatRecoveryContext();
+    // in_progress should appear before pending
+    const crashIdx = text.indexOf('Fix crash bug');
+    const ciIdx = text.indexOf('Setup CI');
+    assert.ok(crashIdx < ciIdx, 'in_progress should sort before pending');
+    cleanup();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Subtask progress persistence (Round 2 enhancement)
+// ---------------------------------------------------------------------------
+
+describe('ContextManager — subtask progress persistence', () => {
+  afterEach(cleanup);
+
+  it('persists and restores subtask progress cross-session (same contextDir)', () => {
+    // Use a shared context dir (not freshManager which creates separate dirs)
+    const sharedDir = resolve(tmpdir(), `smart-persist-${randomUUID().slice(0, 8)}`);
+    mkdirSync(sharedDir, { recursive: true });
+    
+    const cm1 = new ContextManager({ contextDir: sharedDir, autoSave: true, extractFindings: false });
+    cm1.init({ sessionId: 'subtask-persist-test' });
+    cm1.addTodo(['Refactor DB → migrate schema → add indexes']);
+    cm1.matchTodo('smart_fast_apply', { file: 'schema' }, { ok: true, output: '✅ applied' });
+
+    // Second manager, SAME contextDir — should resume session + restore subtask progress
+    const cm2 = new ContextManager({ contextDir: sharedDir, autoSave: true, extractFindings: false });
+    const ctx2 = cm2.init({ sessionId: 'subtask-persist-test' });
+    assert.ok(ctx2._subtaskProgress, 'subtask progress should be restored');
+    assert.ok(ctx2._subtaskProgress['1'], 'todo id 1 should have progress');
+    assert.equal(ctx2._subtaskProgress['1'].done['migrate schema'], true, 'migrate schema should be done');
+    
+    rmSync(sharedDir, { recursive: true, force: true });
   });
 });

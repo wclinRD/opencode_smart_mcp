@@ -859,7 +859,7 @@ export class ContextManager {
     if (pending.length === 0) return { matched: false, todoId: null, todoText: null };
 
     const output = (result.output || result.error || '').toLowerCase();
-    const fileRef = ((args.file || args.files?.[0] || '') + ' ' + (args.symbol || '')).toLowerCase();
+    const fileRef = ((args.file || args.files?.[0] || '') + ' ' + (args.symbol || '')).toLowerCase().trim();
     const toolSig = toolName.replace('smart_', '');
     const fileExt = fileRef.match(/\.(\w+)$/)?.[1] || '';
 
@@ -938,7 +938,7 @@ export class ContextManager {
           score += 2; reasons.push('subTool:' + subToolName);
         }
         // 若子工具的 args 含 fileRef，也加分
-        const subFileRef = ((args.args?.file || args.args?.files?.[0] || '') + ' ' + (args.args?.symbol || '')).toLowerCase();
+        const subFileRef = ((args.args?.file || args.args?.files?.[0] || '') + ' ' + (args.args?.symbol || '')).toLowerCase().trim();
         if (subFileRef && todoText.includes(subFileRef)) { score += 2; reasons.push('subToolFile'); }
       }
 
