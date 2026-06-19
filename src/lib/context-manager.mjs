@@ -111,6 +111,8 @@ export class ContextManager {
     this._maxResultLength = opts.maxResultLength || MAX_RESULT_LENGTH;
     this._autoSave = opts.autoSave !== false;
     this._extract = opts.extractFindings !== false;
+    /** @type {string} Shared todo file path (default: ~/.smart/todos.json for bridge with smart_todo plugin) */
+    this._todoFile = opts.todoFile || resolve(homedir(), '.smart', 'todos.json');
 
     /** @type {object|null} */
     this._context = null;
@@ -828,8 +830,7 @@ export class ContextManager {
    */
   updateTodoStatus(id, status) {
     if (!this._context || !this._context.todoItems) return { ok: false, item: null };
-    // Gap #1 fix: 更新前先從 file 同步，確保能找到該 id
-    this._syncTodosFromFile();
+    // updateTodoStatus 不主動 sync（caller 確保 write 路徑已同步）
     const item = this._context.todoItems.find(t => t.id === id);
     if (!item) return { ok: false, item: null };
     item.status = status;
@@ -850,8 +851,7 @@ export class ContextManager {
    */
   listTodos() {
     if (!this._context || !this._context.todoItems) return [];
-    // Gap #1 fix: 每次查詢前先從 file 同步最新狀態
-    this._syncTodosFromFile();
+    // listTodos 是純讀取，不主動 sync（caller 應確保 write 時已同步）
     return this._context.todoItems.map(t => ({ ...t }));
   }
 
@@ -866,8 +866,7 @@ export class ContextManager {
    */
   matchTodo(toolName, args, result) {
     if (!this._context || !this._context.todoItems) return { matched: false, todoId: null, todoText: null };
-    // Gap #1 fix: 比對前先從 file 同步最新狀態
-    this._syncTodosFromFile();
+    // matchTodo 不主動 sync（caller 確保 write 路徑已同步）
     const pending = this._context.todoItems.filter(t => t.status === 'pending' || t.status === 'in_progress');
     if (pending.length === 0) return { matched: false, todoId: null, todoText: null };
 
@@ -1066,7 +1065,7 @@ export class ContextManager {
     // in-memory 若有落後的狀態則更新。
     // 同時補入 file 中有但 in-memory 沒有的新項目。
     try {
-      const dataFile = resolve(homedir(), '.smart', 'todos.json');
+      const dataFile = this._todoFile;
       if (existsSync(dataFile)) {
         const raw = readFileSync(dataFile, 'utf-8');
         const fileItems = JSON.parse(raw);
@@ -1097,7 +1096,7 @@ export class ContextManager {
     // 讓 smart_todo 等外部 plugin 能讀到最新狀態
     if (!this._context || !this._context.todoItems) return;
     try {
-      const dataFile = resolve(homedir(), '.smart', 'todos.json');
+      const dataFile = this._todoFile;
       writeFileSync(dataFile, JSON.stringify(this._context.todoItems, null, 2), 'utf-8');
     } catch { /* ignore */ }
   }

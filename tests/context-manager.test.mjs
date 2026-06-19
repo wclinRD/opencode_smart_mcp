@@ -21,6 +21,7 @@ function freshManager(opts = {}) {
   mkdirSync(testDir, { recursive: true });
   return new ContextManager({
     contextDir: testDir,
+    todoFile: resolve(testDir, 'todos.json'),
     autoSave: opts.autoSave !== false,
     extractFindings: opts.extractFindings !== false,
     maxHistory: opts.maxHistory || 10,
@@ -896,13 +897,13 @@ describe('ContextManager — subtask progress persistence', () => {
     const sharedDir = resolve(tmpdir(), `smart-persist-${randomUUID().slice(0, 8)}`);
     mkdirSync(sharedDir, { recursive: true });
     
-    const cm1 = new ContextManager({ contextDir: sharedDir, autoSave: true, extractFindings: false });
+    const cm1 = new ContextManager({ contextDir: sharedDir, autoSave: true, extractFindings: false, todoFile: resolve(sharedDir, 'todos.json') });
     cm1.init({ sessionId: 'subtask-persist-test' });
     cm1.addTodo(['Refactor DB → migrate schema → add indexes']);
     cm1.matchTodo('smart_fast_apply', { file: 'schema' }, { ok: true, output: '✅ applied' });
 
     // Second manager, SAME contextDir — should resume session + restore subtask progress
-    const cm2 = new ContextManager({ contextDir: sharedDir, autoSave: true, extractFindings: false });
+    const cm2 = new ContextManager({ contextDir: sharedDir, autoSave: true, extractFindings: false, todoFile: resolve(sharedDir, 'todos.json') });
     const ctx2 = cm2.init({ sessionId: 'subtask-persist-test' });
     assert.ok(ctx2._subtaskProgress, 'subtask progress should be restored');
     assert.ok(ctx2._subtaskProgress['1'], 'todo id 1 should have progress');
