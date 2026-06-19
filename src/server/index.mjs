@@ -170,23 +170,72 @@ function saveSessionCheckpoint() {
     const toolCount = ctx.metadata?.toolCount || 0;
     if (toolCount < 3) return; // skip if basically nothing happened
 
-    const summary = JSON.stringify({
-      projectName,
-      toolCount,
-      sessionId: ctx.sessionId,
-      timestamp: new Date().toISOString(),
-    });
+    // P3: 使用 recovery context (若有 fullCompact 過) 或自行產生
+    let sessionSummary;
+    const recoveryCtx = contextManager.getRecoveryContext();
+    if (recoveryCtx) {
+      sessionSummary = {
+        projectName,
+        toolCount,
+        sessionId: ctx.sessionId,
+        timestamp: new Date().toISOString(),
+        keyDecisions: (recoveryCtx.keyDecisions || []).slice(0, 3),
+        findings: (recoveryCtx.findings || []).slice(0, 5),
+        toolSummary: recoveryCtx.summary,
+      };
+    } else {
+      // 從累積 findings 產生摘要
+      const findings = ctx.accumulatedFindings || [];
+      const highFindings = findings
+        .filter(f => f.severity === 'critical' || f.severity === 'high')
+        .slice(0, 5);
+      sessionSummary = {
+        projectName,
+        toolCount,
+        sessionId: ctx.sessionId,
+        timestamp: new Date().toISOString(),
+        findings: highFindings,
+        errorCount: ctx.metadata?.errorCount || 0,
+      };
+    }
+
+    const metaStr = JSON.stringify(sessionSummary).slice(0, 1000);
 
     const child = spawn('node', [
       MEMORY_CLI_PATH, 'store', `checkpoint:${projectName}`,
-      '--resolution', `Session checkpoint for ${projectName}: ${toolCount} tools called`,
+      '--resolution', `Session checkpoint for ${projectName}: ${toolCount} tools called, ${sessionSummary.errorCount || 0} errors`,
       '--tools', 'checkpoint',
       '--category', 'checkpoint',
       '--success', 'true',
-      '--metadata', summary.slice(0, 1000),
+      '--metadata', metaStr,
     ], { timeout: 3000, stdio: 'ignore' });
     child.unref();
     setTimeout(() => { try { child.kill(); } catch { /* ok */ } }, 2000).unref();
+  } catch { /* best effort */ }
+}
+
+/**
+ * P3: Cross-session memory bridge — 啟動時檢查前一 session 是否有未保存的知識。
+ * 從記憶體查詢前一 session 的 checkpoint，若相關則注入 finding。
+ * 非阻塞 — 快速 spawn + unref，永不延遲啟動。
+ */
+function crossSessionMemoryBridge() {
+  try {
+    if (!existsSync(MEMORY_CLI_PATH) || !contextManager) return;
+    const prev = contextManager.getPreviousSession();
+    if (!prev) return;
+
+    const toolCount = prev.metadata?.toolCount || 0;
+    if (toolCount < 5) return; // 太短 skip
+    if (prev._sessionEnded) return; // 正常結束 skip (上一 session 已完成)
+
+    // 中斷的 session — 注入 finding
+    contextManager.addFindings([{
+      source: 'cross-session-bridge',
+      finding: `[Session Memory] 前一 session (${prev.sessionId.slice(0, 8)}) 有 ${toolCount} 次工具呼叫但未正常結束。最後工具: ${prev.lastResult?.tool || '?'}`,
+      category: 'memory',
+      severity: 'low',
+    }]);
   } catch { /* best effort */ }
 }
 
@@ -310,6 +359,8 @@ function ensureContext() {
     contextManager.init({ projectRoot: env.PWD || env.CWD || process.cwd() });
     contextInitialized = true;
     debugLog('Context initialized:', contextManager.get()?.sessionId);
+    // P3: Cross-session knowledge bridge — 偵測中斷的前一 session
+    crossSessionMemoryBridge();
     // Phase 10.5: inject past learnings into new session
     autoInjectMemory();
   }
