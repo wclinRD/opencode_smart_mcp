@@ -2239,8 +2239,11 @@ function autoManageContext(budget, skipRecoveryInjection = false) {
       } catch { _todoFollowUp.pendingIds = []; }
 
       // 寫入共享檔案供 OpenCode plugin 在 compaction 時讀取
-      writeSharedRecoveryFile(recoveryText);
-      writeCompactionStatus(3);
+      // (若 D.4 已寫過則跳過，避免重複)
+      if (!skipRecoveryInjection) {
+        writeSharedRecoveryFile(recoveryText);
+        writeCompactionStatus(3);
+      }
       return msg + '\n---';
     } catch (e) {
       debugLog('AutoManage Tier3 error:', e.message);
@@ -2279,8 +2282,11 @@ function autoManageContext(budget, skipRecoveryInjection = false) {
         } catch { _todoFollowUp.pendingIds = []; }
 
         // 寫入共享檔案供 OpenCode plugin 在 compaction 時讀取
-        writeSharedRecoveryFile(recoveryText);
-        writeCompactionStatus(2);
+        // (若 D.4 已寫過則跳過，避免重複)
+        if (!skipRecoveryInjection) {
+          writeSharedRecoveryFile(recoveryText);
+          writeCompactionStatus(2);
+        }
         return msg + '\n---';
       }
     } catch (e) {
