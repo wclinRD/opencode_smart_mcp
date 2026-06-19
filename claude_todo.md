@@ -1,96 +1,110 @@
-# Claude Code 無限上下文 — 實作待辦
+# Smart MCP — Claude Code 功能學習 Todo
 
-**更新**: 2026-06-19
-
-## P0: MicroCompact — 工具結果清理
-
-- [ ] **P0.1 定義 MicroCompact 邏輯**
-  - [ ] 決定保留工具結果數量 N（預設 5）
-  - [ ] 決定大字數截斷閾值（預設 50K chars）
-  - [ ] 佔位替代文字：「[Old tool result cleared]」
-- [ ] **P0.2 實作工具結果清理機制**
-  - [ ] 在哪一層 hook（tool call 回傳後 / context 組裝前）
-  - [ ] 保留最近 N 個結果，舊的替換為佔位
-  - [ ] 大字數結果截斷為 2KB 預覽 + 完整存檔到磁碟
-- [ ] **P0.3 測試與驗證**
-  - [ ] 測試 100+ 回合後 context 大小
-  - [ ] 驗證佔位文字不影響 agent 行為
-  - [ ] 驗證 50K+ 結果的正確截斷
-
-## P1: Sub-agent Context 隔離強化
-
-- [ ] **P1.1 審查現有 task() subagent 機制**
-  - [ ] 確認 subagent 已有獨立 context window
-  - [ ] 確認 subagent 回傳格式
-- [ ] **P1.2 實作回傳摘要限制**
-  - [ ] 限制回傳 ≤ 4K tokens
-  - [ ] 超量時自動摘要化
-- [ ] **P1.3 測試與驗證**
-  - [ ] subagent 讀 50 檔案後主 context 不膨脹
-  - [ ] 多 subagent 平行執行 context 互不干擾
-
-## P2: 結構化 Full Compact
-
-- [ ] **P2.1 定義 9 區塊結構化摘要模板**
-  - [ ] Goal / Technical / Errors / Files / Commands / Todos / Decisions / State / Context
-- [ ] **P2.2 實作兩階段 CoT Scratchpad**
-  - [ ] Phase 1: LLM 推理（含完整推理）
-  - [ ] Phase 2: 只保留結論（丟棄推理過程）
-- [ ] **P2.3 實作觸發邏輯**
-  - [ ] 監控 context 使用率（83% 門檻，可設定）
-  - [ ] 絕對值閾值（effective window - 13,000）
-  - [ ] 遞歸保護（壓縮子代理不再觸發壓縮）
-  - [ ] 斷路器（連續 3 次失敗停止重試）
-- [ ] **P2.4 實作 Context Collapse（可逆折疊）**
-  - [ ] 原始 messages 另存 collapse store
-  - [ ] 動態產生壓縮視圖
-  - [ ] 支援 rollback 展開
-- [ ] **P2.5 測試與驗證**
-  - [ ] 壓縮率 ≥ 80%
-  - [ ] 壓縮後對話可正確繼續
-  - [ ] Collapse rollback 完整還原
-
-## P3: 背景 Session Memory
-
-- [ ] **P3.1 背景 fork agent 實作**
-  - [ ] 每 ~5K tokens 新對話觸發更新
-  - [ ] 更新 session memory 文件（9 區塊格式）
-- [ ] **P3.2 整合到 Full Compact**
-  - [ ] Full Compact 時優先使用 session memory
-  - [ ] 無 session memory 時回退 P2 標準流程
-- [ ] **P3.3 測試與驗證**
-  - [ ] Full Compact 時零延遲（無需等待 LLM 摘要）
-
-## P4: 自動回填機制
-
-- [ ] **P4.1 壓縮後清除 file state cache**
-- [ ] **P4.2 自動重新載入最近檔案**
-  - [ ] 最近 5 個檔案，各 5K tokens 上限
-- [ ] **P4.3 自動重新載入專案規則**
-  - [ ] SMART.md / AGENTS.md / .cursorrules 等
-- [ ] **P4.4 自動重新注入待辦事項**
-  - [ ] 壓縮後保留 todo 狀態
-- [ ] **P4.5 測試與驗證**
-  - [ ] 壓縮回填後檔案內容與規則可用
-
-## 基礎設施
-
-- [ ] **Infra.1 Context 監控儀表板**
-  - [ ] 即時顯示各層級使用率（system/history/tool/response）
-  - [ ] 顯示最後壓縮時間與壓縮率
-- [ ] **Infra.2 模型設定映射表**
-  - [ ] 各模型 window size / compact 門檻
-  - [ ] 使用現有 limit.input 設定（Gemma4:114688 / Qwen9B:98304 / Qwen4B:40960）
+> 基於 2026-06-19 評估報告（見 claude_plan.md）
 
 ---
 
-## 進度摘要
+## 🚀 Sprint 1：Hooks 系統（建議優先）
 
-| 項目 | 狀態 | 備註 |
-|------|------|------|
-| P0 MicroCompact | ⏳ 待開始 | 優先實作 |
-| P1 Sub-agent 隔離 | ⏳ 待開始 | 評估現有 task 機制 |
-| P2 Full Compact | ⏳ 待開始 | 含 Collapse 可逆折疊 |
-| P3 Session Memory | ⏳ 待開始 | 依賴 P2 |
-| P4 自動回填 | ⏳ 待開始 | 依賴 P2 |
-| Infra 監控 | ⏳ 待開始 | 輔助工具 |
+### 階段 A — Hook Registry（3-4 天）
+
+- [ ] **新增 `src/lib/hook-registry.mjs`**
+  - [ ] `registerPreHook(hook)` / `registerPostHook(hook)` API
+  - [ ] `executePreHooks(toolName, args)` → return `[{ hook, block?, message? }]`
+  - [ ] `executePostHooks(toolName, args, result)` → return `[{ hook, promise }]`
+  - [ ] `initBuiltinHooks()` 將現有三個 fire-and-forget 遷移為內建 hooks
+    - [ ] `lsp-diagnostics`: match=`smart_fast_apply` + `apply:true`
+    - [ ] `impact-warning`: match=`smart_fast_apply` + `files > 2`
+    - [ ] `hallucination-check`: match=`isHighRiskOutput(toolName)`
+
+- [ ] **修改 `src/server/index.mjs` — invokeTool()**
+  - [ ] Phase 8：在 `checkHighRiskPrerequisites()` 之後、handler 之前，執行 pre-hooks
+  - [ ] Phase 9：在 handler 之後、`captureAndReturn()` 之前，收集 post-hook promises
+  - [ ] 若 pre-hook 回傳 `{ block: true }`，阻斷工具執行
+
+- [ ] **修改 `src/server/index.mjs` — respond()**
+  - [ ] 將 `_pendingImpact` / `_pendingLsp` / `_pendingHallucination` 統一為 `_pendingHooks` 陣列
+  - [ ] 在 `_respondChain` 中迭代執行 `_pendingHooks`
+
+- [ ] **測試**
+  - [ ] 編輯檔案後自動觸發 LSP 診斷（行為不變）
+  - [ ] >2 檔編輯自動觸發 impact 分析（行為不變）
+  - [ ] 高風險工具（如 academic_search）自動觸發幻覺檢查（行為不變）
+  - [ ] Pre-hook 回傳 block 正確阻斷工具
+
+### 階段 B — 用戶自訂 Hooks（1 週）
+
+- [ ] **新增 `smart_hook` 工具**
+  - [ ] `command:"add"` — 註冊自訂 hook（bash / mcp_tool）
+  - [ ] `command:"list"` — 列出已註冊 hooks
+  - [ ] `command:"remove"` — 移除 hook
+  - [ ] `command:"enable"` / `command:"disable"`
+  - [ ] 持久化到 `~/.smart/hooks.json`
+
+- [ ] **Hook action 執行器**
+  - [ ] `type: "bash"` — 執行 shell command，支援 `{file}` 模板變數
+  - [ ] `type: "mcp_tool"` — 呼叫現有 MCP 工具
+
+- [ ] **範例 hook 腳本**
+  - [ ] 編輯 TypeScript 後自動 prettier
+  - [ ] Commit 前自動 lint
+
+### 階段 C — Production 強化（1 週）
+
+- [ ] Hook timeout（預設 10s），超時不阻斷主流程
+- [ ] 同類型 hook 最多 10 個限制
+- [ ] Hook 併發限制（最多 3 個並行）
+- [ ] Hook 執行日誌（時間、成功/失敗）
+- [ ] Defer 支援：pre-hook return `{ defer: true }` 暫停工具執行
+
+---
+
+## 🚀 Sprint 2：Auto Mode
+
+### 階段 A — 基礎模式切換（2-3 天）
+
+- [ ] **新增 `src/lib/auto-classifier.mjs`**
+  - [ ] `classifyTool(toolName, args)` → `{ action: 'allow'|'warn'|'block'|'gate', reason? }`
+  - [ ] 工具分類表（硬編碼）：read / write / other / dangerous
+  - [ ] `BLOCKED_FILES` 清單：`.zshenv`, `.bashrc`, `.npmrc`, `.pre-commit-config.yaml`
+
+- [ ] **修改 `src/server/index.mjs` — runtimeConfig**
+  - [ ] 新增 `mode: 'interactive' | 'auto' | 'bypass'`
+
+- [ ] **修改 `src/server/index.mjs` — invokeTool()**
+  - [ ] 在 `checkHighRiskPrerequisites()` 之後，若 `mode === 'auto'`，執行 `classifyTool()`
+  - [ ] `block` → 回傳錯誤訊息
+  - [ ] `warn` → 在 result 附註 `[Auto Mode] auto-approved`
+
+- [ ] **修改 `smart_config` 工具**
+  - [ ] `set:{autoMode:true/false}` 切換模式
+  - [ ] 持久化到 `~/.smart/config.json`
+
+- [ ] **測試**
+  - [ ] Auto mode 下 read 工具自動放行
+  - [ ] Auto mode 下 fast_apply 正常執行但附註
+  - [ ] Auto mode 下 blocked file 寫入被阻斷
+  - [ ] 切回 interactive 模式恢復正常
+
+### 階段 B — 分類器引擎（1 週）
+
+- [ ] 取代硬編碼分類，改為規則引擎
+- [ ] 動態分類：檢查 toolHistory 中最近 security finding
+- [ ] 支援 `$defaults` 擴充（類似 Claude Code）
+
+### 階段 C — 智慧安全檢查（2 週）
+
+- [ ] 非同步背景安全掃描（fire-and-forget，透過 hook pipeline）
+- [ ] 與 `smart_security` 整合
+- [ ] 掃描結果發現問題 → 通知用戶
+
+---
+
+## 📋 Reference
+
+- **Hooks 現有程式碼位置**：`src/server/index.mjs` L1469-1600（triggerImpactWarning, triggerLspDiagnostics, triggerHallucinationCheck）
+- **respond() 中的 _respondChain**：`src/server/index.mjs` L2442-2530
+- **門控機制**：`src/server/index.mjs` L975-1022（HIGH_RISK_PREREQUISITES）
+- **工具載入**：`src/server/loader.mjs`
+- **Concurrency Gate**：`src/lib/concurrency-gate.mjs`
+- **Safe Handler**：`src/lib/safe-handler.mjs`

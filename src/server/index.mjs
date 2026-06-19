@@ -1821,6 +1821,14 @@ function invokeTool(def, args, timeoutOverride, signal, opts = {}) {
       debugLog(`Auto-classifier: ${def.name} classified as ${level} (auto mode — read allowed)`);
     }
   }
+  // Phase 7c: Pre-hooks — run before tool execution, can block
+  const preResults = executePreHooks(def.name, args);
+  const blocked = preResults.find(r => r.block);
+  if (blocked) {
+    const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+    return emit({ ok: false, error: `Pre-hook "${blocked.hook}" blocked execution: ${blocked.message}` }, elapsedMs);
+  }
+
 
   // Direct handler path — no process spawn overhead
   // Inject context summary into args for handler-based tools
@@ -2054,6 +2062,14 @@ async function invokeToolAsync(def, args, timeoutOverride, signal, opts = {}) {
       debugLog(`Auto-classifier: ${def.name} classified as ${level} (auto mode — read allowed)`);
     }
   }
+  // Phase 7c: Pre-hooks — run before tool execution, can block (async path)
+  const preResults = executePreHooks(def.name, args);
+  const blocked = preResults.find(r => r.block);
+  if (blocked) {
+    const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+    return emit({ ok: false, error: `Pre-hook "${blocked.hook}" blocked execution: ${blocked.message}` }, elapsedMs);
+  }
+
 
   // Handler path — keep sync (fast, in-process)
   const contextArgs = contextManager.inject(def.name, args);
