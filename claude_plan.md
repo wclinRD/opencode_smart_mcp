@@ -193,9 +193,9 @@ const HOOKS = { preTool: [], postTool: [] };
 | **Auto Mode 階段 B**：分類器引擎 | ✅ 已實作 | `src/lib/auto-classifier.mjs` | addRule/removeRule/listRules、PRIORITY、extraCheck、$defaults |
 | **Auto Mode 階段 C**：智慧安全檢查 | ✅ 已實作 | hook-init + `security-scan.mjs` | 原 fire-and-forget，已遷移為內建 hooks |
 
-### 找到的 Gap（與原始規劃對照）
+### 找到的 Gap（目前已全部修復 ✅）
 
-1. **❌ 無 `~/.smart/config.json` 持久化**（規劃第 77 行）— `smart_config` 改動存記憶體，重啟丟失
-2. **❌ 無專屬 auto-mode 測試**（規劃第 79-83 行）— 四個測試情境均無獨立測試檔案
-3. **⚠️ mcp_tool hook action 為 stub**（規劃第 55-56 行）— `type:"mcp_tool"` handler 回傳 placeholder，未實際呼叫 MCP 工具
-4. **⚪ 範例 hook 腳本未實作**（規劃第 58-59 行）— prettier 自動格式化 / commit lint 等範例
+1. **✅ `~/.smart/config.json` 持久化** — 新增 `loadConfig()` / `saveConfig()`，啟動時自動載入，`smart_config` 改變後自動存檔
+2. **✅ 專屬 auto-mode 測試（40 項）** — `tests/auto-classifier.test.mjs`，涵蓋工具分類 / 封鎖檔案 / 安全上下文 / 規則管理 / summary / override
+3. **✅ mcp_tool hook action** — `setMcpToolInvoker` 注入，支援 JS handler 工具直接呼叫 + CLI 工具 spawnSync
+4. **✅ 範例 hook 腳本** — `examples/hooks/pre-format.sh` + `examples/hooks/pre-commit-lint.sh` + README

@@ -39,11 +39,12 @@
 
 - [x] **Hook action 執行器**
   - [x] `type: "bash"` — 執行 shell command，支援 `{file}` 模板變數
-  - [x] `type: "mcp_tool"` — 呼叫現有 MCP 工具（⚠️ 目前為 stub，回傳 placeholder 字串）
+  - [x] `type: "mcp_tool"` — 呼叫現有 MCP 工具 ✅（支援 JS handler 與 CLI spawn）
 
-- [ ] **範例 hook 腳本**（未實作 — 可選項目）
-  - [ ] 編輯 TypeScript 後自動 prettier
-  - [ ] Commit 前自動 lint
+- [x] **範例 hook 腳本** ✅（`examples/hooks/`）
+  - [x] 編輯 TypeScript 後自動 prettier（`examples/hooks/pre-format.sh`）
+  - [x] Commit 前自動 lint（`examples/hooks/pre-commit-lint.sh`）
+  - [x] 使用說明（`examples/hooks/README.md`）
 
 ### 階段 C — Production 強化 ✅（已實作）
 
