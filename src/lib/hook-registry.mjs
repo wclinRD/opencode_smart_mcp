@@ -23,7 +23,17 @@ const HOOKS = {
   postTool: [],  // { id, name, match, handler, enabled }
 };
 
+// Production constraints (Sprint 1C)
+const MAX_HOOKS_PER_TYPE = 10;
+const MAX_POST_HOOK_CONCURRENCY = 3;
+const POST_HOOK_TIMEOUT_MS = 10000;
+
 let _hookIdCounter = 0;
+
+// Execution log (Sprint 1C)
+let _executionLog = [];
+let _activePostHooks = 0;
+let _postHookQueue = [];
 
 // ---------------------------------------------------------------------------
 // Registry API
@@ -42,6 +52,9 @@ let _hookIdCounter = 0;
  * @returns {string} hook id
  */
 export function registerPreHook(hook) {
+  if (HOOKS.preTool.length >= MAX_HOOKS_PER_TYPE) {
+    throw new Error(`Max ${MAX_HOOKS_PER_TYPE} pre-tool hooks reached`);
+  }
   const id = `pre-${++_hookIdCounter}`;
   HOOKS.preTool.push({
     id,
@@ -67,6 +80,9 @@ export function registerPreHook(hook) {
  * @returns {string} hook id
  */
 export function registerPostHook(hook) {
+  if (HOOKS.postTool.length >= MAX_HOOKS_PER_TYPE) {
+    throw new Error(`Max ${MAX_HOOKS_PER_TYPE} post-tool hooks reached`);
+  }
   const id = `post-${++_hookIdCounter}`;
   HOOKS.postTool.push({
     id,
@@ -95,18 +111,26 @@ export function executePreHooks(toolName, args) {
   const results = [];
   for (const hook of HOOKS.preTool) {
     if (!hook.enabled) continue;
+    const start = Date.now();
     try {
       if (hook.match(toolName, args)) {
         const ctx = { toolName, args };
         const result = hook.handler(ctx);
+        const duration = Date.now() - start;
         if (result && result.block) {
           results.push({ hook: hook.name, block: true, message: result.message || 'Blocked by hook' });
+          _executionLog.push({ type: 'pre', hook: hook.name, duration, status: 'blocked', tool: toolName });
+        } else if (result && result.defer) {
+          results.push({ hook: hook.name, defer: true, message: result.message || '' });
+          _executionLog.push({ type: 'pre', hook: hook.name, duration, status: 'deferred', tool: toolName });
         } else {
           results.push({ hook: hook.name, block: false });
+          _executionLog.push({ type: 'pre', hook: hook.name, duration, status: 'ok', tool: toolName });
         }
       }
     } catch (err) {
-      // Hook should never crash the tool — log and continue
+      const duration = Date.now() - start;
+      _executionLog.push({ type: 'pre', hook: hook.name, duration, status: 'error', error: err.message, tool: toolName });
       results.push({ hook: hook.name, block: false, error: err.message });
     }
   }
@@ -125,20 +149,53 @@ export function executePostHooks(toolName, args, result) {
   const promises = [];
   for (const hook of HOOKS.postTool) {
     if (!hook.enabled) continue;
+    const start = Date.now();
     try {
       if (hook.match(toolName, args, result)) {
         const ctx = { toolName, args, result };
-        const p = Promise.resolve()
-          .then(() => hook.handler(ctx))
-          .catch(err => `[Hook ${hook.name} error: ${err.message}]`);
+        const p = executePostHookWithGate(hook, ctx, start);
         promises.push({ hook: hook.name, promise: p });
       }
     } catch (err) {
-      // Match error — shouldn't crash
+      _executionLog.push({ type: 'post', hook: hook.name, duration: Date.now() - start, status: 'match_error', error: err.message, tool: toolName });
       promises.push({ hook: hook.name, promise: Promise.resolve(`[Hook ${hook.name} match error: ${err.message}]`) });
     }
   }
   return promises;
+}
+
+/**
+ * Execute a post-hook with concurrency gating and timeout.
+ * Max MAX_POST_HOOK_CONCURRENCY simultaneous post-hooks.
+ * Post-hooks exceeding the limit are queued and run when a slot frees.
+ */
+async function executePostHookWithGate(hook, ctx, start) {
+  // Concurrency gate: wait if at capacity
+  if (_activePostHooks >= MAX_POST_HOOK_CONCURRENCY) {
+    await new Promise(resolve => { _postHookQueue.push(resolve); });
+  }
+  _activePostHooks++;
+  try {
+    const result = await Promise.race([
+      Promise.resolve().then(() => hook.handler(ctx)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('hook timeout')), POST_HOOK_TIMEOUT_MS)),
+    ]);
+    const duration = Date.now() - start;
+    const output = typeof result === 'string' ? result : `[Hook ${hook.name}: ok]`;
+    _executionLog.push({ type: 'post', hook: hook.name, duration, status: 'ok', tool: ctx.toolName });
+    return output;
+  } catch (err) {
+    const duration = Date.now() - start;
+    _executionLog.push({ type: 'post', hook: hook.name, duration, status: 'error', error: err.message, tool: ctx.toolName });
+    return `[Hook ${hook.name} error: ${err.message}]`;
+  } finally {
+    _activePostHooks--;
+    // Resolve next queued hook (if any)
+    if (_postHookQueue.length > 0) {
+      const next = _postHookQueue.shift();
+      next();
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +386,48 @@ export function saveUserHooksToFile(hooks) {
     writeFileSync(USER_HOOKS_PATH, JSON.stringify(hooks, null, 2), 'utf-8');
     return true;
   } catch { return false; }
+}
+
+// ---------------------------------------------------------------------------
+// Execution log (Sprint 1C)
+// ---------------------------------------------------------------------------
+
+/**
+ * Get the hook execution log (most recent first).
+ * @param {number} [limit=50] - max entries to return
+ * @returns {Array}
+ */
+export function getHookLog(limit = 50) {
+  return _executionLog.slice(-limit).reverse();
+}
+
+/**
+ * Get hook execution statistics.
+ * @returns {{ total: number, ok: number, error: number, blocked: number, deferred: number, activePostHooks: number, queuedPostHooks: number }}
+ */
+export function getHookStats() {
+  const stats = { total: 0, ok: 0, error: 0, blocked: 0, deferred: 0 };
+  for (const entry of _executionLog) {
+    stats.total++;
+    if (entry.status === 'ok') stats.ok++;
+    else if (entry.status === 'error' || entry.status === 'match_error') stats.error++;
+    else if (entry.status === 'blocked') stats.blocked++;
+    else if (entry.status === 'deferred') stats.deferred++;
+  }
+  return {
+    ...stats,
+    activePostHooks: _activePostHooks,
+    queuedPostHooks: _postHookQueue.length,
+    preToolCount: HOOKS.preTool.length,
+    postToolCount: HOOKS.postTool.length,
+  };
+}
+
+/**
+ * Reset the hook execution log.
+ */
+export function resetHookLog() {
+  _executionLog = [];
 }
 
 function buildUserMatch(matchDef) {
