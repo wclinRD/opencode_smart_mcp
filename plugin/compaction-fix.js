@@ -52,6 +52,34 @@ const plugin = {
     // ============================================================
     // Hook: event — 追蹤 todo 狀態 + compaction 事件
     // ============================================================
+    /**
+     * Gap 9 fix: 從 Smart MCP 共享檔案同步 todo 狀態到 plugin 記憶體。
+     * 確保 OpenCode compaction 時 plugin 持有的 todo 列表與 Smart MCP 一致。
+     */
+    async function syncMcpTodosToPluginState(sessionID) {
+      try {
+        const { readFileSync, existsSync } = await import("fs");
+        const { resolve } = await import("path");
+        const { homedir } = await import("os");
+        const todoFile = resolve(homedir(), ".smart", "todos.json");
+        if (existsSync(todoFile)) {
+          const raw = readFileSync(todoFile, "utf-8");
+          const mcpTodos = JSON.parse(raw);
+          if (Array.isArray(mcpTodos) && mcpTodos.length > 0) {
+            const state = getState(sessionID);
+            // 合併策略：MCP 的 todos 優先更新 state.todos
+            // (MCP 的 smart_todo 是 ground truth)
+            state.todos = mcpTodos.map(t => ({
+              id: t.id,
+              content: t.text,
+              status: t.status,
+            }));
+            log(`syncMcpTodos: synced ${mcpTodos.length} todos from Smart MCP`);
+          }
+        }
+      } catch { /* file may not exist, ignore */ }
+    }
+
     async function onEvent({ event }) {
       const sessionID =
         event.properties?.sessionID ||
@@ -65,6 +93,8 @@ const plugin = {
         const state = getState(sessionID);
         state.todos = event.properties?.todos || [];
         log(`todo.updated: ${state.todos.length} items`);
+        // Gap 9 fix: 同步 Smart MCP 共享檔案的 todo 狀態
+        await syncMcpTodosToPluginState(sessionID);
       }
 
       // 追蹤 compaction 事件

@@ -922,6 +922,31 @@ export class ContextManager {
         if (output.includes('no diagnostic') || output.includes('0 error')) { score += 2; reasons.push('lspClean'); }
       }
 
+      // === 規則 9: smart_grep 模式比對（Gap 7 fix） ===
+      // grep 搜尋模式若與 todo 關鍵字重疊，表示 LLM 正在調查該議題
+      if (toolSig.includes('grep') && args.pattern) {
+        const grepPattern = args.pattern.toLowerCase();
+        const todoKeywords = todoText.split(/\s+/).filter(w => w.length > 4);
+        for (const kw of todoKeywords) {
+          if (grepPattern.includes(kw)) {
+            score += 1; reasons.push('grepPattern:' + kw); break;
+          }
+        }
+        // 若 grep 的 fileTypes 或 include 與 todo 相關，加分
+        if (args.fileTypes && todoText.includes(args.fileTypes)) { score += 1; reasons.push('grepExt'); }
+        if (args.include && todoText.includes(args.include.replace(/\*/g, ''))) { score += 1; reasons.push('grepPath'); }
+      }
+
+      // === 規則 10: smart_context / smart_think 使用（Gap 7 fix） ===
+      // 使用上下文/思考工具本身不完成 todo，但表示 LLM 在該任務上積極工作
+      if (toolSig.includes('context') || toolSig.includes('think') || toolSig.includes('deep_think')) {
+        const argText = JSON.stringify(args).toLowerCase();
+        const todoKeywords = todoText.split(/\s+/).filter(w => w.length > 4);
+        for (const kw of todoKeywords) {
+          if (argText.includes(kw)) { score += 1; reasons.push('thinkTopic:' + kw); break; }
+        }
+      }
+
       // === 檔案層級證據偵測（helper） ===
       const hasFileEvidence = () => {
         const r = reasons.join(' ');

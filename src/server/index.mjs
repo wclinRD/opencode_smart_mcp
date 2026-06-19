@@ -1316,21 +1316,32 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
   if (_todoFollowUp.pendingIds.length > 0 && !result._pendingRecovery) {
     _todoFollowUp.toolCallsSince++;
     const BACKOFF_THRESHOLDS = [5, 15, 30, 50];
-    const idx = Math.min(_todoFollowUp.reInjectionCount, BACKOFF_THRESHOLDS.length - 1);
-    const threshold = BACKOFF_THRESHOLDS[idx];
-    if (_todoFollowUp.toolCallsSince >= threshold && _todoFollowUp.toolCallsSince > _todoFollowUp.lastReInjectAtCalls) {
-      _todoFollowUp.reInjectionCount++;
-      _todoFollowUp.lastReInjectAtCalls = _todoFollowUp.toolCallsSince;
-      debugLog(`Todo follow-up: ${_todoFollowUp.pendingIds.length} pending after ${_todoFollowUp.toolCallsSince} calls (re-injection #${_todoFollowUp.reInjectionCount}), re-injecting recovery`);
-      // 產生新的 recovery context 並注入
-      try {
-        contextManager.generateRecoveryContext();
-        const recoveryText = contextManager.formatRecoveryContext();
-        if (recoveryText) {
-          result._reInjectRecovery = recoveryText;
+    const MAX_REINJECTIONS = 4;
+    const MAX_TOOL_CALLS = 100;
+    // Gap 8 fix: 超過最大次數自動放棄
+    if (_todoFollowUp.reInjectionCount >= MAX_REINJECTIONS || _todoFollowUp.toolCallsSince >= MAX_TOOL_CALLS) {
+      debugLog(`Todo follow-up: giving up after ${_todoFollowUp.reInjectionCount} re-injections, ${_todoFollowUp.toolCallsSince} calls. Resetting.`);
+      _todoFollowUp.pendingIds = [];
+      _todoFollowUp.toolCallsSince = 0;
+      _todoFollowUp.reInjectionCount = 0;
+      _todoFollowUp.lastReInjectAtCalls = 0;
+    } else {
+      const idx = Math.min(_todoFollowUp.reInjectionCount, BACKOFF_THRESHOLDS.length - 1);
+      const threshold = BACKOFF_THRESHOLDS[idx];
+      if (_todoFollowUp.toolCallsSince >= threshold && _todoFollowUp.toolCallsSince > _todoFollowUp.lastReInjectAtCalls) {
+        _todoFollowUp.reInjectionCount++;
+        _todoFollowUp.lastReInjectAtCalls = _todoFollowUp.toolCallsSince;
+        debugLog(`Todo follow-up: ${_todoFollowUp.pendingIds.length} pending after ${_todoFollowUp.toolCallsSince} calls (re-injection #${_todoFollowUp.reInjectionCount}), re-injecting recovery`);
+        // 產生新的 recovery context 並注入
+        try {
+          contextManager.generateRecoveryContext();
+          const recoveryText = contextManager.formatRecoveryContext();
+          if (recoveryText) {
+            result._reInjectRecovery = recoveryText;
+          }
+        } catch (e) {
+          debugLog('Todo follow-up recovery gen error:', e.message);
         }
-      } catch (e) {
-        debugLog('Todo follow-up recovery gen error:', e.message);
       }
     }
   }
