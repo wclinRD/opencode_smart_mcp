@@ -104,10 +104,20 @@ Use \`smart_todo\` to manage task items that persist across sessions and survive
   - \`smart_todo({command:"done", id:1})\` — mark item completed
   - \`smart_todo({command:"list"})\` — show all items
 
-When context compaction occurs (budget >75%), the server auto-injects a **📋 [Recovery Context]** block
-into the response with pending todos, recent edits, and a ▶️ Continue directive.
-Always check for this block after compaction — it tells you what task to resume.
-Use \`smart_todo done\` to mark items complete as you finish them.
+**Server auto-completes todos** when tool output matches a pending todo (rules-based, no LLM cost).
+Todos are also auto-detected as completed after successful fast_apply/test/lsp calls.
+Only manually mark done if the auto-detection misses it.
+
+**After context compaction** (budget >75%), you will see a **📋 [Recovery Context]** block
+or a **🔄 [Compaction Recovery]** block. This is your mandatory task instruction:
+
+1. READ the pending todos and ▶️ Continue directive immediately
+2. RESUME the first pending todo — do NOT start new unrelated tasks
+3. If a todo was already finished, call \`smart_todo done\` to clear it
+4. If all todos are done, tell the user and ask for next direction
+
+⚠️ If you ignore the recovery context for 5+ tool calls, the server will force-reinject it.
+Wasted tool calls due to lost context will be flagged.
 
 ### Memory
 - **Auto-injected at session start**: project-aware memory hint appears as 💡 [Memory] finding
