@@ -881,19 +881,29 @@ export class ContextManager {
         if (output.includes('no diagnostic') || output.includes('0 error')) { score += 2; reasons.push('lspClean'); }
       }
 
-      // === High confidence match (threshold 4) ===
-      // 提高門檻從 3→4，減少誤判。需至少兩個獨立證據才能匹配。
-      if (score >= 4) {
+      // === 檔案層級證據偵測（helper） ===
+      const hasFileEvidence = () => {
+        const r = reasons.join(' ');
+        return r.includes('fileRef') || r.includes('applyFile') ||
+               r.includes('testFilePass') || r.includes('lspFile') ||
+               r.includes('subtask:');
+      };
+
+      // === High confidence match ===
+      // threshold 4: 至少兩個獨立證據
+      // 或 score >= 3 且有檔案層級證據（編輯同一檔案、測試含檔名等高度可信情境）
+      if (score >= 4 || (score >= 3 && hasFileEvidence())) {
         return { matched: true, todoId: todo.id, todoText: todo.text, score, reasons: reasons.join(',') };
       }
 
-      // === Borderline: score 2-3 → 回傳 borderline 資訊供呼叫方判斷 ===
-      // 目前無 LLM fallback，但保留資訊供後續擴展
+      // === Borderline: score >= 3 但無檔案證據 → 回傳資訊供 LLM fallback ===
+      if (score >= 3) {
+        return { matched: false, borderline: true, todoId: todo.id, todoText: todo.text, score, reasons: reasons.join(',') };
+      }
     }
 
-    // === Borderline: score >= 2 但 < 3 → 回傳 borderline 資訊供呼叫方判斷 ===
-    // 目前無 LLM fallback，僅保留供後續擴展
-    return { matched: false, todoId: null, todoText: null };
+    // === No match: score < 3 ===
+    return { matched: false, todoId: null, todoText: null, borderline: false };
   }
 
   /**

@@ -1254,6 +1254,14 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
           }
         }
       }
+    } else if (todoMatch.borderline) {
+      // Borderline: score >= 3 但無檔案層級證據 → 儲存 hint 供 respond() 注入
+      result._pendingBorderlineTodo = {
+        todoId: todoMatch.todoId,
+        todoText: todoMatch.todoText,
+        score: todoMatch.score,
+        reasons: todoMatch.reasons,
+      };
     }
   }
 
@@ -2337,6 +2345,17 @@ function respond(id, result, opts = {}) {
         }
       }
     } catch (e) { debugLog('respond._reInjectRecovery error:', e?.message); delete result._reInjectRecovery; }
+    try {
+      // Phase: Borderline todo auto-detect — inject hint for LLM to confirm
+      if (result._pendingBorderlineTodo) {
+        const bt = result._pendingBorderlineTodo;
+        delete result._pendingBorderlineTodo;
+        if (result?.content?.[0]?.type === 'text') {
+          result.content[0].text += `\n\n💡 [Todo Check] 你剛才是否完成了 todo #${bt.todoId}「${bt.todoText}」？（匹配分數 ${bt.score}，線索：${bt.reasons}）\n如果是，請用 \`smart_todo done\` 標記完成。若非此任務，請忽略。`;
+          debugLog(`Todo borderline hint: #${bt.todoId} score=${bt.score} reasons=${bt.reasons}`);
+        }
+      }
+    } catch (e) { debugLog('respond._pendingBorderlineTodo error:', e?.message); delete result._pendingBorderlineTodo; }
     writeMsg({ jsonrpc: '2.0', id, result });
   });
 }
@@ -2704,6 +2723,7 @@ function handleRequest(req) {
                 if (cr._pendingImpact) resp1._pendingImpact = cr._pendingImpact;
                 if (cr._pendingLsp) resp1._pendingLsp = cr._pendingLsp;
                 if (cr._pendingHallucination) resp1._pendingHallucination = cr._pendingHallucination;
+                if (cr._pendingBorderlineTodo) resp1._pendingBorderlineTodo = cr._pendingBorderlineTodo;
                 if (cr._pendingRecovery) resp1._pendingRecovery = cr._pendingRecovery;
                 if (cr._reInjectRecovery) resp1._reInjectRecovery = cr._reInjectRecovery;
                 respond(id, resp1);
