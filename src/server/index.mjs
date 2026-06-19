@@ -1215,7 +1215,8 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
       _todoFollowUp.pendingAt = Date.now();
       _todoFollowUp.pendingText = recoveryText;
       _todoFollowUp.toolCallsSince = 0;
-      _todoFollowUp.reInjected = false;
+      _todoFollowUp.reInjectionCount = 0;
+      _todoFollowUp.lastReInjectAtCalls = 0;
       try {
         const pendingTodos = contextManager.listTodos().filter(t => t.status === 'pending' || t.status === 'in_progress');
         _todoFollowUp.pendingIds = pendingTodos.map(t => t.id);
@@ -1249,7 +1250,8 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
           _todoFollowUp.pendingIds = _todoFollowUp.pendingIds.filter(id => id !== todoMatch.todoId);
           if (_todoFollowUp.pendingIds.length === 0) {
             _todoFollowUp.toolCallsSince = 0;
-            _todoFollowUp.reInjected = false;
+            _todoFollowUp.reInjectionCount = 0;
+            _todoFollowUp.lastReInjectAtCalls = 0;
             debugLog('Todo follow-up: all pending todos completed, monitoring reset');
           }
         }
@@ -1265,13 +1267,17 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
     }
   }
 
-  // Phase 33b: Todo follow-up monitoring — 檢查 LLM 是否在 compact 後繼續待辦事項
-  // 若超過 5 次工具呼叫仍未完成 pending todo，自動 re-inject recovery hint
-  if (_todoFollowUp.pendingIds.length > 0 && !_todoFollowUp.reInjected) {
+  // Phase 33b: Todo follow-up monitoring — 指數退避 re-inject
+  // 只在 pendingIds 有值且尚未全部完成時觸發
+  if (_todoFollowUp.pendingIds.length > 0) {
     _todoFollowUp.toolCallsSince++;
-    if (_todoFollowUp.toolCallsSince > 5) {
-      _todoFollowUp.reInjected = true;
-      debugLog(`Todo follow-up: ${_todoFollowUp.pendingIds.length} pending after ${_todoFollowUp.toolCallsSince} calls, re-injecting recovery`);
+    const BACKOFF_THRESHOLDS = [5, 15, 30, 50];
+    const idx = Math.min(_todoFollowUp.reInjectionCount, BACKOFF_THRESHOLDS.length - 1);
+    const threshold = BACKOFF_THRESHOLDS[idx];
+    if (_todoFollowUp.toolCallsSince >= threshold && _todoFollowUp.toolCallsSince > _todoFollowUp.lastReInjectAtCalls) {
+      _todoFollowUp.reInjectionCount++;
+      _todoFollowUp.lastReInjectAtCalls = _todoFollowUp.toolCallsSince;
+      debugLog(`Todo follow-up: ${_todoFollowUp.pendingIds.length} pending after ${_todoFollowUp.toolCallsSince} calls (re-injection #${_todoFollowUp.reInjectionCount}), re-injecting recovery`);
       // 產生新的 recovery context 並注入
       try {
         contextManager.generateRecoveryContext();
@@ -2078,7 +2084,8 @@ let _todoFollowUp = {
   pendingIds: [],        // 當時的 pending todo IDs
   pendingText: '',       // pending todo 文字摘要
   toolCallsSince: 0,     // 自從 recovery 後的工具呼叫次數
-  reInjected: false,     // 是否已 re-inject（避免無限重複）
+  reInjectionCount: 0,   // 累計 re-inject 次數（指數退避用，取代一次性 bool）
+  lastReInjectAtCalls: 0,// 上次 re-inject 時的 toolCallsSince
 };
 
 /**
@@ -2145,7 +2152,8 @@ function autoManageContext(budget) {
       _todoFollowUp.pendingAt = now;
       _todoFollowUp.pendingText = recoveryText || '';
       _todoFollowUp.toolCallsSince = 0;
-      _todoFollowUp.reInjected = false;
+      _todoFollowUp.reInjectionCount = 0;
+      _todoFollowUp.lastReInjectAtCalls = 0;
       try {
         const pendingTodos = contextManager.listTodos().filter(t => t.status === 'pending' || t.status === 'in_progress');
         _todoFollowUp.pendingIds = pendingTodos.map(t => t.id);
@@ -2183,7 +2191,8 @@ function autoManageContext(budget) {
         _todoFollowUp.pendingAt = now;
         _todoFollowUp.pendingText = recoveryText || '';
         _todoFollowUp.toolCallsSince = 0;
-        _todoFollowUp.reInjected = false;
+        _todoFollowUp.reInjectionCount = 0;
+        _todoFollowUp.lastReInjectAtCalls = 0;
         try {
           const pendingTodos = contextManager.listTodos().filter(t => t.status === 'pending' || t.status === 'in_progress');
           _todoFollowUp.pendingIds = pendingTodos.map(t => t.id);
@@ -2361,14 +2370,21 @@ function respond(id, result, opts = {}) {
       }
     } catch (e) { debugLog('respond._pendingRecovery error:', e?.message); delete result._pendingRecovery; }
     try {
-      // Phase 33b: Todo follow-up re-injection
+      // Phase 33b: Todo follow-up re-injection (指數退避)
       if (result._reInjectRecovery) {
         const reInjectText = result._reInjectRecovery;
         delete result._reInjectRecovery;
         if (reInjectText && result?.content?.[0]?.type === 'text') {
           const wastedCalls = _todoFollowUp.toolCallsSince || 5;
-          result.content[0].text += `\n\n---\n🚨 [Todo Stuck] 你在 ${wastedCalls} 次工具呼叫後仍未完成待辦事項。請暫停當前操作：\n\n` + reInjectText + `\n\n⛔ STOP: 暫停所有工具呼叫，先閱讀上方 [Recovery Context]。\n✅ 若已完成請用 smart_todo done 標記，然後告知使用者。\n---`;
-          debugLog(`Todo follow-up: re-injected recovery after ${wastedCalls} stale calls`);
+          const count = _todoFollowUp.reInjectionCount || 1;
+          const HEADER = count <= 1
+            ? `🚨 [Todo Stuck #${count}] 你在 ${wastedCalls} 次工具呼叫後仍未完成待辦事項。請暫停當前操作：`
+            : `🚨 [Todo Stuck #${count}] 第 ${count} 次提醒！你已偏離任務 ${wastedCalls} 次呼叫。立即回到正軌：`;
+          const FOOTER = count <= 1
+            ? `\n⛔ STOP: 暫停所有工具呼叫，先閱讀上方 [Recovery Context]。\n✅ 若已完成請用 smart_todo done 標記，然後告知使用者。`
+            : `\n⛔ STOP #${count}: 這是你第 ${count} 次收到提醒。請立即回到待辦事項。\n✅ 已完成？→ smart_todo done。不再提醒？→ smart_todo cancel。`;
+          result.content[0].text += `\n\n---\n${HEADER}\n\n` + reInjectText + FOOTER + `\n---`;
+          debugLog(`Todo follow-up: re-injected recovery #${count} after ${wastedCalls} stale calls`);
         }
       }
     } catch (e) { debugLog('respond._reInjectRecovery error:', e?.message); delete result._reInjectRecovery; }
