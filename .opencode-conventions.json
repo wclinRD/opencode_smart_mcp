@@ -3,19 +3,19 @@
     "naming": {
       "file": {
         "snake_case": 24,
-        "camelCase": 108,
+        "camelCase": 109,
         "kebabCase": 118,
-        "other": 88
+        "other": 90
       },
       "variable": {
-        "camelCase": 8726,
-        "PascalCase": 44,
-        "other": 66,
-        "UPPER_CASE": 315,
+        "camelCase": 8972,
+        "PascalCase": 47,
+        "other": 67,
+        "UPPER_CASE": 325,
         "snake_case": 1
       },
       "function": {
-        "camelCase": 1343,
+        "camelCase": 1366,
         "other": 1,
         "PascalCase": 3
       },
@@ -27,7 +27,7 @@
     },
     "imports": {
       "commonjs": 7,
-      "esm": 243,
+      "esm": 246,
       "mixed": true
     },
     "testing": {
@@ -47,9 +47,9 @@
     ],
     "exports": {
       "default": 92,
-      "named": 330
+      "named": 332
     }
   },
   "preferences": {},
-  "lastAnalyzed": "2026-06-15T21:53:17.310Z"
+  "lastAnalyzed": "2026-06-19T10:45:14.270Z"
 }

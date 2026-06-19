@@ -101,7 +101,7 @@ export function add(a, b) {
     });
 
     assert.ok(result.content, 'Should have content');
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(data.fixApplied, 'Fix should be applied');
     assert.ok(data.allPassed, 'All verification should pass');
     assert.ok(data.ok, 'Result should be ok');
@@ -125,7 +125,7 @@ replacement
       timeout: 10
     });
 
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(!data.fixApplied, 'Fix should not be applied');
     assert.ok(data.errors.length > 0, 'Should have errors');
   });
@@ -164,7 +164,7 @@ export function add(a, b) {
       timeout: 10
     });
 
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(data.fixApplied, 'Fix should be applied');
     assert.ok(!data.allPassed, 'Verification should fail');
     assert.ok(data.errors.length > 0, 'Should have errors');
@@ -205,7 +205,7 @@ export function multiply(a, b) {
       timeout: 10
     });
 
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(data.fixApplied, 'Fix should be applied');
     // test should pass, lint/security may be skipped
     assert.ok(data.verification.test !== undefined, 'Should have test result');
@@ -238,7 +238,7 @@ export function multiply(a, b) {
       timeout: 5
     });
 
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(!data.fixApplied || !data.allPassed, 'Should fail gracefully');
   });
 
@@ -266,7 +266,7 @@ export function multiply(a, b) {
       timeout: 10
     });
 
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     // May or may not apply depending on patch availability
     assert.ok(data.verification !== undefined, 'Should have verification results');
   });
@@ -306,7 +306,7 @@ export function add(a, b) {
       timeout: 10
     });
 
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(data.fixApplied, 'Fix should be applied');
     assert.ok(data.allPassed, 'Should pass with no verification steps');
   });

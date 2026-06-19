@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-15T21:52:30.075Z",
+  "generatedAt": "2026-06-19T10:49:50.842Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -819,11 +819,11 @@
           },
           "dryRun": {
             "type": "boolean",
-            "description": "Preview only — show changes without applying (default: true)"
+            "description": "Preview only — show changes without applying. Without this flag or apply:true, safe single-file edits auto-apply immediately."
           },
           "apply": {
             "type": "boolean",
-            "description": "Actually apply changes (default: false, explicit opt-in for 3+ files)"
+            "description": "Actually apply changes (required for 3+ files). Without this flag or dryRun:true, safe single-file edits auto-apply immediately."
           },
           "output": {
             "type": "string",

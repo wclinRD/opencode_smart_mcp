@@ -25,7 +25,7 @@ describe('Workflow Templates', () => {
   it('should list all workflow templates', async () => {
     const result = await plugin.handler({ command: 'list' });
     assert.ok(result.content, 'Should have content');
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(data.ok, 'Should be ok');
     assert.ok(data.workflows.length >= 7, `Expected at least 7 workflows, got ${data.workflows.length}`);
 
@@ -42,7 +42,7 @@ describe('Workflow Templates', () => {
 
   it('should include steps and descriptions in list', async () => {
     const result = await plugin.handler({ command: 'list' });
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
 
     const bugFix = data.workflows.find(w => w.name === 'bug-fix');
     assert.ok(bugFix, 'Should find bug-fix workflow');
@@ -59,7 +59,7 @@ describe('Workflow Templates', () => {
       context: { error: 'TypeError: Cannot read property of undefined' }
     });
 
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(data.ok, 'Should be ok');
     assert.equal(data.workflow, 'bug-fix');
     assert.ok(data.steps.length >= 4, 'Should have steps');
@@ -77,7 +77,7 @@ describe('Workflow Templates', () => {
       context: { path: '/tmp/test.pdf', topic: 'machine learning' }
     });
 
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(data.ok, 'Should be ok');
 
     // First step should have the path from context
@@ -92,8 +92,8 @@ describe('Workflow Templates', () => {
       name: 'nonexistent-workflow'
     });
 
-    assert.ok(result.isError, 'Should be error');
-    const data = JSON.parse(result.content[0].text);
+    assert.ok(!result.ok, 'Should be error');
+    const data = JSON.parse(result.output);
     assert.ok(!data.ok, 'Should not be ok');
     assert.ok(data.available, 'Should list available workflows');
     assert.ok(data.available.includes('bug-fix'), 'Should mention bug-fix');
@@ -101,8 +101,8 @@ describe('Workflow Templates', () => {
 
   it('should error on missing name for run command', async () => {
     const result = await plugin.handler({ command: 'run' });
-    assert.ok(result.isError, 'Should be error');
-    const data = JSON.parse(result.content[0].text);
+    assert.ok(!result.ok, 'Should be error');
+    const data = JSON.parse(result.output);
     assert.ok(!data.ok, 'Should not be ok');
   });
 
@@ -110,7 +110,7 @@ describe('Workflow Templates', () => {
 
   it('should have valid structure for all workflows', async () => {
     const result = await plugin.handler({ command: 'list' });
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
 
     for (const wf of data.workflows) {
       assert.ok(wf.name, `Workflow ${wf.name} should have name`);
@@ -124,7 +124,7 @@ describe('Workflow Templates', () => {
 
   it('should error on unknown command', async () => {
     const result = await plugin.handler({ command: 'unknown' });
-    assert.ok(result.isError, 'Should be error');
+    assert.ok(!result.ok, 'Should be error');
   });
 
   // --- Each workflow can be run ---
@@ -139,7 +139,7 @@ describe('Workflow Templates', () => {
         context: { error: 'test error', goal: 'test goal', path: '/tmp/test.pdf', files: ['src/test.js'] }
       });
 
-      const data = JSON.parse(result.content[0].text);
+      const data = JSON.parse(result.output);
       assert.ok(data.ok, `${name} should be ok`);
       assert.equal(data.workflow, name);
       assert.ok(data.steps.length > 0, `${name} should have steps`);

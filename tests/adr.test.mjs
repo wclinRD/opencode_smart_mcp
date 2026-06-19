@@ -157,7 +157,7 @@ describe('ADR — Architecture Decision Records', () => {
       alternatives: ['Option 1', 'Option 2']
     });
 
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(data.ok, 'Should be ok');
     assert.ok(data.id > 0, 'Should have ID');
   });
@@ -170,7 +170,7 @@ describe('ADR — Architecture Decision Records', () => {
       query: 'plugin'
     });
 
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(data.ok, 'Should be ok');
     assert.ok(data.count > 0, 'Should find results');
   });
@@ -179,7 +179,7 @@ describe('ADR — Architecture Decision Records', () => {
     const plugin = (await import('../src/plugins/standard/adr.mjs')).default;
 
     const result = await plugin.handler({ command: 'list' });
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(data.ok, 'Should be ok');
     assert.ok(data.count > 0, 'Should have results');
   });
@@ -188,13 +188,13 @@ describe('ADR — Architecture Decision Records', () => {
     const plugin = (await import('../src/plugins/standard/adr.mjs')).default;
 
     const result = await plugin.handler({ command: 'record' });
-    assert.ok(result.isError, 'Should be error');
+    assert.ok(!result.ok, 'Should be error');
   });
 
   it('should error on unknown command', async () => {
     const plugin = (await import('../src/plugins/standard/adr.mjs')).default;
 
     const result = await plugin.handler({ command: 'unknown' });
-    assert.ok(result.isError, 'Should be error');
+    assert.ok(!result.ok, 'Should be error');
   });
 });
