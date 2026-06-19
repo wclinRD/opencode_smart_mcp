@@ -1,46 +1,35 @@
-// auto-classifier.mjs — Tool safety classification for Auto Mode
+// auto-classifier.mjs — Rule-based tool safety classification for Auto Mode
 //
-// Determines whether a tool call should be auto-allowed, warned, or blocked
-// based on tool type, target files, and session context.
+// Sprint 2B upgrade: replaces hardcoded Sets with a priority-ordered rule engine.
+// Supports exact-match rules, glob-pattern rules, $defaults category fallbacks,
+// dynamic security-context checks, and runtime rule add/remove.
 //
-// Classification levels:
+// Classification actions:
 //   allow  → execute without LLM notification
 //   warn   → execute but annotate result "[Auto Mode] auto-approved"
 //   block  → reject with explanation
 //   gate   → reject, requires interactive mode (security/prerequisite gates)
 
 // ---------------------------------------------------------------------------
-// Read-only tools — always safe to auto-approve
+// Rule engine
 // ---------------------------------------------------------------------------
-const READ_TOOLS = new Set([
-  'smart_read', 'smart_grep', 'smart_glob',
-  'smart_lsp', 'smart_context', 'smart_rules',
-  'smart_exa_search', 'smart_exa_crawl', 'smart_github_search',
-  'smart_compact', 'smart_hallucination_check',
-  'smart_think', 'smart_deep_think',
-  'smart_learn', 'smart_codebase_index',
-  'smart_security',   // read-only scan
-]);
 
-// ---------------------------------------------------------------------------
-// Non-destructive tools — also safe
-// ---------------------------------------------------------------------------
-const NEUTRAL_TOOLS = new Set([
-  'smart_run', 'smart_academic_search', 'smart_academic_review',
-  'smart_docx_generate', 'smart_config', 'smart_smart_config',
-  'smart_smart_compact',
-]);
+let _ruleIdCounter = 0;
+const _rules = [];
 
-// ---------------------------------------------------------------------------
-// Write-type tools — auto-approve but annotate
-// ---------------------------------------------------------------------------
-const WRITE_TOOLS = new Set([
-  'smart_fast_apply',
-]);
+// Priority levels (lower = higher priority)
+const PRIORITY = {
+  BLOCKED_FILE:    50,   // Protected file check — highest
+  EXACT_TOOL:     100,   // Exact tool name match
+  PATTERN_TOOL:   200,   // Glob/wildcard tool name match
+  CATEGORY_DEFAULT: 500, // $defaults — fallback by category
+  UNKNOWN:        999,   // Unknown tool fallback
+};
 
 // ---------------------------------------------------------------------------
 // Protected file patterns — NEVER auto-approve writes to these
 // ---------------------------------------------------------------------------
+
 const BLOCKED_FILE_PATTERNS = [
   '.zshenv', '.zshrc', '.bashrc', '.bash_profile', '.bash_login',
   '.profile', '.login',
@@ -50,10 +39,6 @@ const BLOCKED_FILE_PATTERNS = [
   '/etc/', '/usr/local/etc/',
   '~/.config/git/',
 ];
-
-// ---------------------------------------------------------------------------
-// Session-aware dangerous patterns
-// ---------------------------------------------------------------------------
 
 /**
  * Check if a file path matches any blocked pattern.
@@ -72,67 +57,140 @@ function isBlockedFile(filePath) {
 function extractTargetFiles(args) {
   const files = [];
   if (!args) return files;
-
-  // blocks format
   if (Array.isArray(args.blocks)) {
-    for (const b of args.blocks) {
-      if (b.file) files.push(b.file);
-    }
+    for (const b of args.blocks) { if (b.file) files.push(b.file); }
   }
-  // changes format (hashline)
   if (Array.isArray(args.changes)) {
-    for (const c of args.changes) {
-      if (c.file) files.push(c.file);
-    }
+    for (const c of args.changes) { if (c.file) files.push(c.file); }
   }
-  // whole format
-  if (args.whole && args.whole.file) {
-    files.push(args.whole.file);
-  }
-  // flat syntax
+  if (args.whole && args.whole.file) files.push(args.whole.file);
   if (args.file) files.push(args.file);
-
   return files;
 }
 
 // ---------------------------------------------------------------------------
-// Main classification API
+// Rule API
 // ---------------------------------------------------------------------------
 
 /**
- * Classify a tool call for auto-mode decision.
- * @param {string} toolName - full tool name (e.g. "smart_fast_apply")
- * @param {object} args - tool arguments
- * @param {object} [context] - optional session context
- * @param {Array} [context.toolHistory] - recent tool history
- * @returns {{ action: 'allow'|'warn'|'block'|'gate', reason?: string }}
+ * Add a classification rule.
+ * Rules are evaluated in priority order (lower = first).
+ *
+ * @param {object} rule
+ * @param {string} rule.name - unique rule name
+ * @param {number} rule.priority - priority (lower = higher). Prefer PRIORITY constants.
+ * @param {'allow'|'warn'|'block'|'gate'} rule.action - classification outcome
+ * @param {function} rule.match - (toolName, args, context) => boolean | null
+ * @param {string} [rule.reason] - explanation for block/gate actions
+ * @param {boolean} [rule.builtin=false] - whether this is a built-in rule
+ * @param {function} [rule.extraCheck] - optional (toolName, args, context) => { block?: bool, reason?: string } | null
+ * @returns {string} rule id
  */
-export function classifyTool(toolName, args, context) {
-  // 1. Read tools → always allow
-  if (READ_TOOLS.has(toolName)) {
-    return { action: 'allow' };
-  }
+export function addRule(rule) {
+  const id = `rule-${++_ruleIdCounter}`;
+  _rules.push({
+    id,
+    name: rule.name || id,
+    priority: rule.priority ?? PRIORITY.UNKNOWN,
+    action: rule.action || 'gate',
+    match: rule.match || (() => false),
+    reason: rule.reason || '',
+    builtin: rule.builtin === true,
+    extraCheck: rule.extraCheck || null,
+  });
+  // Sort by priority ascending
+  _rules.sort((a, b) => a.priority - b.priority);
+  return id;
+}
 
-  // 2. Neutral tools → always allow
-  if (NEUTRAL_TOOLS.has(toolName)) {
-    return { action: 'allow' };
+/**
+ * Remove a rule by id or name.
+ * @param {string} idOrName
+ * @returns {boolean} whether a rule was removed
+ */
+export function removeRule(idOrName) {
+  const idx = _rules.findIndex(r => r.id === idOrName || r.name === idOrName);
+  if (idx >= 0) {
+    _rules.splice(idx, 1);
+    return true;
   }
+  return false;
+}
 
-  // 3. Write tools → check target files
-  if (WRITE_TOOLS.has(toolName)) {
+/**
+ * List all registered rules.
+ */
+export function listRules() {
+  return _rules.map(r => ({
+    id: r.id,
+    name: r.name,
+    priority: r.priority,
+    action: r.action,
+    reason: r.reason,
+    builtin: r.builtin,
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Built-in rules
+// ---------------------------------------------------------------------------
+
+// $defaults: read category — catch-all for read-like tools
+addRule({
+  name: '$defaults:read',
+  priority: PRIORITY.CATEGORY_DEFAULT,
+  action: 'allow',
+  builtin: true,
+  match: (toolName) =>
+    toolName.startsWith('smart_read') ||
+    toolName.startsWith('smart_grep') ||
+    toolName.startsWith('smart_glob') ||
+    toolName.startsWith('smart_exa_') ||
+    toolName === 'smart_lsp' ||
+    toolName === 'smart_context' ||
+    toolName === 'smart_rules' ||
+    toolName === 'smart_compact' ||
+    toolName === 'smart_think' ||
+    toolName === 'smart_deep_think' ||
+    toolName === 'smart_learn' ||
+    toolName === 'smart_codebase_index' ||
+    toolName === 'smart_security' ||
+    toolName === 'smart_hallucination_check',
+});
+
+// $defaults: neutral category — non-destructive utilities
+addRule({
+  name: '$defaults:neutral',
+  priority: PRIORITY.CATEGORY_DEFAULT,
+  action: 'allow',
+  builtin: true,
+  match: (toolName) =>
+    toolName === 'smart_run' ||
+    toolName === 'smart_config' ||
+    toolName === 'smart_smart_config' ||
+    toolName === 'smart_smart_compact' ||
+    toolName === 'smart_hook' ||
+    toolName.startsWith('smart_academic_') ||
+    toolName === 'smart_docx_generate',
+});
+
+// $defaults: write category — tools that modify files
+addRule({
+  name: '$defaults:write',
+  priority: PRIORITY.CATEGORY_DEFAULT,
+  action: 'warn',
+  reason: 'auto-approved',
+  builtin: true,
+  match: (toolName) => toolName === 'smart_fast_apply',
+  extraCheck: (toolName, args, context) => {
     const targetFiles = extractTargetFiles(args);
-
     // Blocked file check
     for (const f of targetFiles) {
       if (isBlockedFile(f)) {
-        return {
-          action: 'block',
-          reason: `Protected file: ${f}. Switch to interactive mode to edit this file.`,
-        };
+        return { block: true, reason: `Protected file: ${f}. Switch to interactive mode to edit this file.` };
       }
     }
-
-    // Security context check: if recent security scan found issues, gate
+    // Security context check
     if (context && context.toolHistory) {
       const recentScans = context.toolHistory
         .filter(h => h.tool === 'smart_security' && h.ok)
@@ -144,52 +202,98 @@ export function classifyTool(toolName, args, context) {
           new Date(h.timestamp).getTime() > latestScan
         );
         if (!hasBeamAfter) {
-          return {
-            action: 'gate',
-            reason: 'Security findings active — use beam search analysis before auto-apply. Switch to interactive mode or run smart_think({mode:"beam", ...}) first.',
-          };
+          return { block: true, reason: 'Security findings active — use beam search analysis before auto-apply. Switch to interactive mode or run smart_think({mode:"beam", ...}) first.' };
         }
       }
     }
+    return null;
+  },
+});
 
-    // Safe write → auto-approve with annotation
-    return { action: 'warn', reason: 'auto-approved' };
-  }
+// $defaults: unknown tools — gate
+addRule({
+  name: '$defaults:unknown',
+  priority: PRIORITY.UNKNOWN,
+  action: 'gate',
+  builtin: true,
+  match: () => true, // catch-all
+  reason: 'Tool not classified for auto mode',
+});
 
-  // 4. Unknown tools → gate (require interactive)
-  return {
-    action: 'gate',
-    reason: `Tool ${toolName} not classified for auto mode. Switch to interactive mode.`,
-  };
-}
+// ---------------------------------------------------------------------------
+// Main classification API
+// ---------------------------------------------------------------------------
 
 /**
- * Get human-readable tool summary for status display.
+ * Classify a tool call for auto-mode decision.
+ * Iterates rules in priority order, returns first match.
+ * @param {string} toolName - full tool name
+ * @param {object} args - tool arguments
+ * @param {object} [context] - optional session context
+ * @returns {{ action: 'allow'|'warn'|'block'|'gate', reason?: string }}
+ */
+export function classifyTool(toolName, args, context) {
+  for (const rule of _rules) {
+    try {
+      if (!rule.match(toolName, args, context)) continue;
+
+      // Run extraCheck for this rule (e.g. blocked file, security context)
+      if (rule.extraCheck) {
+        const extra = rule.extraCheck(toolName, args, context);
+        if (extra && extra.block) {
+          return { action: 'block', reason: extra.reason };
+        }
+      }
+
+      return { action: rule.action, reason: rule.reason || undefined };
+    } catch {
+      // Rule match error — skip to next rule
+      continue;
+    }
+  }
+  // Fallback (shouldn't reach here due to catch-all)
+  return { action: 'gate', reason: `Tool ${toolName} not classified for auto mode.` };
+}
+
+// ---------------------------------------------------------------------------
+// Management utilities
+// ---------------------------------------------------------------------------
+
+/**
+ * Get human-readable classification summary.
  */
 export function getClassificationSummary() {
-  return {
-    read: [...READ_TOOLS].sort(),
-    neutral: [...NEUTRAL_TOOLS].sort(),
-    write: [...WRITE_TOOLS].sort(),
-    blockedPatterns: BLOCKED_FILE_PATTERNS,
-  };
+  const summary = { allow: [], warn: [], block: [], gate: [], blockedPatterns: BLOCKED_FILE_PATTERNS };
+  for (const rule of _rules) {
+    if (!summary[rule.action]) summary[rule.action] = [];
+    summary[rule.action].push(rule.name);
+  }
+  return summary;
 }
 
 /**
- * Override tool classification at runtime.
+ * Override a tool's classification at runtime.
+ * Adds a high-priority rule before the $defaults.
  * Returns true if override was applied.
  */
 export function setToolClassification(toolName, category) {
-  // Remove from all sets first
-  READ_TOOLS.delete(toolName);
-  NEUTRAL_TOOLS.delete(toolName);
-  WRITE_TOOLS.delete(toolName);
+  const actionMap = { read: 'allow', neutral: 'allow', write: 'warn' };
+  const action = actionMap[category];
+  if (!action) return false;
 
-  // Add to target set
-  switch (category) {
-    case 'read': READ_TOOLS.add(toolName); return true;
-    case 'neutral': NEUTRAL_TOOLS.add(toolName); return true;
-    case 'write': WRITE_TOOLS.add(toolName); return true;
-    default: return false;
-  }
+  addRule({
+    name: `override:${toolName}`,
+    priority: PRIORITY.EXACT_TOOL,
+    action,
+    builtin: false,
+    match: (name) => name === toolName,
+  });
+  return true;
+}
+
+/**
+ * Remove a runtime override for a tool.
+ */
+export function removeToolClassification(toolName) {
+  return removeRule(`override:${toolName}`);
 }

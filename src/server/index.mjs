@@ -1810,16 +1810,18 @@ function invokeTool(def, args, timeoutOverride, signal, opts = {}) {
   // Phase 7b: Auto-Classifier — determine tool security level
   // In 'auto' mode, gates block-level tools behind user confirmation
   if (runtimeConfig.mode === 'auto') {
-    const level = classifyTool(def.name, args);
+    const ctx = ensureContext() || {};
+    const classification = classifyTool(def.name, args, ctx);
+    const level = classification.action;
     if (level === 'block') {
       const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
-      return emit({ ok: false, error: `Tool "${def.name}" blocked by auto-classifier (level: ${level}). Switch to interactive mode (smart_config({set:{mode:'interactive'}})) to execute manually.` }, elapsedMs);
+      return emit({ ok: false, error: classification.reason || `Tool "${def.name}" blocked by auto-classifier. Switch to interactive mode (smart_config({set:{mode:'interactive'}})) to execute manually.` }, elapsedMs);
     }
-    if (level === 'write' || level === 'gate') {
-      debugLog(`Auto-classifier: ${def.name} classified as ${level} (auto mode — allowing)`);
+    if (level === 'warn') {
+      debugLog(`Auto-classifier: ${def.name} classified as ${level} — auto-approved`);
     }
-    if (level === 'read') {
-      debugLog(`Auto-classifier: ${def.name} classified as ${level} (auto mode — read allowed)`);
+    if (level === 'allow') {
+      debugLog(`Auto-classifier: ${def.name} classified as ${level} — auto-allowed`);
     }
   }
   // Phase 7c: Pre-hooks — run before tool execution, can block
@@ -2051,16 +2053,18 @@ async function invokeToolAsync(def, args, timeoutOverride, signal, opts = {}) {
 
   // Phase 7b: Auto-Classifier — async path
   if (runtimeConfig.mode === 'auto') {
-    const level = classifyTool(def.name, args);
+    const ctx = ensureContext() || {};
+    const classification = classifyTool(def.name, args, ctx);
+    const level = classification.action;
     if (level === 'block') {
       const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
-      return emit({ ok: false, error: `Tool "${def.name}" blocked by auto-classifier (level: ${level}). Switch to interactive mode (smart_config({set:{mode:'interactive'}})) to execute manually.` }, elapsedMs);
+      return emit({ ok: false, error: classification.reason || `Tool "${def.name}" blocked by auto-classifier. Switch to interactive mode (smart_config({set:{mode:'interactive'}})) to execute manually.` }, elapsedMs);
     }
-    if (level === 'write' || level === 'gate') {
-      debugLog(`Auto-classifier: ${def.name} classified as ${level} (auto mode — allowing)`);
+    if (level === 'warn') {
+      debugLog(`Auto-classifier: ${def.name} classified as ${level} — auto-approved`);
     }
-    if (level === 'read') {
-      debugLog(`Auto-classifier: ${def.name} classified as ${level} (auto mode — read allowed)`);
+    if (level === 'allow') {
+      debugLog(`Auto-classifier: ${def.name} classified as ${level} — auto-allowed`);
     }
   }
   // Phase 7c: Pre-hooks — run before tool execution, can block (async path)
