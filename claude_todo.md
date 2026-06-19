@@ -94,9 +94,9 @@
 
 ### 階段 C — 智慧安全檢查（2 週）
 
-- [ ] 非同步背景安全掃描（fire-and-forget，透過 hook pipeline）
-- [ ] 與 `smart_security` 整合
-- [ ] 掃描結果發現問題 → 通知用戶
+- [x] 非同步背景安全掃描（fire-and-forget，透過 hook pipeline）
+- [x] 與 `smart_security` 整合（spawn security-scan.mjs CLI）
+- [x] 掃描結果發現問題 → 通知用戶（append 到 result output）
 
 ---
 

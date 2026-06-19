@@ -79,11 +79,12 @@ describe('SYSTEM_PROMPT_FRAGMENT', () => {
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('hybrid_router'));
   });
 
-  it('contains Task Subagent Routing rule', () => {
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('Task Subagent Routing'));
+  it('contains Task Subagent Isolation (Context防爆) rule', () => {
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('Task Subagent Isolation'));
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('subagent has NO Smart MCP routing rules'));
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('injected by parent'));
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_lsp > smart_grep'));
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_grep'));
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('hybrid_router'));
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_think'));
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('smart_smart_rules'));

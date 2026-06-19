@@ -158,7 +158,7 @@ describe('Streaming Progress', () => {
     reportProgress('plugin-task', 42, 'Working...');
 
     const result = await plugin.handler({ command: 'status', taskId: 'plugin-task' });
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(data.ok, 'Should be ok');
     assert.equal(data.task.percentage, 42);
     assert.equal(data.task.recentMessages.length, 1);
@@ -171,7 +171,7 @@ describe('Streaming Progress', () => {
     startProgress('list-task-2', 'List test 2', 20);
 
     const result = await plugin.handler({ command: 'all' });
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(data.ok, 'Should be ok');
     assert.ok(data.count >= 2, 'Should have tasks');
   });
@@ -183,7 +183,7 @@ describe('Streaming Progress', () => {
     completeProgress('clear-test');
 
     const result = await plugin.handler({ command: 'clear' });
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(data.ok, 'Should be ok');
     assert.equal(getProgress('clear-test'), null, 'Should be cleared');
   });
@@ -191,12 +191,12 @@ describe('Streaming Progress', () => {
   it('should handle missing taskId for status', async () => {
     const plugin = (await import('../src/plugins/standard/streaming.mjs')).default;
     const result = await plugin.handler({ command: 'status' });
-    assert.ok(result.isError, 'Should error');
+    assert.ok(!result.ok, 'Should error');
   });
 
   it('should handle unknown command', async () => {
     const plugin = (await import('../src/plugins/standard/streaming.mjs')).default;
     const result = await plugin.handler({ command: 'unknown' });
-    assert.ok(result.isError, 'Should error');
+    assert.ok(!result.ok, 'Should error');
   });
 });

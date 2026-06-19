@@ -62,7 +62,7 @@ describe('Scheduled Background Tasks', () => {
       task: 'Daily test task'
     });
 
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(data.ok, 'Should accept valid cron');
     assert.ok(data.nextRun, 'Should have next run time');
   });
@@ -75,7 +75,7 @@ describe('Scheduled Background Tasks', () => {
       task: 'Bad schedule'
     });
 
-    assert.ok(result.isError, 'Should reject invalid cron');
+    assert.ok(!result.ok, 'Should reject invalid cron');
   });
 
   it('should reject cron with wrong number of fields', async () => {
@@ -86,7 +86,7 @@ describe('Scheduled Background Tasks', () => {
       task: 'Too few fields'
     });
 
-    assert.ok(result.isError, 'Should reject too few fields');
+    assert.ok(!result.ok, 'Should reject too few fields');
   });
 
   // --- List ---
@@ -97,7 +97,7 @@ describe('Scheduled Background Tasks', () => {
     await plugin.handler({ command: 'add', name: 'task-b', schedule: '30 12 * * 1-5', task: 'Task B' });
 
     const result = await plugin.handler({ command: 'list' });
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(data.ok, 'Should list tasks');
     assert.ok(data.count >= 2, `Expected at least 2 tasks, got ${data.count}`);
   });
@@ -108,12 +108,12 @@ describe('Scheduled Background Tasks', () => {
     await plugin.handler({ command: 'add', name: 'to-remove', schedule: '0 0 * * *', task: 'Remove me' });
 
     const result = await plugin.handler({ command: 'remove', name: 'to-remove' });
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(data.ok, 'Should remove task');
 
     // Verify it's gone
     const listResult = await plugin.handler({ command: 'list' });
-    const listData = JSON.parse(listResult.content[0].text);
+    const listData = JSON.parse(listResult.output);
     const removed = listData.tasks.find(t => t.name === 'to-remove');
     assert.equal(removed, undefined, 'Task should be removed from list');
   });
@@ -124,7 +124,7 @@ describe('Scheduled Background Tasks', () => {
     await plugin.handler({ command: 'add', name: 'status-test', schedule: '0 10 * * *', task: 'Status check' });
 
     const result = await plugin.handler({ command: 'status' });
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(data.ok, 'Should show status');
     assert.ok(data.active >= 1, 'Should have active tasks');
   });
@@ -141,7 +141,7 @@ describe('Scheduled Background Tasks', () => {
     });
 
     const result = await plugin.handler({ command: 'run-now', name: 'immediate-test' });
-    const data = JSON.parse(result.content[0].text);
+    const data = JSON.parse(result.output);
     assert.ok(data.ok, 'Should run immediately');
     assert.equal(data.result.status, 'completed', 'Task should complete');
     assert.ok(data.result.output.includes('hello from scheduler'), 'Should capture output');
@@ -149,24 +149,24 @@ describe('Scheduled Background Tasks', () => {
 
   it('should error on run-now for non-existent task', async () => {
     const result = await plugin.handler({ command: 'run-now', name: 'nonexistent' });
-    assert.ok(result.isError, 'Should error');
+    assert.ok(!result.ok, 'Should error');
   });
 
   // --- Error Handling ---
 
   it('should error on missing name for add', async () => {
     const result = await plugin.handler({ command: 'add', schedule: '0 0 * * *' });
-    assert.ok(result.isError, 'Should error');
+    assert.ok(!result.ok, 'Should error');
   });
 
   it('should error on missing name for remove', async () => {
     const result = await plugin.handler({ command: 'remove' });
-    assert.ok(result.isError, 'Should error');
+    assert.ok(!result.ok, 'Should error');
   });
 
   it('should error on unknown command', async () => {
     const result = await plugin.handler({ command: 'unknown' });
-    assert.ok(result.isError, 'Should error');
+    assert.ok(!result.ok, 'Should error');
   });
 
   // --- Cron Matching ---
@@ -188,7 +188,7 @@ describe('Scheduled Background Tasks', () => {
         schedule: expr,
         task: desc
       });
-      const data = JSON.parse(result.content[0].text);
+      const data = JSON.parse(result.output);
       assert.ok(data.ok, `Should accept: ${expr} (${desc})`);
       assert.ok(data.nextRun, `Should have next run for: ${desc}`);
     }

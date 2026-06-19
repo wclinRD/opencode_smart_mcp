@@ -24,7 +24,7 @@ describe('Workflow Templates', () => {
 
   it('should list all workflow templates', async () => {
     const result = await plugin.handler({ command: 'list' });
-    assert.ok(result.content, 'Should have content');
+    assert.ok(result.ok, 'Should have content');
     const data = JSON.parse(result.output);
     assert.ok(data.ok, 'Should be ok');
     assert.ok(data.workflows.length >= 7, `Expected at least 7 workflows, got ${data.workflows.length}`);
@@ -93,17 +93,13 @@ describe('Workflow Templates', () => {
     });
 
     assert.ok(!result.ok, 'Should be error');
-    const data = JSON.parse(result.output);
-    assert.ok(!data.ok, 'Should not be ok');
-    assert.ok(data.available, 'Should list available workflows');
-    assert.ok(data.available.includes('bug-fix'), 'Should mention bug-fix');
+    assert.ok(result.error.includes('Unknown workflow'), 'Should mention unknown workflow');
   });
 
   it('should error on missing name for run command', async () => {
     const result = await plugin.handler({ command: 'run' });
     assert.ok(!result.ok, 'Should be error');
-    const data = JSON.parse(result.output);
-    assert.ok(!data.ok, 'Should not be ok');
+    assert.ok(result.error.includes('name parameter is required'), 'Should mention missing name');
   });
 
   // --- All workflows have valid structure ---

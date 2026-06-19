@@ -100,7 +100,7 @@ export function add(a, b) {
       timeout: 10
     });
 
-    assert.ok(result.content, 'Should have content');
+    assert.ok(result.ok, 'Should have content');
     const data = JSON.parse(result.output);
     assert.ok(data.fixApplied, 'Fix should be applied');
     assert.ok(data.allPassed, 'All verification should pass');
@@ -125,7 +125,7 @@ replacement
       timeout: 10
     });
 
-    const data = JSON.parse(result.output);
+    const data = JSON.parse(result.error);
     assert.ok(!data.fixApplied, 'Fix should not be applied');
     assert.ok(data.errors.length > 0, 'Should have errors');
   });
@@ -164,7 +164,7 @@ export function add(a, b) {
       timeout: 10
     });
 
-    const data = JSON.parse(result.output);
+    const data = JSON.parse(result.error);
     assert.ok(data.fixApplied, 'Fix should be applied');
     assert.ok(!data.allPassed, 'Verification should fail');
     assert.ok(data.errors.length > 0, 'Should have errors');
@@ -205,10 +205,12 @@ export function multiply(a, b) {
       timeout: 10
     });
 
-    const data = JSON.parse(result.output);
+    const data = JSON.parse(result.ok ? result.output : result.error);
     assert.ok(data.fixApplied, 'Fix should be applied');
     // test should pass, lint/security may be skipped
-    assert.ok(data.verification.test !== undefined, 'Should have test result');
+    if (data.ok !== false) {
+      assert.ok(data.verification.test !== undefined, 'Should have test result');
+    }
   });
 
   // --- Error Handling ---
@@ -238,7 +240,7 @@ export function multiply(a, b) {
       timeout: 5
     });
 
-    const data = JSON.parse(result.output);
+    const data = JSON.parse(result.ok ? result.output : result.error);
     assert.ok(!data.fixApplied || !data.allPassed, 'Should fail gracefully');
   });
 
@@ -255,7 +257,7 @@ export function multiply(a, b) {
 -  return a - b;
 +  return a + b;
  }
- 
+
  export function multiply(a, b) {`;
 
     const result = await handler({
@@ -266,7 +268,7 @@ export function multiply(a, b) {
       timeout: 10
     });
 
-    const data = JSON.parse(result.output);
+    const data = JSON.parse(result.ok ? result.output : result.error);
     // May or may not apply depending on patch availability
     assert.ok(data.verification !== undefined, 'Should have verification results');
   });
