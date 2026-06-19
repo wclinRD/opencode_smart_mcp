@@ -272,33 +272,59 @@ export class ContextManager {
   }
 
   /**
-   * Phase 14.1: Clear old tool results from history.
+   * Phase 14.1: Clear old tool results from history (含備份)。
    * Removes entries older than `olderThan` turns, with a safety floor of `keepLatest`.
+   * 移除前先備份 KEEP 等級的條目到 _compactedBackups（支援 P4 自動回填）。
    * Only operates on toolHistory — system prompt / thinking blocks are not stored here.
    *
    * @param {object} [opts]
    * @param {number} [opts.olderThan=10] - Keep only the last N turns, remove everything older
    * @param {number} [opts.keepLatest=2] - Safety floor: always keep at least this many recent entries
-   * @returns {{ removed: number, kept: number }}
+   * @returns {{ removed: number, kept: number, backedUp: number }}
    */
   clearToolResults({ olderThan = 10, keepLatest = 2 } = {}) {
     if (!this._context || !this._context.toolHistory.length) {
-      return { removed: 0, kept: 0 };
+      return { removed: 0, kept: 0, backedUp: 0 };
     }
 
     const history = this._context.toolHistory;
     const total = history.length;
 
     // Calculate how many entries to keep
-    // olderThan: keep the last N entries (cap at total — if olderThan >= total, keep all)
     let keepCount = Math.min(olderThan, total);
-    // keepLatest: safety floor — at minimum keep this many
     keepCount = Math.max(keepCount, Math.min(keepLatest, total));
 
     const removeCount = total - keepCount;
 
     if (removeCount <= 0) {
-      return { removed: 0, kept: total };
+      return { removed: 0, kept: total, backedUp: 0 };
+    }
+
+    // 備份被移除的 KEEP 等級條目 (P4 自動回填用)
+    const removed = history.slice(0, total - keepCount);
+    const keepableRemoved = removed.filter(e => {
+      // 保留決策/編輯類 output
+      const keepTools = new Set(['smart_fast_apply', 'smart_think', 'smart_deep_think',
+        'error_diagnose', 'debug', 'planner', 'edit', 'write', 'cross_file_edit']);
+      return keepTools.has(e.tool) || e.result?.length > 500;
+    });
+
+    if (keepableRemoved.length > 0) {
+      if (!this._context._compactedBackups) this._context._compactedBackups = [];
+      for (const entry of keepableRemoved) {
+        this._context._compactedBackups.push({
+          backedUpAt: nowISO(),
+          tool: entry.tool,
+          args: entry.args,
+          result: (entry.result && entry.result.length > 100) ? entry.result.slice(0, 500) : entry.result,
+          ok: entry.ok,
+          timestamp: entry.timestamp,
+        });
+      }
+      // 限制備份數量 (最多 20 筆)
+      if (this._context._compactedBackups.length > 20) {
+        this._context._compactedBackups = this._context._compactedBackups.slice(-20);
+      }
     }
 
     // Remove oldest entries (slice from the front)
@@ -306,7 +332,7 @@ export class ContextManager {
     this._context.metadata.updatedAt = nowISO();
     if (this._autoSave) this._save();
 
-    return { removed: removeCount, kept: keepCount };
+    return { removed: removeCount, kept: keepCount, backedUp: keepableRemoved.length };
   }
 
   /**
