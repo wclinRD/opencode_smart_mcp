@@ -493,6 +493,39 @@ const runtimeConfig = {
 };
 
 // ---------------------------------------------------------------------------
+// Config persistence (~/.smart/config.json)
+// ---------------------------------------------------------------------------
+const CONFIG_PATH = join(homedir(), '.smart', 'config.json');
+
+function loadConfig() {
+  try {
+    if (existsSync(CONFIG_PATH)) {
+      const data = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
+      if (typeof data.debug === 'boolean') runtimeConfig.debug = data.debug;
+      if (typeof data.timeoutMs === 'number' && data.timeoutMs > 0) runtimeConfig.timeoutMs = data.timeoutMs;
+      if (typeof data.maxOutputChars === 'number' && data.maxOutputChars > 0) runtimeConfig.maxOutputChars = data.maxOutputChars;
+      if (typeof data.modelSize === 'string' && ['large', 'small', 'micro'].includes(data.modelSize)) runtimeConfig.modelSize = data.modelSize;
+      if (typeof data.mode === 'string' && ['interactive', 'auto', 'bypass'].includes(data.mode)) runtimeConfig.mode = data.mode;
+      debugLog(`Config loaded from ${CONFIG_PATH}`);
+    }
+  } catch (e) {
+    debugLog(`Failed to load config: ${e.message}`);
+  }
+}
+
+function saveConfig() {
+  try {
+    const { debug, timeoutMs, maxOutputSize, maxOutputChars, modelSize, mode } = runtimeConfig;
+    writeFileSync(CONFIG_PATH, JSON.stringify({ debug, timeoutMs, maxOutputSize, maxOutputChars, modelSize, mode }, null, 2), 'utf-8');
+  } catch (e) {
+    debugLog(`Failed to save config: ${e.message}`);
+  }
+}
+
+// Load persisted config on startup
+loadConfig();
+
+// ---------------------------------------------------------------------------
 // Output optimization (Phase 2: pipeline-based L0/L1/L2 + semantic truncation)
 // ---------------------------------------------------------------------------
 const _optCache = getDefaultCache();
@@ -3147,6 +3180,7 @@ function handleRequest(req) {
           if (typeof changes.modelSize === 'string' && ['large', 'small', 'micro'].includes(changes.modelSize)) { runtimeConfig.modelSize = changes.modelSize; applied.modelSize = runtimeConfig.modelSize; }
           if (typeof changes.mode === 'string' && ['interactive', 'auto', 'bypass'].includes(changes.mode)) { runtimeConfig.mode = changes.mode; applied.mode = runtimeConfig.mode; }
           for (const key of Object.keys(changes)) { if (!(key in applied)) rejected[key] = 'Unknown or invalid'; }
+          if (Object.keys(applied).length > 0) saveConfig();
           respond(id, { content: [{ type: 'text', text: JSON.stringify({ applied, rejected }) }] });
         } else {
           respond(id, { content: [{ type: 'text', text: JSON.stringify({ ...runtimeConfig }) }] });
@@ -3376,6 +3410,7 @@ function handleRequest(req) {
         if (typeof changes.modelSize === 'string' && ['large', 'small', 'micro'].includes(changes.modelSize)) { runtimeConfig.modelSize = changes.modelSize; applied.modelSize = runtimeConfig.modelSize; }
         if (typeof changes.mode === 'string' && ['interactive', 'auto', 'bypass'].includes(changes.mode)) { runtimeConfig.mode = changes.mode; applied.mode = runtimeConfig.mode; }
         for (const key of Object.keys(changes)) { if (!(key in applied)) rejected[key] = 'Unknown or invalid'; }
+        if (Object.keys(applied).length > 0) saveConfig();
         respond(id, { applied, rejected });
       } else {
         respond(id, { ...runtimeConfig });

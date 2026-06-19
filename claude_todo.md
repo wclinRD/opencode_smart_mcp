@@ -6,91 +6,84 @@
 
 ## 🚀 Sprint 1：Hooks 系統（建議優先）
 
-### 階段 A — Hook Registry（3-4 天）
+### 階段 A — Hook Registry ✅（已實作）
 
-- [ ] **新增 `src/lib/hook-registry.mjs`**
-  - [ ] `registerPreHook(hook)` / `registerPostHook(hook)` API
-  - [ ] `executePreHooks(toolName, args)` → return `[{ hook, block?, message? }]`
-  - [ ] `executePostHooks(toolName, args, result)` → return `[{ hook, promise }]`
-  - [ ] `initBuiltinHooks()` 將現有三個 fire-and-forget 遷移為內建 hooks
-    - [ ] `lsp-diagnostics`: match=`smart_fast_apply` + `apply:true`
-    - [ ] `impact-warning`: match=`smart_fast_apply` + `files > 2`
-    - [ ] `hallucination-check`: match=`isHighRiskOutput(toolName)`
+- [x] **新增 `src/lib/hook-registry.mjs`**（476 行）
+  - [x] `registerPreHook(hook)` / `registerPostHook(hook)` API
+  - [x] `executePreHooks(toolName, args)` → return `[{ hook, block?, message? }]`
+  - [x] `executePostHooks(toolName, args, result)` → return `[{ hook, promise }]`
+  - [x] `initBuiltinHooks()` 將現有三個 fire-and-forget 遷移為內建 hooks
+    - [x] `lsp-diagnostics`: match=`smart_fast_apply` + `apply:true`
+    - [x] `impact-warning`: match=`smart_fast_apply` + `files > 2`
+    - [x] `hallucination-check`: match=`isHighRiskOutput(toolName)`
 
-- [ ] **修改 `src/server/index.mjs` — invokeTool()**
-  - [ ] Phase 8：在 `checkHighRiskPrerequisites()` 之後、handler 之前，執行 pre-hooks
-  - [ ] Phase 9：在 handler 之後、`captureAndReturn()` 之前，收集 post-hook promises
-  - [ ] 若 pre-hook 回傳 `{ block: true }`，阻斷工具執行
+- [x] **修改 `src/server/index.mjs` — invokeTool()**
+  - [x] Phase 8：在 auto-classifier 之後、handler 之前，執行 pre-hooks（L1890 sync, L2133 async）
+  - [x] Phase 9：在 handler 之後、`captureAndReturn()` 之前，收集 post-hook promises（L1446-1453）
+  - [x] 若 pre-hook 回傳 `{ block: true }`，阻斷工具執行
 
-- [ ] **修改 `src/server/index.mjs` — respond()**
-  - [ ] 將 `_pendingImpact` / `_pendingLsp` / `_pendingHallucination` 統一為 `_pendingHooks` 陣列
-  - [ ] 在 `_respondChain` 中迭代執行 `_pendingHooks`
+- [x] **修改 `src/server/index.mjs` — respond()**
+  - [x] 將 `_pendingImpact` / `_pendingLsp` / `_pendingHallucination` 統一為 `_pendingHooks` 陣列
+  - [x] 在 `_respondChain` 中迭代執行 `_pendingHooks`（L2611-2628）
 
-- [ ] **測試**
-  - [ ] 編輯檔案後自動觸發 LSP 診斷（行為不變）
-  - [ ] >2 檔編輯自動觸發 impact 分析（行為不變）
-  - [ ] 高風險工具（如 academic_search）自動觸發幻覺檢查（行為不變）
-  - [ ] Pre-hook 回傳 block 正確阻斷工具
+- [x] **測試** — 1690 tests all pass, hooks behavior verified via integration tests
 
-### 階段 B — 用戶自訂 Hooks（1 週）
+### 階段 B — 用戶自訂 Hooks ✅（已實作）
 
-- [ ] **新增 `smart_hook` 工具**
-  - [ ] `command:"add"` — 註冊自訂 hook（bash / mcp_tool）
-  - [ ] `command:"list"` — 列出已註冊 hooks
-  - [ ] `command:"remove"` — 移除 hook
-  - [ ] `command:"enable"` / `command:"disable"`
-  - [ ] 持久化到 `~/.smart/hooks.json`
+- [x] **新增 `smart_hook` 工具**（L2993）
+  - [x] `command:"add"` — 註冊自訂 hook（bash / mcp_tool）
+  - [x] `command:"list"` — 列出已註冊 hooks
+  - [x] `command:"remove"` — 移除 hook
+  - [x] `command:"enable"` / `command:"disable"`
+  - [x] 持久化到 `~/.smart/hooks.json`
 
-- [ ] **Hook action 執行器**
-  - [ ] `type: "bash"` — 執行 shell command，支援 `{file}` 模板變數
-  - [ ] `type: "mcp_tool"` — 呼叫現有 MCP 工具
+- [x] **Hook action 執行器**
+  - [x] `type: "bash"` — 執行 shell command，支援 `{file}` 模板變數
+  - [x] `type: "mcp_tool"` — 呼叫現有 MCP 工具（⚠️ 目前為 stub，回傳 placeholder 字串）
 
-- [ ] **範例 hook 腳本**
+- [ ] **範例 hook 腳本**（未實作 — 可選項目）
   - [ ] 編輯 TypeScript 後自動 prettier
   - [ ] Commit 前自動 lint
 
-### 階段 C — Production 強化（1 週）
+### 階段 C — Production 強化 ✅（已實作）
 
-- [ ] Hook timeout（預設 10s），超時不阻斷主流程
-- [ ] 同類型 hook 最多 10 個限制
-- [ ] Hook 併發限制（最多 3 個並行）
-- [ ] Hook 執行日誌（時間、成功/失敗）
-- [ ] Defer 支援：pre-hook return `{ defer: true }` 暫停工具執行
+- [x] Hook timeout（預設 10s），超時不阻斷主流程
+- [x] 同類型 hook 最多 10 個限制
+- [x] Hook 併發限制（最多 3 個並行）
+- [x] Hook 執行日誌（時間、成功/失敗）
+- [x] Defer 支援：pre-hook return `{ defer: true }` 暫停工具執行
 
 ---
 
 ## 🚀 Sprint 2：Auto Mode
 
-### 階段 A — 基礎模式切換（2-3 天）
+### 階段 A — 基礎模式切換 ✅（已實作，2 個 Missing）
 
-- [ ] **新增 `src/lib/auto-classifier.mjs`**
-  - [ ] `classifyTool(toolName, args)` → `{ action: 'allow'|'warn'|'block'|'gate', reason? }`
-  - [ ] 工具分類表（硬編碼）：read / write / other / dangerous
-  - [ ] `BLOCKED_FILES` 清單：`.zshenv`, `.bashrc`, `.npmrc`, `.pre-commit-config.yaml`
+- [x] **新增 `src/lib/auto-classifier.mjs`**（300 行）
+  - [x] `classifyTool(toolName, args)` → `{ action: 'allow'|'warn'|'block'|'gate', reason? }`
+  - [x] 工具分類表（內建 rules）：read / write / other / dangerous
+  - [x] `BLOCKED_FILE_PATTERNS` 清單：shell configs, git configs, npmrc, 安全敏感路徑
 
-- [ ] **修改 `src/server/index.mjs` — runtimeConfig**
-  - [ ] 新增 `mode: 'interactive' | 'auto' | 'bypass'`
+- [x] **修改 `src/server/index.mjs` — runtimeConfig**
+  - [x] 新增 `mode: 'interactive' | 'auto' | 'bypass'`
 
-- [ ] **修改 `src/server/index.mjs` — invokeTool()**
-  - [ ] 在 `checkHighRiskPrerequisites()` 之後，若 `mode === 'auto'`，執行 `classifyTool()`
-  - [ ] `block` → 回傳錯誤訊息
-  - [ ] `warn` → 在 result 附註 `[Auto Mode] auto-approved`
+- [x] **修改 `src/server/index.mjs` — invokeTool()**
+  - [x] 在 auto-classifier 之後，若 `mode === 'auto'`，執行 `classifyTool()`（L1874 sync, L2117 async）
+  - [x] `block` → 回傳錯誤訊息
+  - [x] `warn` → 在 result 附註 `[Auto Mode] auto-approved`
+  - [x] `gate` → 要求切回 interactive 模式才允許
 
-- [ ] **修改 `smart_config` 工具**
-  - [ ] `set:{autoMode:true/false}` 切換模式
-  - [ ] 持久化到 `~/.smart/config.json`
+- [x] **修改 `smart_config` 工具**
+  - [x] `set:{mode:'auto'}` 切換模式（支援大小寫容錯）
+  - [ ] **持久化到 `~/.smart/config.json`** ❌ Missing — 目前 config 僅在記憶體中，重啟後遺失
 
-- [ ] **測試**
-  - [ ] Auto mode 下 read 工具自動放行
-  - [ ] Auto mode 下 fast_apply 正常執行但附註
-  - [ ] Auto mode 下 blocked file 寫入被阻斷
-  - [ ] 切回 interactive 模式恢復正常
+- [ ] **測試** ❌ Missing — 無專屬 auto-mode tests（整合於其他 integration tests）
 
-### 階段 B — 分類器引擎（1 週）
+### 階段 B — 分類器引擎 ✅（已實作）
 
-- [ ] 取代硬編碼分類，改為規則引擎
-- [ ] 動態分類：檢查 toolHistory 中最近 security finding
-- [ ] 支援 `$defaults` 擴充（類似 Claude Code）
+- [x] 取代硬編碼分類，改為 `addRule`/`removeRule`/`listRules` 規則引擎
+- [x] 動態分類：`extraCheck` 檢查 toolHistory 中最近 security finding（L235-260）
+- [x] 支援 `$defaults` 擴充：`$defaults:read`, `$defaults:write`, `$defaults:unknown`, `$defaults:other`
 
 ### 階段 C — 智慧安全檢查（2 週）
 

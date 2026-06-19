@@ -179,3 +179,23 @@ const HOOKS = { preTool: [], postTool: [] };
 - `src/lib/safe-handler.mjs` — Handler 安全包裝（try-catch）
 - `src/lib/hallucination-judge.mjs` — 幻覺檢查（現有 post-hook 之一）
 - `src/lib/context-manager.mjs` — Context 管理
+
+---
+
+## 📊 實作對照總表（2026-06-19 驗證）
+
+| 規劃項目 | 狀態 | 實際檔案/位置 | 備註 |
+|---------|------|-------------|------|
+| **Hooks 階段 A**：Hook Registry | ✅ 全部實作 | `src/lib/hook-registry.mjs` (476 行) | register/hook API、executePreHooks/PostHooks、initBuiltinHooks、invokeTool Phase 8/9、respond() _pendingHooks |
+| **Hooks 階段 B**：用戶自訂 Hooks | ✅ 全部實作 | `src/server/index.mjs` L2993 | smart_hook tool (add/list/remove/enable/disable)、bash action with template vars、mcp_tool action (stub)、~/.smart/hooks.json 持久化 |
+| **Hooks 階段 C**：Production 強化 | ✅ 全部實作 | `src/lib/hook-registry.mjs` | 10s timeout、max 10 hooks/type、concurrency 3、execution log、defer support |
+| **Auto Mode 階段 A**：基礎模式切換 | ✅ 已實作 (2 Missing ⚠️) | `src/lib/auto-classifier.mjs` (300 行) | classifyTool、runtimeConfig.mode、invokeTool block/warn/gate、smart_config set:{mode:'auto'} |
+| **Auto Mode 階段 B**：分類器引擎 | ✅ 已實作 | `src/lib/auto-classifier.mjs` | addRule/removeRule/listRules、PRIORITY、extraCheck、$defaults |
+| **Auto Mode 階段 C**：智慧安全檢查 | ✅ 已實作 | hook-init + `security-scan.mjs` | 原 fire-and-forget，已遷移為內建 hooks |
+
+### 找到的 Gap（與原始規劃對照）
+
+1. **❌ 無 `~/.smart/config.json` 持久化**（規劃第 77 行）— `smart_config` 改動存記憶體，重啟丟失
+2. **❌ 無專屬 auto-mode 測試**（規劃第 79-83 行）— 四個測試情境均無獨立測試檔案
+3. **⚠️ mcp_tool hook action 為 stub**（規劃第 55-56 行）— `type:"mcp_tool"` handler 回傳 placeholder，未實際呼叫 MCP 工具
+4. **⚪ 範例 hook 腳本未實作**（規劃第 58-59 行）— prettier 自動格式化 / commit lint 等範例
