@@ -2318,7 +2318,8 @@ function respond(id, result, opts = {}) {
         const recoveryText = await result._pendingRecovery;
         delete result._pendingRecovery;
         if (recoveryText && result?.content?.[0]?.type === 'text') {
-          result.content[0].text += '\n\n' + recoveryText;
+          // 強制 proactive reminder — 明確指示 LLM 檢查並繼續待辦事項
+          result.content[0].text += '\n\n---\n🔄 [Compaction Recovery] Context 已壓縮。以下是你應立即繼續的任務：\n\n' + recoveryText + '\n\n⚠️ 請優先完成上述待辦事項，不要偏離當前任務。若所有事項已處理完畢，請告知使用者。\n---';
         }
         // 同步寫入共享檔案 — fullCompact 路徑也需要 plugin 能讀到
         writeSharedRecoveryFile(recoveryText);
