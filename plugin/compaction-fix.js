@@ -243,7 +243,7 @@ const plugin = {
 
       // === 判斷是否需要注入 recovery prompt ===
       // 條件 A: 剛剛經歷了 compaction（state.compactionCount > 0）
-      // 條件 B: 這是 auto-continue（短訊息 or "continue" or "auto-continue"）
+      // 條件 B: auto-continue / 短訊息 / compaction part（Gap 6 fix: 放寬條件）
       const lastTextParts = (lastMsg.parts || []).filter((p) => p.type === "text");
       const lastText = lastTextParts.map((p) => p.text || "").join(" ").trim();
       const isAutoContinue = lastText.length < 100 ||
@@ -256,7 +256,8 @@ const plugin = {
         (m.parts || []).some((p) => p.type === "compaction")
       );
 
-      const needsRecovery = state.compactionCount > 0 && (hasCompactionPart || isAutoContinue);
+      // Gap 6 fix: 放寬條件，也對一般短訊息（<200 chars）觸發 recovery
+      const needsRecovery = state.compactionCount > 0 && (hasCompactionPart || isAutoContinue || lastText.length < 200);
 
       if (!needsRecovery) {
         if (state.compactionCount > 0) {

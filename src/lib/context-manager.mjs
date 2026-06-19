@@ -1046,11 +1046,12 @@ export class ContextManager {
     this._syncTodosFromFile();
 
     const parts = [];
-    parts.push('📋 [Recovery Context]');
+    parts.push('⛔ [INSTRUCTION] Recovery Context — 優先執行以下待辦事項');
+    parts.push(''); // blank line
 
     // Summary
     const s = rc.summary || {};
-    parts.push(`   ${s.totalCalls || 0} calls, ${s.errorCount || 0} errors, ${s.uniqueTools || 0} tools`);
+    parts.push(`📊 Session: ${s.totalCalls || 0} calls, ${s.errorCount || 0} errors, ${s.uniqueTools || 0} tools`);
 
     // Pending todos (排序：in_progress 優先 > pending 依優先級 > completed 置底)
     const todos = this.listTodos();
@@ -1059,16 +1060,15 @@ export class ContextManager {
       const aOrder = order[a.status] ?? 4;
       const bOrder = order[b.status] ?? 4;
       if (aOrder !== bOrder) return aOrder - bOrder;
-      // 同 status 按啟發式優先級降序
       return (this._getTodoPriority(b.text) - this._getTodoPriority(a.text));
     });
     const activeTodos = sortedTodos.filter(t => t.status === 'pending' || t.status === 'in_progress');
 
     if (sortedTodos.length > 0) {
-      parts.push('   📝 Todos:');
+      parts.push('📝 Todos:');
       for (const t of sortedTodos) {
         const icon = t.status === 'completed' ? '✅' : t.status === 'in_progress' ? '⏳' : t.status === 'cancelled' ? '❌' : '☐';
-        parts.push(`      ${icon} ${t.id}. ${t.text}`);
+        parts.push(`  ${icon} ${t.id}. ${t.text}`);
       }
     }
 
@@ -1076,32 +1076,37 @@ export class ContextManager {
     const edits = rc.keyDecisions || [];
     if (edits.length > 0) {
       const files = [...new Set(edits.map(e => e.file))];
-      parts.push(`   📂 Edited: ${files.join(', ')}`);
+      parts.push(`📂 Recent files: ${files.join(', ')}`);
     }
 
     // Active findings
     const findings = rc.findings || [];
     if (findings.length > 0) {
-      parts.push(`   🔍 Issues: ${findings.map(f => f.severity + ':' + f.category).join(', ')}`);
+      parts.push(`🔍 Open issues: ${findings.map(f => f.severity + ':' + f.category).join(', ')}`);
     }
 
     // Last errors — 原始錯誤訊息（非 pattern 摘要）
     const lastErrors = rc.lastErrors || [];
     if (lastErrors.length > 0) {
-      parts.push('   ❌ Recent errors:');
+      parts.push('❌ Recent errors:');
       for (const e of lastErrors) {
         const errPreview = e.error.length > 120 ? e.error.slice(0, 120) + '...' : e.error;
-        parts.push(`      [${e.tool}] ${errPreview}`);
+        parts.push(`  [${e.tool}] ${errPreview}`);
       }
     }
 
-    // Resume directive — 列出所有 active todos，不只第一個
+    // Resume directive — 強制性指令
     if (activeTodos.length > 0) {
+      parts.push('');
+      parts.push('⛔ MANDATORY: 請暫停當前操作，立即執行以下步驟：');
       const continueItems = activeTodos.map((t, i) =>
-        `     ${i + 1}. todo #${t.id} — "${t.text}"`
+        `  Step ${i + 1}: 完成 todo #${t.id} — "${t.text}"`
       );
-      parts.push(`   ▶️ Continue (${activeTodos.length} pending):`);
       parts.push(...continueItems);
+      parts.push('  Final: 全部完成後告知使用者。若已偏離任務，立即回到上述步驟。');
+    } else {
+      parts.push('');
+      parts.push('ℹ️ 目前無待辦事項。請向使用者報告狀態或等待新指令。');
     }
 
     return parts.join('\n');

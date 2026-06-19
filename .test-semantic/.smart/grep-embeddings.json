@@ -1,0 +1,54 @@
+{
+  "version": "1.0.0",
+  "entries": {
+    "/Users/wclin/opencode/dev/smart/.test-semantic/auth.js": {
+      "mtime": "2026-06-19T10:49:42.567Z",
+      "contentHash": "909606d512ce1a4d",
+      "chunkCount": 6,
+      "chunks": [
+        {
+          "text": "function authenticateUser(username, password) {\n  const user = findUser(username);\n  if (!user) throw new Error('User not found');\n  const isValid = verifyPassword(password, user.hash);\n  if (!isValid) throw new Error('Invalid password');\n  return generateToken(user);",
+          "startLine": 2,
+          "endLine": 7,
+          "type": "function",
+          "name": "authenticateUser"
+        },
+        {
+          "text": "constructor(db) { this.db = db; }",
+          "startLine": 11,
+          "endLine": 11,
+          "type": "method",
+          "name": "constructor"
+        },
+        {
+          "text": "async login(username, password) {\n    const user = await this.db.findUser(username);\n    if (!user) throw new AuthError('Invalid credentials');\n    return this.createSession(user);",
+          "startLine": 12,
+          "endLine": 15,
+          "type": "method",
+          "name": "login"
+        },
+        {
+          "text": "class AuthService {\n  constructor(db) { this.db = db; }\n  async login(username, password) {\n    const user = await this.db.findUser(username);\n    if (!user) throw new AuthError('Invalid credentials');\n    return this.createSession(user);\n  }",
+          "startLine": 10,
+          "endLine": 16,
+          "type": "class",
+          "name": "AuthService"
+        },
+        {
+          "text": "function handleError(err) {\n  console.error('Error occurred:', err.message);\n  if (err instanceof AuthError) return { status: 401, message: 'Unauthorized' };\n  return { status: 500, message: 'Internal server error' };",
+          "startLine": 19,
+          "endLine": 22,
+          "type": "function",
+          "name": "handleError"
+        },
+        {
+          "text": "function validateToken(token) {\n  try {\n    const decoded = jwt.verify(token, SECRET);\n    return decoded;\n  } catch (e) {\n    throw new Error('Token validation failed');\n  }",
+          "startLine": 25,
+          "endLine": 31,
+          "type": "function",
+          "name": "validateToken"
+        }
+      ]
+    }
+  }
+}
