@@ -106,11 +106,29 @@ const CONTENT_UPGRADE_PATTERNS = [
   { pattern: /CRITICAL|HIGH.*?(?:severity|issue|vuln)|vulnerability|CVE-/i, upgradeTo: 'KEEP_SUMMARY' },
   // 含 patch apply 記錄 (特定模式，避免 "created"/"written" 過度匹配)
   { pattern: /applied\s+\d+\/\d+/i, upgradeTo: 'KEEP' },
+  // 測試失敗 → 升級至 KEEP (有決策價值)
+  { pattern: /(?:failed|failure|failing)\s+\d+/i, upgradeTo: 'KEEP' },
+  // 檔案變更統計 → 升級至 KEEP_SUMMARY (表示有實際修改)
+  { pattern: /\d+\s+(?:file|files?\s*changed|insertion|deletion)/i, upgradeTo: 'KEEP_SUMMARY' },
+  // deprecated/migration 警告 → 升級至 KEEP_SUMMARY
+  { pattern: /deprecated|migration\s+needed|will\s+be\s+removed/i, upgradeTo: 'KEEP_SUMMARY' },
+  // ✅ 完成 emoji + 關鍵字 → 升級至 KEEP
+  { pattern: /✅\s*(?:done|complete|success|applied|added)/i, upgradeTo: 'KEEP' },
+  // LSP diagnostics 有實際錯誤 → 升級至 KEEP
+  { pattern: /\d+\s+(?:error|warning|problem|diagnostic)/i, upgradeTo: 'KEEP_SUMMARY' },
 ];
 
 const CONTENT_DOWNGRADE_PATTERNS = [
   // 空結果 → 降級至 DROP
   { pattern: /(?:no matches|0 matches|not found|no results|0 results)/i, downgradeTo: 'DROP' },
+  // git 無變更 → 降級至 DROP (無操作)
+  { pattern: /(?:nothing to commit|already up.to.date|no changes|0 files changed)/i, downgradeTo: 'DROP' },
+  // 安全掃描空結果 → 降級至 DROP (無發現即無資訊)
+  { pattern: /0\s+(?:vulnerabilit|issue|finding|alert|problem)/i, downgradeTo: 'DROP' },
+  // 空集合/無資料
+  { pattern: /no\s+(?:data|content|entries|items|results?\s+found)/i, downgradeTo: 'DROP' },
+  // 極短回覆 (< 30 chars) 且無實質內容 → 降級至 DROP
+  { pattern: /^(?:ok|done|noop|nop|\.|\s*)$/i, downgradeTo: 'DROP' },
 ];
 
 /**
