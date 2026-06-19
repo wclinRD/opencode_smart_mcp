@@ -1211,6 +1211,15 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
     const recoveryText = contextManager.formatRecoveryContext();
     if (recoveryText) {
       result._pendingRecovery = Promise.resolve(recoveryText);
+      // 同步初始化 _todoFollowUp，確保 follow-up 監控在 D.4 路徑也能運作
+      _todoFollowUp.pendingAt = Date.now();
+      _todoFollowUp.pendingText = recoveryText;
+      _todoFollowUp.toolCallsSince = 0;
+      _todoFollowUp.reInjected = false;
+      try {
+        const pendingTodos = contextManager.listTodos().filter(t => t.status === 'pending' || t.status === 'in_progress');
+        _todoFollowUp.pendingIds = pendingTodos.map(t => t.id);
+      } catch { _todoFollowUp.pendingIds = []; }
     }
   }
 
