@@ -605,6 +605,9 @@ const ANSI_CYAN     = '\x1b[36m';
 const ANSI_BOLD     = '\x1b[1m';
 const ANSI_DIM      = '\x1b[2m';
 const ANSI_RESET    = '\x1b[0m';
+const ANSI_BLACK    = '\x1b[30m';
+const ANSI_BG_RED   = '\x1b[41m';
+const ANSI_BG_GREEN = '\x1b[42m';
 
 /**
  * Colorize unified diff text with enhanced ANSI escape codes.
@@ -699,7 +702,58 @@ export function parseBlockDiff(blocks, root) {
  * Use with output: "ansi" for headless/bare-terminal contexts.
  */
 function formatAnsiDiff(diffText) {
-  return ansiColorizeDiff(diffText);
+  return ansiColorizeDiffBg(diffText);
+}
+
+/**
+ * Colorize diff with background colors instead of text colors.
+ *   + lines → green background
+ *   - lines → red background
+ *   @@ headers → bold cyan
+ *   context → dim
+ */
+function ansiColorizeDiffBg(diffText) {
+  if (!diffText) return '';
+  return diffText.split('\n').map(line => {
+    if (line.startsWith('--- ')) return ANSI_BOLD + ANSI_RED + line + ANSI_RESET;
+    if (line.startsWith('+++ ')) return ANSI_BOLD + ANSI_GREEN + line + ANSI_RESET;
+    if (line.startsWith('@@'))   return ANSI_BOLD + ANSI_CYAN + line + ANSI_RESET;
+    if (line.startsWith('+') && !line.startsWith('+++ ')) return ANSI_BG_GREEN + ANSI_BLACK + line + ANSI_RESET;
+    if (line.startsWith('-') && !line.startsWith('--- ')) return ANSI_BG_RED + ANSI_BLACK + line + ANSI_RESET;
+    if (line.startsWith(' '))    return ANSI_DIM + line + ANSI_RESET;
+    return line;
+  }).join('\n');
+}
+
+/**
+ * Count additions (+ lines) and deletions (- lines) from unified diff text.
+ * Ignores ---/+++ file headers.
+ */
+function countDiffStats(diffText) {
+  if (!diffText) return { additions: 0, deletions: 0 };
+  let additions = 0, deletions = 0;
+  for (const line of diffText.split('\n')) {
+    if (line.startsWith('+') && !line.startsWith('+++ ')) additions++;
+    else if (line.startsWith('-') && !line.startsWith('--- ')) deletions++;
+  }
+  return { additions, deletions };
+}
+
+/**
+ * Render a 5-block visual bar showing additions vs deletions ratio.
+ * Green blocks = additions, red blocks = deletions.
+ * Mirrors opencode TUI's DiffChanges bars variant.
+ * Works in any terminal (uses ANSI colors only).
+ */
+function textBars(additions, deletions) {
+  const total = additions + deletions;
+  if (total === 0) return '';
+  const a = Math.round((additions / total) * 5);
+  const d = 5 - a;
+  return '[' +
+    ANSI_GREEN + '█'.repeat(Math.max(0, a)) + ANSI_RESET +
+    ANSI_RED + '█'.repeat(Math.max(0, d)) + ANSI_RESET +
+  ']';
 }
 
 function formatOutput(data, format) {
@@ -708,8 +762,17 @@ function formatOutput(data, format) {
   // ── ANSI output: pure colored diff, minimal status ──
   if (format === 'ansi') {
     if (data.results) {
-      // Post-apply: colored diffs
-      return data.results.filter(r => r.diff).map(r => formatAnsiDiff(r.diff)).join('\n\n');
+      // Post-apply: colored diffs with summary
+      let totalAdd = 0, totalDel = 0;
+      const diffs = data.results.filter(r => r.diff).map(r => {
+        const s = countDiffStats(r.diff);
+        totalAdd += s.additions;
+        totalDel += s.deletions;
+        return formatAnsiDiff(r.diff);
+      });
+      const summaryBar = textBars(totalAdd, totalDel);
+      const summary = ANSI_BOLD + `Applied ${data.summary?.applied || 0}/${data.totalChanges || 0} \u2014 +${totalAdd}  -${totalDel}  ` + summaryBar + ANSI_RESET;
+      return summary + '\n' + diffs.join('\n\n');
     }
     if (data.dryRun) {
       // Dry-run: colored summary (no markdown, just ANSI)
@@ -722,11 +785,18 @@ function formatOutput(data, format) {
       }
       for (const p of data.preview) {
         if (p.status === 'ready') {
-          out.push(ANSI_GREEN + '\u2705' + ANSI_RESET + ' ' + p.file);
+          const sl = p.searchLines || 0;
+          const rl = p.replaceLines || 0;
+          const netAdd = Math.max(0, rl - sl);
+          const netDel = Math.max(0, sl - rl);
+          const bar = textBars(netAdd, netDel);
+          out.push(ANSI_GREEN + '\u2705' + ANSI_RESET + ' ' + p.file + '  ' +
+            ANSI_GREEN + '+' + netAdd + ANSI_RESET + ' ' +
+            ANSI_RED + '-' + netDel + ANSI_RESET + ' ' + bar);
           if (p.type === 'hashline') {
             out.push(ANSI_DIM + '  Lines ' + p.startLine + '-' + p.endLine + ANSI_RESET);
           } else {
-            out.push(ANSI_DIM + '  ~' + p.searchLines + ' \u2192 ~' + p.replaceLines + ' lines' + ANSI_RESET);
+            out.push(ANSI_DIM + '  ~' + sl + ' \u2192 ~' + rl + ' lines' + ANSI_RESET);
           }
         } else {
           out.push(ANSI_RED + '\u274C ' + p.file + ANSI_RESET);
@@ -774,7 +844,18 @@ function formatOutput(data, format) {
   }
 
   if (data.dryRun) {
-    out.push(`\uD83D\uDD0D DRY RUN \u2014 ${data.totalChanges} change(s) detected`);
+    // Compute summary stats
+    let totalAdd = 0, totalDel = 0;
+    for (const p of data.preview) {
+      if (p.status === 'ready') {
+        const sl = p.searchLines || 0;
+        const rl = p.replaceLines || 0;
+        totalAdd += Math.max(0, rl - sl);
+        totalDel += Math.max(0, sl - rl);
+      }
+    }
+    const summaryBar = textBars(totalAdd, totalDel);
+    out.push(`\uD83D\uDD0D DRY RUN \u2014 ${data.totalChanges} file(s) changed, +${totalAdd}  -${totalDel}  ${summaryBar}`);
     out.push('='.repeat(50));
     if (data.multiFileWarning) out.push(`\n\u26A0\uFE0F  ${data.multiFileWarning}`);
     if (data.conflicts > 0) out.push(`\n\u26A0\uFE0F  ${data.conflicts} file(s) with match conflicts:`);
@@ -783,19 +864,27 @@ function formatOutput(data, format) {
     for (const p of data.preview) {
       const icon = p.status === 'ready' ? '\u2705' : '\u274C';
       const matchInfo = p.matchLevel ? ` (fuzzy L${p.matchLevel})` : '';
-      out.push(`${icon} ${p.file}${matchInfo}`);
+
       if (p.status === 'ready') {
+        const sl = p.searchLines || 0;
+        const rl = p.replaceLines || 0;
+        const netAdd = Math.max(0, rl - sl);
+        const netDel = Math.max(0, sl - rl);
+        const bar = textBars(netAdd, netDel);
+        out.push(`${icon} ${p.file}${matchInfo}  +${netAdd}  -${netDel}  ${bar}`);
+
         if (p.type === 'hashline') {
           out.push(`   Lines ${p.startLine}-${p.endLine} (file: ${p.fileLines} lines)`);
           if (p.contentVerified && p.fingerprintMatch) out.push(`   \u2705 Content verified (fuzzy fingerprint match)`);
           else if (p.contentVerified) out.push(`   \u2705 Content verified (exact match)`);
           else if (!p.oldContent) out.push(`   \u26A1 Line range mode (no oldContent verification)`);
         } else {
-          out.push(`   Search: ${p.searchLines} lines \u2192 Replace: ${p.replaceLines} lines`);
+          out.push(`   ~${sl} \u2192 ~${rl} lines`);
         }
         if (p.matchLevel > 2) out.push(`   \u26A1 Fuzzy match level ${p.matchLevel}`);
         if (p.balanced === false) out.push(`   \u26A0\uFE0F  Brace balance issue detected`);
       } else if (p.status === 'conflict') {
+        out.push(`${icon} ${p.file}${matchInfo}`);
         out.push(`   \u274C Cannot find search block`);
       }
     }
@@ -809,13 +898,26 @@ function formatOutput(data, format) {
   }
 
   if (data.status === 'applied' || data.status === 'partial') {
-    out.push(`\u2705 Applied ${data.summary?.applied || 0}/${data.totalChanges || 0} change(s)`);
+    // Compute summary from actual diffs
+    let totalAdd = 0, totalDel = 0;
+    const perFile = (data.results || []).map(r => {
+      if (r.diff) {
+        const s = countDiffStats(r.diff);
+        totalAdd += s.additions;
+        totalDel += s.deletions;
+        return { file: r.file, status: r.status, matchLevel: r.matchLevel, error: r.error, additions: s.additions, deletions: s.deletions, diff: r.diff };
+      }
+      return { file: r.file, status: r.status, matchLevel: r.matchLevel, error: r.error, additions: 0, deletions: 0, diff: r.diff };
+    });
+    const summaryBar = textBars(totalAdd, totalDel);
+    out.push(`\u2705 Applied ${data.summary?.applied || 0}/${data.totalChanges || 0} \u2014 +${totalAdd}  -${totalDel}  ${summaryBar}`);
     if (data.summary?.conflicts > 0) out.push(`\u26A0\uFE0F  ${data.summary.conflicts} conflict(s) \u2014 need manual fix`);
     if (data.summary?.failed > 0) out.push(`\u274C ${data.summary.failed} error(s)`);
     out.push('');
-    for (const r of (data.results || [])) {
+    for (const r of perFile) {
       const icon = r.status === 'applied' ? '\u2705' : r.status === 'conflict' ? '\u274C' : '\u26A0\uFE0F';
-      out.push(`${icon} ${r.file}`);
+      const bar = textBars(r.additions, r.deletions);
+      out.push(`${icon} ${r.file}  +${r.additions}  -${r.deletions}  ${bar}`);
       if (r.matchLevel && r.matchLevel > 2) out.push(`   \u26A1 Fuzzy match level ${r.matchLevel}`);
       if (r.error) out.push(`   ${r.error}`);
     }
