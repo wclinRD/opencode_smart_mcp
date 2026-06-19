@@ -1333,17 +1333,22 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
     // Gap 8 fix: 超過最大次數自動放棄 (含 usuario 上報)
     if (_todoFollowUp.reInjectionCount >= MAX_REINJECTIONS || _todoFollowUp.toolCallsSince >= MAX_TOOL_CALLS) {
       debugLog(`Todo follow-up: giving up after ${_todoFollowUp.reInjectionCount} re-injections, ${_todoFollowUp.toolCallsSince} calls. Resetting.`);
-      // Fix 1: 放棄前寫入 finding 讓使用者知道
+      // Fix 1: 放棄前寫入 finding 讓使用者知道 (severity 提高至 high)
       try {
+        const pendingItems = _todoFollowUp.pendingText.split('\n').filter(l => l.includes('☐') || l.includes('⏳')).join('；').slice(0, 200);
         contextManager.addFindings([{
           source: 'todo-follow-up',
-          finding: `Todo 追蹤已放棄：${_todoFollowUp.pendingIds.length} 個待辦在 ${_todoFollowUp.reInjectionCount} 次提醒後仍未完成。已自動重置監控。待辦：${_todoFollowUp.pendingText.split('\n').filter(l => l.includes('☐') || l.includes('⏳')).join('；').slice(0, 200)}`,
+          finding: `[放棄] ${_todoFollowUp.pendingIds.length} 個待辦經 ${_todoFollowUp.reInjectionCount} 次提醒、${_todoFollowUp.toolCallsSince} 次呼叫後仍未完成。已停止追蹤。待辦：${pendingItems}`,
           category: 'warning',
-          severity: 'medium',
+          severity: 'high',
         }]);
+        // 同步清除共享 recovery 檔案（監控已停止，無需再提示）
+        writeSharedRecoveryFile('');
+        writeCompactionStatus(0);
       } catch {}
-      // 注入最終通知到結果
-      result._pendingTodoAbandon = `⚠️ [Todo Monitor] 系統在 ${_todoFollowUp.reInjectionCount} 次提醒、${_todoFollowUp.toolCallsSince} 次工具呼叫後，已停止追蹤未完成的待辦事項。請手動確認：\n${_todoFollowUp.pendingText.split('\n').filter(l => l.includes('☐') || l.includes('⏳')).join('\n')}\n✅ 若已完成請用 \`smart_todo done\` 標記，❌ 若已不需要請用 \`smart_todo cancel\`。`;
+      // 注入最終通知到結果（含結構化待辦清單）
+      const todoList = _todoFollowUp.pendingText.split('\n').filter(l => l.includes('☐') || l.includes('⏳')).join('\n');
+      result._pendingTodoAbandon = `⚠️ [Todo Monitor] 已在 ${_todoFollowUp.reInjectionCount} 次提醒、${_todoFollowUp.toolCallsSince} 次工具呼叫後停止追蹤以下待辦事項：\n\n${todoList}\n\n✅ 若已完成 → \`smart_todo done\`\n❌ 若已不需要 → \`smart_todo cancel\`\n加新任務 → \`smart_todo add\` (將自動重啟監控)`;
       _todoFollowUp.pendingIds = [];
       _todoFollowUp.toolCallsSince = 0;
       _todoFollowUp.reInjectionCount = 0;
