@@ -2215,20 +2215,21 @@ function autoManageContext(budget, skipRecoveryInjection = false) {
   const inCooldown = (now - s.lastAction) < s.cooldownMs;
 
   // Tier 3: Emergency (95%) — always trigger, no cooldown
+  // Tier 3: Emergency (95%) — always trigger, no cooldown
   if (used >= s.thresholds.emergency) {
     s.lastLevel = 3; s.lastAction = now;
     try {
       ensureContext();
-      // 先產生 recovery context，保存 todo/decision/error 狀態
-      contextManager.generateRecoveryContext();
+      // Gap #2 fix: 若 D.4 已產生 recovery，跳過重複的 generate/formatted
+      if (!skipRecoveryInjection) {
+        contextManager.generateRecoveryContext();
+      }
       const cleared = contextManager.clearToolResults({ olderThan: 3, keepLatest: 2 });
       budget.freeEntries(cleared.removed);
       const stats = budget.getDroppableStats();
-      // 取得恢復指引（含未完成 todo、近期編輯、繼續方向）
-      const recoveryText = contextManager.formatRecoveryContext();
+      const recoveryText = !skipRecoveryInjection ? contextManager.formatRecoveryContext() : null;
       debugLog(`AutoManage Tier3: cleared ${cleared.removed} entries (budget=${(used*100).toFixed(0)}%)`);
       let msg = `\n\n---\n🚨 Context 危急：${(used*100).toFixed(0)}%。已緊急清除 ${cleared.removed} 筆輸出。\n可丟棄: ${(stats.discardable/1024).toFixed(1)}KB, 可摘要: ${(stats.summarizable/1024).toFixed(1)}KB`;
-      // 若 MicroCompact 已注入 recovery，不再重複
       if (recoveryText && !skipRecoveryInjection) {
         msg += `\n\n${recoveryText}`;
       }
@@ -2244,7 +2245,6 @@ function autoManageContext(budget, skipRecoveryInjection = false) {
       } catch { _todoFollowUp.pendingIds = []; }
 
       // 寫入共享檔案供 OpenCode plugin 在 compaction 時讀取
-      // (若 D.4 已寫過則跳過，避免重複)
       if (!skipRecoveryInjection) {
         writeSharedRecoveryFile(recoveryText);
         writeCompactionStatus(3);
@@ -2261,17 +2261,17 @@ function autoManageContext(budget, skipRecoveryInjection = false) {
     s.lastLevel = 2; s.lastAction = now;
     try {
       ensureContext();
-      // 先產生 recovery context，保存 todo/decision/error 狀態
-      contextManager.generateRecoveryContext();
+      // Gap #2 fix: 若 D.4 已產生 recovery，跳過重複的 generate/formatted
+      if (!skipRecoveryInjection) {
+        contextManager.generateRecoveryContext();
+      }
       const cleared = contextManager.clearToolResults({ olderThan: 5, keepLatest: 3 });
       budget.freeEntries(cleared.removed);
       const stats = budget.getDroppableStats();
-      // 取得恢復指引（含未完成 todo、近期編輯、繼續方向）
-      const recoveryText = contextManager.formatRecoveryContext();
+      const recoveryText = !skipRecoveryInjection ? contextManager.formatRecoveryContext() : null;
       debugLog(`AutoManage Tier2: cleared ${cleared.removed} entries (budget=${(used*100).toFixed(0)}%)`);
       if (cleared.removed > 0) {
         let msg = `\n\n---\n⚠️ Context ${(used*100).toFixed(0)}%。已自動清除 ${cleared.removed} 筆輸出（釋放約 ${(stats.discardable/1024).toFixed(1)}KB）。`;
-        // 若 MicroCompact 已注入 recovery，不再重複（Tier 2 最常發生雙重注入）
         if (recoveryText && !skipRecoveryInjection) {
           msg += `\n\n${recoveryText}`;
         }
@@ -2286,8 +2286,7 @@ function autoManageContext(budget, skipRecoveryInjection = false) {
           _todoFollowUp.pendingIds = pendingTodos.map(t => t.id);
         } catch { _todoFollowUp.pendingIds = []; }
 
-        // 寫入共享檔案供 OpenCode plugin 在 compaction 時讀取
-        // (若 D.4 已寫過則跳過，避免重複)
+        // 寫入共享檔案
         if (!skipRecoveryInjection) {
           writeSharedRecoveryFile(recoveryText);
           writeCompactionStatus(2);

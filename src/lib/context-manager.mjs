@@ -29,7 +29,7 @@ import { classifyEntry, summarizeOutput, shouldPrefetchCompact } from '../plugin
 
 const CONTEXT_DIR = resolve(homedir(), '.smart', 'context');
 const RECOVERY_FILE = resolve(homedir(), '.smart', 'recovery-context.json');
-const RECOVERY_TTL_MS = 86400000; // 24h — 超過此期限的 recovery context 視為過期
+const RECOVERY_TTL_MS = 14400000; // 4h — Gap #6 fix: 從 24h 縮短為 4h，避免過期 context 干擾新 session
 const SUBTASK_PROGRESS_FILE = resolve(homedir(), '.smart', 'subtask-progress.json');
 const MAX_HISTORY = 50;
 const MAX_FINDINGS = 100;
