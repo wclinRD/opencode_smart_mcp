@@ -545,9 +545,10 @@ export class ContextManager {
     const errorCount = this._context.metadata.errorCount || 0;
     const uniqueTools = new Set(history.map(e => e.tool)).size;
 
-    // 關鍵決策: 從 fast_apply 條目中擷取
+    // 關鍵決策: 從編輯工具條目中擷取 (fast_apply + sub-tools via smart_run)
+    const EDIT_TOOLS = ['fast_apply', 'apply', 'smart_run', 'cross_file_edit', 'rename_safety'];
     const keyDecisions = history
-      .filter(e => e.tool && (e.tool.includes('fast_apply') || e.tool.includes('apply')))
+      .filter(e => e.tool && EDIT_TOOLS.some(t => e.tool.includes(t)))
       .slice(-5)
       .map(e => {
         const args = e.args || {};

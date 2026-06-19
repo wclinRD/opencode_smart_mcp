@@ -1205,28 +1205,6 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
     }
   }
 
-  // D.4 Recovery Context: after fullCompact, inject todo-aware resume hint.
-  // This tells the LLM what was in progress before compaction cleared the history.
-  if (didCompact) {
-    const recoveryText = contextManager.formatRecoveryContext();
-    if (recoveryText) {
-      result._pendingRecovery = Promise.resolve(recoveryText);
-      // 同步初始化 _todoFollowUp，確保 follow-up 監控在 D.4 路徑也能運作
-      _todoFollowUp.pendingAt = Date.now();
-      _todoFollowUp.pendingText = recoveryText;
-      _todoFollowUp.toolCallsSince = 0;
-      _todoFollowUp.reInjectionCount = 0;
-      _todoFollowUp.lastReInjectAtCalls = 0;
-      try {
-        const pendingTodos = contextManager.listTodos().filter(t => t.status === 'pending' || t.status === 'in_progress');
-        _todoFollowUp.pendingIds = pendingTodos.map(t => t.id);
-      } catch { _todoFollowUp.pendingIds = []; }
-      // Gap 4 fix: 同步寫入共享檔案 — 與 Tier 2/3 路徑一致，不 deferred
-      writeSharedRecoveryFile(recoveryText);
-      writeCompactionStatus(_autoState.lastLevel || 1);
-    }
-  }
-
   // D.1 Auto-Store: non-blocking write failed tool results to memory
   if (!success && toolName !== 'smart_memory_store') {
     autoStoreToMemory(toolName, args, result);
@@ -1310,17 +1288,54 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
     }
   }
 
+  // D.4 Recovery Context: after fullCompact, inject todo-aware resume hint.
+  // (位置在 auto-complete 之後，確保 formatRecoveryContext 看到已更新的 todo 狀態)
+  if (didCompact) {
+    const recoveryText = contextManager.formatRecoveryContext();
+    if (recoveryText) {
+      result._pendingRecovery = Promise.resolve(recoveryText);
+      // 同步初始化 _todoFollowUp，確保 follow-up 監控在 D.4 路徑也能運作
+      _todoFollowUp.pendingAt = Date.now();
+      _todoFollowUp.pendingText = recoveryText;
+      _todoFollowUp.toolCallsSince = 0;
+      _todoFollowUp.reInjectionCount = 0;
+      _todoFollowUp.lastReInjectAtCalls = 0;
+      try {
+        const pendingTodos = contextManager.listTodos().filter(t => t.status === 'pending' || t.status === 'in_progress');
+        _todoFollowUp.pendingIds = pendingTodos.map(t => t.id);
+      } catch { _todoFollowUp.pendingIds = []; }
+      // 同步寫入共享檔案 — 與 Tier 2/3 路徑一致
+      writeSharedRecoveryFile(recoveryText);
+      writeCompactionStatus(_autoState.lastLevel || 1);
+    }
+  }
+
   // Phase 33b: Todo follow-up monitoring — 指數退避 re-inject
   // 只在 pendingIds 有值且尚未全部完成時觸發
   // (Gap 5 fix: 若同一輪已有 _pendingRecovery，跳過 re-inject 避免重複)
   if (_todoFollowUp.pendingIds.length > 0 && !result._pendingRecovery) {
-    _todoFollowUp.toolCallsSince++;
+    // Fix 5: 排除探索類工具 (讀取/搜尋/管理) 不計入浪費次數
+    const EXPLORE_TOOLS = ['smart_read', 'smart_grep', 'smart_glob', 'smart_lsp', 'smart_context', 'smart_compact', 'smart_rules'];
+    if (!EXPLORE_TOOLS.includes(toolName)) {
+      _todoFollowUp.toolCallsSince++;
+    }
     const BACKOFF_THRESHOLDS = [5, 15, 30, 50];
     const MAX_REINJECTIONS = 4;
     const MAX_TOOL_CALLS = 100;
-    // Gap 8 fix: 超過最大次數自動放棄
+    // Gap 8 fix: 超過最大次數自動放棄 (含 usuario 上報)
     if (_todoFollowUp.reInjectionCount >= MAX_REINJECTIONS || _todoFollowUp.toolCallsSince >= MAX_TOOL_CALLS) {
       debugLog(`Todo follow-up: giving up after ${_todoFollowUp.reInjectionCount} re-injections, ${_todoFollowUp.toolCallsSince} calls. Resetting.`);
+      // Fix 1: 放棄前寫入 finding 讓使用者知道
+      try {
+        contextManager.addFindings([{
+          source: 'todo-follow-up',
+          finding: `Todo 追蹤已放棄：${_todoFollowUp.pendingIds.length} 個待辦在 ${_todoFollowUp.reInjectionCount} 次提醒後仍未完成。已自動重置監控。待辦：${_todoFollowUp.pendingText.split('\n').filter(l => l.includes('☐') || l.includes('⏳')).join('；').slice(0, 200)}`,
+          category: 'warning',
+          severity: 'medium',
+        }]);
+      } catch {}
+      // 注入最終通知到結果
+      result._pendingTodoAbandon = `⚠️ [Todo Monitor] 系統在 ${_todoFollowUp.reInjectionCount} 次提醒、${_todoFollowUp.toolCallsSince} 次工具呼叫後，已停止追蹤未完成的待辦事項。請手動確認：\n${_todoFollowUp.pendingText.split('\n').filter(l => l.includes('☐') || l.includes('⏳')).join('\n')}\n✅ 若已完成請用 \`smart_todo done\` 標記，❌ 若已不需要請用 \`smart_todo cancel\`。`;
       _todoFollowUp.pendingIds = [];
       _todoFollowUp.toolCallsSince = 0;
       _todoFollowUp.reInjectionCount = 0;
@@ -2178,7 +2193,7 @@ function buildToolContent(resolvedOutput, result) {
  * Tier 2 (85%): Auto-clear low-value outputs
  * Tier 3 (95%): Emergency aggressive clear
  */
-function autoManageContext(budget) {
+function autoManageContext(budget, skipRecoveryInjection = false) {
   const s = _autoState;
   if (!s.enabled || s.mode === 'off') return '';
 
@@ -2200,7 +2215,8 @@ function autoManageContext(budget) {
       const recoveryText = contextManager.formatRecoveryContext();
       debugLog(`AutoManage Tier3: cleared ${cleared.removed} entries (budget=${(used*100).toFixed(0)}%)`);
       let msg = `\n\n---\n🚨 Context 危急：${(used*100).toFixed(0)}%。已緊急清除 ${cleared.removed} 筆輸出。\n可丟棄: ${(stats.discardable/1024).toFixed(1)}KB, 可摘要: ${(stats.summarizable/1024).toFixed(1)}KB`;
-      if (recoveryText) {
+      // 若 MicroCompact 已注入 recovery，不再重複
+      if (recoveryText && !skipRecoveryInjection) {
         msg += `\n\n${recoveryText}`;
       }
       // 追蹤 pending todo 供 follow-up 監控
@@ -2239,7 +2255,8 @@ function autoManageContext(budget) {
       debugLog(`AutoManage Tier2: cleared ${cleared.removed} entries (budget=${(used*100).toFixed(0)}%)`);
       if (cleared.removed > 0) {
         let msg = `\n\n---\n⚠️ Context ${(used*100).toFixed(0)}%。已自動清除 ${cleared.removed} 筆輸出（釋放約 ${(stats.discardable/1024).toFixed(1)}KB）。`;
-        if (recoveryText) {
+        // 若 MicroCompact 已注入 recovery，不再重複（Tier 2 最常發生雙重注入）
+        if (recoveryText && !skipRecoveryInjection) {
           msg += `\n\n${recoveryText}`;
         }
         // 追蹤 pending todo 供 follow-up 監控
@@ -2363,7 +2380,8 @@ function respond(id, result, opts = {}) {
     }
 
     // Phase 33: Tiered auto context management (replaces fire-once _autoCleared/_autoCompacted)
-    const autoMsg = autoManageContext(budget);
+    // 若 _pendingRecovery 已有值（MicroCompact 已注入），跳過 autoManageContext 的 recovery 文字
+    const autoMsg = autoManageContext(budget, !!(result._pendingRecovery));
     if (autoMsg) {
       result.content[0].text += autoMsg;
     }
@@ -2441,6 +2459,17 @@ function respond(id, result, opts = {}) {
         }
       }
     } catch (e) { debugLog('respond._reInjectRecovery error:', e?.message); delete result._reInjectRecovery; }
+    try {
+      // Fix 1: Todo follow-up 放棄通知 — 當監控系統決定停止追蹤時通知使用者
+      if (result._pendingTodoAbandon) {
+        const abandonText = result._pendingTodoAbandon;
+        delete result._pendingTodoAbandon;
+        if (abandonText && result?.content?.[0]?.type === 'text') {
+          result.content[0].text += `\n\n---\n${abandonText}\n---`;
+          debugLog('Todo follow-up: abandon notification injected');
+        }
+      }
+    } catch (e) { debugLog('respond._pendingTodoAbandon error:', e?.message); delete result._pendingTodoAbandon; }
     try {
       // Phase: Borderline todo auto-detect — inject hint for LLM to confirm
       if (result._pendingBorderlineTodo) {
@@ -2831,6 +2860,7 @@ function handleRequest(req) {
                 if (cr._pendingSubTaskTodo) resp1._pendingSubTaskTodo = cr._pendingSubTaskTodo;
                 if (cr._pendingRecovery) resp1._pendingRecovery = cr._pendingRecovery;
                 if (cr._reInjectRecovery) resp1._reInjectRecovery = cr._reInjectRecovery;
+                if (cr._pendingTodoAbandon) resp1._pendingTodoAbandon = cr._pendingTodoAbandon;
                 respond(id, resp1);
               })
               .catch(err => {
@@ -2853,6 +2883,7 @@ function handleRequest(req) {
             if (result._pendingImpact) resp2._pendingImpact = result._pendingImpact;
             if (result._pendingLsp) resp2._pendingLsp = result._pendingLsp;
             if (result._pendingHallucination) resp2._pendingHallucination = result._pendingHallucination;
+            if (result._pendingTodoAbandon) resp2._pendingTodoAbandon = result._pendingTodoAbandon;
             respond(id, resp2);
           } else {
             respond(id, {
@@ -2956,6 +2987,7 @@ function handleRequest(req) {
               if (cr._pendingImpact) resp3._pendingImpact = cr._pendingImpact;
               if (cr._pendingLsp) resp3._pendingLsp = cr._pendingLsp;
               if (cr._pendingHallucination) resp3._pendingHallucination = cr._pendingHallucination;
+              if (cr._pendingTodoAbandon) resp3._pendingTodoAbandon = cr._pendingTodoAbandon;
               respond(id, resp3);
             })
             .catch(err => {
@@ -2979,6 +3011,7 @@ function handleRequest(req) {
           const resp4 = { content: [{ type: 'text', text: String(result.output ?? "") }] };
           if (result._responsePolicy) resp4._responsePolicy = result._responsePolicy;
           if (result._pendingImpact) resp4._pendingImpact = result._pendingImpact;
+          if (result._pendingTodoAbandon) resp4._pendingTodoAbandon = result._pendingTodoAbandon;
           respond(id, resp4);
         } else {
           respond(id, {
