@@ -578,11 +578,23 @@ export class ContextManager {
       timestamp: e.timestamp,
     }));
 
+    // 最近錯誤 (最多 2 筆，含原始錯誤訊息)
+    const lastErrors = history
+      .filter(e => !e.ok && e.error && e.error.length > 10)
+      .slice(-2)
+      .map(e => ({
+        tool: e.tool,
+        error: e.error.length > 500 ? e.error.slice(0, 500) + '... [truncated]' : e.error,
+        duration: e.duration,
+        timestamp: e.timestamp,
+      }));
+
     return {
       summary: { totalCalls, errorCount, uniqueTools },
       findings: highFindings,
       keyDecisions,
       recentTools,
+      lastErrors,
       todoItems: this.listTodos(),
       compactedAt: nowISO(),
     };
@@ -987,6 +999,16 @@ export class ContextManager {
     const findings = rc.findings || [];
     if (findings.length > 0) {
       parts.push(`   🔍 Issues: ${findings.map(f => f.severity + ':' + f.category).join(', ')}`);
+    }
+
+    // Last errors — 原始錯誤訊息（非 pattern 摘要）
+    const lastErrors = rc.lastErrors || [];
+    if (lastErrors.length > 0) {
+      parts.push('   ❌ Recent errors:');
+      for (const e of lastErrors) {
+        const errPreview = e.error.length > 120 ? e.error.slice(0, 120) + '...' : e.error;
+        parts.push(`      [${e.tool}] ${errPreview}`);
+      }
     }
 
     // Resume directive — 列出所有 active todos，不只第一個
