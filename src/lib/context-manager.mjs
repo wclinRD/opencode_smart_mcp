@@ -953,9 +953,13 @@ export class ContextManager {
       parts.push(`   🔍 Issues: ${findings.map(f => f.severity + ':' + f.category).join(', ')}`);
     }
 
-    // Resume directive
+    // Resume directive — 列出所有 active todos，不只第一個
     if (activeTodos.length > 0) {
-      parts.push(`   ▶️ Continue: todo #${activeTodos[0].id} — "${activeTodos[0].text}"`);
+      const continueItems = activeTodos.map((t, i) =>
+        `     ${i + 1}. todo #${t.id} — "${t.text}"`
+      );
+      parts.push(`   ▶️ Continue (${activeTodos.length} pending):`);
+      parts.push(...continueItems);
     }
 
     return parts.join('\n');
