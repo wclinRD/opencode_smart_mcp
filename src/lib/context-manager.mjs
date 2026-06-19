@@ -32,6 +32,11 @@ const MAX_HISTORY = 50;
 const MAX_FINDINGS = 100;
 const MAX_RESULT_LENGTH = 2000;
 
+// P0 MicroCompact: placeholder for cleared tool results
+const TOOL_RESULT_PLACEHOLDER = '[MicroCompact: tool result cleared]';
+const MICRO_COMPACT_KEEP = 5;     // Keep last N results as-is
+const MICRO_COMPACT_LARGE_RESULT = 50000;  // Truncate results >50K chars
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -298,6 +303,62 @@ export class ContextManager {
   }
 
   /**
+   * P0 MicroCompact: keep last N results as-is, replace older ones with placeholder.
+   * Unlike clearToolResults (which removes entries entirely), MicroCompact preserves
+   * the entry structure but replaces the result/error text with a short placeholder.
+   * This allows the LLM to still see *what tools were called* without the full output.
+   *
+   * Large results (>50K chars) are truncated to 2KB preview at capture time.
+   *
+   * Runs on every tool call (auto-triggered from server). Zero LLM cost.
+   *
+   * @param {object} [opts]
+   * @param {number} [opts.keep=5] - Keep last N results as-is
+   * @returns {{ cleared: number, kept: number, largeTruncated: number }}
+   */
+  microCompact({ keep = MICRO_COMPACT_KEEP } = {}) {
+    if (!this._context || !this._context.toolHistory.length) {
+      return { cleared: 0, kept: 0, largeTruncated: 0 };
+    }
+
+    const history = this._context.toolHistory;
+    const total = history.length;
+    const keepCount = Math.min(keep, total);
+    const clearStart = total - keepCount;
+    let cleared = 0;
+    let largeTruncated = 0;
+
+    for (let i = 0; i < total; i++) {
+      const entry = history[i];
+
+      // Keep last `keepCount` entries as-is
+      if (i >= clearStart) {
+        // Still check for large results
+        if (entry.result && entry.result.length > MICRO_COMPACT_LARGE_RESULT) {
+          entry.result = entry.result.slice(0, 2000) +
+            `\n\n--- [MicroCompact: truncated ${MICRO_COMPACT_LARGE_RESULT}+ chars] ---`;
+          entry._microCompacted = 'truncated';
+          largeTruncated++;
+        }
+        continue;
+      }
+
+      // Older entries: replace result/error with placeholder
+      if (entry.result || entry.error) {
+        entry.result = TOOL_RESULT_PLACEHOLDER;
+        entry.error = undefined;
+        entry._microCompacted = 'cleared';
+        cleared++;
+      }
+    }
+
+    this._context.metadata.updatedAt = nowISO();
+    if (this._autoSave) this._save();
+
+    return { cleared, kept: keepCount, largeTruncated };
+  }
+
+  /**
    * Phase 32: Compact tool history using smart classification.
    * Uses classifyEntry() to identify DROP/KEEP_SUMMARY/KEEP entries.
    * DROP entries are removed. KEEP_SUMMARY entries are replaced with summary.
@@ -489,7 +550,15 @@ export class ContextManager {
     if (workflowId) entry.workflowId = workflowId;
 
     if (result.ok) {
-      entry.result = truncate(result.output || '', this._maxResultLength);
+      const raw = result.output || '';
+      // P0: Large result truncation (>50K chars → 2KB preview)
+      if (raw.length > MICRO_COMPACT_LARGE_RESULT) {
+        entry.result = raw.slice(0, 2000) +
+          `\n\n--- [MicroCompact: truncated ${raw.length} chars to 2KB preview] ---`;
+        entry._largeTruncated = true;
+      } else {
+        entry.result = truncate(raw, this._maxResultLength);
+      }
     } else {
       entry.error = truncate(result.error || '', this._maxResultLength);
     }

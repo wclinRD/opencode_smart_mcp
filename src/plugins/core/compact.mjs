@@ -1,54 +1,88 @@
-// compact.mjs → smart_compact
+// compact.mjs → smart_compact + MicroCompact classification
 //
 // Phase 14.2: Smart Compact Tool — rules-based tool history classifier.
-// Analyzes tool call history and classifies each entry as DROP / KEEP SUMMARY / KEEP.
+// Analyzes tool call history and classifies each entry as DROP / KEEP_SUMMARY / KEEP.
 // Zero LLM cost — pure rules-based classification.
 //
-// Purpose: Help the LLM decide which tool outputs to discard before compaction,
-// reducing context budget pressure and preventing unnecessary compaction cycles.
+// P0 MicroCompact extension: every tool now has a computed "compact action" so
+// the auto-clear can decide which outputs to replace with placeholder vs keep.
 //
 // Classification rules:
-//   DROP          — smart_grep, smart_lsp, smart_test, smart_learn,
-//                   import_graph, code_impact
-//   KEEP SUMMARY  — smart_security, smart_ingest_document, git_*
-//   KEEP          — smart_think, smart_deep_think, smart_fast_apply,
-//                   edit, error_diagnose, debug
+//   DROP          — search/lookup tools: grep, glob, lsp, test, learn, *search, crawl
+//   KEEP_SUMMARY  — security, ingest, git_*, exa tools, github_search, read, bash
+//   KEEP          — think, deep_think, fast_apply, edit, error_diagnose, debug
+//                   context, config, compact, security
 //   Unknown       → KEEP (conservative)
 //
 // Safety: Last 3 turns are always KEEP (never analyzed for dropping).
 
 // ---------------------------------------------------------------------------
-// Classification rules
+// Classification rules (P0: expanded for all Smart MCP tools)
 // ---------------------------------------------------------------------------
 
-/** Tools whose output is stale and can be safely dropped */
+/** Tools whose output is stale and can be safely dropped.
+ *  These are ephemeral lookups — once read, the result is consumed. */
 const DROP_TOOLS = new Set([
   'smart_grep',
   'smart_lsp',
   'smart_test',
   'smart_learn',
+  'smart_glob',
+  'smart_run',
   'import_graph',
   'code_impact',
+  'naming',
+  'coverage',
+  'test_suggest',
+  'git_context',
+  'py_helper',
+  'ts_helper',
+  'rs_helper',
+  'diagram',
+  'report',
+  'warm_up',
+  'integrate',
+  'compose',
+  'tool_stats',
 ]);
 
-/** Tools whose output should be summarized (keep key findings, drop raw output) */
+/** Tools whose output should be summarized (keep key findings, drop raw output).
+ *  These are valuable but verbose — keep a summary, drop the details. */
 const KEEP_SUMMARY_TOOLS = new Set([
   'smart_security',
   'smart_ingest_document',
+  'smart_exa_search',
+  'smart_exa_crawl',
+  'smart_github_search',
+  'smart_read',
+  'smart_rules',
+  'bash',
+  'smart_context',
+  'smart_compact',
+  'smart_config',
+  'memory_store',
 ]);
 
-/** Tools whose output should be fully preserved */
+/** Tools whose output should be fully preserved.
+ *  These contain decision-quality information that must survive compaction. */
 const KEEP_TOOLS = new Set([
   'smart_think',
   'smart_deep_think',
   'smart_fast_apply',
+  'smart_fast_apply_verbose',
   'edit',
+  'write',
   'error_diagnose',
   'debug',
+  'planner',
+  'cross_file_edit',
+  'rename_safety',
 ]);
 
-/** Prefix-based matching for git tools */
+/** Prefix-based matching */
 const GIT_PREFIX = 'git_';
+const SMART_PREFIX = 'smart_';
+const MEMORY_PREFIX = 'memory_';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -62,10 +96,21 @@ const GIT_PREFIX = 'git_';
 export function classifyEntry(entry) {
   const tool = entry.tool || '';
 
+  // Exact match (fast path)
   if (DROP_TOOLS.has(tool)) return 'DROP';
   if (KEEP_SUMMARY_TOOLS.has(tool)) return 'KEEP_SUMMARY';
   if (KEEP_TOOLS.has(tool)) return 'KEEP';
+
+  // Prefix matching
   if (tool.startsWith(GIT_PREFIX)) return 'KEEP_SUMMARY';
+  if (tool.startsWith(MEMORY_PREFIX)) return 'KEEP_SUMMARY';
+
+  // smart_* tools not in any set: search-like → DROP, everything else → KEEP_SUMMARY
+  if (tool.startsWith(SMART_PREFIX)) {
+    const base = tool.slice(SMART_PREFIX.length);
+    if (/^(search|find|list|show|get|check|scan)/i.test(base)) return 'DROP';
+    return 'KEEP_SUMMARY';
+  }
 
   // Unknown → conservative: KEEP
   return 'KEEP';

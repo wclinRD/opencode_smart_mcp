@@ -51,6 +51,10 @@ const MAX_OUTPUT_SIZE = 512 * 1024;
 const MAX_OUTPUT_CHARS = 200_000;
 const TOOL_TIMEOUT = 30_000;
 
+// P0 MicroCompact: auto-trigger after tool call
+const MICRO_COMPACT_KEEP = 5;      // Keep last N results as-is
+const MICRO_COMPACT_MIN_CALLS = 5; // Don't compact before N calls (allow build-up)
+
 // ---------------------------------------------------------------------------
 // Model size: 'large' | 'small' | 'micro'
 // Controls tool manifest, output compression, emoji stripping.
@@ -1113,6 +1117,19 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
   recordStats(toolName, elapsedMs, success);
   ensureContext();
   contextManager.capture(toolName, args, result, elapsedMs);
+
+  // P0 MicroCompact: auto-trigger after every tool call.
+  // Keeps last 5 results as-is, replaces older ones with placeholder.
+  // Skip for memory_store (noise reduction) and skip first 5 calls to allow build-up.
+  const ctx = contextManager.get();
+  const toolCount = ctx?.metadata?.toolCount || 0;
+  if (toolCount > MICRO_COMPACT_MIN_CALLS && toolName !== 'smart_memory_store') {
+    const mcResult = contextManager.microCompact({ keep: MICRO_COMPACT_KEEP });
+    if (mcResult.cleared > 0 || mcResult.largeTruncated > 0) {
+      debugLog(`MicroCompact: cleared ${mcResult.cleared}, truncated ${mcResult.largeTruncated}, kept ${mcResult.kept}`);
+    }
+  }
+
   // D.1 Auto-Store: non-blocking write failed tool results to memory
   if (!success && toolName !== 'smart_memory_store') {
     autoStoreToMemory(toolName, args, result);
