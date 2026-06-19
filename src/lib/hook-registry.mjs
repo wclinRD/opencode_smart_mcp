@@ -170,6 +170,21 @@ export function setHookEnabled(id, enabled) {
 }
 
 /**
+ * Enable or disable a hook by name.
+ */
+export function setHookEnabledByName(name, enabled) {
+  let found = false;
+  for (const list of [HOOKS.preTool, HOOKS.postTool]) {
+    const hook = list.find(h => h.name === name);
+    if (hook) {
+      hook.enabled = enabled;
+      found = true;
+    }
+  }
+  return found;
+}
+
+/**
  * Remove a hook by id.
  */
 export function removeHook(id) {
@@ -254,6 +269,63 @@ export function removeUserHook(name) {
     const before = hooks.length;
     hooks = hooks.filter(h => h.name !== name);
     if (hooks.length === before) return false;
+    writeFileSync(USER_HOOKS_PATH, JSON.stringify(hooks, null, 2), 'utf-8');
+    return true;
+  } catch { return false; }
+}
+
+
+// ---------------------------------------------------------------------------
+// Helpers for smart_hook tool
+// ---------------------------------------------------------------------------
+
+/**
+ * Remove a hook by name (across both pre and post lists).
+ * @param {string} name
+ * @returns {boolean} whether a hook was removed
+ */
+export function removeHookByName(name) {
+  let found = false;
+  for (const list of [HOOKS.preTool, HOOKS.postTool]) {
+    const idx = list.findIndex(h => h.name === name);
+    if (idx >= 0) {
+      list.splice(idx, 1);
+      found = true;
+    }
+  }
+  return found;
+}
+
+/**
+ * Clear all user-registered hooks (not built-in ones) and reload from file.
+ */
+export function reloadUserHooks() {
+  // Remove all user-type hooks first
+  HOOKS.preTool = HOOKS.preTool.filter(h => h.type === null);
+  HOOKS.postTool = HOOKS.postTool.filter(h => h.type === null);
+  // Reload from file
+  loadUserHooks();
+}
+
+/**
+ * Load user hooks from file without registering (for tool preview).
+ */
+export function loadUserHooksFromFile() {
+  try {
+    if (!existsSync(USER_HOOKS_PATH)) return [];
+    const data = readFileSync(USER_HOOKS_PATH, 'utf-8');
+    const hooks = JSON.parse(data);
+    return Array.isArray(hooks) ? hooks : [];
+  } catch { return []; }
+}
+
+/**
+ * Save full hooks array to file (replaces contents).
+ */
+export function saveUserHooksToFile(hooks) {
+  try {
+    const dir = join(homedir(), '.smart');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(USER_HOOKS_PATH, JSON.stringify(hooks, null, 2), 'utf-8');
     return true;
   } catch { return false; }

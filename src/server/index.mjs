@@ -42,8 +42,9 @@ import { getPrefetchEngine } from '../lib/prefetch-engine.mjs';
 import { getConcurrencyGate } from '../lib/concurrency-gate.mjs';
 import {
   registerPreHook, registerPostHook, executePreHooks, executePostHooks,
-  listHooks, setHookEnabled, removeHook,
+  listHooks, setHookEnabled, setHookEnabledByName, removeHook, removeHookByName,
   loadUserHooks, saveUserHook, removeUserHook,
+  loadUserHooksFromFile, saveUserHooksToFile, reloadUserHooks,
 } from '../lib/hook-registry.mjs';
 import { classifyTool, getClassificationSummary, setToolClassification } from '../lib/auto-classifier.mjs';
 
@@ -2921,6 +2922,52 @@ function handleRequest(req) {
           },
         },
       });
+      // Add the hook management tool
+      tools.push({
+        name: 'smart_hook',
+        description: '[hook] Manage tool lifecycle hooks. Supports add/list/remove/enable/disable. Hooks run bash commands or call MCP tools before/after tool execution. Persisted to ~/.smart/hooks.json.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            command: {
+              type: 'string',
+              enum: ['add', 'list', 'remove', 'enable', 'disable'],
+              description: 'Hook management command',
+            },
+            name: {
+              type: 'string',
+              description: 'Hook name (required for remove/enable/disable)',
+            },
+            event: {
+              type: 'string',
+              enum: ['preTool', 'postTool'],
+              description: 'When to trigger the hook (required for add)',
+            },
+            match: {
+              type: 'object',
+              description: 'Match criteria (required for add): {tool: "smart_fast_apply"}',
+              properties: {
+                tool: { type: 'string', description: 'Tool name or glob pattern (e.g. "smart_fast_apply", "smart_*")' },
+              },
+            },
+            action: {
+              type: 'object',
+              description: 'Action to execute (required for add)',
+              properties: {
+                type: { type: 'string', enum: ['bash', 'mcp_tool'], description: 'Action type' },
+                command: { type: 'string', description: 'Shell command (for type:bash). Supports {file} {tool} template variables.' },
+                tool: { type: 'string', description: 'MCP tool name (for type:mcp_tool)' },
+              },
+            },
+            enabled: {
+              type: 'boolean',
+              description: 'Whether the hook is enabled (default: true)',
+            },
+          },
+          required: ['command'],
+        },
+      });
+
       respond(id, { tools });
       break;
     }
@@ -3040,6 +3087,79 @@ function handleRequest(req) {
         }
         break;
       }
+      // smart_hook → hook management (CRUD for ~/.smart/hooks.json)
+      if (toolName === 'smart_hook') {
+        const args4 = (params?.arguments || {});
+        const cmd = args4.command;
+        try {
+          switch (cmd) {
+            case 'list': {
+              const hooks = listHooks();
+              respond(id, { content: [{ type: 'text', text: JSON.stringify(hooks, null, 2) }] });
+              break;
+            }
+            case 'add': {
+              if (!args4.name || !args4.event || !args4.match || !args4.action) {
+                respond(id, { content: [{ type: 'text', text: 'Missing required fields: name, event, match, action' }], isError: true }, { optimize: false });
+                break;
+              }
+              if (!['preTool', 'postTool'].includes(args4.event)) {
+                respond(id, { content: [{ type: 'text', text: 'event must be "preTool" or "postTool"' }], isError: true }, { optimize: false });
+                break;
+              }
+              const saved = saveUserHook({
+                name: args4.name,
+                description: args4.description || '',
+                event: args4.event,
+                match: args4.match,
+                action: args4.action,
+                enabled: args4.enabled !== false,
+              });
+              if (saved) {
+                // Reload user hooks to sync in-memory state (remove old + re-register)
+                removeHookByName(args4.name);
+                reloadUserHooks();
+                respond(id, { content: [{ type: 'text', text: `Hook "${args4.name}" added and registered.` }] });
+              } else {
+                respond(id, { content: [{ type: 'text', text: `Failed to save hook "${args4.name}".` }], isError: true }, { optimize: false });
+              }
+              break;
+            }
+            case 'remove': {
+              if (!args4.name) {
+                respond(id, { content: [{ type: 'text', text: 'Missing required field: name' }], isError: true }, { optimize: false });
+                break;
+              }
+              removeHookByName(args4.name);
+              const removed = removeUserHook(args4.name);
+              respond(id, { content: [{ type: 'text', text: removed ? `Hook "${args4.name}" removed.` : `Hook "${args4.name}" not found.` }] });
+              break;
+            }
+            case 'enable':
+            case 'disable': {
+              if (!args4.name) {
+                respond(id, { content: [{ type: 'text', text: 'Missing required field: name' }], isError: true }, { optimize: false });
+                break;
+              }
+              const enabled = cmd === 'enable';
+              // Update in-memory
+              const found = setHookEnabledByName(args4.name, enabled);
+              // Update in file
+              const hooks = loadUserHooksFromFile();
+              const updated = hooks.map(h => h.name === args4.name ? { ...h, enabled } : h);
+              saveUserHooksToFile(updated);
+              respond(id, { content: [{ type: 'text', text: found ? `Hook "${args4.name}" ${cmd}d.` : `Hook "${args4.name}" not found.` }] });
+              break;
+            }
+            default:
+              respond(id, { content: [{ type: 'text', text: `Unknown command: ${cmd}. Supported: add, list, remove, enable, disable` }], isError: true }, { optimize: false });
+          }
+        } catch (err) {
+          respond(id, { content: [{ type: 'text', text: `Hook error: ${err.message}` }], isError: true }, { optimize: false });
+        }
+        break;
+      }
+
 
       // Phase 33: Inject toolHistory for smart_compact auto mode
       if (toolName === 'smart_compact' && args.auto) {
