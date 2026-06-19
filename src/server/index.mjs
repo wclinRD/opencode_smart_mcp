@@ -2153,6 +2153,7 @@ function autoManageContext(budget) {
 
       // 寫入共享檔案供 OpenCode plugin 在 compaction 時讀取
       writeSharedRecoveryFile(recoveryText);
+      writeCompactionStatus(3);
       return msg + '\n---';
     } catch (e) {
       debugLog('AutoManage Tier3 error:', e.message);
@@ -2190,6 +2191,7 @@ function autoManageContext(budget) {
 
         // 寫入共享檔案供 OpenCode plugin 在 compaction 時讀取
         writeSharedRecoveryFile(recoveryText);
+        writeCompactionStatus(2);
         return msg + '\n---';
       }
     } catch (e) {
@@ -2228,6 +2230,30 @@ function writeSharedRecoveryFile(recoveryText) {
     }
   } catch (err) {
     debugLog('writeSharedRecoveryFile error:', err.message);
+  }
+}
+
+/**
+ * 寫入結構化 compaction status 到共享檔案，供 OpenCode plugin 讀取。
+ * 讓 plugin 知道：compaction 等級、pending todos 數量、時間戳。
+ * 與 writeSharedRecoveryFile 互補（文字 vs 結構化）。
+ */
+function writeCompactionStatus(level) {
+  try {
+    const pendingTodos = contextManager ? contextManager.listTodos().filter(
+      t => t.status === 'pending' || t.status === 'in_progress'
+    ) : [];
+    const status = {
+      level,
+      pendingTodos: pendingTodos.length,
+      pendingTodoIds: pendingTodos.map(t => t.id),
+      timestamp: new Date().toISOString(),
+      source: 'smart-mcp-auto-compact',
+    };
+    const filePath = resolve(homedir(), '.smart', 'compaction-status.json');
+    writeFileSync(filePath, JSON.stringify(status, null, 2) + '\n', 'utf-8');
+  } catch (err) {
+    debugLog('writeCompactionStatus error:', err.message);
   }
 }
 
@@ -2331,6 +2357,7 @@ function respond(id, result, opts = {}) {
         }
         // 同步寫入共享檔案 — fullCompact 路徑也需要 plugin 能讀到
         writeSharedRecoveryFile(recoveryText);
+        writeCompactionStatus(_autoState.lastLevel || 1);
       }
     } catch (e) { debugLog('respond._pendingRecovery error:', e?.message); delete result._pendingRecovery; }
     try {
