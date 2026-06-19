@@ -829,14 +829,21 @@ export class ContextManager {
       if (fileExt && todoText.includes('.' + fileExt) && fileRef.includes('.' + fileExt)) { score += 1; reasons.push('extMatch'); }
 
       // === 規則 3: fast_apply 成功 + 輸出含完成關鍵字 ===
+      // 不給無條件 applyOk 分數 — 只有 output 明確確認才計分 (避免任何 edit 都 match)
       if (toolSig.includes('fast_apply') && result.ok) {
-        score += 1; reasons.push('applyOk');
         if (output.includes('applied') || output.includes('✅') || output.includes('success')) { score += 1; reasons.push('applyDone'); }
+        // 若也有檔案路徑比對，額外加分 (同一檔案的編輯高度相關)
+        if (fileRef && todoText.includes(fileRef)) { score += 2; reasons.push('applyFile'); }
       }
 
       // === 規則 4: test 成功 ===
       if (toolSig.includes('test') && result.ok) {
-        if (output.includes('pass')) { score += 2; reasons.push('testPass'); }
+        if (output.includes('pass')) {
+          // 檢查 test include pattern 是否與 todo 相關
+          const testPattern = ((args.include || '') + ' ' + (args.file || '')).toLowerCase();
+          const hasFileContext = testPattern && todoText.includes(testPattern);
+          score += hasFileContext ? 3 : 1; reasons.push(hasFileContext ? 'testFilePass' : 'testPass');
+        }
         if (output.includes('all pass') || output.includes('100%')) { score += 2; reasons.push('testAllPass'); }
       }
 
@@ -874,10 +881,14 @@ export class ContextManager {
         if (output.includes('no diagnostic') || output.includes('0 error')) { score += 2; reasons.push('lspClean'); }
       }
 
-      // === High confidence match ===
-      if (score >= 3) {
+      // === High confidence match (threshold 4) ===
+      // 提高門檻從 3→4，減少誤判。需至少兩個獨立證據才能匹配。
+      if (score >= 4) {
         return { matched: true, todoId: todo.id, todoText: todo.text, score, reasons: reasons.join(',') };
       }
+
+      // === Borderline: score 2-3 → 回傳 borderline 資訊供呼叫方判斷 ===
+      // 目前無 LLM fallback，但保留資訊供後續擴展
     }
 
     // === Borderline: score >= 2 但 < 3 → 回傳 borderline 資訊供呼叫方判斷 ===
