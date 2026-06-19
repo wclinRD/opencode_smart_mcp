@@ -923,7 +923,37 @@ export class ContextManager {
         if (output.includes('no diagnostic') || output.includes('0 error')) { score += 2; reasons.push('lspClean'); }
       }
 
-      // === 規則 9: smart_grep 模式比對（Gap 7 fix） ===
+      // === 規則 9a: smart_smart_run sub-tool 名稱比對 ===
+      // smart_run 的 args.tool 包含子工具名 (如 cross_file_edit)，比對 todo 是否提及
+      if (toolSig === 'smart_run' || toolSig === 'run') {
+        const subToolName = (args.tool || '').toLowerCase();
+        if (subToolName && todoText.includes(subToolName)) {
+          score += 2; reasons.push('subTool:' + subToolName);
+        }
+        // 若子工具的 args 含 fileRef，也加分
+        const subFileRef = ((args.args?.file || args.args?.files?.[0] || '') + ' ' + (args.args?.symbol || '')).toLowerCase();
+        if (subFileRef && todoText.includes(subFileRef)) { score += 2; reasons.push('subToolFile'); }
+      }
+
+      // === 規則 9b: bash 指令關鍵字比對 ===
+      // bash 的 command/description 若與 todo 關鍵字重疊，表示正在執行相關操作
+      if (toolSig === 'bash') {
+        const bashText = ((args.command || '') + ' ' + (args.description || '')).toLowerCase();
+        const todoKeywords = todoText.split(/\s+/).filter(w => w.length > 4);
+        for (const kw of todoKeywords) {
+          if (bashText.includes(kw)) { score += 1; reasons.push('bashCmd:' + kw); break; }
+        }
+        // 若 bash 輸出的結果包含成功關鍵字 + todo 關鍵字，加分
+        if (result.ok && output) {
+          if ((output.includes('done') || output.includes('success') || output.includes('complete'))) {
+            for (const kw of todoKeywords) {
+              if (output.includes(kw)) { score += 2; reasons.push('bashDone:' + kw); break; }
+            }
+          }
+        }
+      }
+
+      // === 規則 10: smart_grep 模式比對（Gap 7 fix） ===
       // grep 搜尋模式若與 todo 關鍵字重疊，表示 LLM 正在調查該議題
       if (toolSig.includes('grep') && args.pattern) {
         const grepPattern = args.pattern.toLowerCase();

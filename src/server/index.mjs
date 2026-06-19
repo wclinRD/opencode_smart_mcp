@@ -1273,7 +1273,15 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
       }
     } else if (args.command === 'add' && Array.isArray(args.items) && args.items.length > 0) {
       contextManager.addTodo(args.items);
-      debugLog(`Todo sync: smart_todo add synced ${args.items.length} items to in-memory state`);
+      // Round 2: 加入新 todo 後重啟監控（若之前已放棄），確保新任務能被追蹤
+      try {
+        const allPending = contextManager.listTodos().filter(t => t.status === 'pending' || t.status === 'in_progress');
+        _todoFollowUp.pendingIds = allPending.map(t => t.id);
+        _todoFollowUp.toolCallsSince = 0;
+        _todoFollowUp.reInjectionCount = 0;
+        _todoFollowUp.lastReInjectAtCalls = 0;
+      } catch {}
+      debugLog(`Todo sync: smart_todo add synced ${args.items.length} items, monitoring (re)started`);
     } else if (args.command === 'update' && args.id !== undefined && args.status) {
       const updateResult = contextManager.updateTodoStatus(args.id, args.status);
       if (updateResult.ok && (args.status === 'completed' || args.status === 'cancelled')) {
