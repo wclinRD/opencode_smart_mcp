@@ -1322,8 +1322,8 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
   // 只在 pendingIds 有值且尚未全部完成時觸發
   // (Gap 5 fix: 若同一輪已有 _pendingRecovery，跳過 re-inject 避免重複)
   if (_todoFollowUp.pendingIds.length > 0 && !result._pendingRecovery) {
-    // Fix 5: 排除探索類工具 (讀取/搜尋/管理) 不計入浪費次數
-    const EXPLORE_TOOLS = ['smart_read', 'smart_grep', 'smart_glob', 'smart_lsp', 'smart_context', 'smart_compact', 'smart_rules'];
+    // Fix 5: 排除探索/思考工具 (讀取/搜尋/管理/思考) 不計入浪費次數
+    const EXPLORE_TOOLS = ['smart_read', 'smart_grep', 'smart_glob', 'smart_lsp', 'smart_context', 'smart_compact', 'smart_rules', 'smart_think', 'smart_deep_think'];
     if (!EXPLORE_TOOLS.includes(toolName)) {
       _todoFollowUp.toolCallsSince++;
     }
