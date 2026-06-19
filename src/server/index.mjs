@@ -2289,13 +2289,33 @@ function autoManageContext(budget, skipRecoveryInjection = false) {
     return '';
   }
 
-  // Tier 1: Reminder (70%) — cooldown-gated, suggestion only
+  // Tier 1: Reminder (70%) — cooldown-gated, suggestion + pending todo recovery
   if (used >= s.thresholds.warn && (!inCooldown || s.lastLevel < 1)) {
     s.lastLevel = 1; s.lastAction = now;
     const stats = budget.getDroppableStats();
     const droppableKB = ((stats.discardable + stats.summarizable) / 1024).toFixed(1);
     if (stats.discardable + stats.summarizable > 2000) {
-      return `\n\n---\n💡 Context ${(used*100).toFixed(0)}%。可釋放約 ${droppableKB}KB：\n  - 無匹配搜尋: ${(stats.discardable/1024).toFixed(1)}KB\n  - 可摘要輸出: ${(stats.summarizable/1024).toFixed(1)}KB\n👉 執行 smart_compact({auto:true}) 或忽略\n---`;
+      let msg = `\n\n---\n💡 Context ${(used*100).toFixed(0)}%。可釋放約 ${droppableKB}KB：\n  - 無匹配搜尋: ${(stats.discardable/1024).toFixed(1)}KB\n  - 可摘要輸出: ${(stats.summarizable/1024).toFixed(1)}KB`;
+      // 若有 pending todo，注入 recovery context 讓 LLM 知道待辦事項
+      try {
+        const pendingTodos = contextManager.listTodos().filter(t => t.status === 'pending' || t.status === 'in_progress');
+        if (pendingTodos.length > 0) {
+          const recoveryText = contextManager.formatRecoveryContext();
+          if (recoveryText && !skipRecoveryInjection) {
+            msg += `\n\n${recoveryText}`;
+            writeSharedRecoveryFile(recoveryText);
+            writeCompactionStatus(1);
+            _todoFollowUp.pendingAt = now;
+            _todoFollowUp.pendingText = recoveryText;
+            _todoFollowUp.toolCallsSince = 0;
+            _todoFollowUp.reInjectionCount = 0;
+            _todoFollowUp.lastReInjectAtCalls = 0;
+            try { _todoFollowUp.pendingIds = pendingTodos.map(t => t.id); } catch {}
+          }
+        }
+      } catch {}
+      msg += '\n---';
+      return msg;
     }
   }
 
