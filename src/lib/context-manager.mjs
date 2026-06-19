@@ -30,6 +30,7 @@ import { classifyEntry, summarizeOutput, shouldPrefetchCompact } from '../plugin
 const CONTEXT_DIR = resolve(homedir(), '.smart', 'context');
 const RECOVERY_FILE = resolve(homedir(), '.smart', 'recovery-context.json');
 const RECOVERY_TTL_MS = 86400000; // 24h — 超過此期限的 recovery context 視為過期
+const SUBTASK_PROGRESS_FILE = resolve(homedir(), '.smart', 'subtask-progress.json');
 const MAX_HISTORY = 50;
 const MAX_FINDINGS = 100;
 const MAX_RESULT_LENGTH = 2000;
@@ -136,6 +137,8 @@ export class ContextManager {
         if (!this._context.todoItems) this._context.todoItems = [];
         // 從檔案恢復 recovery context（若前次 session 異常中斷）
         this.restoreRecoveryContext();
+        // 從共享檔案恢復 subtask progress（跨 session）
+        this._restoreSubtaskProgress();
         return this._context;
       }
     }
@@ -825,6 +828,10 @@ export class ContextManager {
     this._context.metadata.updatedAt = nowISO();
     if (this._autoSave) this._save();
     this._syncTodosToFile();
+    // 完成/取消時清空 subtask progress
+    if (status === 'completed' || status === 'cancelled') {
+      this._clearSubtaskProgress(id);
+    }
     return { ok: true, item };
   }
 
@@ -1005,6 +1012,8 @@ export class ContextManager {
         }
         this._context._subtaskProgress[todo.id].done[matchedSubTask] = true;
         this._context._subtaskProgress[todo.id].updatedAt = nowISO();
+        // 同步寫入共享檔案，跨 session 可恢復
+        this._persistSubtaskProgress();
 
         // 檢查是否所有子任務都已完成
         const progress = this._context._subtaskProgress[todo.id];
@@ -1078,6 +1087,52 @@ export class ContextManager {
       const dataFile = resolve(homedir(), '.smart', 'todos.json');
       writeFileSync(dataFile, JSON.stringify(this._context.todoItems, null, 2), 'utf-8');
     } catch { /* ignore */ }
+  }
+
+  /**
+   * 將 subtask progress 寫入共享檔案，跨 session 可恢復。
+   * 每次 subtask 更新時自動呼叫。
+   */
+  _persistSubtaskProgress() {
+    const sp = this._context?._subtaskProgress;
+    if (!sp || Object.keys(sp).length === 0) {
+      // 無進度 → 清除檔案
+      try { if (existsSync(SUBTASK_PROGRESS_FILE)) unlinkSync(SUBTASK_PROGRESS_FILE); } catch {}
+      return;
+    }
+    try {
+      ensureDir(resolve(homedir(), '.smart'));
+      writeFileSync(SUBTASK_PROGRESS_FILE, JSON.stringify(sp, null, 2), 'utf-8');
+    } catch { /* ignore */ }
+  }
+
+  /**
+   * 從共享檔案恢復 subtask progress（跨 session）。
+   * 在 init() 中自動呼叫。
+   */
+  _restoreSubtaskProgress() {
+    if (!this._context) return;
+    try {
+      if (!existsSync(SUBTASK_PROGRESS_FILE)) return;
+      const raw = readFileSync(SUBTASK_PROGRESS_FILE, 'utf-8');
+      const sp = JSON.parse(raw);
+      if (typeof sp === 'object' && sp !== null) {
+        this._context._subtaskProgress = sp;
+      }
+    } catch {
+      // 檔案損毀 → 清除
+      try { unlinkSync(SUBTASK_PROGRESS_FILE); } catch {}
+    }
+  }
+
+  /**
+   * 清空特定 todo 的 subtask progress（完成/取消時呼叫）。
+   * @param {number} todoId
+   */
+  _clearSubtaskProgress(todoId) {
+    if (!this._context?._subtaskProgress) return;
+    delete this._context._subtaskProgress[todoId];
+    this._persistSubtaskProgress();
   }
 
   /** 根據 todo 文字判斷啟發式優先級 */
