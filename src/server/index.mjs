@@ -1264,6 +1264,15 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
         score: todoMatch.score,
         reasons: todoMatch.reasons,
       };
+    } else if (todoMatch.subTaskOnly) {
+      // Sub-task matched but not all sub-tasks complete → 提示進度
+      result._pendingSubTaskTodo = {
+        todoId: todoMatch.todoId,
+        todoText: todoMatch.todoText,
+        progress: todoMatch.subTaskProgress,
+        reasons: todoMatch.reasons,
+      };
+      debugLog(`Todo sub-task progress: #${todoMatch.todoId} ${todoMatch.subTaskProgress} — "${todoMatch.todoText}"`);
     }
   }
 
@@ -2398,6 +2407,14 @@ function respond(id, result, opts = {}) {
           debugLog(`Todo borderline hint: #${bt.todoId} score=${bt.score} reasons=${bt.reasons}`);
         }
       }
+      if (result._pendingSubTaskTodo) {
+        const st = result._pendingSubTaskTodo;
+        delete result._pendingSubTaskTodo;
+        if (result?.content?.[0]?.type === 'text') {
+          result.content[0].text += `\n\n📋 [Sub-task Progress] todo #${st.todoId}「${st.todoText}」— 已完成 ${st.progress} 子任務。繼續完成其餘步驟後，系統將自動標記完成。`;
+          debugLog(`Todo sub-task progress hint: #${st.todoId} ${st.progress}`);
+        }
+      }
     } catch (e) { debugLog('respond._pendingBorderlineTodo error:', e?.message); delete result._pendingBorderlineTodo; }
     writeMsg({ jsonrpc: '2.0', id, result });
   });
@@ -2767,6 +2784,7 @@ function handleRequest(req) {
                 if (cr._pendingLsp) resp1._pendingLsp = cr._pendingLsp;
                 if (cr._pendingHallucination) resp1._pendingHallucination = cr._pendingHallucination;
                 if (cr._pendingBorderlineTodo) resp1._pendingBorderlineTodo = cr._pendingBorderlineTodo;
+                if (cr._pendingSubTaskTodo) resp1._pendingSubTaskTodo = cr._pendingSubTaskTodo;
                 if (cr._pendingRecovery) resp1._pendingRecovery = cr._pendingRecovery;
                 if (cr._reInjectRecovery) resp1._reInjectRecovery = cr._reInjectRecovery;
                 respond(id, resp1);

@@ -901,14 +901,15 @@ export class ContextManager {
         if (output.includes(kw)) { score += 2; reasons.push('keyword:' + kw); break; }
       }
 
-      // === 規則 7: 子任務層級比對 ===
-      // 若 todo 包含 "→" 或 "- " 表示有子任務，比對正在處理的子項目
+      // === 規則 7: 子任務層級比對 + 進度追蹤 ===
+      // 若 todo 包含 "→" / "\n" / " - " 表示有子任務，只匹配單一子項不應 complete 整個 todo
+      let matchedSubTask = null;
       if (todoText.includes('→') || todoText.includes('\n') || todoText.includes(' - ')) {
         const subTasks = todoText.split(/→|\n| - /).map(s => s.trim()).filter(s => s.length > 3);
         for (const st of subTasks) {
           const stLower = st.toLowerCase();
-          if (fileRef && stLower.includes(fileRef)) { score += 3; reasons.push('subtask:' + stLower.slice(0, 20)); break; }
-          if (toolSig && stLower.includes(toolSig)) { score += 2; reasons.push('subtaskTool:' + stLower.slice(0, 20)); break; }
+          if (fileRef && stLower.includes(fileRef)) { score += 3; reasons.push('subtask:' + stLower.slice(0, 20)); matchedSubTask = stLower; break; }
+          if (toolSig && stLower.includes(toolSig)) { score += 2; reasons.push('subtaskTool:' + stLower.slice(0, 20)); matchedSubTask = stLower; break; }
         }
       }
 
@@ -927,10 +928,40 @@ export class ContextManager {
                r.includes('subtask:');
       };
 
-      // === High confidence match ===
-      // threshold 4: 至少兩個獨立證據
-      // 或 score >= 3 且有檔案層級證據（編輯同一檔案、測試含檔名等高度可信情境）
-      if (score >= 4 || (score >= 3 && hasFileEvidence())) {
+      // 計算獨立證據數量（去重，避免 keyword:* 多個相同來源 inflate score）
+      const uniqueReasonTypes = new Set(reasons.map(r => r.split(':')[0]));
+      const uniqueScore = uniqueReasonTypes.size * 2; // 每個獨立證據來源至少 2 分
+
+      // === Sub-task progress tracking ===
+      // 若 match 來自 sub-task 且 todo 有子項，追蹤進度但不 auto-complete
+      if (matchedSubTask && todo.text.includes('→')) {
+        if (!this._context._subtaskProgress) this._context._subtaskProgress = {};
+        if (!this._context._subtaskProgress[todo.id]) {
+          // 從 todo 文字解析所有子任務
+          const allSubTasks = todo.text.split(/→|\n/).map(s => s.trim()).filter(s => s.length > 3);
+          this._context._subtaskProgress[todo.id] = {
+            total: allSubTasks.length,
+            done: {},
+            allSubTaskNames: allSubTasks.map(s => s.toLowerCase()),
+          };
+        }
+        this._context._subtaskProgress[todo.id].done[matchedSubTask] = true;
+        this._context._subtaskProgress[todo.id].updatedAt = nowISO();
+
+        // 檢查是否所有子任務都已完成
+        const progress = this._context._subtaskProgress[todo.id];
+        const allDone = progress.allSubTaskNames.every(st => progress.done[st] === true);
+        if (!allDone) {
+          const doneCount = Object.keys(progress.done).length;
+          // 回傳 subtaskOnly 而非 matched:true，讓 caller 不要 auto-complete
+          return { matched: false, subTaskOnly: true, todoId: todo.id, todoText: todo.text,
+            subTaskProgress: `${doneCount}/${progress.total}`, score, reasons: reasons.join(',') };
+        }
+        // 所有子任務完成 → 可以 auto-complete
+      }
+
+      // === High confidence match (提高至 score >= 5，或 >= 4 且有檔案證據) ===
+      if (uniqueScore >= 4 || score >= 5 || (score >= 4 && hasFileEvidence()) || (score >= 3 && hasFileEvidence() && uniqueScore >= 3)) {
         return { matched: true, todoId: todo.id, todoText: todo.text, score, reasons: reasons.join(',') };
       }
 
