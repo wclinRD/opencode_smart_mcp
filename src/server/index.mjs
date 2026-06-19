@@ -465,6 +465,15 @@ function initBuiltinHooks() {
     handler: async (ctx) => triggerHallucinationCheck(ctx.toolName, ctx.args, ctx.result),
   });
 
+  // Background Security Scan — after file edits (Sprint 2C)
+  registerPostHook({
+    name: 'security-background-scan',
+    description: 'Async background credential/injection scan on edited files',
+    match: (toolName, args) =>
+      toolName === 'smart_fast_apply' && args?.apply === true,
+    handler: async (ctx) => triggerSecurityScan(ctx.args),
+  });
+
   // Load user hooks from ~/.smart/hooks.json
   loadUserHooks();
 
@@ -1603,6 +1612,59 @@ async function triggerLspDiagnostics(args) {
     return lines.join('\n');
   } catch (e) {
     debugLog('LSP diagnostics error:', e.message);
+    return '';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5.5: Background Security Scan — post-edit credential/injection check
+// ---------------------------------------------------------------------------
+
+/**
+ * Fire-and-forget: run security scan on files modified by smart_fast_apply.
+ * Appends findings to result output so LLM can remediate.
+ */
+async function triggerSecurityScan(args) {
+  try {
+    const files = extractFilesFromFastApplyArgs(args);
+    if (files.length === 0) return '';
+
+    // Only scan file types that could contain credentials/injection
+    const SCANNABLE_EXTS = ['.js', '.ts', '.mjs', '.cjs', '.py', '.rs', '.swift', '.php', '.java', '.go', '.rb', '.sh', '.bash', '.zsh', '.yaml', '.yml', '.json', '.toml', '.env', '.ini', '.cfg'];
+    const scanFiles = files.filter(f => SCANNABLE_EXTS.some(ext => f.endsWith(ext)));
+    if (scanFiles.length === 0) return '';
+
+    const { spawn } = await import('node:child_process');
+    const cliPath = new URL('../cli/security-scan.mjs', import.meta.url).pathname;
+    const root = args.root || process.cwd();
+
+    // Run security scan on specific files (one --include per file)
+    const args = [cliPath, '--root', root, '--format', 'text', '--scan', 'credentials,injection'];
+    for (const f of scanFiles) {
+      args.push('--include', f);
+    }
+    const result = await new Promise((resolve) => {
+      const child = spawn(process.execPath, args, {
+        timeout: 15000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (d) => { stdout += d; });
+      child.stderr.on('data', (d) => { stderr += d; });
+      child.on('close', (code) => resolve({ code, stdout, stderr }));
+      child.on('error', (err) => resolve({ code: -1, stdout: '', stderr: err.message }));
+    });
+
+    if (!result.stdout || result.stdout.trim().length === 0) return '';
+    if (!result.stdout.includes('File:') && !result.stdout.includes('Finding:') && !result.stdout.includes('🔒')) return '';
+
+    const lines = ['\n\n---\n🔒 背景安全掃描 (自動驗證)'];
+    lines.push(result.stdout.trim().slice(0, 2000));
+    lines.push('---');
+    return lines.join('\n');
+  } catch (e) {
+    debugLog('Security scan error:', e.message);
     return '';
   }
 }
