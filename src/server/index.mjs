@@ -40,6 +40,12 @@ import { parseJson as lenientParseJson } from '../lib/lenient-json.mjs';
 import { judgeHallucination, isHighRiskOutput } from '../lib/hallucination-judge.mjs';
 import { getPrefetchEngine } from '../lib/prefetch-engine.mjs';
 import { getConcurrencyGate } from '../lib/concurrency-gate.mjs';
+import {
+  registerPreHook, registerPostHook, executePreHooks, executePostHooks,
+  listHooks, setHookEnabled, removeHook,
+  loadUserHooks, saveUserHook, removeUserHook,
+} from '../lib/hook-registry.mjs';
+import { classifyTool, getClassificationSummary, setToolClassification } from '../lib/auto-classifier.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -249,6 +255,9 @@ const stats = { startTime: Date.now(), totalCalls: 0, totalErrors: 0, totalDurat
 // ---------------------------------------------------------------------------
 const contextManager = new ContextManager({ autoSave: true, extractFindings: true });
 let contextInitialized = false;
+
+// Initialize hook system (built-in hooks + user hooks from ~/.smart/hooks.json)
+initBuiltinHooks();
 let memoryInjected = false; // Phase 10.5: auto-inject once per session
 
 const MEMORY_PATH = env.SMART_MEMORY_PATH || join(homedir(), '.smart', 'memory', 'resolutions.json');
@@ -418,9 +427,60 @@ function getStatsSummary() {
 function resetStats() { stats.startTime = Date.now(); stats.totalCalls = 0; stats.totalErrors = 0; stats.totalDurationMs = 0; stats.byTool.clear(); stats.memoryAutoStoreCount = 0; stats.memoryPreCheckCount = 0; stats.memoryPreCheckHitCount = 0; stats.memoryPreCheckConflictCount = 0; stats.memoryPreCheckSavedMs = 0; stats.autoExtractCount = 0; }
 
 // ---------------------------------------------------------------------------
+// Initialize built-in hooks
+// ---------------------------------------------------------------------------
+
+/**
+ * Register all built-in post-tool hooks, migrating from ad-hoc fire-and-forget.
+ */
+function initBuiltinHooks() {
+  // LSP Diagnostics — after smart_fast_apply
+  registerPostHook({
+    name: 'lsp-diagnostics',
+    description: 'Run LSP diagnostics after file edits',
+    match: (toolName, args) =>
+      toolName === 'smart_fast_apply' && args?.apply === true,
+    handler: async (ctx) => triggerLspDiagnostics(ctx.args),
+  });
+
+  // Impact Warning — after multi-file smart_fast_apply
+  registerPostHook({
+    name: 'impact-warning',
+    description: 'Code impact analysis for multi-file edits',
+    match: (toolName, args) => {
+      if (toolName !== 'smart_fast_apply') return false;
+      const files = extractFilesFromFastApplyArgs(args || {});
+      return files.length > 2;
+    },
+    handler: async (ctx) => triggerImpactWarning(ctx.args),
+  });
+
+  // Hallucination Check — after high-risk tool outputs
+  registerPostHook({
+    name: 'hallucination-check',
+    description: 'Verify high-risk tool output for hallucinations',
+    match: (toolName, args, result) =>
+      result?.ok === true && isHighRiskOutput(toolName),
+    handler: async (ctx) => triggerHallucinationCheck(ctx.toolName, ctx.args, ctx.result),
+  });
+
+  // Load user hooks from ~/.smart/hooks.json
+  loadUserHooks();
+
+  debugLog(`Hooks initialized: ${listHooks().preTool.length} pre, ${listHooks().postTool.length} post`);
+}
+
+// ---------------------------------------------------------------------------
 // Runtime config
 // ---------------------------------------------------------------------------
-const runtimeConfig = { debug: DEBUG, timeoutMs: TOOL_TIMEOUT, maxOutputSize: MAX_OUTPUT_SIZE, maxOutputChars: MAX_OUTPUT_CHARS, modelSize: MODEL_SIZE };
+const runtimeConfig = {
+  debug: DEBUG,
+  timeoutMs: TOOL_TIMEOUT,
+  maxOutputSize: MAX_OUTPUT_SIZE,
+  maxOutputChars: MAX_OUTPUT_CHARS,
+  modelSize: MODEL_SIZE,
+  mode: 'interactive', // 'interactive' | 'auto' | 'bypass'
+};
 
 // ---------------------------------------------------------------------------
 // Output optimization (Phase 2: pipeline-based L0/L1/L2 + semantic truncation)
@@ -1373,18 +1433,13 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
       }
     }
   }
-  // Phase 10.2: Impact Warning — auto-trigger code_impact for multi-file edits
-  // Stores promise resolving to impact text (or empty string) so respond() can append it.
-  if (success && toolName === 'smart_fast_apply' && result.output) {
-    result._pendingImpact = triggerImpactWarning(args);
-  }
-  // Phase 1: LSP Diagnostics — auto-trigger after fast_apply to catch type errors
-  if (success && toolName === 'smart_fast_apply' && result.output) {
-    result._pendingLsp = triggerLspDiagnostics(args);
-  }
-  // Phase 6: Hallucination Detection — auto-trigger for high-risk tool outputs
-  if (success && isHighRiskOutput(toolName) && result.output) {
-    result._pendingHallucination = triggerHallucinationCheck(toolName, args, result);
+  // Phase 8/9: Unified Post-tool Hooks — replaces ad-hoc _pendingImpact/_pendingLsp/_pendingHallucination
+  // All built-in and user post-hooks are registered via hook-registry.mjs and executed here.
+  if (success && result.output) {
+    const postResults = executePostHooks(toolName, args, result);
+    if (postResults.length > 0) {
+      result._pendingHooks = postResults;
+    }
   }
   // Phase 18: Speculative Pre-fetch — fire-and-forget after tool success
   if (success && toolName !== 'smart_memory_store') {
@@ -1751,6 +1806,22 @@ function invokeTool(def, args, timeoutOverride, signal, opts = {}) {
     return emit({ ok: false, error: enforcement.message }, elapsedMs);
   }
 
+  // Phase 7b: Auto-Classifier — determine tool security level
+  // In 'auto' mode, gates block-level tools behind user confirmation
+  if (runtimeConfig.mode === 'auto') {
+    const level = classifyTool(def.name, args);
+    if (level === 'block') {
+      const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+      return emit({ ok: false, error: `Tool "${def.name}" blocked by auto-classifier (level: ${level}). Switch to interactive mode (smart_config({set:{mode:'interactive'}})) to execute manually.` }, elapsedMs);
+    }
+    if (level === 'write' || level === 'gate') {
+      debugLog(`Auto-classifier: ${def.name} classified as ${level} (auto mode — allowing)`);
+    }
+    if (level === 'read') {
+      debugLog(`Auto-classifier: ${def.name} classified as ${level} (auto mode — read allowed)`);
+    }
+  }
+
   // Direct handler path — no process spawn overhead
   // Inject context summary into args for handler-based tools
   const contextArgs = contextManager.inject(def.name, args);
@@ -1967,6 +2038,21 @@ async function invokeToolAsync(def, args, timeoutOverride, signal, opts = {}) {
   if (enforcement) {
     const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
     return emit({ ok: false, error: enforcement.message }, elapsedMs);
+  }
+
+  // Phase 7b: Auto-Classifier — async path
+  if (runtimeConfig.mode === 'auto') {
+    const level = classifyTool(def.name, args);
+    if (level === 'block') {
+      const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
+      return emit({ ok: false, error: `Tool "${def.name}" blocked by auto-classifier (level: ${level}). Switch to interactive mode (smart_config({set:{mode:'interactive'}})) to execute manually.` }, elapsedMs);
+    }
+    if (level === 'write' || level === 'gate') {
+      debugLog(`Auto-classifier: ${def.name} classified as ${level} (auto mode — allowing)`);
+    }
+    if (level === 'read') {
+      debugLog(`Auto-classifier: ${def.name} classified as ${level} (auto mode — read allowed)`);
+    }
   }
 
   // Handler path — keep sync (fast, in-process)
@@ -2440,33 +2526,23 @@ function respond(id, result, opts = {}) {
   // then serializes writes to maintain MCP JSON-RPC ordering.
   // Each hook individually try/catched so one failure never blocks writeMsg.
   _respondChain = _respondChain.then(async () => {
+    // Unified post-hooks: iterate _pendingHooks array and await all promises
     try {
-      if (result._pendingImpact) {
-        const impactText = await result._pendingImpact;
-        delete result._pendingImpact;
-        if (impactText && result?.content?.[0]?.type === 'text') {
-          result.content[0].text += impactText;
+      if (result._pendingHooks && Array.isArray(result._pendingHooks)) {
+        const hooks = result._pendingHooks;
+        delete result._pendingHooks;
+        for (const { hook, promise } of hooks) {
+          try {
+            const text = await promise;
+            if (text && result?.content?.[0]?.type === 'text') {
+              result.content[0].text += text;
+            }
+          } catch (e) {
+            debugLog(`respond._pendingHooks.${hook} error:`, e?.message);
+          }
         }
       }
-    } catch (e) { debugLog('respond._pendingImpact error:', e?.message); delete result._pendingImpact; }
-    try {
-      if (result._pendingHallucination) {
-        const hcText = await result._pendingHallucination;
-        delete result._pendingHallucination;
-        if (hcText && result?.content?.[0]?.type === 'text') {
-          result.content[0].text += hcText;
-        }
-      }
-    } catch (e) { debugLog('respond._pendingHallucination error:', e?.message); delete result._pendingHallucination; }
-    try {
-      if (result._pendingLsp) {
-        const lspText = await result._pendingLsp;
-        delete result._pendingLsp;
-        if (lspText && result?.content?.[0]?.type === 'text') {
-          result.content[0].text += lspText;
-        }
-      }
-    } catch (e) { debugLog('respond._pendingLsp error:', e?.message); delete result._pendingLsp; }
+    } catch (e) { debugLog('respond._pendingHooks error:', e?.message); delete result._pendingHooks; }
     try {
       if (result._pendingRecovery) {
         const recoveryText = await result._pendingRecovery;
@@ -2809,10 +2885,10 @@ function handleRequest(req) {
           },
         },
       });
-      // Add the config tool (allows LLM to switch modelSize at runtime)
+      // Add the config tool (allows LLM to switch modelSize/mode at runtime)
       tools.push({
         name: 'smart_config',
-        description: '[config] Get or set server runtime configuration. Supports modelSize (large/small/micro), debug, timeoutMs.',
+        description: '[config] Get or set server runtime configuration. Supports modelSize (large/small/micro), mode (interactive/auto/bypass), debug, timeoutMs.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -2821,6 +2897,7 @@ function handleRequest(req) {
               description: 'Configuration values to set. Use {\"modelSize\":\"small\"} to switch modes.',
               properties: {
                 modelSize: { type: 'string', enum: ['large', 'small', 'micro'], description: 'Switch model size mode' },
+                mode: { type: 'string', enum: ['interactive', 'auto', 'bypass'], description: 'Switch auto-classifier mode' },
                 debug: { type: 'boolean', description: 'Enable/disable debug logging' },
                 timeoutMs: { type: 'number', description: 'Default tool timeout in ms' },
               },
@@ -2891,9 +2968,7 @@ function handleRequest(req) {
                 const resp1 = { content: [{ type: 'text', text: cr.output }] };
                 const rp = cr._responsePolicy || _responsePolicy;
                 if (rp) resp1._responsePolicy = rp;
-                if (cr._pendingImpact) resp1._pendingImpact = cr._pendingImpact;
-                if (cr._pendingLsp) resp1._pendingLsp = cr._pendingLsp;
-                if (cr._pendingHallucination) resp1._pendingHallucination = cr._pendingHallucination;
+                if (cr._pendingHooks) resp1._pendingHooks = cr._pendingHooks;
                 if (cr._pendingBorderlineTodo) resp1._pendingBorderlineTodo = cr._pendingBorderlineTodo;
                 if (cr._pendingSubTaskTodo) resp1._pendingSubTaskTodo = cr._pendingSubTaskTodo;
                 if (cr._pendingRecovery) resp1._pendingRecovery = cr._pendingRecovery;
@@ -2918,9 +2993,7 @@ function handleRequest(req) {
             }
             const resp2 = { content: [{ type: 'text', text: String(result.output ?? "") }] };
             if (result._responsePolicy) resp2._responsePolicy = result._responsePolicy;
-            if (result._pendingImpact) resp2._pendingImpact = result._pendingImpact;
-            if (result._pendingLsp) resp2._pendingLsp = result._pendingLsp;
-            if (result._pendingHallucination) resp2._pendingHallucination = result._pendingHallucination;
+            if (result._pendingHooks) resp2._pendingHooks = result._pendingHooks;
             if (result._pendingTodoAbandon) resp2._pendingTodoAbandon = result._pendingTodoAbandon;
             respond(id, resp2);
           } else {
@@ -2943,6 +3016,7 @@ function handleRequest(req) {
           if (typeof changes.debug === 'boolean') { runtimeConfig.debug = changes.debug; applied.debug = runtimeConfig.debug; }
           if (typeof changes.timeoutMs === 'number' && changes.timeoutMs > 0) { runtimeConfig.timeoutMs = changes.timeoutMs; applied.timeoutMs = runtimeConfig.timeoutMs; }
           if (typeof changes.modelSize === 'string' && ['large', 'small', 'micro'].includes(changes.modelSize)) { runtimeConfig.modelSize = changes.modelSize; applied.modelSize = runtimeConfig.modelSize; }
+          if (typeof changes.mode === 'string' && ['interactive', 'auto', 'bypass'].includes(changes.mode)) { runtimeConfig.mode = changes.mode; applied.mode = runtimeConfig.mode; }
           for (const key of Object.keys(changes)) { if (!(key in applied)) rejected[key] = 'Unknown or invalid'; }
           respond(id, { content: [{ type: 'text', text: JSON.stringify({ applied, rejected }) }] });
         } else {
@@ -3022,9 +3096,7 @@ function handleRequest(req) {
               const resp3 = { content: [{ type: 'text', text: cr.output }] };
               const rp = cr._responsePolicy || _responsePolicy;
               if (rp) resp3._responsePolicy = rp;
-              if (cr._pendingImpact) resp3._pendingImpact = cr._pendingImpact;
-              if (cr._pendingLsp) resp3._pendingLsp = cr._pendingLsp;
-              if (cr._pendingHallucination) resp3._pendingHallucination = cr._pendingHallucination;
+              if (cr._pendingHooks) resp3._pendingHooks = cr._pendingHooks;
               if (cr._pendingTodoAbandon) resp3._pendingTodoAbandon = cr._pendingTodoAbandon;
               respond(id, resp3);
             })
@@ -3048,7 +3120,7 @@ function handleRequest(req) {
           }
           const resp4 = { content: [{ type: 'text', text: String(result.output ?? "") }] };
           if (result._responsePolicy) resp4._responsePolicy = result._responsePolicy;
-          if (result._pendingImpact) resp4._pendingImpact = result._pendingImpact;
+          if (result._pendingHooks) resp4._pendingHooks = result._pendingHooks;
           if (result._pendingTodoAbandon) resp4._pendingTodoAbandon = result._pendingTodoAbandon;
           respond(id, resp4);
         } else {
@@ -3100,6 +3172,7 @@ function handleRequest(req) {
         if (typeof changes.timeoutMs === 'number' && changes.timeoutMs > 0) { runtimeConfig.timeoutMs = changes.timeoutMs; applied.timeoutMs = runtimeConfig.timeoutMs; }
         if (typeof changes.maxOutputChars === 'number' && changes.maxOutputChars > 0) { runtimeConfig.maxOutputChars = changes.maxOutputChars; applied.maxOutputChars = runtimeConfig.maxOutputChars; }
         if (typeof changes.modelSize === 'string' && ['large', 'small', 'micro'].includes(changes.modelSize)) { runtimeConfig.modelSize = changes.modelSize; applied.modelSize = runtimeConfig.modelSize; }
+        if (typeof changes.mode === 'string' && ['interactive', 'auto', 'bypass'].includes(changes.mode)) { runtimeConfig.mode = changes.mode; applied.mode = runtimeConfig.mode; }
         for (const key of Object.keys(changes)) { if (!(key in applied)) rejected[key] = 'Unknown or invalid'; }
         respond(id, { applied, rejected });
       } else {
