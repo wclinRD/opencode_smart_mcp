@@ -615,12 +615,14 @@ Instructions:
 
 ---
 
-## 🛠 Direct Tools（10 個，直接呼叫）
+## 🛠 Direct Tools（12 個，直接呼叫）
 
 | Tool name | 功能 |
 |-----------|------|
 | `smart_grep` | 用 regex 搜尋程式碼，支援 scope context、import graph |
 | `smart_learn` | 分析專案結構、tech stack、相依性、coding conventions |
+| `smart_read` | **🥇 漸進式檔案讀取器**：11 種模式（auto/outline/signatures/symbol/explain/range/full/batch/project/image/directory），Session cache 零重複讀取 |
+| `smart_glob` | **🥇 快速檔案匹配**：glob 模式搜尋任何規模的程式碼庫，回傳絕對路徑 |
 | `smart_think` | 快速推理引擎（hypothesis → verify → repeat，mode:cit/beam/forest） |
 | `smart_deep_think` | 結構化推理，10 種 template + 動態多輪推理 |
 | `smart_security` | 掃描 credentials、injection、path traversal、dependency 漏洞 |
@@ -690,6 +692,15 @@ smart_smart_run({tool: "tool_name", args: {...}})
 | `exa_crawl` | 爬取網頁內容，支援 clean / markdown / chunk / crawlee / **stealth** |
 | `github_search` | 搜尋 public GitHub code，filter by repo/path/language |
 
+### 文件與知識庫工具
+
+| Tool name | 功能 |
+|-----------|------|
+| `ingest_document` | **🥇 文件攝取**：PDF/DOCX/XLSX/HTML/RTF → Markdown，自動 OCR（掃描 PDF），跨 session 持久索引 |
+| `list_documents` | 列出已攝取文件：搜尋標題、路徑、摘要，跨 session 持久索引 |
+| `search_docs` | 全文搜尋已攝取文件內容：記得內容但忘了文件名時使用 |
+| `obsidian_write` | 寫入 Obsidian 筆記：YAML frontmatter + 自動分類 + vault 路徑偵測 |
+
 ### 研究/學術工具
 
 | Tool name | 功能 |
@@ -713,6 +724,7 @@ smart_smart_run({tool: "tool_name", args: {...}})
 |-----------|------|
 | `diagram` | 產生 Mermaid.js diagram（flowchart/sequence/class/ER） |
 | `report` | 產生自包含 HTML report（test/security/coverage/custom） |
+| `diff_view` | 視覺化 diff 比對：並排或 unified diff 顯示變更 |
 
 ### Workflow/排程工具
 
@@ -720,12 +732,14 @@ smart_smart_run({tool: "tool_name", args: {...}})
 |-----------|------|
 | `workflow` | 多工具工作流編排：create/report/replan/summary |
 | `planner` | 目標分解：9 種任務模板 + DAG + 條件分支 + replan |
+| `mcts_plan` | MCTS 蒙地卡羅樹搜索規劃器：5+ 步驟複雜任務的最優工具鏈搜尋 |
 | `compose` | 工具組合：seq（順序）/par（平行）/cond（條件）執行 |
 | `agent_execute` | 全自動工作流：選模板 → create → dispatch → replan → summary |
 | `agent_plan` | 任務分解器：將模糊目標拆解成 DAG 步驟 |
 | `schedule` | 排程背景任務（cron 表達式），自動執行 + 結果儲存 |
 | `progress` | 檢查長時間任務進度、active tasks 列表 |
 | `autofix` | 自動修復程式碼 + verify（test/lint/security pass/fail） |
+| `todo` | 待辦事項管理：建立、追蹤、完成任務清單 |
 
 ### 整合工具
 
