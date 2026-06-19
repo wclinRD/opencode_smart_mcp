@@ -1130,6 +1130,28 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
     }
   }
 
+  // P2 FullCompact: 依據 context budget 漸進式觸發
+  // level=1 (>75%): keep 5, 產生結構化摘要
+  // level=2 (>85%): keep 3, 移除舊條目
+  // level=3 (>95%): keep 2, 緊急壓縮
+  if (toolCount > MICRO_COMPACT_MIN_CALLS && toolName !== 'smart_memory_store') {
+    const budget = getContextBudget();
+    const usedPct = budget.usedFraction;
+    let compactLevel = 0;
+    if (usedPct >= 0.95) compactLevel = 3;
+    else if (usedPct >= 0.85) compactLevel = 2;
+    else if (usedPct >= 0.75) compactLevel = 1;
+
+    if (compactLevel > 0) {
+      const fcResult = contextManager.fullCompact({ level: compactLevel });
+      if (fcResult.cleared > 0) {
+        debugLog(`FullCompact L${compactLevel}: cleared ${fcResult.cleared}, kept ${fcResult.kept}, budget ${(usedPct * 100).toFixed(0)}%`);
+        // 同步更新 context budget
+        budget.freeEntries(fcResult.cleared);
+      }
+    }
+  }
+
   // D.1 Auto-Store: non-blocking write failed tool results to memory
   if (!success && toolName !== 'smart_memory_store') {
     autoStoreToMemory(toolName, args, result);

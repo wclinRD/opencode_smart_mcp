@@ -359,6 +359,127 @@ export class ContextManager {
   }
 
   /**
+   * P2 FullCompact: 深度結構化壓縮 + Context Collapse。
+   *
+   * 比 microCompact 更積極: 從 findings 產生結構化摘要 recovery context，
+   * 然後清除所有舊 tool history 條目，只保留最近 N 筆。
+   *
+   * 三層 progressive 壓縮 (由 server 端依據 budget 選擇 level):
+   *   level=1 (>75%): keep 5, 保留前生成摘要 (微壓縮)
+   *   level=2 (>85%): keep 3, 產生結構化 recovery context, 清除舊條目
+   *   level=3 (>95%): keep 2, 緊急壓縮, 只留摘要 + 最後 N 筆
+   *
+   * @param {object} [opts]
+   * @param {number} [opts.level=1] - 壓縮等級 1-3
+   * @returns {{ level: number, recoveryContext: object|null, cleared: number, kept: number }}
+   */
+  fullCompact({ level = 1 } = {}) {
+    if (!this._context || !this._context.toolHistory.length) {
+      return { level, recoveryContext: null, cleared: 0, kept: 0 };
+    }
+
+    // 產生 recovery context (結構化摘要)
+    const recoveryContext = this._generateRecoveryContext();
+    this._context._recoveryContext = recoveryContext;
+    this._context._lastCompact = {
+      level,
+      timestamp: nowISO(),
+      toolCount: this._context.metadata.toolCount,
+    };
+
+    // 依據 level 決定保留筆數
+    const keepMap = { 1: 5, 2: 3, 3: 2 };
+    const keep = keepMap[level] || 5;
+
+    const history = this._context.toolHistory;
+    const total = history.length;
+    const keepCount = Math.min(keep, total);
+
+    // Level 2/3: 移除舊條目 (不只是清結果)
+    if (level >= 2) {
+      this._context.toolHistory = history.slice(-keepCount);
+      const cleared = total - keepCount;
+      this._context.metadata.updatedAt = nowISO();
+      if (this._autoSave) this._save();
+      return { level, recoveryContext, cleared, kept: keepCount };
+    }
+
+    // Level 1: 同 microCompact (保留完整條目結構, 只清結果)
+    return {
+      level,
+      recoveryContext,
+      ...this.microCompact({ keep }),
+    };
+  }
+
+  /**
+   * 從 accumulatedFindings + toolHistory 產生結構化 recovery context。
+   * 供 fullCompact 使用 — 摘要關鍵決策、錯誤、工具呼叫模式。
+   * @returns {object} { summary, findings, recentTools, keyDecisions }
+   */
+  _generateRecoveryContext() {
+    if (!this._context) return null;
+
+    const findings = this._context.accumulatedFindings || [];
+    const history = this._context.toolHistory || [];
+
+    // 摘要: 工具呼叫統計
+    const totalCalls = this._context.metadata.toolCount || 0;
+    const errorCount = this._context.metadata.errorCount || 0;
+    const uniqueTools = new Set(history.map(e => e.tool)).size;
+
+    // 關鍵決策: 從 fast_apply 條目中擷取
+    const keyDecisions = history
+      .filter(e => e.tool && (e.tool.includes('fast_apply') || e.tool.includes('apply')))
+      .slice(-5)
+      .map(e => {
+        const args = e.args || {};
+        return {
+          tool: e.tool,
+          file: args.file || args.files?.[0] || '?',
+          ok: e.ok,
+          timestamp: e.timestamp,
+        };
+      });
+
+    // 高優先級 findings
+    const highFindings = findings
+      .filter(f => f.severity === 'critical' || f.severity === 'high')
+      .slice(-10)
+      .map(f => ({
+        source: f.source,
+        finding: f.finding,
+        category: f.category,
+        severity: f.severity,
+      }));
+
+    // 最近工具呼叫 (最多 5筆)
+    const recentTools = history.slice(-5).map(e => ({
+      tool: e.tool,
+      ok: e.ok,
+      duration: e.duration,
+      timestamp: e.timestamp,
+    }));
+
+    return {
+      summary: { totalCalls, errorCount, uniqueTools },
+      findings: highFindings,
+      keyDecisions,
+      recentTools,
+      compactedAt: nowISO(),
+    };
+  }
+
+  /**
+   * 取得 recovery context (若 fullCompact 曾執行過)。
+   * 用於 session resume 或 context 重建。
+   * @returns {object|null}
+   */
+  getRecoveryContext() {
+    return this._context?._recoveryContext || null;
+  }
+
+  /**
    * Phase 32: Compact tool history using smart classification.
    * Uses classifyEntry() to identify DROP/KEEP_SUMMARY/KEEP entries.
    * DROP entries are removed. KEEP_SUMMARY entries are replaced with summary.
