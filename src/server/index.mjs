@@ -2331,8 +2331,9 @@ function respond(id, result, opts = {}) {
         const reInjectText = result._reInjectRecovery;
         delete result._reInjectRecovery;
         if (reInjectText && result?.content?.[0]?.type === 'text') {
-          result.content[0].text += '\n\n---\n🔄 [Todo Follow-up] 偵測到 pending todo 停滯，重新注入恢復指引：\n\n' + reInjectText + '\n---';
-          debugLog('Todo follow-up: re-injected recovery text');
+          const wastedCalls = _todoFollowUp.toolCallsSince || 5;
+          result.content[0].text += `\n\n---\n🚨 [Todo Stuck] 你在 ${wastedCalls} 次工具呼叫後仍未完成待辦事項。請暫停當前操作：\n\n` + reInjectText + `\n\n⛔ STOP: 暫停所有工具呼叫，先閱讀上方 [Recovery Context]。\n✅ 若已完成請用 smart_todo done 標記，然後告知使用者。\n---`;
+          debugLog(`Todo follow-up: re-injected recovery after ${wastedCalls} stale calls`);
         }
       }
     } catch (e) { debugLog('respond._reInjectRecovery error:', e?.message); delete result._reInjectRecovery; }
