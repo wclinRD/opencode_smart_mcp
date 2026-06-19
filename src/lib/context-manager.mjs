@@ -1014,6 +1014,20 @@ export class ContextManager {
     } catch { /* ignore */ }
   }
 
+  /** 根據 todo 文字判斷啟發式優先級 */
+  _getTodoPriority(text) {
+    const t = text.toLowerCase();
+    if (/security|vuln|cve|bug|crash|critical|urgent|error|fail/i.test(t)) return 10;
+    if (/fix|repair|patch|hotfix/i.test(t)) return 8;
+    if (/refactor|rewrite|migrate|restructure/i.test(t)) return 6;
+    if (/test|verify|validate|audit|review|check/i.test(t)) return 5;
+    if (/add|implement|feature|new|create|build/i.test(t)) return 4;
+    if (/update|upgrade|bump|upgrade|improve|enhance|optimize/i.test(t)) return 3;
+    if (/doc|docs|readme|comment|annotat/i.test(t)) return 2;
+    if (/cleanup|clean|remove|delete|chore/i.test(t)) return 1;
+    return 3; // default medium
+  }
+
   formatRecoveryContext() {
     const rc = this.getRecoveryContext();
     if (!rc) return null;
@@ -1028,13 +1042,21 @@ export class ContextManager {
     const s = rc.summary || {};
     parts.push(`   ${s.totalCalls || 0} calls, ${s.errorCount || 0} errors, ${s.uniqueTools || 0} tools`);
 
-    // Pending todos
+    // Pending todos (排序：in_progress 優先 > pending 依優先級 > completed 置底)
     const todos = this.listTodos();
-    const activeTodos = todos.filter(t => t.status === 'pending' || t.status === 'in_progress');
-    const doneTodos = todos.filter(t => t.status === 'completed');
-    if (todos.length > 0) {
+    const sortedTodos = [...todos].sort((a, b) => {
+      const order = { 'in_progress': 0, 'pending': 1, 'completed': 2, 'cancelled': 3 };
+      const aOrder = order[a.status] ?? 4;
+      const bOrder = order[b.status] ?? 4;
+      if (aOrder !== bOrder) return aOrder - bOrder;
+      // 同 status 按啟發式優先級降序
+      return (this._getTodoPriority(b.text) - this._getTodoPriority(a.text));
+    });
+    const activeTodos = sortedTodos.filter(t => t.status === 'pending' || t.status === 'in_progress');
+
+    if (sortedTodos.length > 0) {
       parts.push('   📝 Todos:');
-      for (const t of todos) {
+      for (const t of sortedTodos) {
         const icon = t.status === 'completed' ? '✅' : t.status === 'in_progress' ? '⏳' : t.status === 'cancelled' ? '❌' : '☐';
         parts.push(`      ${icon} ${t.id}. ${t.text}`);
       }
