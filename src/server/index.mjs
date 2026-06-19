@@ -1276,9 +1276,41 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
     }
   }
 
+  // Phase: Sync smart_todo results to contextManager in-memory state
+  // (Gap 1 fix: smart_todo 工具直接寫檔，需同步到 in-memory 讓 _todoFollowUp 正確追蹤)
+  if (success && toolName === 'smart_todo') {
+    if (args.command === 'done' && args.id !== undefined) {
+      const doneResult = contextManager.doneTodo(args.id);
+      if (doneResult.ok) {
+        _todoFollowUp.pendingIds = _todoFollowUp.pendingIds.filter(id => id !== args.id);
+        if (_todoFollowUp.pendingIds.length === 0) {
+          _todoFollowUp.toolCallsSince = 0;
+          _todoFollowUp.reInjectionCount = 0;
+          _todoFollowUp.lastReInjectAtCalls = 0;
+        }
+        debugLog(`Todo sync: smart_todo done #${args.id} synced to in-memory state`);
+      }
+    } else if (args.command === 'add' && Array.isArray(args.items) && args.items.length > 0) {
+      contextManager.addTodo(args.items);
+      debugLog(`Todo sync: smart_todo add synced ${args.items.length} items to in-memory state`);
+    } else if (args.command === 'update' && args.id !== undefined && args.status) {
+      const updateResult = contextManager.updateTodoStatus(args.id, args.status);
+      if (updateResult.ok && (args.status === 'completed' || args.status === 'cancelled')) {
+        _todoFollowUp.pendingIds = _todoFollowUp.pendingIds.filter(id => id !== args.id);
+        if (_todoFollowUp.pendingIds.length === 0) {
+          _todoFollowUp.toolCallsSince = 0;
+          _todoFollowUp.reInjectionCount = 0;
+          _todoFollowUp.lastReInjectAtCalls = 0;
+        }
+      }
+      debugLog(`Todo sync: smart_todo update #${args.id} → ${args.status} synced to in-memory state`);
+    }
+  }
+
   // Phase 33b: Todo follow-up monitoring — 指數退避 re-inject
   // 只在 pendingIds 有值且尚未全部完成時觸發
-  if (_todoFollowUp.pendingIds.length > 0) {
+  // (Gap 5 fix: 若同一輪已有 _pendingRecovery，跳過 re-inject 避免重複)
+  if (_todoFollowUp.pendingIds.length > 0 && !result._pendingRecovery) {
     _todoFollowUp.toolCallsSince++;
     const BACKOFF_THRESHOLDS = [5, 15, 30, 50];
     const idx = Math.min(_todoFollowUp.reInjectionCount, BACKOFF_THRESHOLDS.length - 1);

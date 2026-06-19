@@ -984,20 +984,30 @@ export class ContextManager {
    * @returns {string|null} Formatted text, or null if nothing to inject
    */
   _syncTodosFromFile() {
-    // Merge todo items from shared file (~/.smart/todos.json)
-    // Merge 策略：in-memory 為 ground truth（最新），file 中不存在的 id 才補入。
+    // 雙向同步 strategy：file 為 ground truth（smart_todo plugin 直接寫檔），
+    // in-memory 若有落後的狀態則更新。
+    // 同時補入 file 中有但 in-memory 沒有的新項目。
     try {
       const dataFile = resolve(homedir(), '.smart', 'todos.json');
       if (existsSync(dataFile)) {
         const raw = readFileSync(dataFile, 'utf-8');
         const fileItems = JSON.parse(raw);
         if (!Array.isArray(fileItems)) return;
-        // 建立 in-memory id 索引
-        const memIds = new Set((this._context.todoItems || []).map(t => t.id));
+        const memItems = this._context.todoItems || [];
+        // 1) 雙向同步：file 的 status 優先（smart_todo plugin 直接寫檔）
+        const fileMap = new Map(fileItems.map(t => [t.id, t]));
+        for (let i = 0; i < memItems.length; i++) {
+          const fi = fileMap.get(memItems[i].id);
+          if (fi && fi.status !== memItems[i].status) {
+            memItems[i].status = fi.status;
+            memItems[i].updatedAt = fi.updatedAt || fi.createdAt;
+          }
+        }
+        // 2) 補入 file 中有但 in-memory 沒有的項目
+        const memIds = new Set(memItems.map(t => t.id));
         for (const fi of fileItems) {
           if (!memIds.has(fi.id)) {
-            // file 中有但記憶體沒有的 → 補入
-            this._context.todoItems.push(fi);
+            memItems.push(fi);
           }
         }
       }
