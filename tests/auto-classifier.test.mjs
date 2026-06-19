@@ -367,3 +367,165 @@ describe('Auto Classifier — override classification', () => {
     assert.equal(ok, false);
   });
 });
+// ============================================================
+// Sprint 3 tests — risk scoring, context awareness, prompt scanning
+// ============================================================
+
+describe('Auto Classifier — Sprint 3: file risk scoring', () => {
+
+  let getFileRiskLevel;
+
+  before(async () => {
+    const mod = await import('../src/lib/auto-classifier.mjs');
+    getFileRiskLevel = mod.getFileRiskLevel;
+  });
+
+  it('should classify src/app.ts as low risk', () => {
+    const risk = getFileRiskLevel('src/app.ts');
+    assert.equal(risk.level, 'low');
+  });
+
+  it('should classify .env as critical risk', () => {
+    const risk = getFileRiskLevel('.env');
+    assert.equal(risk.level, 'critical');
+  });
+
+  it('should classify .env.prod as critical risk', () => {
+    const risk = getFileRiskLevel('.env.prod');
+    assert.equal(risk.level, 'critical');
+  });
+
+  it('should classify config.json as medium risk', () => {
+    const risk = getFileRiskLevel('config/config.json');
+    assert.equal(risk.level, 'medium');
+  });
+
+  it('should classify .gitignore as medium risk', () => {
+    const risk = getFileRiskLevel('.gitignore');
+    assert.equal(risk.level, 'medium');
+  });
+
+  it('should classify .npmrc as high risk', () => {
+    const risk = getFileRiskLevel('.npmrc');
+    assert.equal(risk.level, 'high');
+  });
+
+  it('should classify .ssh/id_rsa as critical risk', () => {
+    const risk = getFileRiskLevel('~/.ssh/id_rsa');
+    assert.equal(risk.level, 'critical');
+  });
+
+  it('should classify Dockerfile as medium risk', () => {
+    const risk = getFileRiskLevel('Dockerfile');
+    assert.equal(risk.level, 'medium');
+  });
+});
+
+describe('Auto Classifier — Sprint 3: prompt scanning', () => {
+
+  let scanPromptForDangerousOps;
+
+  before(async () => {
+    const mod = await import('../src/lib/auto-classifier.mjs');
+    scanPromptForDangerousOps = mod.scanPromptForDangerousOps;
+  });
+
+  it('should flag rm -rf as dangerous', () => {
+    const result = scanPromptForDangerousOps('run rm -rf /');
+    assert.equal(result.dangerous, true);
+    assert.ok(result.matchedPatterns.length >= 1);
+  });
+
+  it('should flag edit .env as dangerous', () => {
+    const result = scanPromptForDangerousOps('edit .env');
+    assert.equal(result.dangerous, true);
+  });
+
+  it('should flag chmod 777 as dangerous', () => {
+    const result = scanPromptForDangerousOps('chmod 777 /some/file');
+    assert.equal(result.dangerous, true);
+  });
+
+  it('should not flag safe prompt', () => {
+    const result = scanPromptForDangerousOps('refactor the auth module');
+    assert.equal(result.dangerous, false);
+    assert.equal(result.riskLevel, 'low');
+  });
+
+  it('should not flag empty prompt', () => {
+    const result = scanPromptForDangerousOps('');
+    assert.equal(result.dangerous, false);
+  });
+});
+
+describe('Auto Classifier — Sprint 3: risk-based classification', () => {
+
+  it('should block write to .env (critical risk)', () => {
+    const result = classifyTool('smart_fast_apply', { file: '.env' });
+    assert.equal(result.action, 'block');
+    assert.ok(result.reason.includes('High-risk file'));
+  });
+
+  it('should block write to credentials file', () => {
+    const result = classifyTool('smart_fast_apply', { file: 'config/credentials.json' });
+    assert.equal(result.action, 'block');
+  });
+
+  it('should block write to .npmrc (blocked pattern + high risk)', () => {
+    const result = classifyTool('smart_fast_apply', { file: '.npmrc' });
+    assert.equal(result.action, 'block');
+  });
+
+  it('should warn on write to src/app.ts (low risk)', () => {
+    const result = classifyTool('smart_fast_apply', { file: 'src/app.ts' });
+    assert.equal(result.action, 'warn');
+  });
+});
+
+describe('Auto Classifier — Sprint 3: context-aware classification', () => {
+
+  it('should downgrade medium-risk file to warn when recently read', () => {
+    const context = {
+      toolHistory: [
+        { tool: 'smart_read', args: { file: 'config/settings.json' }, ok: true, timestamp: new Date().toISOString() },
+      ],
+    };
+    const result = classifyTool('smart_fast_apply', { file: 'config/settings.json' }, context);
+    assert.equal(result.action, 'warn');
+  });
+
+  it('should allow-once critical file when in allowOncePaths', () => {
+    const context = {
+      allowOncePaths: ['.env'],
+    };
+    const result = classifyTool('smart_fast_apply', { file: '.env' }, context);
+    assert.equal(result.action, 'warn');
+  });
+});
+
+describe('Auto Classifier — Sprint 3: buildBlockMessage', () => {
+
+  let buildBlockMessage;
+
+  before(async () => {
+    const mod = await import('../src/lib/auto-classifier.mjs');
+    buildBlockMessage = mod.buildBlockMessage;
+  });
+
+  it('should include interactive mode option', () => {
+    const msg = buildBlockMessage('smart_fast_apply', 'Test reason');
+    assert.ok(msg.includes('smart_config'));
+    assert.ok(msg.includes('interactive'));
+  });
+
+  it('should include read files when provided', () => {
+    const msg = buildBlockMessage('smart_fast_apply', 'Test', { readFiles: ['src/app.ts', 'src/auth.ts'] });
+    assert.ok(msg.includes('src/app.ts'));
+    assert.ok(msg.includes('src/auth.ts'));
+  });
+
+  it('should suggest alternative paths for critical risk', () => {
+    const msg = buildBlockMessage('smart_fast_apply', 'Test', { riskLevel: 'critical' });
+    assert.ok(msg.includes('.env.example'));
+  });
+});
