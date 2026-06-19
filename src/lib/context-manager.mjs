@@ -796,6 +796,7 @@ export class ContextManager {
     }
     this._context.metadata.updatedAt = nowISO();
     if (this._autoSave) this._save();
+    this._syncTodosToFile();
     return { added: added.length, items: added };
   }
 
@@ -822,6 +823,7 @@ export class ContextManager {
     item.updatedAt = nowISO();
     this._context.metadata.updatedAt = nowISO();
     if (this._autoSave) this._save();
+    this._syncTodosToFile();
     return { ok: true, item };
   }
 
@@ -982,15 +984,34 @@ export class ContextManager {
    * @returns {string|null} Formatted text, or null if nothing to inject
    */
   _syncTodosFromFile() {
-    // Sync todo items from shared file (~/.smart/todos.json)
-    // so the smart_todo plugin and contextManager stay in sync.
+    // Merge todo items from shared file (~/.smart/todos.json)
+    // Merge 策略：in-memory 為 ground truth（最新），file 中不存在的 id 才補入。
     try {
       const dataFile = resolve(homedir(), '.smart', 'todos.json');
       if (existsSync(dataFile)) {
         const raw = readFileSync(dataFile, 'utf-8');
-        this._context.todoItems = JSON.parse(raw);
+        const fileItems = JSON.parse(raw);
+        if (!Array.isArray(fileItems)) return;
+        // 建立 in-memory id 索引
+        const memIds = new Set((this._context.todoItems || []).map(t => t.id));
+        for (const fi of fileItems) {
+          if (!memIds.has(fi.id)) {
+            // file 中有但記憶體沒有的 → 補入
+            this._context.todoItems.push(fi);
+          }
+        }
       }
     } catch { /* file may not exist, ignore */ }
+  }
+
+  _syncTodosToFile() {
+    // 將目前 in-memory 的 todo 狀態寫入共享檔案
+    // 讓 smart_todo 等外部 plugin 能讀到最新狀態
+    if (!this._context || !this._context.todoItems) return;
+    try {
+      const dataFile = resolve(homedir(), '.smart', 'todos.json');
+      writeFileSync(dataFile, JSON.stringify(this._context.todoItems, null, 2), 'utf-8');
+    } catch { /* ignore */ }
   }
 
   formatRecoveryContext() {
