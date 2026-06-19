@@ -2325,6 +2325,40 @@ function handleSmartContext(id, args) {
         break;
       }
 
+      // P4: 自動回填 — 查看/讀取/恢復 compacted 備份
+      case 'compacted': {
+        const backups = contextManager.listCompactedBackups();
+        if (backups.length === 0) {
+          result = 'No compacted backups available.';
+        } else {
+          result = JSON.stringify({ count: backups.length, backups }, null, 2);
+        }
+        break;
+      }
+
+      case 'read-compacted': {
+        const idx = args.index ?? 'last';
+        const entry = contextManager.readCompactedEntry(idx);
+        if (!entry) {
+          result = `No compacted backup found at index: ${idx}`;
+        } else {
+          result = JSON.stringify({ index: idx, entry }, null, 2);
+        }
+        break;
+      }
+
+      case 'restore-compacted': {
+        const ridx = args.index ?? 'last';
+        const restored = contextManager.restoreCompactedEntry(ridx);
+        if (restored.ok) {
+          result = `Restored ${restored.entry.tool} from compacted backup to tool history.`;
+          debugLog(`restore-compacted: ${restored.entry.tool} (index ${ridx})`);
+        } else {
+          result = `Failed to restore: no backup at index ${ridx}`;
+        }
+        break;
+      }
+
       case 'auto': {
         const mode = args.mode || 'status';
         if (mode === 'on') {

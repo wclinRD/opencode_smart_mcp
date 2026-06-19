@@ -395,13 +395,36 @@ export class ContextManager {
     const total = history.length;
     const keepCount = Math.min(keep, total);
 
-    // Level 2/3: 移除舊條目 (不只是清結果)
+    // Level 2/3: 移除舊條目前先備份 (P4 自動回填)
     if (level >= 2) {
+      // 備份被移除的條目 (只備份 KEEP 等級的)
+      const removed = history.slice(0, total - keepCount);
+      const keepableRemoved = removed.filter(e => {
+        const cls = e._microCompacted !== 'cleared' ? 'KEEP' : 'DROP';
+        return cls === 'KEEP' || e.tool === 'smart_fast_apply' || e.tool === 'smart_think';
+      });
+
+      if (!this._context._compactedBackups) this._context._compactedBackups = [];
+      for (const entry of keepableRemoved) {
+        this._context._compactedBackups.push({
+          backedUpAt: nowISO(),
+          tool: entry.tool,
+          args: entry.args,
+          result: (entry.result && entry.result.length > 100) ? entry.result.slice(0, 500) : entry.result,
+          ok: entry.ok,
+          timestamp: entry.timestamp,
+        });
+      }
+      // 限制備份數量 (最多 20 筆)
+      if (this._context._compactedBackups.length > 20) {
+        this._context._compactedBackups = this._context._compactedBackups.slice(-20);
+      }
+
       this._context.toolHistory = history.slice(-keepCount);
       const cleared = total - keepCount;
       this._context.metadata.updatedAt = nowISO();
       if (this._autoSave) this._save();
-      return { level, recoveryContext, cleared, kept: keepCount };
+      return { level, recoveryContext, cleared, kept: keepCount, backups: keepableRemoved.length };
     }
 
     // Level 1: 同 microCompact (保留完整條目結構, 只清結果)
@@ -410,6 +433,68 @@ export class ContextManager {
       recoveryContext,
       ...this.microCompact({ keep }),
     };
+  }
+
+  /**
+   * P4: 列出所有 compacted 備份條目摘要。
+   * @returns {Array<{index: number, tool: string, ok: boolean, timestamp: string, preview: string}>}
+   */
+  listCompactedBackups() {
+    const backups = this._context?._compactedBackups || [];
+    return backups.map((b, i) => ({
+      index: i,
+      tool: b.tool,
+      ok: b.ok,
+      timestamp: b.timestamp,
+      preview: b.result ? (b.result.slice(0, 120) + (b.result.length > 120 ? '...' : '')) : '(no result)',
+    }));
+  }
+
+  /**
+   * P4: 從 compacted 備份中讀取特定條目。
+   * @param {number|string} index - 備份索引或 'last'/'first'
+   * @returns {object|null} 備份條目 (含 tool, args, result, timestamp)
+   */
+  readCompactedEntry(index) {
+    const backups = this._context?._compactedBackups || [];
+    if (backups.length === 0) return null;
+
+    if (index === 'last') return backups[backups.length - 1];
+    if (index === 'first') return backups[0];
+    if (typeof index === 'number' && index >= 0 && index < backups.length) return backups[index];
+    return null;
+  }
+
+  /**
+   * P4: 將特定 compacted 備份條目恢復到 toolHistory 末尾。
+   * 方便 LLM 在需要時取回被壓縮的舊結果。
+   * @param {number|string} index - 備份索引
+   * @returns {{ ok: boolean, entry: object|null }}
+   */
+  restoreCompactedEntry(index) {
+    if (!this._context) return { ok: false, entry: null };
+    const entry = this.readCompactedEntry(index);
+    if (!entry) return { ok: false, entry: null };
+
+    // 重建條目並附加到 history 末尾
+    const restored = {
+      tool: entry.tool,
+      args: entry.args || {},
+      result: entry.result || '[restored from compacted backup]',
+      ok: entry.ok,
+      timestamp: nowISO(),
+      _restored: true,
+      _originalTimestamp: entry.timestamp,
+    };
+
+    this._context.toolHistory.push(restored);
+    if (this._context.toolHistory.length > this._maxHistory) {
+      this._context.toolHistory = this._context.toolHistory.slice(-this._maxHistory);
+    }
+    this._context.metadata.updatedAt = nowISO();
+    if (this._autoSave) this._save();
+
+    return { ok: true, entry: restored };
   }
 
   /**
