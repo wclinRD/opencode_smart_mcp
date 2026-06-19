@@ -21,7 +21,7 @@
 // Adding a new tool: create tools/standard/xxx.mjs → restart → done
 
 import { spawnSync, spawn } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdtempSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { resolve, dirname, basename } from 'node:path';
@@ -1227,6 +1227,46 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
   if (success && toolName !== 'smart_memory_store') {
     trackMemoryMiss(toolName, args, result);
   }
+  // Phase: Auto-detect completed todo items after successful tool calls.
+  // Rules-based matching: tool name + file args + output heuristics. Zero LLM cost.
+  if (success && toolName !== 'smart_memory_store') {
+    const todoMatch = contextManager.matchTodo(toolName, args, result);
+    if (todoMatch.matched) {
+      const updated = contextManager.updateTodoStatus(todoMatch.todoId, 'completed');
+      if (updated.ok) {
+        debugLog(`Todo auto-completed: #${todoMatch.todoId} — "${todoMatch.todoText}"`);
+        // 清除 follow-up 追蹤（todo 已完成）
+        if (_todoFollowUp.pendingIds.includes(todoMatch.todoId)) {
+          _todoFollowUp.pendingIds = _todoFollowUp.pendingIds.filter(id => id !== todoMatch.todoId);
+          if (_todoFollowUp.pendingIds.length === 0) {
+            _todoFollowUp.toolCallsSince = 0;
+            _todoFollowUp.reInjected = false;
+            debugLog('Todo follow-up: all pending todos completed, monitoring reset');
+          }
+        }
+      }
+    }
+  }
+
+  // Phase 33b: Todo follow-up monitoring — 檢查 LLM 是否在 compact 後繼續待辦事項
+  // 若超過 5 次工具呼叫仍未完成 pending todo，自動 re-inject recovery hint
+  if (_todoFollowUp.pendingIds.length > 0 && !_todoFollowUp.reInjected) {
+    _todoFollowUp.toolCallsSince++;
+    if (_todoFollowUp.toolCallsSince > 5) {
+      _todoFollowUp.reInjected = true;
+      debugLog(`Todo follow-up: ${_todoFollowUp.pendingIds.length} pending after ${_todoFollowUp.toolCallsSince} calls, re-injecting recovery`);
+      // 產生新的 recovery context 並注入
+      try {
+        contextManager.generateRecoveryContext();
+        const recoveryText = contextManager.formatRecoveryContext();
+        if (recoveryText) {
+          result._reInjectRecovery = recoveryText;
+        }
+      } catch (e) {
+        debugLog('Todo follow-up recovery gen error:', e.message);
+      }
+    }
+  }
   // Phase 10.2: Impact Warning — auto-trigger code_impact for multi-file edits
   // Stores promise resolving to impact text (or empty string) so respond() can append it.
   if (success && toolName === 'smart_fast_apply' && result.output) {
@@ -2014,6 +2054,16 @@ let _autoState = {
   cooldownMs: 60000,     // 60s cooldown between same-tier actions
 };
 
+// Todo follow-up monitoring: 追蹤 auto-compact 後 LLM 是否真正繼續待辦事項
+// 若超過 5 次工具呼叫仍未完成 pending todo，自動 re-inject recovery hint
+let _todoFollowUp = {
+  pendingAt: 0,          // 最後一次 recovery injection 時間戳
+  pendingIds: [],        // 當時的 pending todo IDs
+  pendingText: '',       // pending todo 文字摘要
+  toolCallsSince: 0,     // 自從 recovery 後的工具呼叫次數
+  reInjected: false,     // 是否已 re-inject（避免無限重複）
+};
+
 /**
  * Extract image content from a result object if it has _imageContent flag.
  * Returns { data, mimeType } or null.
@@ -2062,11 +2112,31 @@ function autoManageContext(budget) {
     s.lastLevel = 3; s.lastAction = now;
     try {
       ensureContext();
+      // 先產生 recovery context，保存 todo/decision/error 狀態
+      contextManager.generateRecoveryContext();
       const cleared = contextManager.clearToolResults({ olderThan: 3, keepLatest: 2 });
       budget.freeEntries(cleared.removed);
       const stats = budget.getDroppableStats();
+      // 取得恢復指引（含未完成 todo、近期編輯、繼續方向）
+      const recoveryText = contextManager.formatRecoveryContext();
       debugLog(`AutoManage Tier3: cleared ${cleared.removed} entries (budget=${(used*100).toFixed(0)}%)`);
-      return `\n\n---\n🚨 Context 危急：${(used*100).toFixed(0)}%。已緊急清除 ${cleared.removed} 筆輸出。\n可丟棄: ${(stats.discardable/1024).toFixed(1)}KB, 可摘要: ${(stats.summarizable/1024).toFixed(1)}KB\n---`;
+      let msg = `\n\n---\n🚨 Context 危急：${(used*100).toFixed(0)}%。已緊急清除 ${cleared.removed} 筆輸出。\n可丟棄: ${(stats.discardable/1024).toFixed(1)}KB, 可摘要: ${(stats.summarizable/1024).toFixed(1)}KB`;
+      if (recoveryText) {
+        msg += `\n\n${recoveryText}`;
+      }
+      // 追蹤 pending todo 供 follow-up 監控
+      _todoFollowUp.pendingAt = now;
+      _todoFollowUp.pendingText = recoveryText || '';
+      _todoFollowUp.toolCallsSince = 0;
+      _todoFollowUp.reInjected = false;
+      try {
+        const pendingTodos = contextManager.listTodos().filter(t => t.status === 'pending' || t.status === 'in_progress');
+        _todoFollowUp.pendingIds = pendingTodos.map(t => t.id);
+      } catch { _todoFollowUp.pendingIds = []; }
+
+      // 寫入共享檔案供 OpenCode plugin 在 compaction 時讀取
+      writeSharedRecoveryFile(recoveryText);
+      return msg + '\n---';
     } catch (e) {
       debugLog('AutoManage Tier3 error:', e.message);
     }
@@ -2078,12 +2148,32 @@ function autoManageContext(budget) {
     s.lastLevel = 2; s.lastAction = now;
     try {
       ensureContext();
+      // 先產生 recovery context，保存 todo/decision/error 狀態
+      contextManager.generateRecoveryContext();
       const cleared = contextManager.clearToolResults({ olderThan: 5, keepLatest: 3 });
       budget.freeEntries(cleared.removed);
       const stats = budget.getDroppableStats();
+      // 取得恢復指引（含未完成 todo、近期編輯、繼續方向）
+      const recoveryText = contextManager.formatRecoveryContext();
       debugLog(`AutoManage Tier2: cleared ${cleared.removed} entries (budget=${(used*100).toFixed(0)}%)`);
       if (cleared.removed > 0) {
-        return `\n\n---\n⚠️ Context ${(used*100).toFixed(0)}%。已自動清除 ${cleared.removed} 筆輸出（釋放約 ${(stats.discardable/1024).toFixed(1)}KB）。\n保留：錯誤訊息、活躍搜尋結果、編輯記錄\n---`;
+        let msg = `\n\n---\n⚠️ Context ${(used*100).toFixed(0)}%。已自動清除 ${cleared.removed} 筆輸出（釋放約 ${(stats.discardable/1024).toFixed(1)}KB）。`;
+        if (recoveryText) {
+          msg += `\n\n${recoveryText}`;
+        }
+        // 追蹤 pending todo 供 follow-up 監控
+        _todoFollowUp.pendingAt = now;
+        _todoFollowUp.pendingText = recoveryText || '';
+        _todoFollowUp.toolCallsSince = 0;
+        _todoFollowUp.reInjected = false;
+        try {
+          const pendingTodos = contextManager.listTodos().filter(t => t.status === 'pending' || t.status === 'in_progress');
+          _todoFollowUp.pendingIds = pendingTodos.map(t => t.id);
+        } catch { _todoFollowUp.pendingIds = []; }
+
+        // 寫入共享檔案供 OpenCode plugin 在 compaction 時讀取
+        writeSharedRecoveryFile(recoveryText);
+        return msg + '\n---';
       }
     } catch (e) {
       debugLog('AutoManage Tier2 error:', e.message);
@@ -2102,6 +2192,26 @@ function autoManageContext(budget) {
   }
 
   return '';
+}
+
+/**
+ * 寫入 recovery text 到共享檔案，供 OpenCode plugin (compaction-fix.js) 讀取。
+ * Plugin 在 onCompacting hook 中讀取此檔案，確保 Smart MCP 的 recovery context
+ * 在 OpenCode native compaction 後仍能被保留在摘要中。
+ * 若 recoveryText 為空，則清除檔案（避免留過期資料）。
+ */
+function writeSharedRecoveryFile(recoveryText) {
+  try {
+    const filePath = resolve(homedir(), '.smart', 'recent-recovery.txt');
+    if (recoveryText) {
+      writeFileSync(filePath, recoveryText, 'utf-8');
+    } else {
+      // 空值 → 清除檔案
+      try { existsSync(filePath) && unlinkSync(filePath); } catch {}
+    }
+  } catch (err) {
+    debugLog('writeSharedRecoveryFile error:', err.message);
+  }
 }
 
 function respond(id, result, opts = {}) {
@@ -2201,8 +2311,21 @@ function respond(id, result, opts = {}) {
         if (recoveryText && result?.content?.[0]?.type === 'text') {
           result.content[0].text += '\n\n' + recoveryText;
         }
+        // 同步寫入共享檔案 — fullCompact 路徑也需要 plugin 能讀到
+        writeSharedRecoveryFile(recoveryText);
       }
     } catch (e) { debugLog('respond._pendingRecovery error:', e?.message); delete result._pendingRecovery; }
+    try {
+      // Phase 33b: Todo follow-up re-injection
+      if (result._reInjectRecovery) {
+        const reInjectText = result._reInjectRecovery;
+        delete result._reInjectRecovery;
+        if (reInjectText && result?.content?.[0]?.type === 'text') {
+          result.content[0].text += '\n\n---\n🔄 [Todo Follow-up] 偵測到 pending todo 停滯，重新注入恢復指引：\n\n' + reInjectText + '\n---';
+          debugLog('Todo follow-up: re-injected recovery text');
+        }
+      }
+    } catch (e) { debugLog('respond._reInjectRecovery error:', e?.message); delete result._reInjectRecovery; }
     writeMsg({ jsonrpc: '2.0', id, result });
   });
 }
@@ -2571,6 +2694,7 @@ function handleRequest(req) {
                 if (cr._pendingLsp) resp1._pendingLsp = cr._pendingLsp;
                 if (cr._pendingHallucination) resp1._pendingHallucination = cr._pendingHallucination;
                 if (cr._pendingRecovery) resp1._pendingRecovery = cr._pendingRecovery;
+                if (cr._reInjectRecovery) resp1._reInjectRecovery = cr._reInjectRecovery;
                 respond(id, resp1);
               })
               .catch(err => {

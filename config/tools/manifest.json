@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-19T10:49:50.842Z",
+  "generatedAt": "2026-06-19T11:45:40.900Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -3104,6 +3104,72 @@
       }
     },
     {
+      "name": "smart_edit",
+      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
+      "category": "standard",
+      "domain": "edit",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "File path to edit (required)"
+          },
+          "oldString": {
+            "type": "string",
+            "description": "Text to find and replace (exact match by default, regex if regex=true)"
+          },
+          "newString": {
+            "type": "string",
+            "description": "Replacement text"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Multiple files to edit (alternative to file)"
+          },
+          "regex": {
+            "type": "boolean",
+            "description": "Use regex matching instead of exact (default: false)"
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Apply changes (default: false — dry run)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: current dir)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "description": "Output format (default: json — includes nextCommand)"
+          }
+        },
+        "required": [
+          "oldString",
+          "newString"
+        ]
+      }
+    },
+    {
       "name": "smart_hallucination_check",
       "description": "Check LLM output for hallucinations (fabrication, misattribution, unfaithful, self-contradiction, off-topic, confident-refusal).\n\nRuns 5 structural checks:\n  1. Factual — are mentioned identifiers present in context?\n  2. Consistency — are there internal contradictions?\n  3. Groundedness — can conclusions be traced to context?\n  4. Off-topic — does output address the query?\n  5. Confidence — overconfident language without evidence?\n\nDOI Verification mode (mode:\"doi\"):\n  Extracts all DOIs from the output and verifies each via doi.org liveness check.\n  Dead DOIs (404) = likely fabricated. Restricted (403) = paywalled but may exist.\n\nReturns: { overallScore: 1-10, verdict: \"pass\"|\"warn\"|\"fail\", issues[], summary }\n\nExamples:\n  { output: \"The bug is in parser.js...\", context: \"Error at parser.js:42\" }\n  { output: \"...\", query: \"Why does the parser crash?\", strictness: 7 }\n  { output: \"Smith (2024, doi:10.1234/fake) found...\", mode: \"doi\" }",
       "category": "standard",
@@ -4171,45 +4237,6 @@
       }
     },
     {
-      "name": "smart_progress",
-      "description": "Check progress of long-running tasks. View active tasks, their completion percentage, and recent messages.",
-      "category": "standard",
-      "domain": "general",
-      "safetyLevel": "medium",
-      "routingRules": {
-        "autoRoute": true,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "command": {
-            "type": "string",
-            "enum": [
-              "status",
-              "all",
-              "clear"
-            ],
-            "description": "Command: status (check one task), all (list all tasks), clear (remove completed tasks)"
-          },
-          "taskId": {
-            "type": "string",
-            "description": "Task ID to check (for status command)"
-          }
-        },
-        "required": [
-          "command"
-        ]
-      }
-    },
-    {
       "name": "smart_pw_browser",
       "description": "Control a web browser — navigate, click, fill forms, screenshot, execute JavaScript.\n\nCommands:\n  navigate(url):   Browse to a URL\n  snapshot():      Get page text + links\n  click(selector): Click element (text or CSS selector)\n  fill(selector, value): Fill a form field\n  screenshot():    Capture page as PNG (base64)\n  run_code(code):  Execute JavaScript in the page\n\nNOT for: reading article content (use smart_exa_crawl with --clean).\nNOT for: searching the web (use smart_exa_search).",
       "category": "standard",
@@ -4515,11 +4542,11 @@
       }
     },
     {
-      "name": "smart_edit",
-      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
+      "name": "smart_progress",
+      "description": "Check progress of long-running tasks. View active tasks, their completion percentage, and recent messages.",
       "category": "standard",
-      "domain": "edit",
-      "safetyLevel": "high",
+      "domain": "general",
+      "safetyLevel": "medium",
       "routingRules": {
         "autoRoute": true,
         "interceptorRequired": false,
@@ -4534,49 +4561,22 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "file": {
-            "type": "string",
-            "description": "File path to edit (required)"
-          },
-          "oldString": {
-            "type": "string",
-            "description": "Text to find and replace (exact match by default, regex if regex=true)"
-          },
-          "newString": {
-            "type": "string",
-            "description": "Replacement text"
-          },
-          "files": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Multiple files to edit (alternative to file)"
-          },
-          "regex": {
-            "type": "boolean",
-            "description": "Use regex matching instead of exact (default: false)"
-          },
-          "apply": {
-            "type": "boolean",
-            "description": "Apply changes (default: false — dry run)"
-          },
-          "root": {
-            "type": "string",
-            "description": "Project root (default: current dir)"
-          },
-          "format": {
+          "command": {
             "type": "string",
             "enum": [
-              "json",
-              "text"
+              "status",
+              "all",
+              "clear"
             ],
-            "description": "Output format (default: json — includes nextCommand)"
+            "description": "Command: status (check one task), all (list all tasks), clear (remove completed tasks)"
+          },
+          "taskId": {
+            "type": "string",
+            "description": "Task ID to check (for status command)"
           }
         },
         "required": [
-          "oldString",
-          "newString"
+          "command"
         ]
       }
     },
@@ -4808,6 +4808,63 @@
         },
         "required": [
           "file"
+        ]
+      }
+    },
+    {
+      "name": "smart_todo",
+      "description": "Manage todo items. Commands: add (one or more items), done (mark completed), list (show all), update (set status). Todos persist across sessions.",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 1
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "add",
+              "done",
+              "list",
+              "update"
+            ],
+            "description": "Command: add (add items), done (mark id completed), list (show all), update (set status)"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Items to add (required for command=add)"
+          },
+          "id": {
+            "type": "number",
+            "description": "Todo item id (required for done/update)"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "in_progress",
+              "completed",
+              "cancelled"
+            ],
+            "description": "New status (required for command=update)"
+          }
+        },
+        "required": [
+          "command"
         ]
       }
     },

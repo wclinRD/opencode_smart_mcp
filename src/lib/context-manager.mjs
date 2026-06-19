@@ -28,6 +28,8 @@ import { classifyEntry, summarizeOutput, shouldPrefetchCompact } from '../plugin
 // ---------------------------------------------------------------------------
 
 const CONTEXT_DIR = resolve(homedir(), '.smart', 'context');
+const RECOVERY_FILE = resolve(homedir(), '.smart', 'recovery-context.json');
+const RECOVERY_TTL_MS = 86400000; // 24h — 超過此期限的 recovery context 視為過期
 const MAX_HISTORY = 50;
 const MAX_FINDINGS = 100;
 const MAX_RESULT_LENGTH = 2000;
@@ -132,6 +134,8 @@ export class ContextManager {
         if (opts.projectRoot) this._context.projectRoot = opts.projectRoot;
         // Ensure todoItems exists on resumed sessions
         if (!this._context.todoItems) this._context.todoItems = [];
+        // 從檔案恢復 recovery context（若前次 session 異常中斷）
+        this.restoreRecoveryContext();
         return this._context;
       }
     }
@@ -382,8 +386,7 @@ export class ContextManager {
     }
 
     // 產生 recovery context (結構化摘要)
-    const recoveryContext = this._generateRecoveryContext();
-    this._context._recoveryContext = recoveryContext;
+    const recoveryContext = this.generateRecoveryContext();
     this._context._lastCompact = {
       level,
       timestamp: nowISO(),
@@ -560,7 +563,78 @@ export class ContextManager {
   }
 
   /**
-   * 取得 recovery context (若 fullCompact 曾執行過)。
+   * 產生並儲存結構化 recovery context（公開版本）。
+   * 呼叫 _generateRecoveryContext() 並存入 _context._recoveryContext，
+   * 供 autoManageContext / formatRecoveryContext / fullCompact 等使用。
+   * @returns {object|null} { summary, findings, recentTools, keyDecisions }
+   */
+  generateRecoveryContext() {
+    const rc = this._generateRecoveryContext();
+    if (this._context) {
+      this._context._recoveryContext = rc;
+      this._context._lastCompact = {
+        level: 0,
+        timestamp: nowISO(),
+        toolCount: this._context.metadata.toolCount,
+      };
+      // 自動持久化 — 確保跨 session 可恢復
+      this._persistRecoveryContext();
+    }
+    return rc;
+  }
+
+  /**
+   * 將 recovery context 寫入 ~/.smart/recovery-context.json。
+   * 確保 server restart 或 session 切換後仍可恢復。
+   * 由 generateRecoveryContext 自動呼叫，也可手動觸發。
+   * @returns {boolean}
+   */
+  _persistRecoveryContext() {
+    const rc = this._context?._recoveryContext;
+    if (!rc) return false;
+    try {
+      ensureDir(resolve(homedir(), '.smart'));
+      writeFileSync(RECOVERY_FILE, JSON.stringify(rc, null, 2), 'utf-8');
+      return true;
+    } catch (err) {
+      console.error(`[context-manager] Recovery persist failed: ${err.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * 從 ~/.smart/recovery-context.json 恢復 recovery context。
+   * 僅恢復 24 小時內的 context（避免過期資料干擾）。
+   * 在 init() 時自動呼叫。
+   * @returns {object|null}
+   */
+  restoreRecoveryContext() {
+    try {
+      if (!existsSync(RECOVERY_FILE)) return null;
+      const raw = readFileSync(RECOVERY_FILE, 'utf-8');
+      const rc = JSON.parse(raw);
+      // 過期檢查：超過 24 小時的 recovery context 視為無效
+      if (rc.compactedAt) {
+        const age = Date.now() - new Date(rc.compactedAt).getTime();
+        if (age > RECOVERY_TTL_MS) {
+          // 過期 → 清除檔案
+          try { unlinkSync(RECOVERY_FILE); } catch {}
+          return null;
+        }
+      }
+      if (this._context) {
+        this._context._recoveryContext = rc;
+      }
+      return rc;
+    } catch {
+      // 檔案損毀 → 清除
+      try { unlinkSync(RECOVERY_FILE); } catch {}
+      return null;
+    }
+  }
+
+  /**
+   * 取得 recovery context (若 generateRecoveryContext / fullCompact 曾執行過)。
    * 用於 session resume 或 context 重建。
    * @returns {object|null}
    */
@@ -739,28 +813,75 @@ export class ContextManager {
     const output = (result.output || result.error || '').toLowerCase();
     const fileRef = ((args.file || args.files?.[0] || '') + ' ' + (args.symbol || '')).toLowerCase();
     const toolSig = toolName.replace('smart_', '');
+    const fileExt = fileRef.match(/\.(\w+)$/)?.[1] || '';
 
     for (const todo of pending) {
       const todoText = todo.text.toLowerCase();
       let score = 0;
+      let reasons = [];
 
-      // Tool name matches keyword in todo
-      if (todoText.includes(toolSig)) score += 2;
+      // === 規則 1: 工具名比對 ===
+      if (todoText.includes(toolSig)) { score += 2; reasons.push('toolName'); }
 
-      // File ref matches todo text
-      if (fileRef && todoText.includes(fileRef)) score += 3;
+      // === 規則 2: 檔案路徑比對 ===
+      if (fileRef && todoText.includes(fileRef)) { score += 3; reasons.push('fileRef'); }
+      // 2b: todo 包含檔案副檔名（如 ".ts"）且 fileRef 也包含
+      if (fileExt && todoText.includes('.' + fileExt) && fileRef.includes('.' + fileExt)) { score += 1; reasons.push('extMatch'); }
 
-      // Tool is fast_apply + output indicates success
-      if (toolSig.includes('fast_apply') && result.ok) score += 1;
+      // === 規則 3: fast_apply 成功 + 輸出含完成關鍵字 ===
+      if (toolSig.includes('fast_apply') && result.ok) {
+        score += 1; reasons.push('applyOk');
+        if (output.includes('applied') || output.includes('✅') || output.includes('success')) { score += 1; reasons.push('applyDone'); }
+      }
 
-      // Tool is test + all passed
-      if (toolSig.includes('test') && result.ok && output.includes('pass')) score += 2;
+      // === 規則 4: test 成功 ===
+      if (toolSig.includes('test') && result.ok) {
+        if (output.includes('pass')) { score += 2; reasons.push('testPass'); }
+        if (output.includes('all pass') || output.includes('100%')) { score += 2; reasons.push('testAllPass'); }
+      }
 
-      // High confidence match
+      // === 規則 5: 動作動詞比對 ===
+      // todo 以 fix/add/refactor/implement/update/remove 開頭 → 比對工具行為
+      const actionVerbs = ['fix', 'add', 'refactor', 'implement', 'update', 'remove', 'delete', 'create', 'setup'];
+      for (const v of actionVerbs) {
+        if (todoText.startsWith(v) && (toolSig.includes(v) || toolSig.includes('fast_apply'))) {
+          score += 2; reasons.push('action:' + v); break;
+        }
+      }
+
+      // === 規則 6: 輸出含 todo 關鍵字 ===
+      // 當輸出中明確提到 todo 的獨特子字串（>4 chars）時
+      const todoKeywords = todoText.split(/\s+/).filter(w => w.length > 4);
+      for (const kw of todoKeywords) {
+        if (output.includes(kw)) { score += 2; reasons.push('keyword:' + kw); break; }
+      }
+
+      // === 規則 7: 子任務層級比對 ===
+      // 若 todo 包含 "→" 或 "- " 表示有子任務，比對正在處理的子項目
+      if (todoText.includes('→') || todoText.includes('\n') || todoText.includes(' - ')) {
+        const subTasks = todoText.split(/→|\n| - /).map(s => s.trim()).filter(s => s.length > 3);
+        for (const st of subTasks) {
+          const stLower = st.toLowerCase();
+          if (fileRef && stLower.includes(fileRef)) { score += 3; reasons.push('subtask:' + stLower.slice(0, 20)); break; }
+          if (toolSig && stLower.includes(toolSig)) { score += 2; reasons.push('subtaskTool:' + stLower.slice(0, 20)); break; }
+        }
+      }
+
+      // === 規則 8: LSP 診斷成功後比對錯誤修復 ===
+      if (toolSig.includes('lsp') && result.ok) {
+        const argFile = (args.file || '').toLowerCase();
+        if (argFile && todoText.includes(argFile)) { score += 3; reasons.push('lspFile'); }
+        if (output.includes('no diagnostic') || output.includes('0 error')) { score += 2; reasons.push('lspClean'); }
+      }
+
+      // === High confidence match ===
       if (score >= 3) {
-        return { matched: true, todoId: todo.id, todoText: todo.text };
+        return { matched: true, todoId: todo.id, todoText: todo.text, score, reasons: reasons.join(',') };
       }
     }
+
+    // === Borderline: score >= 2 但 < 3 → 回傳 borderline 資訊供呼叫方判斷 ===
+    // 目前無 LLM fallback，僅保留供後續擴展
     return { matched: false, todoId: null, todoText: null };
   }
 

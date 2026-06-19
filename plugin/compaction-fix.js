@@ -6,10 +6,14 @@
 // 解法：在 compaction 前注入當前任務狀態到 compaction prompt，
 //       compaction 後把 auto-continue 換成精確的恢復指令。
 //
+// 雙系統橋接：Smart MCP 的 auto-compact (Tier 2/3) 會寫入 ~/.smart/recent-recovery.txt，
+//           此 plugin 在 onCompacting 時讀取該檔案，確保 OpenCode compaction
+//           摘要中保留 Smart MCP 層的 recovery context。
+//
 // Hooks used:
 //   event                          → 追蹤 todo 狀態 + compaction 事件
 //   chat.message                   → 追蹤使用者目標
-//   experimental.session.compacting → compaction 前注入上下文
+//   experimental.session.compacting → compaction 前注入上下文（含 Smart MCP recovery）
 //   experimental.compaction.autocontinue → 確保 auto-continue 啟用
 //   experimental.chat.messages.transform → 改造 auto-continue 訊息
 
@@ -125,6 +129,22 @@ const plugin = {
         (t) => t.status === "pending"
       );
 
+      // === 讀取 Smart MCP 共享 recovery context ===
+      // 雙系統橋接：Smart MCP 的 auto-compact 會寫入 ~/.smart/recent-recovery.txt，
+      // 我們在 compaction 時嵌入其內容，確保 OpenCode summarizer 保留它。
+      let smartMcpRecovery = "";
+      try {
+        const { readFileSync, existsSync } = await import("fs");
+        const { resolve } = await import("path");
+        const { homedir } = await import("os");
+        const recoveryFile = resolve(homedir(), ".smart", "recent-recovery.txt");
+        if (existsSync(recoveryFile)) {
+          smartMcpRecovery = readFileSync(recoveryFile, "utf-8").trim();
+        }
+      } catch {
+        // 檔案不存在或無法讀取 → 忽略
+      }
+
       // 建立 recovery 區塊 — 要求 summarizer 附加到摘要末端
       // 這是關鍵：messages.transform 在 compaction 後不會被呼叫，
       // 所以必須直接在 compaction context 中嵌入恢復指令，
@@ -143,6 +163,8 @@ const plugin = {
         pendingTodos.length > 0
           ? `**Pending tasks**:\n${pendingTodos.map((t) => `  - ${t.content}`).join("\n")}`
           : ``,
+        // 嵌入 Smart MCP 的 recovery context（若有）
+        smartMcpRecovery ? `\n**Smart MCP Recovery**:\n${smartMcpRecovery}` : "",
         ``,
         `**Instructions for agent after compaction**:`,
         `1. Continue working — do NOT restart from scratch`,
