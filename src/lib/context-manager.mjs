@@ -135,6 +135,8 @@ export class ContextManager {
         if (opts.projectRoot) this._context.projectRoot = opts.projectRoot;
         // Ensure todoItems exists on resumed sessions
         if (!this._context.todoItems) this._context.todoItems = [];
+        // Gap #1/#4 fix: 從共享檔案同步 todo 狀態（file 為 ground truth）
+        this._syncTodosFromFile();
         // 從檔案恢復 recovery context（若前次 session 異常中斷）
         this.restoreRecoveryContext();
         // 從共享檔案恢復 subtask progress（跨 session）
@@ -161,6 +163,8 @@ export class ContextManager {
     };
 
     this._save();
+    // Gap #4 fix: 跨 session 載入 active todos（從共享檔案）
+    this._syncTodosFromFile();
     return this._context;
   }
 
@@ -786,10 +790,13 @@ export class ContextManager {
   addTodo(items) {
     if (!this._context) return { added: 0, items: [] };
     if (!Array.isArray(items)) items = [String(items)];
+    // Gap #1 fix: 加入前先從 file 同步，確保 id 正確
+    this._syncTodosFromFile();
     const added = [];
     for (const text of items) {
       if (!text || typeof text !== 'string') continue;
-      const id = this._context.todoItems.length + 1;
+      const existingIds = this._context.todoItems.map(t => t.id);
+      const id = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1;
       this._context.todoItems.push({
         id,
         text: text.slice(0, 200),
@@ -821,6 +828,8 @@ export class ContextManager {
    */
   updateTodoStatus(id, status) {
     if (!this._context || !this._context.todoItems) return { ok: false, item: null };
+    // Gap #1 fix: 更新前先從 file 同步，確保能找到該 id
+    this._syncTodosFromFile();
     const item = this._context.todoItems.find(t => t.id === id);
     if (!item) return { ok: false, item: null };
     item.status = status;
@@ -841,6 +850,8 @@ export class ContextManager {
    */
   listTodos() {
     if (!this._context || !this._context.todoItems) return [];
+    // Gap #1 fix: 每次查詢前先從 file 同步最新狀態
+    this._syncTodosFromFile();
     return this._context.todoItems.map(t => ({ ...t }));
   }
 
@@ -855,6 +866,8 @@ export class ContextManager {
    */
   matchTodo(toolName, args, result) {
     if (!this._context || !this._context.todoItems) return { matched: false, todoId: null, todoText: null };
+    // Gap #1 fix: 比對前先從 file 同步最新狀態
+    this._syncTodosFromFile();
     const pending = this._context.todoItems.filter(t => t.status === 'pending' || t.status === 'in_progress');
     if (pending.length === 0) return { matched: false, todoId: null, todoText: null };
 
