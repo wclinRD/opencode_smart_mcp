@@ -44,7 +44,7 @@ import {
   registerPreHook, registerPostHook, executePreHooks, executePostHooks,
   listHooks, setHookEnabled, setHookEnabledByName, removeHook, removeHookByName,
   loadUserHooks, saveUserHook, removeUserHook,
-  loadUserHooksFromFile, saveUserHooksToFile, reloadUserHooks,
+  loadUserHooksFromFile, saveUserHooksToFile, reloadUserHooks, setMcpToolInvoker,
 } from '../lib/hook-registry.mjs';
 import { classifyTool, getClassificationSummary, setToolClassification } from '../lib/auto-classifier.mjs';
 
@@ -259,6 +259,31 @@ let contextInitialized = false;
 
 // Initialize hook system (built-in hooks + user hooks from ~/.smart/hooks.json)
 initBuiltinHooks();
+// Inject MCP tool invoker so user hooks of type 'mcp_tool' can call tools
+setMcpToolInvoker(async (toolName, args) => {
+  const def = toolMap.get(toolName);
+  if (!def) return `[mcp_tool: unknown tool "${toolName}"]`;
+  if (typeof def.handler === 'function') {
+    try {
+      const result = def.handler(args);
+      return result instanceof Promise ? await result : String(result ?? '');
+    } catch (err) {
+      return `[mcp_tool: error in "${toolName}": ${err.message}]`;
+    }
+  }
+  if (def.cli) {
+    const { spawnSync } = await import('node:child_process');
+    const cliPath = join(__dirname, '../cli', def.cli);
+    const mappedArgs = typeof def.mapArgs === 'function' ? def.mapArgs(args) : [];
+    try {
+      const result = spawnSync('node', [cliPath, ...mappedArgs], { encoding: 'utf-8', timeout: 15000 });
+      return result.stdout || result.stderr || '';
+    } catch (err) {
+      return `[mcp_tool: CLI spawn error for "${toolName}": ${err.message}]`;
+    }
+  }
+  return `[mcp_tool: tool "${toolName}" has no handler or CLI entry]`;
+});
 let memoryInjected = false; // Phase 10.5: auto-inject once per session
 
 const MEMORY_PATH = env.SMART_MEMORY_PATH || join(homedir(), '.smart', 'memory', 'resolutions.json');

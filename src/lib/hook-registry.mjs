@@ -430,6 +430,20 @@ export function resetHookLog() {
   _executionLog = [];
 }
 
+// ---------------------------------------------------------------------------
+// MCP tool invoker (injected by server at startup)
+// ---------------------------------------------------------------------------
+let _mcpToolInvoker = null;
+
+/**
+ * Set the MCP tool invoker function.
+ * Called by server/index.mjs to inject toolMap-based tool calling.
+ * @param {function} fn - async (toolName, args) => string
+ */
+export function setMcpToolInvoker(fn) {
+  _mcpToolInvoker = fn;
+}
+
 function buildUserMatch(matchDef) {
   if (!matchDef) return () => false;
   if (matchDef.tool) {
@@ -466,9 +480,10 @@ function buildUserHandler(actionDef) {
   }
   if (actionDef.type === 'mcp_tool') {
     return async (ctx) => {
-      // Call an MCP tool via the toolMap (injected at runtime)
-      // This is resolved by the server when importing
-      return `[mcp_tool hook: ${actionDef.tool || 'unknown'}]`;
+      const toolName = actionDef.tool || '';
+      const callArgs = actionDef.args || ctx.args || {};
+      if (!_mcpToolInvoker) return `[mcp_tool hook: no invoker registered for "${toolName}"]`;
+      return await _mcpToolInvoker(toolName, callArgs);
     };
   }
   return () => null;
