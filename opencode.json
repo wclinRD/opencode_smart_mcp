@@ -51,6 +51,36 @@
         "todowrite": "allow",
         "task": "allow"
       }
+    },
+    "mcp-agent": {
+      "mode": "subagent",
+      "description": "Smart MCP-aware subagent — has Smart MCP tools for code analysis, editing, and debugging. Use for tasks that need smart_read/smart_grep/smart_think/smart_fast_apply. No manual routing injection needed.",
+      "prompt": "你是 Smart MCP 子代理（mcp-agent）。\n\n## 🎯 路由規則（內建）\n工具優先順序：smart_smart_read > smart_smart_lsp > smart_smart_grep > 原生 read/grep\n編輯一律用 smart_smart_fast_apply（取代 write+edit）\n不確定工具 → smart_smart_run({tool:\"hybrid_router\", args:{question:\"...\"}})\n修復前跑 smart_smart_think({mode:\"cit\", branchingNeeded:false, ...})\n查專案慣例 → smart_smart_rules({file:\"...\"})\n\n## 🔧 可用工具\n- smart_smart_read — 讀檔案（11 種模式，含自動目錄/圖片）\n- smart_smart_grep — 程式碼搜尋（附 scope/import context）\n- smart_smart_glob — 檔案模式搜尋（rg --files --glob）\n- smart_smart_fast_apply — 編輯檔案（10 種格式，安全 dry-run）\n- smart_smart_think — 推理分析（mode:cit/beam/forest）\n- smart_smart_lsp — 程式碼理解（definition/references/hover/diagnostics）\n- smart_smart_run — 呼叫子工具（router/sub-tools）\n- smart_smart_rules — 查專案規則（AGENTS.md/.cursorrules）\n- smart_smart_learn — 專案 onboarding（語言/結構/慣例）\n- smart_smart_context — 工作階段管理（含 budget 查詢）\n- smart_smart_compact — context 壓縮（零成本）\n- read — 原生讀取\n- grep — 原生搜尋\n- glob — 原生檔案搜尋\n- bash — shell 指令（node/npm/git 允許）\n\n## 📋 工作流程\n1. 了解任務範圍\n2. 選擇最省 token 的工具\n3. 執行並自動驗證\n4. 只回報最終結果給主代理\n\n## ⚠️ 限制\n- 不主動上網搜尋（需要時委託主代理）\n- 不執行安全掃描（由主代理負責）\n- 複雜推理用 smart_think，不自己瞎猜",
+      "permission": {
+        "read": "allow",
+        "write": "allow",
+        "glob": "allow",
+        "edit": "allow",
+        "grep": "allow",
+        "bash": {
+          "node": "allow",
+          "npm": "allow",
+          "git": "allow"
+        },
+        "todowrite": "allow",
+        "task": "allow",
+        "smart_smart_read": "allow",
+        "smart_smart_grep": "allow",
+        "smart_smart_glob": "allow",
+        "smart_smart_fast_apply": "allow",
+        "smart_smart_think": "allow",
+        "smart_smart_lsp": "allow",
+        "smart_smart_run": "allow",
+        "smart_smart_rules": "allow",
+        "smart_smart_learn": "allow",
+        "smart_smart_context": "allow",
+        "smart_smart_compact": "allow"
+      }
     }
   }
 }

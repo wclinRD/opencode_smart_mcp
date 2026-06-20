@@ -900,9 +900,9 @@ const DOMAIN_MAP = [
     domain: 'plan',
     keywords: ['規劃', '計畫', 'workflow', '流程', '任務 分解', 'plan', 'project plan', 'task plan', 'feature plan', '分解', '步驟', 'step by step'],
     skill: null,
-    tools: ['planner', 'workflow', 'compose', 'agent_execute', 'agent_plan'],
+    tools: ['task_dispatch', 'planner', 'workflow', 'compose', 'agent_execute', 'agent_plan'],
     description: '任務規劃與工作流編排',
-    workflow: ['Plan: planner', 'Orchestrate: workflow / compose', 'Auto-execute: agent_execute'],
+    workflow: ['Dispatch: task_dispatch', 'Plan: planner', 'Orchestrate: workflow / compose', 'Auto-execute: agent_execute'],
   },
   {
     domain: 'office',

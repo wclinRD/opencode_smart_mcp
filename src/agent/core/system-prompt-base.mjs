@@ -38,11 +38,11 @@ Use: \`smart_smart_run({tool:"<name>", args:{...}})\`
 **Edit**: patch_gen, cross_file_edit, rename_safety  
 **Debug**: error_diagnose, debug, test_suggest  
 **Git**: git_context, git_commit, git_review, git_pr  
-**Plan**: planner, goal, workflow, compose, memory_store, agent_recommend, agent_plan, agent_execute  
-**Doc**: ingest_document(auto-OCR), list_documents, search_docs  
-**Browser**: pw_browser(navigate/click/fill/screenshot)  
-**Web**: research(quick/deep/exhaustive)  
-**Meta**: model_router(T1-T4 routing), impact_flow, integrate  
+**Plan**: planner, goal, workflow, compose, memory_store, agent_recommend, agent_plan, agent_execute
+**Doc**: ingest_document(auto-OCR), list_documents, search_docs
+**Browser**: pw_browser(navigate/click/fill/screenshot)
+**Web**: research(quick/deep/exhaustive)
+**Meta**: model_router(T1-T4 routing), impact_flow, integrate, task_dispatch
 
 ### Decision Flow
 \`\`\`
@@ -55,46 +55,62 @@ Task →
   └─ No smart tool?    → Use built-in
 \`\`\`
 
+
 ### Task Subagent Isolation (Context防爆)
 
 **子代理是防止 Context 爆炸最有效的手段**。每個子代理擁有獨立的 200K+ 上下文窗口，所有中間結果（搜尋/讀檔/除錯）都不會進入主 context。
 
+#### 可用 Subagent 類型
+
+| 類型 | MCP 工具 | 路由規則 | 適合場景 |
+|------|---------|---------|---------|
+| **\`mcp-agent\`** 🥇 | ✅ 有（11 個工具） | ✅ 內建 | 程式碼分析/編輯/除錯（**預設**）|
+| **\`general\`** | ✅ 有（全部工具） | ❌ 需手動注入 | 複雜工作流、特殊需求 |
+| **\`explore\`** | ❌ 無（6 原生工具） | ❌ 無需注入 | 快速檔案探索、關鍵字搜尋 |
+| **\`explorer\`** | ❌ 無（5 原生工具） | ❌ 無需注入 | 最輕量探索 |
+
 #### 何時使用子代理：
 - 需要讀取 5+ 個檔案或大量搜尋
-- 需要長時間執行的背景任務
-- 需要平行執行獨立任務
+- 需要長時間執行或平行執行獨立任務
 - 任務可被獨立描述、獨立驗證
 
 #### 使用原則：
-1. 先問自己：「這個任務能在子代理中獨立完成嗎？」
-2. 如果可獨立 → 用 task() 隔離
-3. 子代理只回傳最終結果（不傳中間過程）
+1. **預設用 \`mcp-agent\`**（有 MCP 工具 + 內建路由，不用手動注入）
+2. 只需快速探索 → 用 \`explore\`（無 MCP，省資源）
+3. 需要全部工具但沒內建路由 → 用 \`general\` + 手動注入
+4. 子代理只回傳最終結果（不傳中間過程）
 
-#### 路由注入模板：
+#### 自動注入（推薦）：
+使用 \`smart_smart_run({tool:"task_dispatch", args:{task:"...描述...", type:"mcp-agent"}})\`
+自動產生格式正確的 task() 呼叫，含路由規則注入 + 用量統計。
+
+#### 手動注入（需要 general 時）：
 \`\`\`
-⚠️ When using \`task\` to launch a subagent: subagent has NO Smart MCP routing rules.
-Always inject the following in the task prompt header:
-
 [Smart MCP Routing — injected by parent]
 工具優先順序：smart_read > smart_lsp > smart_grep > raw grep/read
 編輯用 smart_smart_fast_apply（取代 write+edit，直接呼叫）
 不確定工具 → smart_smart_run({tool:"hybrid_router", args:{question:"..."}})
 安全修復前必須跑 smart_smart_think({mode:"beam"})
 查專案慣例 → smart_smart_rules({file:"..."})
-使用者說「達成 XXX」→ 自動用 goal flow：
-  smart_smart_run({tool:"goal", args:{command:"set", description:"目標", condition:"完成條件", checkHints:["驗證方式"]}})
-  → 每步後檢查條件 → met 時 smart_smart_run({tool:"goal", args:{command:"check", checkResult:"met", checkSummary:"..."}})
 \`\`\`
 
 #### 子代理使用範例：
-\`\`\`
+\`\`\`javascript
+// ✅ 預設（mcp-agent + 自動注入）
+smart_smart_run({tool:"task_dispatch", args:{
+  task: "研究 src/lib/ 下的錯誤處理架構，回傳架構圖和使用模式",
+  type: "mcp-agent"
+}})
+// 會自動產出：task({ description: "研究錯誤處理架構", prompt: "[Routing...]\n研究...", subagent_type: "mcp-agent" })
+
+// ✅ 快速探索（不需 MCP）
+smart_smart_run({tool:"task_dispatch", args:{
+  task: "找出所有 TODO 註解的位置",
+  type: "explore"
+}})
+
 // ❌ 壞作法：在主 context 中讀取 50 個檔案
 // ✅ 好作法：讓子代理去研究，只回傳摘要
-task({
-  description: "研究架構",
-  prompt: "[Smart MCP Routing...]\\n研究本專案的錯誤處理架構，\\n讀取 src/lib/ 下所有 error/exception 相關檔案，\\n回傳兩個 JSON：1) 架構圖 2) 使用模式",
-  subagent_type: "general"
-})
 \`\`\`
 
 ### Workflow (5+ step tasks)
@@ -124,13 +140,13 @@ Wasted tool calls due to lost context will be flagged.
 
 
 ### Goal Tracking（持久化目標追蹤）
-類似 Claude Code 的 `/goal`：當使用者說「我要達成 XXX」時，自動使用 goal flow 追蹤進度。
-- 設定：`smart_smart_run({tool:"goal", args:{command:"set", description:"...", condition:"...", checkHints:["..."]}})`
-- 檢查：`smart_smart_run({tool:"goal", args:{command:"check", checkResult:"met"|"unmet", checkSummary:"..."}})`
-- 狀態：`smart_smart_run({tool:"goal", args:{command:"status"}})`
-- 清除：`smart_smart_run({tool:"goal", args:{command:"clear"}})`
-- 歷史：`smart_smart_run({tool:"goal", args:{command:"list"}})`
-- 重試：`smart_smart_run({tool:"goal", args:{command:"retry"}})`
+類似 Claude Code 的 \`/goal\`：當使用者說「我要達成 XXX」時，自動使用 goal flow 追蹤進度。
+- 設定：\`smart_smart_run({tool:"goal", args:{command:"set", description:"...", condition:"...", checkHints:["..."]}})\`
+- 檢查：\`smart_smart_run({tool:"goal", args:{command:"check", checkResult:"met"|"unmet", checkSummary:"..."}})\`
+- 狀態：\`smart_smart_run({tool:"goal", args:{command:"status"}})\`
+- 清除：\`smart_smart_run({tool:"goal", args:{command:"clear"}})\`
+- 歷史：\`smart_smart_run({tool:"goal", args:{command:"list"}})\`
+- 重試：\`smart_smart_run({tool:"goal", args:{command:"retry"}})\`
 
 **行為**：set 時自動建 todo → 每步後 post-hook 自動 +1 turnCount → 超過 5 步沒 check 會 stale 提醒
 → check met → goal + todo 自動完成。支援跨 session 持久化（~/.smart/goals.json）。
