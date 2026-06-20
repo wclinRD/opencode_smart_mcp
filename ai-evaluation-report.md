@@ -136,39 +136,61 @@ opencode 整合模式：作為 MCP server 透過 opencode.json 載入，plugin/c
 
 ## Layer B：產品定位與競品比較（經 exa_search 生態調查）
 
-Smart MCP 定位為 **開發工具 MCP server + 洋蔥架構 agent**，同類競品主要集中在 **MCP aggregator / meta-server** 領域。
+> 🏷️ **產品類別**：AI 程式碼助手（AI Coding Assistant）
+> 本專案 = opencode（CLI agent）+ Smart MCP（70+ 工具插件），構成完整 AI 程式碼助手產品。
+> 直接競品不是 MCP server，而是 **Claude Code、Cursor、Codex CLI、Cline、Aider** 等 AI coding tools。
 
-### 競品地圖
+### 競品地圖（AI 程式碼助手層級）
 
-| 競品 | 定位 | 相似度 | 差異化 | 強項 | 弱項 |
-|------|------|:------:|--------|------|------|
-| **MetaMCP** (metatool-ai) ⭐2.4k | 通用 MCP 聚合閘道 | 中 | 純聚合不產工具、有 middleware 管線 | 生態成熟、OAuth、namespace | 無自有工具、被動聚合 |
-| **IBM mcp-context-forge** | 企業級 Virtual Meta-Server | 中 | 12 meta-tools + OAuth + resources | 工程強度、安全審計 | 企業包袱、非開發者工具專注 |
-| **OneMCP** (Go) | 通用聚合器，2 meta-tools | 低 | 僅 search + execute | 極簡輕量 | 無自有工具、功能貧乏 |
-| **MCP of MCPs** | 語義搜尋 meta-server | 低 | semantic search + schema 按需載入 | Token 效率佳 | 社群極小 (9 stars) |
-| **mcpd** | 簡易聚合 daemon | 低 | 2 meta-tools、hot reload | 超輕量 | 無自有工具 |
-| **multi-mcp** (Python) | MCP 代理路由 | 低 | 動態 add/remove、K8s 部署 | Kubernetes 整合 | 無自有工具 |
-| **mcp-aggregator** (C#) | MCP 聚合閘道含 REST | 低 | Skill document、lazy loading | C# 生態 | 無自有工具 |
-| ⭐ **Smart MCP (本專案)** | **開發工具 MCP + 洋蔥 agent** | — | **70+ 自有工具**、skill 動態載入、**LSP/AST 程式碼理解** | 自有工具、洋蔥架構 | 僅限 opencode、非通用 MCP client |
+| 產品 | 類別 | 價格 | 開源 | MCP | BYOM | 最佳場景 |
+|------|------|:----:|:----:|:---:|:----:|---------|
+| **Claude Code** | CLI agent | $20-200/mo | ❌ | ✅ | ❌ | 深度推理、大型重構、agentic loops |
+| **Cursor** | IDE (VS Code fork) | $20/mo | ❌ | ✅ | 部分 | IDE 內 daily coding、一鍵編輯 |
+| **Codex CLI** | CLI + 雲端沙箱 | $20+/mo | ✅ | ❌ 原生 | ❌ | 並行 agent、DevOps、大量 PR |
+| **Cline** | VS Code 擴充 | 免費+API | ✅ (5M+) | ✅ | ✅ | VS Code 用戶、自控模型 |
+| **Aider** | CLI agent | 免費+API | ✅ | ❌ | ✅ | Git 原生、外科式編輯 |
+| **Windsurf** | IDE (VS Code fork) | $15/mo | ❌ | ❌ | 部分 | Cursor 替代、入門免費 |
+| **GitHub Copilot** | IDE 插件 | $10-39/mo | ❌ | ❌ | ❌ | 最大裝機量、入門首選 |
+| **Devin** | 雲端自主 agent | $500+/mo | ❌ | ❌ | ❌ | ticket-in/PR-out 全自動 |
+| **Gemini CLI** | CLI agent | 免費+API | ✅ | ✅ | ❌ | Google 生態、1M context |
+| ⭐ **opencode + Smart MCP** | CLI agent + 插件 | **免費+API** | **✅** | **✅** | **✅** | **自託管、無 vendor lock-in、MCP 深度整合** |
+
+### 關鍵差異化分析
+
+| 比較維度 | opencode + Smart MCP | Claude Code | Cursor | Codex CLI | Cline |
+|----------|:--------------------:|:-----------:|:------:|:---------:|:-----:|
+| **開源** | ✅ 全開源 | ❌ | ❌ | ✅ | ✅ |
+| **BYOM** 自帶模型 | ✅ | ❌ | 部分 | ❌ | ✅ |
+| **MCP 支援** | ✅ **深度整合 (Smart MCP)** | ✅ 基本 | ✅ 基本 | ❌ | ✅ 基本 |
+| **自有 MCP 工具** | **70+ 工具**（LSP/AST/編輯） | 無（靠 community servers） | 無 | 無 | 無 |
+| **洋蔥架構 skill 載入** | ✅ **獨有** | ❌ | ❌ | ❌ | ❌ |
+| **CLI agent** | ✅ | ✅ | ❌ | ✅ | ✅ |
+| **IDE 整合** | ❌（terminal only） | 部分（VS Code ext） | ✅ 原生 | 部分（VS Code ext） | ✅ |
+| **價格** | API 成本 only | $20-200/mo | $20/mo | $20+/mo | API 成本 only |
+| **SWE-bench** | 依模型選擇 | 80.8% (最高) | ~49% | ~75% | 依模型 |
 
 ### Ecosystem Check
 
 | Check | 結果 | 說明 |
 |-------|:----:|------|
-| **Check-E1: 競品數量** | ⚠️ WARN | MCP ecosystem 已 **1000+ 公開 servers**，meta-server 類也有 6+ 成熟專案 |
-| **Check-E2: 差異化優勢** | ✅ PASS | **2+ 獨特優勢**：(1) 70+ 自有開發工具（LSP/程式碼分析/AST/編輯），(2) 洋蔥架構動態載入技能，(3) 為 opencode 深度整合 |
-| **Check-E3: 生態趨勢** | ✅ PASS | **MCP 生態正在爆發**（2026 年官方 SDK 覆蓋 10 語言，client 支援 Claude/Cursor/Windsurf/VS Code），meta-server 需求持續成長 |
+| **Check-E1: 競品數量** | ⚠️ WARN | AI coding assistant 市場已 **10+ 成熟產品**（紅海競爭），但 self-hosted + BYOM 類別仍有藍海機會 |
+| **Check-E2: 差異化優勢** | ✅ PASS | **3+ 獨特優勢**：(1) **70+ 自有 MCP 開發工具**（他廠都無自有工具），(2) **洋蔥架構動態載入**，(3) **全開源 + BYOM + MCP 三位一體**（僅有 Cline 稍有類似） |
+| **Check-E3: 生態趨勢** | ✅ PASS | **AI coding assistant 市場持續爆發**，2026 年 Cursor 36 萬付費用戶、Cline 500 萬 VS Code 安裝，opencode 也被列入主流比較 |
 
 ### 關鍵洞察
 
-1. **Smart MCP 走的是不同路線** — 其他 aggregator 都是「聚合現有 MCP server」，Smart MCP 是「**自己開發 70+ 專用工具 + skill 動態載入**」。這在市場上沒有直接競品。
-2. **最大的競品風險不是其他 MCP server，而是 opencode 本身** — 若 opencode 內建這些工具，Smart MCP 價值就下降。需持續強化 skill 生態與洋蔥架構的差異化。
-3. **缺口：未支援其他 MCP client** — 目前僅限 opencode，若未來支援 Claude Desktop、Cursor 等，可大幅擴張用戶群。
+1. **Smart MCP 是 opencode 的殺手級差異化** — 在 AI coding assistant 市場中，**沒有任何競品提供 70+ 內建開發工具**。Claude Code 靠 community MCP servers，Cline 靠手動配置。Smart MCP 的洋蔥架構 + 豐富工具有著顯著護城河。
+
+2. **產品定位 = opencode + Smart MCP** — 目前 opencode 已被 agent wiki 列為 Tier 2 (Strong for Specific Workflows)，與 Cline、Aider 同級。完整的定位是「**全開源、自託管、模型中立、MCP 深度整合的 AI 程式碼助手**」。
+
+3. **最大風險：opencode 內建工具** — 若 opencode 團隊決定內建 Smart MCP 的工具功能，現有依存關係就弱化了。需持續強化洋蔥架構與 skill 生態。
+
+4. **機會：支援非 opencode 的 MCP clients** — 目前 Smart MCP 僅支援 opencode。Claude Code、Cursor、Cline 都有完整的 MCP 支援，若能讓 Smart MCP 無縫用於這些 client，可大幅擴張用戶群。
 
 ### 演進建議
 
-| 時間 | 行動 |
-|------|------|
-| **短期**（現在） | 保持 Layer A 依賴更新；強化洋蔥架構文件與 onboarding |
-| **中期**（1-3 個月） | 支援 stdio transport 讓其他 MCP client 也可使用（如 Claude Desktop） |
-| **長期**（3-6 個月） | 考慮開放部分工具作為 standalone npm package，降低 vendor lock-in 風險 |
+| 時間 | 行動 | 對應競品壓力 |
+|------|------|-------------|
+| **短期**（現在） | 持續更新依賴 + 強化洋蔥架構文件 | Cline 5M 裝機量成長中 |
+| **中期**（1-3 個月） | 支援 stdio transport，讓 Smart MCP 可直接用於 Claude Code、Cursor、Cline | Claude Code + Cursor MCP 生態飽和 |
+| **長期**（3-6 個月） | 建立 skill market / community 生態；考慮 opencode 以外的主體能獨立使用部分工具 | Codex CLI 開放 + 並行 agent 趨勢 |
