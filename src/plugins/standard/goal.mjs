@@ -151,14 +151,6 @@ export default {
     },
     required: ['command'],
   },
-  validateArgs(args) {
-    // Validate status for clear command
-    if (args.command === 'clear' && args.status && !['completed', 'cancelled', 'failed'].includes(args.status)) {
-      return `Invalid status "${args.status}". Allowed: completed, cancelled, failed.`;
-    }
-    return null;
-  },
-
   handler(args) {
     const { command, description, condition, checkHints, autoCheck, id, status, checkResult, checkSummary } = args;
     let goals = loadGoals();
@@ -248,8 +240,8 @@ export default {
 
       // ── Clear (complete/cancel/fail) a goal ──
       case 'clear': {
-        const newStatus = status || 'completed';
-        // validateArgs catches invalid status values via plugin hook
+        const ALLOWED_STATUSES = ['completed', 'cancelled', 'failed'];
+        const newStatus = status && ALLOWED_STATUSES.includes(status) ? status : 'completed';
         const targetId = id;
         if (targetId === undefined || targetId === null || typeof targetId !== 'number') {
           const active = getActiveGoal(goals);

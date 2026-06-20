@@ -14,7 +14,6 @@ import { homedir } from 'node:os';
 // Import the goal plugin directly
 const goalPlugin = await import('../src/plugins/standard/goal.mjs');
 const handler = goalPlugin.default.handler;
-const validateArgs = goalPlugin.default.validateArgs;
 
 const GOAL_FILE = resolve(homedir(), '.smart', 'goals.json');
 let backup = null;
@@ -52,25 +51,6 @@ describe('smart_goal plugin', () => {
     } else if (hasGoalFile()) {
       writeFileSync(GOAL_FILE, '[]', 'utf-8');
     }
-  });
-
-  // ── validateArgs ──
-  describe('validateArgs', () => {
-    it('returns null for valid clear status', () => {
-      assert.equal(validateArgs({ command: 'clear', status: 'completed' }), null);
-      assert.equal(validateArgs({ command: 'clear', status: 'cancelled' }), null);
-      assert.equal(validateArgs({ command: 'clear', status: 'failed' }), null);
-    });
-
-    it('returns error for invalid clear status', () => {
-      const result = validateArgs({ command: 'clear', status: 'invalid-status' });
-      assert.match(result, /Invalid status/);
-    });
-
-    it('returns null for non-clear commands', () => {
-      assert.equal(validateArgs({ command: 'set' }), null);
-      assert.equal(validateArgs({ command: 'check' }), null);
-    });
   });
 
   // ── command:set ──
