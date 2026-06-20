@@ -151,7 +151,7 @@ Context Budget：
 | 層級 | 規則 |
 |------|------|
 | 🟥 **強制**（Server 端執行） | 安全修復前必須 `smart_think({mode:"beam", ...})` |
-| 🟨 **建議**（LLM 自主判斷） | 高風險任務啟用 self-correction；複雜推理預設 `mode:"cit"`；跨檔案編輯先跑 import_graph |
+| 🟨 **建議**（LLM 自主判斷） | 高風險任務啟用 self-correction（輸出→`smart_hallucination_check`→分數<7修正→≥7回報，最多 1 輪）；複雜推理預設 `mode:"cit"`；跨檔案編輯先跑 import_graph |
 | 🟩 **跳過**（省 token） | 例行 grep/test/簡單編輯/查詢 |
 
 ---
