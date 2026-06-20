@@ -501,10 +501,13 @@ task 強制規則：
   查專案慣例 → smart_rules({file:"..."})
   """
 
+  ⚠️ subagent_type 務必選 `general`（`explore`/`explorer` 是輕量型，僅 6 個原生工具，無 MCP 存取權）
+
   反例（會被記入反省）：
   task({prompt:"幫我修這個 bug"})          ← 沒給路由，subagent 亂用工具
+  task({subagent_type:"explore", ...})     ← explore 無 MCP 工具，白費
   正例：
-  task({prompt:"[Routing]...\n幫我修這個 bug"})  ← subagent 知道走工具鏈
+  task({prompt:"[Routing]...\n幫我修這個 bug", subagent_type:"general"})  ← general 有完整 MCP 工具
 
 LSP 優先原則：
   📍 找函式定義 → smart_lsp({operation:"definition"}) 優先，smart_grep 備用

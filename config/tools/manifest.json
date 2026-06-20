@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-20T01:22:21.400Z",
+  "generatedAt": "2026-06-20T01:55:50.249Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -3104,6 +3104,72 @@
       }
     },
     {
+      "name": "smart_edit",
+      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
+      "category": "standard",
+      "domain": "edit",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "File path to edit (required)"
+          },
+          "oldString": {
+            "type": "string",
+            "description": "Text to find and replace (exact match by default, regex if regex=true)"
+          },
+          "newString": {
+            "type": "string",
+            "description": "Replacement text"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Multiple files to edit (alternative to file)"
+          },
+          "regex": {
+            "type": "boolean",
+            "description": "Use regex matching instead of exact (default: false)"
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Apply changes (default: false — dry run)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: current dir)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "description": "Output format (default: json — includes nextCommand)"
+          }
+        },
+        "required": [
+          "oldString",
+          "newString"
+        ]
+      }
+    },
+    {
       "name": "smart_goal",
       "description": "Persistent goal tracking. Set a completion condition and auto-check progress across turns. Commands: set (new goal), check (verify condition), status (show active), clear (complete/cancel), list (history), retry (reactivate failed).",
       "category": "standard",
@@ -4253,45 +4319,6 @@
       }
     },
     {
-      "name": "smart_progress",
-      "description": "Check progress of long-running tasks. View active tasks, their completion percentage, and recent messages.",
-      "category": "standard",
-      "domain": "general",
-      "safetyLevel": "medium",
-      "routingRules": {
-        "autoRoute": true,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "command": {
-            "type": "string",
-            "enum": [
-              "status",
-              "all",
-              "clear"
-            ],
-            "description": "Command: status (check one task), all (list all tasks), clear (remove completed tasks)"
-          },
-          "taskId": {
-            "type": "string",
-            "description": "Task ID to check (for status command)"
-          }
-        },
-        "required": [
-          "command"
-        ]
-      }
-    },
-    {
       "name": "smart_pw_browser",
       "description": "Control a web browser — navigate, click, fill forms, screenshot, execute JavaScript.\n\nCommands:\n  navigate(url):   Browse to a URL\n  snapshot():      Get page text + links\n  click(selector): Click element (text or CSS selector)\n  fill(selector, value): Fill a form field\n  screenshot():    Capture page as PNG (base64)\n  run_code(code):  Execute JavaScript in the page\n\nNOT for: reading article content (use smart_exa_crawl with --clean).\nNOT for: searching the web (use smart_exa_search).",
       "category": "standard",
@@ -4597,11 +4624,11 @@
       }
     },
     {
-      "name": "smart_edit",
-      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
+      "name": "smart_progress",
+      "description": "Check progress of long-running tasks. View active tasks, their completion percentage, and recent messages.",
       "category": "standard",
-      "domain": "edit",
-      "safetyLevel": "high",
+      "domain": "general",
+      "safetyLevel": "medium",
       "routingRules": {
         "autoRoute": true,
         "interceptorRequired": false,
@@ -4616,49 +4643,22 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "file": {
-            "type": "string",
-            "description": "File path to edit (required)"
-          },
-          "oldString": {
-            "type": "string",
-            "description": "Text to find and replace (exact match by default, regex if regex=true)"
-          },
-          "newString": {
-            "type": "string",
-            "description": "Replacement text"
-          },
-          "files": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Multiple files to edit (alternative to file)"
-          },
-          "regex": {
-            "type": "boolean",
-            "description": "Use regex matching instead of exact (default: false)"
-          },
-          "apply": {
-            "type": "boolean",
-            "description": "Apply changes (default: false — dry run)"
-          },
-          "root": {
-            "type": "string",
-            "description": "Project root (default: current dir)"
-          },
-          "format": {
+          "command": {
             "type": "string",
             "enum": [
-              "json",
-              "text"
+              "status",
+              "all",
+              "clear"
             ],
-            "description": "Output format (default: json — includes nextCommand)"
+            "description": "Command: status (check one task), all (list all tasks), clear (remove completed tasks)"
+          },
+          "taskId": {
+            "type": "string",
+            "description": "Task ID to check (for status command)"
           }
         },
         "required": [
-          "oldString",
-          "newString"
+          "command"
         ]
       }
     },
@@ -4839,6 +4839,63 @@
         },
         "required": [
           "query"
+        ]
+      }
+    },
+    {
+      "name": "smart_task_dispatch",
+      "description": "Smart Task Dispatcher — generates a formatted task() call with Smart MCP routing rules pre-injected. Use when you need to dispatch work to a subagent and want consistent routing injection + usage tracking. Returns a ready-to-execute task() block. Tracks dispatch statistics across sessions.",
+      "category": "standard",
+      "domain": "edit",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task": {
+            "type": "string",
+            "description": "Task description for the subagent (what to do, what to return)"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "mcp-agent",
+              "general",
+              "explore",
+              "explorer"
+            ],
+            "description": "Subagent type (default: mcp-agent). mcp-agent = MCP tools + built-in routing (recommended). general = full tools, manual routing. explore = native tools only, fast exploration."
+          },
+          "context": {
+            "type": "string",
+            "description": "Optional context about the codebase, prior work, or constraints"
+          },
+          "verify": {
+            "type": "string",
+            "description": "Optional verification instructions (e.g., \"run npm test\" or \"check lint\")"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "call"
+            ],
+            "description": "Output format (default: text)"
+          }
+        },
+        "required": [
+          "task"
         ]
       }
     },
