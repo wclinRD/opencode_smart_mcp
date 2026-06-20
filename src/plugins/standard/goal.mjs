@@ -25,7 +25,6 @@
 //     lastCheckResult: null,   // "met" | "unmet" | null
 //     lastCheckSummary: null,  // brief note from last check
 //     turnCount: 0,            // how many turns spent on this goal
-//     sessionId: null,         // which session created it
 //   }
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
