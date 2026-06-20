@@ -131,3 +131,44 @@ opencode 整合模式：作為 MCP server 透過 opencode.json 載入，plugin/c
 - 專案採用 `peerDependencies` 搭配 `smart-mcp`，避免套件版本衝突
 
 **結論**：整體技術棧非常健康，多數依賴保持在最新版。無需立即升級行動。
+
+---
+
+## Layer B：產品定位與競品比較（經 exa_search 生態調查）
+
+Smart MCP 定位為 **開發工具 MCP server + 洋蔥架構 agent**，同類競品主要集中在 **MCP aggregator / meta-server** 領域。
+
+### 競品地圖
+
+| 競品 | 定位 | 相似度 | 差異化 | 強項 | 弱項 |
+|------|------|:------:|--------|------|------|
+| **MetaMCP** (metatool-ai) ⭐2.4k | 通用 MCP 聚合閘道 | 中 | 純聚合不產工具、有 middleware 管線 | 生態成熟、OAuth、namespace | 無自有工具、被動聚合 |
+| **IBM mcp-context-forge** | 企業級 Virtual Meta-Server | 中 | 12 meta-tools + OAuth + resources | 工程強度、安全審計 | 企業包袱、非開發者工具專注 |
+| **OneMCP** (Go) | 通用聚合器，2 meta-tools | 低 | 僅 search + execute | 極簡輕量 | 無自有工具、功能貧乏 |
+| **MCP of MCPs** | 語義搜尋 meta-server | 低 | semantic search + schema 按需載入 | Token 效率佳 | 社群極小 (9 stars) |
+| **mcpd** | 簡易聚合 daemon | 低 | 2 meta-tools、hot reload | 超輕量 | 無自有工具 |
+| **multi-mcp** (Python) | MCP 代理路由 | 低 | 動態 add/remove、K8s 部署 | Kubernetes 整合 | 無自有工具 |
+| **mcp-aggregator** (C#) | MCP 聚合閘道含 REST | 低 | Skill document、lazy loading | C# 生態 | 無自有工具 |
+| ⭐ **Smart MCP (本專案)** | **開發工具 MCP + 洋蔥 agent** | — | **70+ 自有工具**、skill 動態載入、**LSP/AST 程式碼理解** | 自有工具、洋蔥架構 | 僅限 opencode、非通用 MCP client |
+
+### Ecosystem Check
+
+| Check | 結果 | 說明 |
+|-------|:----:|------|
+| **Check-E1: 競品數量** | ⚠️ WARN | MCP ecosystem 已 **1000+ 公開 servers**，meta-server 類也有 6+ 成熟專案 |
+| **Check-E2: 差異化優勢** | ✅ PASS | **2+ 獨特優勢**：(1) 70+ 自有開發工具（LSP/程式碼分析/AST/編輯），(2) 洋蔥架構動態載入技能，(3) 為 opencode 深度整合 |
+| **Check-E3: 生態趨勢** | ✅ PASS | **MCP 生態正在爆發**（2026 年官方 SDK 覆蓋 10 語言，client 支援 Claude/Cursor/Windsurf/VS Code），meta-server 需求持續成長 |
+
+### 關鍵洞察
+
+1. **Smart MCP 走的是不同路線** — 其他 aggregator 都是「聚合現有 MCP server」，Smart MCP 是「**自己開發 70+ 專用工具 + skill 動態載入**」。這在市場上沒有直接競品。
+2. **最大的競品風險不是其他 MCP server，而是 opencode 本身** — 若 opencode 內建這些工具，Smart MCP 價值就下降。需持續強化 skill 生態與洋蔥架構的差異化。
+3. **缺口：未支援其他 MCP client** — 目前僅限 opencode，若未來支援 Claude Desktop、Cursor 等，可大幅擴張用戶群。
+
+### 演進建議
+
+| 時間 | 行動 |
+|------|------|
+| **短期**（現在） | 保持 Layer A 依賴更新；強化洋蔥架構文件與 onboarding |
+| **中期**（1-3 個月） | 支援 stdio transport 讓其他 MCP client 也可使用（如 Claude Desktop） |
+| **長期**（3-6 個月） | 考慮開放部分工具作為 standalone npm package，降低 vendor lock-in 風險 |
