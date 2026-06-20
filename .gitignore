@@ -42,7 +42,9 @@ tmp-test-impact-*/
 .opencode/stats/
 storage/
 
-# Companion skills: runtime cache & pytest artifacts
+# Companion skills: runtime cache, __pycache__, test & pytest artifacts
+.opencode/skills/**/__pycache__/
+.opencode/skills/**/.pytest_cache/
 config/skills/**/.cache/
 config/skills/**/.pytest_cache/
 config/skills/**/__pycache__/
