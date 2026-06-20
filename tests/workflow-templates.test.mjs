@@ -125,7 +125,7 @@ describe('Workflow Templates', () => {
 
   // --- Each workflow can be run ---
 
-  const workflowNames = ['bug-fix', 'refactor', 'security-fix', 'pr-review', 'new-feature', 'onboard', 'doc-analysis'];
+  const workflowNames = ['bug-fix', 'refactor', 'security-fix', 'pr-review', 'new-feature', 'onboard', 'doc-analysis', 'brainstorm-flow', 'tdd-flow'];
 
   for (const name of workflowNames) {
     it(`should run workflow: ${name}`, async () => {

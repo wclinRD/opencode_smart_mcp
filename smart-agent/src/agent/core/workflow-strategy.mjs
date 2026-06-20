@@ -23,6 +23,8 @@ const TEMPLATE_MATCHERS = [
   { pattern: /refactor|restructur|reorganize|clean|simplify|dedup/i, template: 'refactor-flow' },
   { pattern: /security|vulnerability|credential|secret|xss|injection/i, template: 'security-flow' },
   { pattern: /research|search.*web|investigate|find.*(library|api)/i, template: 'research-flow' },
+  { pattern: /brainstorm|design|spec|requirement.*clarify/i, template: 'brainstorm-flow' },
+  { pattern: /tdd|red.green|test.first|test.driven/i, template: 'tdd-flow' },
   { pattern: /git|commit|pr|pull.request|review|staged/i, template: 'git-flow' },
 ];
 

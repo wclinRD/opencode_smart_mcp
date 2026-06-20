@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-20T02:54:28.243Z",
+  "generatedAt": "2026-06-20T05:12:28.846Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -2232,6 +2232,43 @@
       }
     },
     {
+      "name": "smart_consistency_check",
+      "description": "Harness Engineering 機械化一致性檢查。掃描專案結構飄移：\n- 檔案數與 README 聲明是否一致\n- wikilink/cross-reference 是否斷裂\n- 目錄結構是否與聲明同步\n- golden rules 是否被違反\n\n每個違反回報內嵌修復指令，agent 可自行修正。",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string",
+            "description": "Project root (default: cwd)"
+          },
+          "checks": {
+            "type": "string",
+            "enum": [
+              "all",
+              "file-counts",
+              "cross-refs",
+              "golden-rules"
+            ],
+            "description": "Which checks to run (default: all)"
+          }
+        }
+      }
+    },
+    {
       "name": "smart_coverage",
       "description": "Use when: need to find untested code paths — uncovered branches, conditions, edge cases in if/else, switch, loops, ternaries. Call after writing new code to identify gaps. Avoid when: looking for test suggestions (use test_suggest instead).",
       "category": "analyze",
@@ -2453,6 +2490,64 @@
             "description": "Output format"
           }
         }
+      }
+    },
+    {
+      "name": "smart_design_doc",
+      "description": "產出結構化設計文件（Superpowers brainstorming）。\n開發任何新功能前先產出此文件，確保 spec 與實作一致。\n\n欄位：Goal / Context / Approach / Risks / Test Plan\n\n會自動儲存到 DESIGNS/ 目錄。",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "string",
+            "description": "Goal in one sentence (required)"
+          },
+          "context": {
+            "type": "string",
+            "description": "Background, constraints, existing architecture"
+          },
+          "approach": {
+            "type": "string",
+            "description": "Implementation approach and reasoning"
+          },
+          "risks": {
+            "type": "string",
+            "description": "Known risks, edge cases, failure modes"
+          },
+          "testPlan": {
+            "type": "string",
+            "description": "How to verify correctness"
+          },
+          "acceptanceCriteria": {
+            "type": "string",
+            "description": "List of acceptance criteria"
+          },
+          "outputDir": {
+            "type": "string",
+            "description": "Output directory (default: DESIGNS/)"
+          },
+          "save": {
+            "type": "boolean",
+            "description": "Save to file (default: true)"
+          }
+        },
+        "required": [
+          "goal"
+        ]
       }
     },
     {
@@ -3101,72 +3196,6 @@
             "description": "Max review comments per file (default: 5)"
           }
         }
-      }
-    },
-    {
-      "name": "smart_edit",
-      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
-      "category": "standard",
-      "domain": "edit",
-      "safetyLevel": "high",
-      "routingRules": {
-        "autoRoute": true,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "file": {
-            "type": "string",
-            "description": "File path to edit (required)"
-          },
-          "oldString": {
-            "type": "string",
-            "description": "Text to find and replace (exact match by default, regex if regex=true)"
-          },
-          "newString": {
-            "type": "string",
-            "description": "Replacement text"
-          },
-          "files": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Multiple files to edit (alternative to file)"
-          },
-          "regex": {
-            "type": "boolean",
-            "description": "Use regex matching instead of exact (default: false)"
-          },
-          "apply": {
-            "type": "boolean",
-            "description": "Apply changes (default: false — dry run)"
-          },
-          "root": {
-            "type": "string",
-            "description": "Project root (default: current dir)"
-          },
-          "format": {
-            "type": "string",
-            "enum": [
-              "json",
-              "text"
-            ],
-            "description": "Output format (default: json — includes nextCommand)"
-          }
-        },
-        "required": [
-          "oldString",
-          "newString"
-        ]
       }
     },
     {
@@ -4319,6 +4348,45 @@
       }
     },
     {
+      "name": "smart_progress",
+      "description": "Check progress of long-running tasks. View active tasks, their completion percentage, and recent messages.",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "status",
+              "all",
+              "clear"
+            ],
+            "description": "Command: status (check one task), all (list all tasks), clear (remove completed tasks)"
+          },
+          "taskId": {
+            "type": "string",
+            "description": "Task ID to check (for status command)"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
       "name": "smart_pw_browser",
       "description": "Control a web browser — navigate, click, fill forms, screenshot, execute JavaScript.\n\nCommands:\n  navigate(url):   Browse to a URL\n  snapshot():      Get page text + links\n  click(selector): Click element (text or CSS selector)\n  fill(selector, value): Fill a form field\n  screenshot():    Capture page as PNG (base64)\n  run_code(code):  Execute JavaScript in the page\n\nNOT for: reading article content (use smart_exa_crawl with --clean).\nNOT for: searching the web (use smart_exa_search).",
       "category": "standard",
@@ -4624,11 +4692,11 @@
       }
     },
     {
-      "name": "smart_progress",
-      "description": "Check progress of long-running tasks. View active tasks, their completion percentage, and recent messages.",
+      "name": "smart_edit",
+      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
       "category": "standard",
-      "domain": "general",
-      "safetyLevel": "medium",
+      "domain": "edit",
+      "safetyLevel": "high",
       "routingRules": {
         "autoRoute": true,
         "interceptorRequired": false,
@@ -4643,22 +4711,49 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "command": {
+          "file": {
+            "type": "string",
+            "description": "File path to edit (required)"
+          },
+          "oldString": {
+            "type": "string",
+            "description": "Text to find and replace (exact match by default, regex if regex=true)"
+          },
+          "newString": {
+            "type": "string",
+            "description": "Replacement text"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Multiple files to edit (alternative to file)"
+          },
+          "regex": {
+            "type": "boolean",
+            "description": "Use regex matching instead of exact (default: false)"
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Apply changes (default: false — dry run)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: current dir)"
+          },
+          "format": {
             "type": "string",
             "enum": [
-              "status",
-              "all",
-              "clear"
+              "json",
+              "text"
             ],
-            "description": "Command: status (check one task), all (list all tasks), clear (remove completed tasks)"
-          },
-          "taskId": {
-            "type": "string",
-            "description": "Task ID to check (for status command)"
+            "description": "Output format (default: json — includes nextCommand)"
           }
         },
         "required": [
-          "command"
+          "oldString",
+          "newString"
         ]
       }
     },
