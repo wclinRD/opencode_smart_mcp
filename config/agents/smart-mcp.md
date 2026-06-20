@@ -118,6 +118,7 @@ permission:
 | 除錯 | `error_diagnose` | 診斷錯誤訊息 |
 | 除錯 | `debug` | 除錯流程 |
 | 規劃 | `planner` | 分解目標為步驟 |
+| 規劃 | `goal` | **持久化目標追蹤** — 設定完成條件，跨回合自動檢查，條件達成前持續工作 |
 | 規劃 | `memory_store` | 記憶錯誤解法（跨 session） |
 | 瀏覽器 | `pw_browser` | 控制瀏覽器（navigate/click/fill/screenshot） |
 | 學術 | `academic_search` | 🥇 學術文獻搜尋（OpenAlex/Crossref/Semantic Scholar/Unpaywall） |
@@ -235,6 +236,56 @@ permission:
 | Session 快取 | `第一次 smart_read 會讀取檔案 → 第二次相同呼叫直接回傳快取結果（mtime 檢查 + 10min TTL）` |
 | 工作流模板 | `ssr(workflow args:{command:"list"}) → ssr(workflow args:{command:"run", name:"bug-fix"})` |
 | 重構計畫 | `ssr(refactor_plan args:{symbol:"...", newApi:"..."}) → 產出遷移計畫 → ssr(fast_apply)` |
+| 目標追蹤 | `ssr(goal command:"set", description:"...", condition:"...")` → **自動**：每步後自檢查條件 → 達標後 `ssr(goal command:"clear")` → 匯報 |
+
+---
+
+## 🎯 持久化目標追蹤（/goal）
+
+類似 Claude Code 的 `/goal`：設定一個完成條件，Smart MCP 會持續工作直到條件達成。
+
+### 行為規則
+
+```
+使用 smart_goal 的流程：
+
+1️⃣ 設定目標
+   ssr({tool:"goal", args:{command:"set",
+     description: "簡短描述",
+     condition: "完成條件（什麼叫「做好了」）",
+     checkHints: ["如何驗證"]  // 可選
+   }})
+
+2️⃣ 自動行為（LLM 自主遵守）
+   - 有 active goal 時，每步完成後自動檢查 condition 是否滿足
+   - 條件滿足 → ssr({tool:"goal", args:{command:"check", checkResult:"met", checkSummary:"..."}})
+     → ssr({tool:"goal", args:{command:"clear"}}) → 向使用者回報 ✅
+   - 條件不滿足 → 繼續下一步，無需問使用者
+   - 卡住或失敗 → ssr({tool:"goal", args:{command:"clear", status:"failed"}}) → 向使用者解釋
+
+3️⃣ 跨 session 持久化
+   - goal 狀態存在 ~/.smart/goals.json，跨 session 自動恢復
+   - context compact 後 recovery context 會包含 active goal 資訊
+   - 支援 retry：ssr({tool:"goal", args:{command:"retry"}})
+
+4️⃣ 查詢狀態
+   ssr({tool:"goal", args:{command:"status"}})     ← 看 active goal
+   ssr({tool:"goal", args:{command:"list"}})       ← 看歷史目標
+```
+
+### 使用範例
+
+```
+使用者：「把 auth module migration 做完」
+  1. ssr({tool:"goal", args:{command:"set",
+       description:"Auth module v2 migration",
+       condition:"All auth tests pass, no TypeScript errors, existing API endpoints still work",
+       checkHints:["Run npm test -- --testPathPattern=auth","Run tsc --noEmit"]
+     }})
+  2. 執行 migration 工作...
+  3. 每步完成 → 檢查條件
+  4. 條件滿足 → ssr({tool:"goal", args:{command:"clear"}}) → 向使用者回報 "✅ Auth module migration 完成！"
+```
 
 ---
 

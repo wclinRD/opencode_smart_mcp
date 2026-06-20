@@ -490,6 +490,28 @@ function initBuiltinHooks() {
     handler: async (ctx) => triggerHallucinationCheck(ctx.toolName, ctx.args, ctx.result),
   });
 
+  // Goal Turn Tracking — after every tool call when goal is active
+  registerPostHook({
+    name: 'goal-turn-tracker',
+    description: 'Increment goal turn counter after each tool call',
+    match: () => true, // always check — cheap file stat
+    handler: async (ctx) => {
+      try {
+        const goalFile = join(homedir(), '.smart', 'goals.json');
+        if (!existsSync(goalFile)) return;
+        const raw = readFileSync(goalFile, 'utf-8');
+        const goals = JSON.parse(raw);
+        if (!Array.isArray(goals)) return;
+        const active = goals.find(g => g.status === 'active');
+        if (!active) return;
+        // Increment turn counter
+        active.turnCount = (active.turnCount || 0) + 1;
+        active.updatedAt = new Date().toISOString();
+        writeFileSync(goalFile, JSON.stringify(goals, null, 2), 'utf-8');
+      } catch { /* silent */ }
+    },
+  });
+
   // Background Security Scan — after file edits (Sprint 2C)
   registerPostHook({
     name: 'security-background-scan',
@@ -681,6 +703,9 @@ const ERROR_FIXES = {
   },
   planner: {
     missing:   'goal is required. Usage: smart_run(tool:"planner", args:{goal:"what to accomplish"})',
+  },
+  goal: {
+    missing:   'command is required (set/check/status/clear/list/retry). Usage: smart_run(tool:"goal", args:{command:"set", description:"...", condition:"..."})',
   },
   memory_store: {
     missing:   'command is required (search/add/profile/forget). Usage: smart_run(tool:"memory_store", args:{command:"search", query:"..."})',
@@ -1159,7 +1184,7 @@ const ROUTER_DESCRIPTION =
   '  [analyze] coverage(file,threshold), debug(error), import_graph(root), naming(file)\n' +
   '  [edit]    cross_file_edit(file,pattern,replacement), rename_safety(name,newName)\n' +
   '  [search]  (exa tools moved to Layer 1 — use smart_exa_search, smart_exa_crawl, smart_github_search directly)\n' +
-  '  [plan]    planner(goal), memory_store(command,query), tool_stats(command)\n' +
+  '  [plan]    planner(goal), goal(command), memory_store(command,query), tool_stats(command)\n' +
   '  [debug]   error_diagnose(error), test_suggest(file,diff)\n' +
   '  [report]  diagram(type,title), report(type,title)\n' +
   '  [code]    py_helper(command), ts_helper(command)\n' +

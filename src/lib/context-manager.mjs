@@ -137,8 +137,11 @@ export class ContextManager {
         if (opts.projectRoot) this._context.projectRoot = opts.projectRoot;
         // Ensure todoItems exists on resumed sessions
         if (!this._context.todoItems) this._context.todoItems = [];
+        if (!this._context.goalState) this._context.goalState = null;
         // Gap #1/#4 fix: 從共享檔案同步 todo 狀態（file 為 ground truth）
         this._syncTodosFromFile();
+        // 從共享檔案同步 active goal（跨 session）
+        this._syncGoalFromFile();
         // 從檔案恢復 recovery context（若前次 session 異常中斷）
         this.restoreRecoveryContext();
         // 從共享檔案恢復 subtask progress（跨 session）
@@ -155,6 +158,7 @@ export class ContextManager {
       toolHistory: [],
       accumulatedFindings: [],
       todoItems: [],
+      goalState: null,
       lastResult: null,
       metadata: {
         createdAt: nowISO(),
@@ -1102,6 +1106,44 @@ export class ContextManager {
   }
 
   /**
+   * 從共享的 goals.json 同步 active goal 到 in-memory context。
+   * 讓跨 session 的 goal 狀態能自動恢復。
+   */
+  _syncGoalFromFile() {
+    try {
+      const goalFile = resolve(homedir(), '.smart', 'goals.json');
+      if (existsSync(goalFile)) {
+        const raw = readFileSync(goalFile, 'utf-8');
+        const items = JSON.parse(raw);
+        if (!Array.isArray(items)) return;
+        const active = items.find(g => g.status === 'active');
+        if (active) {
+          this._context.goalState = {
+            id: active.id,
+            description: active.description,
+            condition: active.condition,
+            checkCount: active.checkCount || 0,
+            turnCount: active.turnCount || 0,
+            lastCheckResult: active.lastCheckResult || null,
+          };
+        } else {
+          this._context.goalState = null;
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  /**
+   * Get active goal summary for injection into recovery context.
+   * @returns {object|null} { id, description, condition, checkCount, turnCount, lastCheckResult }
+   */
+  getActiveGoalSummary() {
+    if (!this._context) return null;
+    this._syncGoalFromFile();
+    return this._context.goalState || null;
+  }
+
+  /**
    * 將 subtask progress 寫入共享檔案，跨 session 可恢復。
    * 每次 subtask 更新時自動呼叫。
    */
@@ -1175,6 +1217,15 @@ export class ContextManager {
     // Summary
     const s = rc.summary || {};
     parts.push(`📊 Session: ${s.totalCalls || 0} calls, ${s.errorCount || 0} errors, ${s.uniqueTools || 0} tools`);
+
+    // Active goal (from shared goals.json)
+    const goalState = this.getActiveGoalSummary();
+    if (goalState) {
+      const statusIcon = goalState.lastCheckResult === 'met' ? '✅' : '🎯';
+      parts.push(`${statusIcon} Active Goal: ${goalState.description}`);
+      parts.push(`   Condition: ${goalState.condition}`);
+      parts.push(`   Checks: ${goalState.checkCount} | Turns: ${goalState.turnCount}`);
+    }
 
     // Pending todos (排序：in_progress 優先 > pending 依優先級 > completed 置底)
     const todos = this.listTodos();
