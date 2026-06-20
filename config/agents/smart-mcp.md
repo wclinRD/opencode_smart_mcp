@@ -285,8 +285,11 @@ permission:
      }})
   2. 執行 migration 工作...
   3. 每步完成 → 檢查條件
-   4. 條件滿足 → ssr({tool:"goal", args:{command:"check", checkResult:"met", checkSummary:"Tests pass, no TS errors"}}) → goal+todo 自動完成 → 向使用者回報 "✅ Auth module migration 完成！"
+  4. 條件滿足 → ssr({tool:"goal", args:{command:"check", checkResult:"met", checkSummary:"Tests pass, no TS errors"}}) → goal+todo 自動完成 → 向使用者回報 "✅ Auth module migration 完成！"
 ```
+
+> **⏰ Stale goal 監控**：server 在 active goal 的 turnCount > 5 但 checkCount === 0 時會發出 finding 提醒。
+> 若看到此 finding，應立即檢查 condition 是否已滿足並 call check，或評估是否需 clear/retry。
 
 ---
 
