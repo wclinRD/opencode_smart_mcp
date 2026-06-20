@@ -4,7 +4,7 @@
 
 ## 分類
 
-共有 **23 個 skills**（8 個內建 + 15 個 companion）。
+共有 **24 個 skills**（8 個內建 + 16 個 companion）。
 
 ### 🟢 內建 skills（8 個 `smart-mcp-*.md`）
 由 Smart MCP 的 MCP 工具直接支援，無需額外安裝即可使用。
@@ -20,7 +20,7 @@
 | `smart-mcp-security` | 安全掃描 | `smart_security`, `fast_apply` |
 | `smart-mcp-test` | 測試執行與覆蓋率 | `smart_test`, `coverage`, `test_suggest` |
 
-### 🔵 Companion skills（15 個，來自 `~/.config/opencode/skills/`）
+### 🔵 Companion skills（16 個，來自 `~/.config/opencode/skills/`）
 這些是 Smart MCP 專案從使用者環境收集的進階 skill，**需要安裝至 `~/.config/opencode/skills/` 才能使用**。
 
 #### LSP / 語法檢查
@@ -53,6 +53,11 @@
 |------|------|
 | `asic1-weekly-report/` | ASIC1 週報 DOCX 產生（需 python-docx） |
 | `weekly-report/` | 自動彙整週報寫入 Obsidian |
+
+#### 工程方法
+| Skill | 用途 |
+|------|------|
+| `project-evaluation/` | 專案健康評估 — 7 階段管線（Harness Engineering + Superpowers） |
 
 ## 安裝方式
 
@@ -118,5 +123,6 @@ config/skills/
 ├── telegram-search/
 ├── asic1-weekly-report/
 ├── weekly-report/
+├── project-evaluation/
 └── ...
 ```
