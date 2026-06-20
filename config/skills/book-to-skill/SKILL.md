@@ -25,7 +25,7 @@ Turn any technical book, document folder, or collection of sources into a unifie
 
 ## 📦 What It Generates
 
-Running the pipeline creates a full skill in `.opencode/skills/<slug>/` (or `~/.agents/skills/<slug>/`):
+Running the pipeline creates a full skill in `config/skills/<slug>/` (Smart MCP — installed globally) or `~/.agents/skills/<slug>/` (cross-agent):
 
 | File | Purpose | Size |
 |------|---------|------|
@@ -149,15 +149,16 @@ Choose destination:
 
 | Host | Skill Root |
 |------|-----------|
-| OpenCode / Smart MCP | `.opencode/skills/<slug>/` |
+| Smart MCP (global) | `config/skills/<slug>/` — installed via `install-skills.sh` |
+| Project-local | `.opencode/skills/<slug>/` |
 | Cross-agent | `~/.agents/skills/<slug>/` |
 | Claude Code | `~/.claude/skills/<slug>/` |
 
-Default to `.opencode/skills/<slug>/` for Smart MCP projects.
+Default to `config/skills/<slug>/` for Smart MCP (globally available to all projects).
 
 Create the directory:
 ```bash
-SKILL_HOME=".opencode/skills/<slug>"
+SKILL_HOME="config/skills/<slug>"
 mkdir -p "$SKILL_HOME/chapters"
 ```
 
@@ -300,7 +301,7 @@ rm -rf /tmp/book_skill_work
 
 Report to user:
 ```
-✅ Skill created: .opencode/skills/<slug>/
+✅ Skill created: config/skills/<slug>/
 
 📚 <Title> — <Author> | Chapters: <N>
 

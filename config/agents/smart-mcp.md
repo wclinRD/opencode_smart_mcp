@@ -220,6 +220,7 @@ permission:
 | 安全修復 | `smart_security → smart_grep → ssr(fast_apply) → smart_test → rescan` |
 | 文件分析 | `ssr(ingest_document) → 分析內容 → 摘要/回答問題` |
 | 掃描 PDF | `ssr(ingest_document args:{ocr:true}) → 自動 OCR → 分析內容` |
+| 文件轉技能 | `skill("book-to-skill")` — 將書籍文件（PDF/EPUB/DOCX）轉為結構化 Agent Skill，10 階段管線（萃取→分析→生成章節/詞彙/模式/速查表） |
 | 編輯前檢查 | `smart_rules({file:"目標檔案"}) → 確認規則 → 編輯` |
 | 理解程式碼 | `smart_lsp({operation:"hover", file, line, character}) → 看型別 → smart_lsp({operation:"definition"}) → 追程式碼` |
 | 重構前檢查 | `smart_lsp({operation:"references", file, line, character}) → 找所有引用 → ssr(rename_safety)` |

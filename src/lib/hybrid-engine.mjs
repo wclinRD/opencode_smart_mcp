@@ -921,6 +921,14 @@ const DOMAIN_MAP = [
     workflow: ['Ingest: smart_ingest_document', 'Analyze content with LLM', 'Search past docs: smart_list_documents', 'Search doc content: smart_search_docs', 'Optionally save to wiki: skill("wiki-update")'],
   },
   {
+    domain: 'book-to-skill',
+    keywords: ['book-to-skill', 'book to skill', 'convert book', 'turn book into skill', 'make a skill from', 'create a skill from document', 'extract knowledge from book', 'study this book', 'skill from this pdf', '書籍 轉 skill', '文件 轉 技能', '書本 萃取', '文件 萃取', '知識 轉 skill', 'convert document to skill', '從文件建立技能', '生成 skill'],
+    skill: 'book-to-skill',
+    tools: ['smart_ingest_document', 'smart_fast_apply', 'smart_think', 'smart_glob', 'smart_read'],
+    description: '將書籍/文件（PDF/EPUB/DOCX）轉為結構化 Agent Skill，10 階段管線（萃取→分析→生成章節/詞彙/模式/速查表）',
+    workflow: ['Load skill: skill("book-to-skill")', 'Phase 0-1: Scope check & content type identification', 'Phase 2: Text extraction via ingest_document or Python extractor', 'Phase 3-4: Structure analysis with smart_think/smart_read', 'Phase 5-8: Generate chapters/glossary/patterns/cheatsheet + SKILL.md', 'Phase 9-10: Update/fold-in mode, cleanup & report'],
+  },
+  {
     domain: 'academic',
     keywords: ['學術', '論文', '文獻', 'peer review', '同儕審查', 'apa', 'doi', 'openalex', 'crossref', 'semantic scholar', 'unpaywall', '文獻回顧', 'literature review', 'scientific article', 'research paper', '學術寫作', 'academic writing', 'deep research', 'scientific research', '期刊', 'journal article', 'citation', '引用'],
     skill: 'deep-research',
