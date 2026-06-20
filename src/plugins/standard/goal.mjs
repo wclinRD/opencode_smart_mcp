@@ -151,6 +151,13 @@ export default {
     },
     required: ['command'],
   },
+  validateArgs(args) {
+    // Validate status for clear command
+    if (args.command === 'clear' && args.status && !['completed', 'cancelled', 'failed'].includes(args.status)) {
+      return `Invalid status "${args.status}". Allowed: completed, cancelled, failed.`;
+    }
+    return null;
+  },
 
   handler(args) {
     const { command, description, condition, checkHints, autoCheck, id, status, checkResult, checkSummary } = args;
@@ -186,7 +193,6 @@ export default {
           lastCheckResult: null,
           lastCheckSummary: null,
           turnCount: 0,
-          sessionId: null,
         };
         goals.push(goal);
         if (goals.length > MAX_HISTORY) {
@@ -242,23 +248,25 @@ export default {
 
       // ── Clear (complete/cancel/fail) a goal ──
       case 'clear': {
+        const newStatus = status || 'completed';
+        // validateArgs catches invalid status values via plugin hook
         const targetId = id;
-        if (targetId === undefined || targetId === null) {
+        if (targetId === undefined || targetId === null || typeof targetId !== 'number') {
           const active = getActiveGoal(goals);
           if (!active) return '🎯 No active goal to clear.';
-          active.status = status || 'completed';
+          active.status = newStatus;
           active.completedAt = now;
           active.updatedAt = now;
           saveGoals(goals);
-          return `✅ Goal #${active.id} "${active.description}" marked ${active.status}.`;
+          return `✅ Goal #${active.id} "${active.description}" marked ${newStatus}.`;
         }
         const found = goals.find(g => g.id === targetId);
         if (!found) return `Error: goal #${targetId} not found.`;
-        found.status = status || 'completed';
+        found.status = newStatus;
         found.completedAt = now;
         found.updatedAt = now;
         saveGoals(goals);
-        return `✅ Goal #${found.id} "${found.description}" marked ${found.status}.`;
+        return `✅ Goal #${found.id} "${found.description}" marked ${newStatus}.`;
       }
 
       // ── List goal history ──
@@ -277,7 +285,6 @@ export default {
           last.lastCheckSummary = null;
           last.checkCount = 0;
           last.turnCount = 0;
-          last.sessionId = null;
           saveGoals(goals);
           return `🔄 Goal #${last.id} "${last.description}" reactivated.\n${formatGoal(last, true)}`;
         }
@@ -289,7 +296,6 @@ export default {
         found.lastCheckSummary = null;
         found.checkCount = 0;
         found.turnCount = 0;
-        found.sessionId = null;
         saveGoals(goals);
         return `🔄 Goal #${found.id} "${found.description}" reactivated.\n${formatGoal(found, true)}`;
       }

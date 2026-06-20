@@ -38,7 +38,7 @@ Use: \`smart_smart_run({tool:"<name>", args:{...}})\`
 **Edit**: patch_gen, cross_file_edit, rename_safety  
 **Debug**: error_diagnose, debug, test_suggest  
 **Git**: git_context, git_commit, git_review, git_pr  
-**Plan**: planner, workflow, compose, memory_store, agent_recommend, agent_plan, agent_execute  
+**Plan**: planner, goal, workflow, compose, memory_store, agent_recommend, agent_plan, agent_execute  
 **Doc**: ingest_document(auto-OCR), list_documents, search_docs  
 **Browser**: pw_browser(navigate/click/fill/screenshot)  
 **Web**: research(quick/deep/exhaustive)  
@@ -77,10 +77,13 @@ Always inject the following in the task prompt header:
 
 [Smart MCP Routing — injected by parent]
 工具優先順序：smart_read > smart_lsp > smart_grep > raw grep/read
-編輯用 smart_smart_fast_apply (取代 write+edit，直接呼叫)
+編輯用 smart_smart_fast_apply（取代 write+edit，直接呼叫）
 不確定工具 → smart_smart_run({tool:"hybrid_router", args:{question:"..."}})
 安全修復前必須跑 smart_smart_think({mode:"beam"})
 查專案慣例 → smart_smart_rules({file:"..."})
+使用者說「達成 XXX」→ 自動用 goal flow：
+  smart_smart_run({tool:"goal", args:{command:"set", description:"目標", condition:"完成條件", checkHints:["驗證方式"]}})
+  → 每步後檢查條件 → met 時 smart_smart_run({tool:"goal", args:{command:"check", checkResult:"met", checkSummary:"..."}})
 \`\`\`
 
 #### 子代理使用範例：
@@ -118,6 +121,20 @@ or a **🔄 [Compaction Recovery]** block. This is your mandatory task instructi
 
 ⚠️ If you ignore the recovery context for 5+ tool calls, the server will force-reinject it.
 Wasted tool calls due to lost context will be flagged.
+
+
+### Goal Tracking（持久化目標追蹤）
+類似 Claude Code 的 `/goal`：當使用者說「我要達成 XXX」時，自動使用 goal flow 追蹤進度。
+- 設定：`smart_smart_run({tool:"goal", args:{command:"set", description:"...", condition:"...", checkHints:["..."]}})`
+- 檢查：`smart_smart_run({tool:"goal", args:{command:"check", checkResult:"met"|"unmet", checkSummary:"..."}})`
+- 狀態：`smart_smart_run({tool:"goal", args:{command:"status"}})`
+- 清除：`smart_smart_run({tool:"goal", args:{command:"clear"}})`
+- 歷史：`smart_smart_run({tool:"goal", args:{command:"list"}})`
+- 重試：`smart_smart_run({tool:"goal", args:{command:"retry"}})`
+
+**行為**：set 時自動建 todo → 每步後 post-hook 自動 +1 turnCount → 超過 5 步沒 check 會 stale 提醒
+→ check met → goal + todo 自動完成。支援跨 session 持久化（~/.smart/goals.json）。
+
 
 ### Memory
 - **Auto-injected at session start**: project-aware memory hint appears as 💡 [Memory] finding

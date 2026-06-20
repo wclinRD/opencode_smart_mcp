@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-20T00:33:06.555Z",
+  "generatedAt": "2026-06-20T01:02:58.295Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -3104,11 +3104,11 @@
       }
     },
     {
-      "name": "smart_edit",
-      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
+      "name": "smart_goal",
+      "description": "Persistent goal tracking. Set a completion condition and auto-check progress across turns. Commands: set (new goal), check (verify condition), status (show active), clear (complete/cancel), list (history), retry (reactivate failed).",
       "category": "standard",
-      "domain": "edit",
-      "safetyLevel": "high",
+      "domain": "general",
+      "safetyLevel": "medium",
       "routingRules": {
         "autoRoute": true,
         "interceptorRequired": false,
@@ -3118,54 +3118,70 @@
       "interceptorRules": [],
       "qualityGates": [],
       "responsePolicy": {
-        "maxLevel": 0
+        "maxLevel": 1
       },
       "inputSchema": {
         "type": "object",
         "properties": {
-          "file": {
+          "command": {
             "type": "string",
-            "description": "File path to edit (required)"
+            "enum": [
+              "set",
+              "check",
+              "status",
+              "clear",
+              "list",
+              "retry"
+            ],
+            "description": "Command: set (new goal), check (verify condition met), status (show active), clear (complete or cancel), list (history), retry (reset failed to active)"
           },
-          "oldString": {
+          "description": {
             "type": "string",
-            "description": "Text to find and replace (exact match by default, regex if regex=true)"
+            "description": "Goal description (required for command=set)"
           },
-          "newString": {
+          "condition": {
             "type": "string",
-            "description": "Replacement text"
+            "description": "Completion condition — what constitutes \"done\" (required for command=set)"
           },
-          "files": {
+          "checkHints": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "Multiple files to edit (alternative to file)"
+            "description": "How to verify the goal (optional, for command=set)"
           },
-          "regex": {
+          "autoCheck": {
             "type": "boolean",
-            "description": "Use regex matching instead of exact (default: false)"
+            "description": "Auto-check after each tool call (default: true)"
           },
-          "apply": {
-            "type": "boolean",
-            "description": "Apply changes (default: false — dry run)"
+          "id": {
+            "type": "number",
+            "description": "Goal id (required for clear/retry)"
           },
-          "root": {
-            "type": "string",
-            "description": "Project root (default: current dir)"
-          },
-          "format": {
+          "status": {
             "type": "string",
             "enum": [
-              "json",
-              "text"
+              "completed",
+              "cancelled",
+              "failed"
             ],
-            "description": "Output format (default: json — includes nextCommand)"
+            "description": "Status to set on clear (default: completed)"
+          },
+          "checkResult": {
+            "type": "string",
+            "enum": [
+              "met",
+              "unmet"
+            ],
+            "description": "Check result (internal, used by hook)"
+          },
+          "checkSummary": {
+            "type": "string",
+            "description": "Brief note about check outcome (internal, used by hook)"
           }
         },
         "required": [
-          "oldString",
-          "newString"
+          "command"
         ]
       }
     },
@@ -4237,6 +4253,45 @@
       }
     },
     {
+      "name": "smart_progress",
+      "description": "Check progress of long-running tasks. View active tasks, their completion percentage, and recent messages.",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "status",
+              "all",
+              "clear"
+            ],
+            "description": "Command: status (check one task), all (list all tasks), clear (remove completed tasks)"
+          },
+          "taskId": {
+            "type": "string",
+            "description": "Task ID to check (for status command)"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    },
+    {
       "name": "smart_pw_browser",
       "description": "Control a web browser — navigate, click, fill forms, screenshot, execute JavaScript.\n\nCommands:\n  navigate(url):   Browse to a URL\n  snapshot():      Get page text + links\n  click(selector): Click element (text or CSS selector)\n  fill(selector, value): Fill a form field\n  screenshot():    Capture page as PNG (base64)\n  run_code(code):  Execute JavaScript in the page\n\nNOT for: reading article content (use smart_exa_crawl with --clean).\nNOT for: searching the web (use smart_exa_search).",
       "category": "standard",
@@ -4542,11 +4597,11 @@
       }
     },
     {
-      "name": "smart_progress",
-      "description": "Check progress of long-running tasks. View active tasks, their completion percentage, and recent messages.",
+      "name": "smart_edit",
+      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
       "category": "standard",
-      "domain": "general",
-      "safetyLevel": "medium",
+      "domain": "edit",
+      "safetyLevel": "high",
       "routingRules": {
         "autoRoute": true,
         "interceptorRequired": false,
@@ -4561,22 +4616,49 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "command": {
+          "file": {
+            "type": "string",
+            "description": "File path to edit (required)"
+          },
+          "oldString": {
+            "type": "string",
+            "description": "Text to find and replace (exact match by default, regex if regex=true)"
+          },
+          "newString": {
+            "type": "string",
+            "description": "Replacement text"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Multiple files to edit (alternative to file)"
+          },
+          "regex": {
+            "type": "boolean",
+            "description": "Use regex matching instead of exact (default: false)"
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Apply changes (default: false — dry run)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: current dir)"
+          },
+          "format": {
             "type": "string",
             "enum": [
-              "status",
-              "all",
-              "clear"
+              "json",
+              "text"
             ],
-            "description": "Command: status (check one task), all (list all tasks), clear (remove completed tasks)"
-          },
-          "taskId": {
-            "type": "string",
-            "description": "Task ID to check (for status command)"
+            "description": "Output format (default: json — includes nextCommand)"
           }
         },
         "required": [
-          "command"
+          "oldString",
+          "newString"
         ]
       }
     },
