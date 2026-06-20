@@ -5,6 +5,7 @@ import {
   startDynamicSession,
   execStateCommand,
 } from '../../cli/thinking.mjs';
+import { getContextBudget } from '../../lib/context-budget.mjs';
 
 export default {
   name: 'smart_deep_think',
@@ -180,16 +181,33 @@ export default {
       return null; // Signals smart-mcp to fall back to CLI spawn
     }
 
+    // Phase 34: Budget-aware step count
+    let steps = args.steps || 5;
+    let budgetNote = '';
+    try {
+      const budget = getContextBudget();
+      if (budget) {
+        const rec = budget.getThinkingRecommendation();
+        // Cap steps to maxThoughts, but respect explicit user override
+        if (!args.steps) {
+          if (rec.maxThoughts < 5) steps = rec.maxThoughts;
+          if (budget.remainingFraction < 0.30) {
+            budgetNote = `\n\n${'─'.repeat(50)}\n📊 ${rec.suggestion}`;
+          }
+        }
+      }
+    } catch { /* silent */ }
+
     // Default: static deep analysis
     const result = deepAnalyze({
       topic: args.topic || (planObj ? (planObj.goal || '') : '') || '',
       template: args.template || 'analyze',
-      steps: args.steps || 5,
+      steps,
       format: args.format || 'text',
       plan: planObj || undefined,
       planStep: args.planStep,
     });
     if (result.error) throw new Error(result.error);
-    return result.output;
+    return result.output + budgetNote;
   },
 };

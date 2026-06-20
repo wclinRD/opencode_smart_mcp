@@ -346,6 +346,44 @@ export class ContextBudget {
     return { structuredCount: this._structuredCount, freeFormCount: this._freeFormCount, totalThinkingCalls: total, savingsChars: this._structuredSavingsChars, avgFreeFormChars: avgFreeForm, savingsPct };
   }
 
+  /**
+   * Phase 34: Budget-aware thinking recommendation.
+   * Returns optimal thinking depth/mode based on remaining context budget.
+   * Called by smart_think / smart_deep_think handlers to dynamically
+   * adjust reasoning depth without wasting tokens.
+   *
+   * @param {object} [opts]
+   * @param {string} [opts.requestedMode] — mode LLM wants to use (cit/beam/forest/structured)
+   * @returns {{ mode: string, maxThoughts: number, suggestion: string }}
+   */
+  getThinkingRecommendation(opts = {}) {
+    const requestedMode = opts.requestedMode || null;
+    const remaining = this.remainingFraction;
+
+    if (remaining >= 0.60) {
+      // Ample budget — full exploration
+      return {
+        mode: requestedMode || 'cit',
+        maxThoughts: 8,
+        suggestion: `✅ Budget ${(remaining * 100).toFixed(0)}% — full exploration available`,
+      };
+    }
+    if (remaining >= 0.30) {
+      // Moderate budget — balanced
+      return {
+        mode: requestedMode === 'forest' ? 'cit' : (requestedMode || 'cit'),
+        maxThoughts: 5,
+        suggestion: `⚡ Budget ${(remaining * 100).toFixed(0)}% — prefer concise reasoning (max 5 thoughts). Consider structured mode for efficiency.`,
+      };
+    }
+    // Tight budget — conserve
+    return {
+      mode: 'structured',
+      maxThoughts: 3,
+      suggestion: `⚠️ Budget ${(remaining * 100).toFixed(0)}% — conserve tokens. Use structured mode (GOAL/STATE/ALGO/EDGE/VERIFY) with ≤3 thoughts. Run smart_compact if needed.`,
+    };
+  }
+
   getStatus() {
     const status = this.isCritical() ? 'critical' : this.isLow() ? 'low' : this.isWarning() ? 'warning' : 'ok';
     const estimatedTokens = Math.round(this._effectiveChars / 4);

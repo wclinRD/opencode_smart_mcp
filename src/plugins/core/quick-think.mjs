@@ -1,4 +1,5 @@
 import { quickThink } from '../../cli/thinking.mjs';
+import { getContextBudget } from '../../lib/context-budget.mjs';
 
 export default {
   name: 'smart_think',
@@ -196,6 +197,19 @@ Returns done flag + optional updated totalThoughts.`,
       edge: args.edge ? String(args.edge) : null,
       verify: args.verify ? String(args.verify) : null,
     });
+
+    // Phase 34: Budget-aware thinking hint — append when budget is low
+    try {
+      const budget = getContextBudget();
+      if (budget && budget.remainingFraction < 0.60) {
+        const rec = budget.getThinkingRecommendation({ requestedMode: args.mode });
+        result.output += `\n\n${'─'.repeat(50)}\n📊 ${rec.suggestion}\n`;
+        if (budget.remainingFraction < 0.30) {
+          result.output += `💡 Try: smart_think({mode:"structured", goal:"...", state:"...", algo:"...", edge:"...", verify:"...", thoughtNumber:1, totalThoughts:3, nextThoughtNeeded:true})\n`;
+        }
+      }
+    } catch { /* silent — budget hint is best-effort */ }
+
     return result.output;
   },
 };

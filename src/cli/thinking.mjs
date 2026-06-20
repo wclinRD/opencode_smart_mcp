@@ -372,6 +372,45 @@ export function quickThought(args) {
         lines.push(`└──────────────────────────────────────────`);
         lines.push('');
       }
+
+      // ── Trace Synthesis: combine complementary insights across trees ──
+      const selectedBranches = treeList
+        .map(tree => {
+          const sel = tree.branches?.find(b => b.name === tree.selectedBranch);
+          return sel ? { tree: tree.name, branch: sel.name, content: sel.content, confidence: sel.confidence } : null;
+        })
+        .filter(Boolean);
+
+      if (selectedBranches.length >= 2) {
+        const highConf = selectedBranches.filter(sb => (sb.confidence || 5) >= 7);
+        const partialConf = selectedBranches.filter(sb => (sb.confidence || 5) < 7);
+
+        lines.push(`┌─ Trace Synthesis ───────────────────────`);
+        lines.push(`│ Combined from ${selectedBranches.length} reasoning trees:`);
+        for (const sb of selectedBranches) {
+          const sentences = sb.content.split(/[.!?\n]/).filter(s => s.trim().length > 10);
+          const lead = sentences[0]?.trim() || '(key insight)';
+          lines.push(`│`);
+          lines.push(`│ [${sb.tree}] ${lead}`);
+          if (sentences[1]) {
+            const second = sentences[1].trim();
+            if (second.length > 0) lines.push(`│          ${second}`);
+          }
+        }
+        lines.push(`│`);
+        if (highConf.length === selectedBranches.length) {
+          lines.push(`│ ✓ All trees converge at high confidence — unified conclusion`);
+        } else if (highConf.length >= Math.ceil(selectedBranches.length / 2)) {
+          lines.push(`│ ⚠ Majority convergence (${highConf.length}/${selectedBranches.length} high-confidence)`);
+        } else {
+          lines.push(`│ ⚠ Low convergence — consider deeper analysis on divergent areas`);
+        }
+        if (partialConf.length > 0) {
+          lines.push(`│ ⚠ Lower confidence in: ${partialConf.map(sb => sb.tree).join(', ')}`);
+        }
+        lines.push(`└──────────────────────────────────────────`);
+        lines.push('');
+      }
     } else {
       // Fallback: no structured trees
       lines.push(`┌─ Forest-of-Thought ───────────────────────`);

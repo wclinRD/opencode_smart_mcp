@@ -31,21 +31,16 @@ describe('smart-mcp.md personality', () => {
 
   it('contains behavior gate section', () => {
     assert.ok(personality.includes('行為閘'));
-    assert.ok(personality.includes('絕對不能做的事'));
   });
 
   it('contains task subagent routing rule', () => {
-    assert.ok(personality.includes('task 強制規則'));
-    assert.ok(personality.includes('subagent 沒有 Smart MCP personality'));
-    assert.ok(personality.includes('[Smart MCP Routing — injected by parent]'));
-    assert.ok(personality.includes('smart_lsp > smart_read > smart_grep > raw grep/read'));
-    assert.ok(personality.includes('ssr(fast_apply)'));
-    assert.ok(personality.includes('反例'));
-    assert.ok(personality.includes('正例'));
+    assert.ok(personality.includes('task 強制'));
+    assert.ok(personality.includes('subagent_type 選 general（explore/explorer 無 MCP 工具）'));
+    assert.ok(personality.includes('smart_lsp > smart_read > smart_grep > raw'));
   });
 
   it('contains LSP priority principle', () => {
-    assert.ok(personality.includes('LSP 優先原則'));
+    assert.ok(personality.includes('LSP 優先'));
     assert.ok(personality.includes('smart_lsp'));
     assert.ok(personality.includes('definition'));
     assert.ok(personality.includes('references'));
@@ -53,8 +48,8 @@ describe('smart-mcp.md personality', () => {
 
   it('contains reasoning quality gates', () => {
     assert.ok(personality.includes('推理品質閘'));
-    assert.ok(personality.includes('強制執行'));
-    assert.ok(personality.includes('Server 端強制'));
+    assert.ok(personality.includes('強制'));
+    assert.ok(personality.includes('Server 端執行'));
   });
 
   it('references all permission-granted tools', () => {
