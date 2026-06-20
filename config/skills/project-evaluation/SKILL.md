@@ -314,7 +314,8 @@ Step 3: 產出結構化報告（寫入 ai-evaluation-report.md）
 - Phase 1-2 強制執行（建立基線）
 - Phase 3 純審查無工具呼叫（零 token 成本）
 - Phase 6/7/8 可跳過（小專案省 token）
-- 若 context budget <30%：只跑 P1 + P2 + P5 + P9 + P10
+- 若 context budget <30%：只跑 P1 + P2 + P5 + P9 + P10 + **P10a（科技雷達不可跳過）**
+- 🟥 **Phase 10a 不納入可跳過清單** — 即使 budget 吃緊，也必須用 caveman 壓縮後執行 exa_search
 - 報告建議用 `smart_fast_apply` 寫入檔案（避免佔對話 context）
 
 ## 快速單行指令
@@ -347,47 +348,55 @@ ssr({tool:"git_context", args:{}})
 | P9 測試 | — | TDD（RED→GREEN→REFACTOR） |
 | P10 報告 | — | Brainstorming 閉環 |
 
-### Phase 10a: 科技雷達（演進研究）
+### Phase 10a: 科技雷達（演進研究）【🟥 強制 — 不可跳過】
 
 ```
 目的：上網搜尋最新技術趨勢，提供演進建議（Superpowers 持續改善）
 
 前置條件：先完成 Phase 1 取得 tech stack、Phase 8 取得依賴清單
 
+⛔ 常見錯誤：僅從 package.json 看版本號就寫報告，**沒有實際執行 exa_search 查證**
+🟥 強制規則：本階段所有 Check 必須使用 exa_search 上網驗證，禁止僅靠本地知識
+  若 context budget 不足，應使用 smart_exa_search + caveman 壓縮搜尋
+
 Step 1: 從 Phase 1/8 收集關鍵技術關鍵字
-  範例：express, react-query, better-sqlite3, yfinance, playwright, python 3.11
+  範例：better-sqlite3, playwright, crawlee, tree-sitter-wasms, docx, pdf-parse
 
-Step 2: 對每個關鍵技術搜尋最新版本與替代方案
+Step 2: 【🟥 強制】對每個關鍵技術用 exa_search 搜尋最新版本與替代方案
 
-  smart_exa_search({command:"search", query:"{tech} latest version 2026 migration alternatives"})
-  或使用 ssr({tool:"model_router", args:{question:"{tech} 最新版本與替代方案", mode: "research"}})
+  smart_exa_search({
+    command:"search",
+    query:"{tech} npm latest version",
+    numResults:3,
+    compress:"caveman",
+    compressLevel:"semantic"
+  })
 
-  檢查項目：
+  檢查項目（每個技術都要 PASS 才算過關）：
   Check-R1: 使用的技術是否仍在 active maintenance？
-    PASS → 官方仍有定期更新（6 個月內有 release）
-    WARN → 超過 6 個月未更新或進入 LTS-only 模式
-    FAIL → 已 deprecated 或 archived（需立即規劃遷移）
+    ✅ PASS → 官方定期更新（6 個月內有 release）
+    ⚠️ WARN → 超過 6 個月未更新或進入 LTS-only 模式
+    ❌ FAIL → 已 deprecated 或 archived（需立即規劃遷移）
 
   Check-R2: 是否有更現代的替代技術？
-    PASS → 無明顯更好的替代（仍在生態主流）
-    WARN → 有替代方案但遷移成本高
-    FAIL → 有明顯更好且穩定的替代（需評估遷移）
+    ✅ PASS → 無明顯更好的替代（仍在生態主流）
+    ⚠️ WARN → 有替代方案但遷移成本高
+    ❌ FAIL → 有明顯更好且穩定的替代（需評估遷移）
 
   Check-R3: 是否落後最新 stable 版本 >2 major？
-    PASS → 落後 <1 major
-    WARN → 落後 1-2 major
-    FAIL → 落後 >2 major（有重大安全或效能改善未跟上）
+    ✅ PASS → 落後 <1 major
+    ⚠️ WARN → 落後 1-2 major
+    ❌ FAIL → 落後 >2 major（有重大安全或效能改善未跟上）
 
-Step 3: 簡要評估每個發現
+Step 3: 簡要評估每個發現，使用標準格式：
 
-  格式：
-  - {技術名} → 最新版 {ver}，目前使用 {ver}，落後 {n} major
-    ⚠️ 建議：{具體行動}
-    參考：{URL}
+  | 技術 | 使用版本 | 最新版 | 落後 | R1 | R2 | R3 | 評估 |
+  |------|:--------:|:------:|:----:|:--:|:--:|:--:|:----:|
+  | {tech} | {cur} | {latest} | {n} | ✅/⚠️/❌ | ✅/⚠️/❌ | ✅/⚠️/❌ | {判定} |
 
 Step 4: 將演進建議納入最終報告的「行動項目」
 
-產出：科技雷達摘要表
+產出：科技雷達摘要表（附 exa_search 來源驗證標記）
 ```
 
 ## 對應方法論

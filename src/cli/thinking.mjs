@@ -388,7 +388,7 @@ export function quickThought(args) {
         lines.push(`┌─ Trace Synthesis ───────────────────────`);
         lines.push(`│ Combined from ${selectedBranches.length} reasoning trees:`);
         for (const sb of selectedBranches) {
-          const sentences = sb.content.split(/[.!?\n]/).filter(s => s.trim().length > 10);
+          const sentences = (sb.content || '').split(/[.!?\n]/).filter(s => s.trim().length > 10);
           const lead = sentences[0]?.trim() || '(key insight)';
           lines.push(`│`);
           lines.push(`│ [${sb.tree}] ${lead}`);

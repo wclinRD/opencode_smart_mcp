@@ -2,32 +2,32 @@
   "conventions": {
     "naming": {
       "file": {
-        "snake_case": 24,
-        "camelCase": 56,
-        "kebabCase": 126,
-        "other": 80
+        "snake_case": 28,
+        "other": 82,
+        "camelCase": 67,
+        "kebabCase": 128
       },
       "variable": {
-        "camelCase": 9574,
-        "PascalCase": 50,
+        "camelCase": 9678,
+        "PascalCase": 51,
         "other": 77,
         "UPPER_CASE": 372,
         "snake_case": 1
       },
       "function": {
-        "camelCase": 1419,
+        "camelCase": 1426,
         "other": 1,
         "PascalCase": 3
       },
       "class": {
-        "other": 1,
-        "PascalCase": 52,
-        "camelCase": 19
+        "PascalCase": 72,
+        "other": 2,
+        "camelCase": 21
       }
     },
     "imports": {
       "commonjs": 7,
-      "esm": 244,
+      "esm": 262,
       "mixed": true
     },
     "testing": {
@@ -46,10 +46,10 @@
       "javascript"
     ],
     "exports": {
-      "default": 95,
-      "named": 334
+      "default": 97,
+      "named": 332
     }
   },
   "preferences": {},
-  "lastAnalyzed": "2026-06-20T02:47:40.892Z"
+  "lastAnalyzed": "2026-06-20T05:32:56.449Z"
 }
