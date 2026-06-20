@@ -94,12 +94,12 @@ permission:
 | 分類 | 工具 |
 |------|------|
 | 路由 | `hybrid_router` |
-| 程式碼分析 | `arch_overview`, `import_graph`, `code_call_graph`, `code_ast`, `code_type_infer`, `code_query`, `code_impact`, `impact_flow`, `codebase_index`, `naming` |
+| 程式碼分析 | `arch_overview`, `import_graph`, `code_call_graph`, `code_ast`, `code_type_infer`, `code_query`, `code_impact`, `impact_flow`, `codebase_index`, `naming`, `consistency_check` |
 | 編輯 | `patch_gen`, `cross_file_edit`, `rename_safety` |
 | 文件 | `ingest_document`（PDF/DOCX/XLSX/PPTX/HTML，含 OCR）, `list_documents`, `search_docs` |
 | Git | `git_context`, `git_commit`, `git_review`, `git_pr` |
 | 除錯 | `error_diagnose`, `debug` |
-| 規劃/目標 | `planner`, `goal`（持久化目標追蹤，跨回合自動檢查）, `memory_store` |
+| 規劃/目標 | `planner`, `goal`（持久化目標追蹤，跨回合自動檢查）, `memory_store`, `design_doc` |
 | 自動化 | `autofix`, `pr_review`, `agent_execute`, `compose`, `workflow`（7 模板） |
 | 重構 | `refactor_plan`, `exec`（沙箱 bash/node/python/deno） |
 | 學術 | `academic_search`, `academic_review`, `docx_generate`, `hallucination_check` |
@@ -144,15 +144,20 @@ Context Budget：
   📊 budget warning → 優先壓縮舊輸出
   📊 大檔案 (>400 lines) 用 hashline 格式
   📊 用 smart_context({command:"budget"}) 檢查剩餘空間
+
+Golden Rules（機械化執行）：
+  📊 `smart_rules` 回傳的 golden rules 是不可違反的不變量（類似 linter）
+  📊 每個 golden rule 違反回報內嵌修復指令，agent 應自行修正
+  📊 規則來源：AGENTS.md、.cursorrules、opencode.json 中的機械化檢查
 ```
 
 ### 推理品質閘
 
 | 層級 | 規則 |
 |------|------|
-| 🟥 **強制**（Server 端執行） | 安全修復前必須 `smart_think({mode:"beam", ...})` |
-| 🟨 **建議**（LLM 自主判斷） | 高風險任務啟用 self-correction（輸出→`smart_hallucination_check`→分數<7修正→≥7回報，最多 1 輪）；複雜推理預設 `mode:"cit"`；跨檔案編輯先跑 import_graph；LLM 判斷需結構化分析時 → `smart_deep_think` |
-| 🟩 **跳過**（省 token） | 例行 grep/test/簡單編輯/查詢 |
+| 🟥 **強制**（Server 端執行） | 安全修復前必須 `smart_think({mode:"beam", ...})`；golden rules 由 `smart_rules` 機械化執行，每個錯誤含修復指令，agent 應自行修正 |
+| 🟨 **建議**（LLM 自主判斷） | 新功能先 `smart_think({mode:"cit"})` 確認 spec；實現前先寫測試（RED→GREEN→REFACTOR TDD 循環）；高風險任務啟用 self-correction（輸出→`smart_hallucination_check`→分數<7修正→≥7回報，最多 1 輪）；複雜推理預設 `mode:"cit"`；跨檔案編輯先跑 import_graph；LLM 判斷需結構化分析時 → `smart_deep_think` |
+| 🟩 **跳過**（省 token） | 例行 grep/test/簡單編輯/查詢；新專案先用 `smart_learn`，建議生成 AGENTS.md 作為 agent 入口地圖 |
 
 ---
 
@@ -168,15 +173,18 @@ Context Budget：
 
 ---
 
-## ⚡ 常用工作流速查
+## ⚡ 常用工作流速查（整合 Harness Engineering + Superpowers）
 
 | 情境 | 步驟 |
 |------|------|
+| Brainstorming | `smart_think({mode:"cit"})` 確認需求 → 列出 acceptance criteria → `ssr(design_doc)` |
+| TDD 循環 | RED：寫測試看 fail → GREEN：最小實作測試 pass → REFACTOR：清理 → 再驗證 |
 | 修 Bug | `ssr(error_diagnose) → ssr(debug) → smart_fast_apply → smart_test → ssr(memory_store)` |
 | 重構 | `ssr(import_graph) → ssr(code_impact) → smart_fast_apply → smart_test` |
-| 新功能 | `ssr(planner) → smart_think → smart_fast_apply → smart_test` |
+| 新功能 | `smart_think(確認spec) → ssr(planner) → smart_think(設計) → smart_fast_apply → smart_test` |
 | Git 流程 | `ssr(git_context) → ssr(git_commit) → smart_test → ssr(git_pr)` |
 | 安全修復 | `smart_security → smart_think({mode:"beam"}) → smart_fast_apply → smart_test → rescan` |
+
 
 ---
 
