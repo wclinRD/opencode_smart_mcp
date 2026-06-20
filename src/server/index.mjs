@@ -491,19 +491,30 @@ function initBuiltinHooks() {
   });
 
   // Goal Turn Tracking — after every tool call when goal is active
+  let _goalNoActiveCache = { checked: 0, noActive: false };
   registerPostHook({
     name: 'goal-turn-tracker',
     description: 'Increment goal turn counter after each tool call',
-    match: () => true, // always check — cheap file stat
+    match: () => true,
     handler: async (ctx) => {
       try {
         const goalFile = join(homedir(), '.smart', 'goals.json');
-        if (!existsSync(goalFile)) return;
+        const now = Date.now();
+        // Skip file I/O if we recently confirmed no active goal
+        if (_goalNoActiveCache.noActive && (now - _goalNoActiveCache.checked) < 10000) return;
+        if (!existsSync(goalFile)) {
+          _goalNoActiveCache = { checked: now, noActive: true };
+          return;
+        }
         const raw = readFileSync(goalFile, 'utf-8');
         const goals = JSON.parse(raw);
         if (!Array.isArray(goals)) return;
         const active = goals.find(g => g.status === 'active');
-        if (!active) return;
+        if (!active) {
+          _goalNoActiveCache = { checked: now, noActive: true };
+          return;
+        }
+        _goalNoActiveCache = { checked: now, noActive: false };
         // Increment turn counter
         active.turnCount = (active.turnCount || 0) + 1;
         active.updatedAt = new Date().toISOString();
@@ -512,7 +523,7 @@ function initBuiltinHooks() {
         if (active.turnCount > 5 && (active.checkCount || 0) === 0 && !active._staleNotified && contextManager) {
           contextManager.addFindings([{
             source: 'goal-turn-tracker',
-            finding: `⚠️ Goal #${active.id} "${active.description}" has ${active.turnCount} turns without any check. Consider checking progress.`,
+            finding: `⚠️ Goal #${active.id} "${active.description}" has ${active.turnCount} turns without any check. Run \`ssr({tool:"goal", args:{command:"check", checkResult:"met"|"unmet", checkSummary:"..."}})\` to record progress.`,
             category: 'quality',
             severity: 'low',
           }]);
@@ -535,24 +546,52 @@ function initBuiltinHooks() {
         const command = goalArgs.command;
         if (!command) return;
 
+        // Read goal id from goals.json for precise todo matching
+        function readActiveGoalId() {
+          const goalFile = join(homedir(), '.smart', 'goals.json');
+          if (!existsSync(goalFile)) return null;
+          try {
+            const raw = readFileSync(goalFile, 'utf-8');
+            const goals = JSON.parse(raw);
+            const active = (Array.isArray(goals) ? goals : []).find(g => g.status === 'active');
+            return active ? active.id : null;
+          } catch { return null; }
+        }
+
         if (command === 'set' && goalArgs.description) {
-          contextManager.addTodo(`🎯 [Goal] ${goalArgs.description}`);
-        } else if (command === 'check' && goalArgs.checkResult === 'met') {
+          const goalId = readActiveGoalId();
+          const text = goalId
+            ? `🎯 [Goal #${goalId}] ${goalArgs.description}`
+            : `🎯 [Goal] ${goalArgs.description}`;
+          contextManager.addTodo(text);
+        } else if ((command === 'check' && goalArgs.checkResult === 'met') || command === 'clear') {
+          const goalId = readActiveGoalId();
           const todos = contextManager.listTodos();
-          const goalTodo = [...todos].reverse().find(t =>
-            (t.text.startsWith('🎯 [Goal]') || t.text.startsWith('[Goal]')) &&
-            t.status !== 'completed'
-          );
-          if (goalTodo) contextManager.doneTodo(goalTodo.id);
-        } else if (command === 'clear') {
-          const todos = contextManager.listTodos();
+          // Try exact match by goal id first
+          if (goalId) {
+            const exactTodo = [...todos].reverse().find(t =>
+              (t.text.startsWith(`🎯 [Goal #${goalId}]`) || t.text.startsWith(`[Goal #${goalId}]`))
+            );
+            if (exactTodo) { contextManager.doneTodo(exactTodo.id); return; }
+          }
+          // Fallback: reverse find any uncompleted goal todo
           const goalTodo = [...todos].reverse().find(t =>
             (t.text.startsWith('🎯 [Goal]') || t.text.startsWith('[Goal]')) &&
             t.status !== 'completed'
           );
           if (goalTodo) contextManager.doneTodo(goalTodo.id);
         } else if (command === 'retry') {
+          const goalId = readActiveGoalId();
           const todos = contextManager.listTodos();
+          if (goalId) {
+            const exactTodo = [...todos].reverse().find(t =>
+              (t.text.startsWith(`🎯 [Goal #${goalId}]`) || t.text.startsWith(`[Goal #${goalId}]`))
+            );
+            if (exactTodo && exactTodo.status === 'completed') {
+              contextManager.updateTodoStatus(exactTodo.id, 'in_progress');
+              return;
+            }
+          }
           const goalTodo = [...todos].reverse().find(t =>
             (t.text.startsWith('🎯 [Goal]') || t.text.startsWith('[Goal]'))
           );
