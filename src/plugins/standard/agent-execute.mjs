@@ -46,9 +46,14 @@ export default {
       const { goal, template, state, format = 'text' } = args;
       if (!goal) return '❌ goal is required. Usage: smart_agent_execute({ goal: "debug login error" })';
 
-      // Load smart-agent engine
-      const smartAgentPath = resolve(__dirname, '..', '..', '..', 'smart-agent', 'src', 'index.mjs');
-      const smart = await import(`file://${smartAgentPath}`);
+      // Load smart-agent engine (try npm package first, fall back to monorepo)
+      let smart;
+      try {
+        smart = await import('smart-agent');
+      } catch {
+        const smartAgentPath = resolve(__dirname, '..', '..', '..', 'smart-agent', 'src', 'index.mjs');
+        smart = await import(`file://${smartAgentPath}`);
+      }
       const { planAutoExecute, selectTemplate, getDispatchCommand, getSummaryCommand, shouldReplan, extractFindings } = smart;
 
       // Generate workflow plan

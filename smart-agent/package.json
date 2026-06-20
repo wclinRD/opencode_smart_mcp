@@ -14,6 +14,7 @@
     "./install/install-agent": "./src/install/install-agent.mjs"
   },
   "scripts": {
+    "prepare": "node scripts/build-agent.mjs",
     "postinstall": "node src/install/postinstall.mjs",
     "setup": "node src/install/postinstall.mjs --setup-agent",
     "install-agent": "node src/install/install-agent.mjs",

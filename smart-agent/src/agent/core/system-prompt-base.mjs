@@ -1,0 +1,179 @@
+// system-prompt.mjs — Smart Agent system prompt fragments for opencode
+//
+// Provides injectable system prompt snippets that teach the opencode agent
+// how to use smart-mcp tools effectively, when to chain them, and how to
+// leverage workflow/memory/planner integration.
+//
+// IMPORTANT: opencode prefixes ALL tools from MCP server "smart" with `smart_`.
+// So internal `smart_grep` → actual call name `smart_smart_grep`.
+// This fragment uses actual exposed names.
+//
+// Usage:
+//   import { SYSTEM_PROMPT_FRAGMENT } from 'smart-agent/system-prompt';
+//   // Append SYSTEM_PROMPT_FRAGMENT to opencode agent system prompt
+
+export const SYSTEM_PROMPT_BASE = `
+
+## Smart MCP — Tool Routing (40+ tools)
+
+opencode prefixes MCP server "smart" tools with \`smart_\`. So internal \`smart_grep\` → call as \`smart_smart_grep\`.
+
+### Layer 1: Native Tools (direct call, no router)
+- \`smart_smart_grep\` — regex code search (scope + import context)
+- \`smart_smart_learn\` — project onboarding (lang, structure, conventions)
+- \`smart_smart_think\` — fast reasoning (default mode:"cit" — BN-DP, only branches when uncertain). mode:"beam" for high-risk. mode:"forest" for multi-angle consensus.
+- \`smart_smart_deep_think\` — deep analysis (9 templates: analyze/debug/refactor/research/decision/architecture/retrospect/feature/plan_execute)
+- \`smart_smart_security\` — security scan (credentials/injection/deps)
+- \`smart_smart_test\` — run tests (auto-detects vitest/jest/mocha/ava/node:test)
+- \`smart_smart_context\` — session context (summary/findings/reset/budget)
+- \`smart_smart_rules\` — project rules discovery (AGENTS.md, .cursorrules, etc.)
+- \`smart_smart_read\` 🥇 — progressive file reader (11 modes: auto/outline/signatures/symbol/explain/range/full/batch/project/image/directory). Session cache = zero disk I/O on repeat reads. Fully replaces raw read.
+- \`smart_smart_compact\` — zero-cost context compression (rules-based, no LLM cost)
+- \`smart_smart_exa_search\` / \`smart_smart_exa_crawl\` — web search & crawl. 🆕 Support \`compress:"caveman"\` + \`compressLevel:"semantic"\` to save 15-30% tokens on search results (strips grammar, keeps facts/URLs/technical terms)
+
+### Layer 2: Router Tools (via \`smart_smart_run\`)
+Use: \`smart_smart_run({tool:"<name>", args:{...}})\`
+
+**Code**: hybrid_router, arch_overview, import_graph, code_call_graph, code_query(CKG), code_impact, code_ast, code_type_infer, coverage, naming  
+**Edit**: patch_gen, cross_file_edit, rename_safety  
+**Debug**: error_diagnose, debug, test_suggest  
+**Git**: git_context, git_commit, git_review, git_pr  
+**Plan**: planner, goal, workflow, compose, memory_store, agent_recommend, agent_plan, agent_execute
+**Doc**: ingest_document(auto-OCR), list_documents, search_docs
+**Browser**: pw_browser(navigate/click/fill/screenshot)
+**Web**: research(quick/deep/exhaustive)
+**Meta**: model_router(T1-T4 routing), impact_flow, integrate, task_dispatch
+
+### Decision Flow
+\`\`\`
+Task →
+  ├─ Native tool fits? → smart_smart_<tool>({...})
+  │  編輯一律用 smart_smart_fast_apply（取代 write+edit+edit_ast）
+  ├─ Router tool fits? → smart_smart_run({tool:"<name>", args:{...}})
+  ├─ Unsure?           → smart_smart_run({tool:"hybrid_router", args:{question:"..."}})
+  ├─ Need domain skill?→ skill("<skill-name>")
+  └─ No smart tool?    → Use built-in
+\`\`\`
+
+
+### Task Subagent Routing \& Isolation (路由規則 + Context防爆)
+
+**子代理是防止 Context 爆炸最有效的手段**。每個子代理擁有獨立的 200K+ 上下文窗口，所有中間結果（搜尋/讀檔/除錯）都不會進入主 context。
+
+#### 可用 Subagent 類型
+
+| 類型 | MCP 工具 | 路由規則 | 適合場景 |
+|------|---------|---------|---------|
+| **\`mcp-agent\`** 🥇 | ✅ 有（11 個工具） | ✅ 內建 | 程式碼分析/編輯/除錯（**預設**）|
+| **\`general\`** | ✅ 有（全部工具） | ❌ 需手動注入 — subagent has NO Smart MCP routing rules | 複雜工作流、特殊需求 |
+| **\`explore\`** | ❌ 無（6 原生工具） | ❌ 無需注入 — subagent has NO Smart MCP routing rules | 快速檔案探索、關鍵字搜尋 |
+| **\`explorer\`** | ❌ 無（5 原生工具） | ❌ 無需注入 — subagent has NO Smart MCP routing rules | 最輕量探索 |
+
+#### 何時使用子代理：
+- 需要讀取 5+ 個檔案或大量搜尋
+- 需要長時間執行或平行執行獨立任務
+- 任務可被獨立描述、獨立驗證
+
+#### 使用原則：
+1. **預設用 \`mcp-agent\`**（有 MCP 工具 + 內建路由，不用手動注入）
+2. 只需快速探索 → 用 \`explore\`（無 MCP，省資源）
+3. 需要全部工具但沒內建路由 → 用 \`general\` + 手動注入
+4. 子代理只回傳最終結果（不傳中間過程）
+
+#### 自動注入（推薦）：
+使用 \`smart_smart_run({tool:"task_dispatch", args:{task:"...描述...", type:"mcp-agent"}})\`
+自動產生格式正確的 task() 呼叫，含路由規則注入 + 用量統計。
+
+#### 手動注入（需要 general 時）：
+\`\`\`
+[Smart MCP Routing — injected by parent]
+工具優先順序：smart_read > smart_lsp > smart_grep > raw grep/read
+編輯用 smart_smart_fast_apply（取代 write+edit，直接呼叫）
+不確定工具 → smart_smart_run({tool:"hybrid_router", args:{question:"..."}})
+安全修復前必須跑 smart_smart_think({mode:"beam"})
+查專案慣例 → smart_smart_rules({file:"..."})
+\`\`\`
+
+#### 子代理使用範例：
+\`\`\`javascript
+// ✅ 預設（mcp-agent + 自動注入）
+smart_smart_run({tool:"task_dispatch", args:{
+  task: "研究 src/lib/ 下的錯誤處理架構，回傳架構圖和使用模式",
+  type: "mcp-agent"
+}})
+// 會自動產出：task({ description: "研究錯誤處理架構", prompt: "[Routing...]\n研究...", subagent_type: "mcp-agent" })
+
+// ✅ 快速探索（不需 MCP）
+smart_smart_run({tool:"task_dispatch", args:{
+  task: "找出所有 TODO 註解的位置",
+  type: "explore"
+}})
+
+// ❌ 壞作法：在主 context 中讀取 50 個檔案
+// ✅ 好作法：讓子代理去研究，只回傳摘要
+\`\`\`
+
+### Workflow (5+ step tasks)
+\`smart_smart_run({tool:"workflow", args:{command:"create", goal:"...", template:"<debug-flow|refactor-flow|security-flow|research-flow|git-flow|default-flow>"}})\`
+→ \`dispatch\` → \`replan\` (on fail) → \`summary\`
+
+### Todo & Recovery
+Use \`smart_todo\` to manage task items that persist across sessions and survive compaction:
+  - \`smart_todo({command:"add", items:["..."]})\` — add task items
+  - \`smart_todo({command:"done", id:1})\` — mark item completed
+  - \`smart_todo({command:"list"})\` — show all items
+
+**Server auto-completes todos** when tool output matches a pending todo (rules-based, no LLM cost).
+Todos are also auto-detected as completed after successful fast_apply/test/lsp calls.
+Only manually mark done if the auto-detection misses it.
+
+**After context compaction** (budget >75%), you will see a **📋 [Recovery Context]** block
+or a **🔄 [Compaction Recovery]** block. This is your mandatory task instruction:
+
+1. READ the pending todos and ▶️ Continue directive immediately
+2. RESUME the first pending todo — do NOT start new unrelated tasks
+3. If a todo was already finished, call \`smart_todo done\` to clear it
+4. If all todos are done, tell the user and ask for next direction
+
+⚠️ If you ignore the recovery context for 5+ tool calls, the server will force-reinject it.
+Wasted tool calls due to lost context will be flagged.
+
+
+### Goal Tracking（持久化目標追蹤）
+類似 Claude Code 的 \`/goal\`：當使用者說「我要達成 XXX」時，自動使用 goal flow 追蹤進度。
+- 設定：\`smart_smart_run({tool:"goal", args:{command:"set", description:"...", condition:"...", checkHints:["..."]}})\`
+- 檢查：\`smart_smart_run({tool:"goal", args:{command:"check", checkResult:"met"|"unmet", checkSummary:"..."}})\`
+- 狀態：\`smart_smart_run({tool:"goal", args:{command:"status"}})\`
+- 清除：\`smart_smart_run({tool:"goal", args:{command:"clear"}})\`
+- 歷史：\`smart_smart_run({tool:"goal", args:{command:"list"}})\`
+- 重試：\`smart_smart_run({tool:"goal", args:{command:"retry"}})\`
+
+**行為**：set 時自動建 todo → 每步後 post-hook 自動 +1 turnCount → 超過 5 步沒 check 會 stale 提醒
+→ check met → goal + todo 自動完成。支援跨 session 持久化（~/.smart/goals.json）。
+
+
+### Memory
+- **Auto-injected at session start**: project-aware memory hint appears as 💡 [Memory] finding
+- **Contextual search** (Phase 2): smart_fast_apply, smart_think, smart_refactor_plan auto-search past memory for relevant context (non-blocking, injects 💡 [Contextual Memory] finding)
+- **Blocking pre-check** (Phase D): smart_debug, smart_test, smart_cross_file_edit check memory before execution — returns known fix if high-confidence match
+- Search intentionally: \`smart_smart_run({tool:"memory_store", args:{command:"search", query:"..."}})\`
+- Store intentionally: \`smart_smart_run({tool:"memory_store", args:{command:"store", query:"...", resolution:"..."}})\`
+- Session checkpoints auto-save on shutdown (Phase 3)
+- Skill patches auto-extract from findings every 5 calls + on session end
+- 💡 When stuck on an error, check memory FIRST: past sessions may have the fix. The 💡 [Memory] hints at session start are a lightweight preview — use memory_store search for full results.
+
+### Boulder (狀態持久化)
+- Boulder 是基礎設施層，Agent 無需主動管理
+- 啟動時若有 active plan，會自動顯示：\`[Boulder] Active plan: "name" (done/total)\`
+- 進度查詢：\`node src/cli/boulder.mjs status\`
+- 續命（resume）自動從上次 checkpoint 恢復
+`;
+
+/**
+ * Boulder prompt line — conditionally appended when an active plan exists.
+ * Format: {{name}}, {{done}}, {{total}} are replaced at injection time.
+ */
+export const BOULDER_PROMPT_LINE = `[Boulder] Active plan: "{{name}}" ({{done}}/{{total}}).
+續命：自動從上次進度恢復。需要進度查詢可用 boulder status。`;
+
+

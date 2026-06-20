@@ -1,7 +1,6 @@
 // planner-integration.mjs — Smart Agent planner orchestration
 //
-// npm 套件版：re-export from core/base。
-// 單一事實來源：src/agent/core/planner-integration.mjs
-// 發布時 build script 會將 import 路徑從 ../../src/agent/core/ 改為 ./core/
+// 發布版：re-export from core/。
+// 單一事實來源：src/agent/core/（根目錄），由 build-agent.mjs 同步至此
 
-export * from '../../../src/agent/core/planner-integration.mjs';
+export * from './core/planner-integration.mjs';
