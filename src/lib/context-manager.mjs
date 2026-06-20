@@ -610,6 +610,7 @@ export class ContextManager {
       recentTools,
       lastErrors,
       todoItems: this.listTodos(),
+      goalState: this.getActiveGoalSummary(),
       compactedAt: nowISO(),
     };
   }
@@ -1233,6 +1234,9 @@ export class ContextManager {
       if (goalTodo) {
         const icon = goalTodo.status === 'completed' ? '✅' : goalTodo.status === 'in_progress' ? '⏳' : goalTodo.status === 'cancelled' ? '❌' : '🎯';
         parts.push(`   → ${icon} Todo #${goalTodo.id}: ${goalTodo.status}`);
+      }
+      if (goalState && goalState.lastCheckResult !== 'met') {
+        parts.push('   → 繼續完成此 goal，直到 condition 滿足');
       }
     }
 

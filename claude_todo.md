@@ -58,7 +58,7 @@
 
 ## 🚀 Sprint 2：Auto Mode
 
-### 階段 A — 基礎模式切換 ✅（已實作，2 個 Missing）
+### 階段 A — 基礎模式切換 ✅（已實作）
 
 - [x] **新增 `src/lib/auto-classifier.mjs`**（300 行）
   - [x] `classifyTool(toolName, args)` → `{ action: 'allow'|'warn'|'block'|'gate', reason? }`
@@ -76,9 +76,9 @@
 
 - [x] **修改 `smart_config` 工具**
   - [x] `set:{mode:'auto'}` 切換模式（支援大小寫容錯）
-  - [ ] **持久化到 `~/.smart/config.json`** ❌ Missing — 目前 config 僅在記憶體中，重啟後遺失
+  - [x] **持久化到 `~/.smart/config.json`** ✅ — `loadConfig()` / `saveConfig()` 在 `src/server/index.mjs` L523-551，啟動時自動載入，`smart_config` 變更後自動存檔
 
-- [ ] **測試** ❌ Missing — 無專屬 auto-mode tests（整合於其他 integration tests）
+- [x] **測試** ✅ — `tests/auto-classifier.test.mjs`（40 項測試），涵蓋工具分類/封鎖檔案/安全上下文/規則管理/summary/override
 
 ### 階段 B — 分類器引擎 ✅（已實作）
 

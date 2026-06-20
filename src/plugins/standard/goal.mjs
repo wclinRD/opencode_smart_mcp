@@ -162,24 +162,25 @@ export default {
       case 'set': {
         if (!description || !condition) {
           return 'Error: command=set requires both description and condition.\n'
-            + 'Usage: smart_goal({command:"set", description:"Refactor auth", condition:"All tests pass"})';
+            + 'Usage: ssr({tool:"goal", args:{command:"set", description:"Refactor auth", condition:"All tests pass"}})';
         }
-        // Mark any existing active goal as cancelled (can only have one active)
+        // Mark any existing active goal as cancelled
         for (const g of goals) {
           if (g.status === 'active') {
             g.status = 'cancelled';
-            g.updatedAt = new Date().toISOString();
+            g.updatedAt = now;
           }
         }
+        const nextId = goals.length > 0 ? Math.max(...goals.map(g => g.id)) + 1 : 1;
         const goal = {
-          id: goals.length > 0 ? Math.max(...goals.map(g => g.id)) + 1 : 1,
+          id: nextId,
           description: description.slice(0, 200),
           condition: condition.slice(0, 500),
           checkHints: Array.isArray(checkHints) ? checkHints.slice(0, 5) : [],
-          autoCheck: autoCheck !== false, // default true
+          autoCheck: autoCheck !== false,
           status: 'active',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          createdAt: now,
+          updatedAt: now,
           completedAt: null,
           checkCount: 0,
           lastCheckResult: null,
@@ -188,14 +189,14 @@ export default {
           sessionId: null,
         };
         goals.push(goal);
-        // Trim history
         if (goals.length > MAX_HISTORY) {
           goals = goals.slice(-MAX_HISTORY);
         }
         saveGoals(goals);
+        const hintsStr = goal.checkHints.length > 0 ? ` Hints: ${goal.checkHints.join(', ')}` : '';
         return `🎯 Goal #${goal.id} set!\n${formatGoal(goal, true)}\n\n`
-          + `I'll keep working until: "${condition}". `
-          + (autoCheck !== false ? 'Auto-check is ON — I\'ll verify after each step.' : '');
+          + `I'll keep working until: "${condition}".`
+          + (autoCheck !== false ? ` Auto-check is ON.${hintsStr}` : '');
       }
 
           // ── Record a check result ──
@@ -215,7 +216,7 @@ export default {
             active.status = 'completed';
             active.completedAt = now;
             saveGoals(goals);
-            return `✅ Goal #${active.id} "${active.description}" COMPLETED!\n${formatGoal(active, true)}`;
+            return `✅ Goal #${active.id} "${active.description}" 已自動完成！\n${formatGoal(active, true)}\n(todo 也將自動完成，不需再 call clear)`;
           }
           return `⏳ Goal #${active.id} check recorded (unmet, ${active.checkCount} total).\n${formatGoal(active, true)}`;
         }

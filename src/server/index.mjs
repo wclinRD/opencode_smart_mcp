@@ -508,6 +508,15 @@ function initBuiltinHooks() {
         active.turnCount = (active.turnCount || 0) + 1;
         active.updatedAt = new Date().toISOString();
         writeFileSync(goalFile, JSON.stringify(goals, null, 2), 'utf-8');
+        // Stale goal reminder
+        if (active.turnCount > 5 && (active.checkCount || 0) === 0 && contextManager) {
+          contextManager.addFindings([{
+            source: 'goal-turn-tracker',
+            finding: `⚠️ Goal #${active.id} "${active.description}" has ${active.turnCount} turns without any check. Consider checking progress.`,
+            category: 'quality',
+            severity: 'low',
+          }]);
+        }
       } catch { /* silent */ }
     },
   });
