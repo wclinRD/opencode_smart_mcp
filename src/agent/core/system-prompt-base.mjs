@@ -56,7 +56,7 @@ Task →
 \`\`\`
 
 
-### Task Subagent Isolation (Context防爆)
+### Task Subagent Routing \& Isolation (路由規則 + Context防爆)
 
 **子代理是防止 Context 爆炸最有效的手段**。每個子代理擁有獨立的 200K+ 上下文窗口，所有中間結果（搜尋/讀檔/除錯）都不會進入主 context。
 
@@ -65,9 +65,9 @@ Task →
 | 類型 | MCP 工具 | 路由規則 | 適合場景 |
 |------|---------|---------|---------|
 | **\`mcp-agent\`** 🥇 | ✅ 有（11 個工具） | ✅ 內建 | 程式碼分析/編輯/除錯（**預設**）|
-| **\`general\`** | ✅ 有（全部工具） | ❌ 需手動注入 | 複雜工作流、特殊需求 |
-| **\`explore\`** | ❌ 無（6 原生工具） | ❌ 無需注入 | 快速檔案探索、關鍵字搜尋 |
-| **\`explorer\`** | ❌ 無（5 原生工具） | ❌ 無需注入 | 最輕量探索 |
+| **\`general\`** | ✅ 有（全部工具） | ❌ 需手動注入 — subagent has NO Smart MCP routing rules | 複雜工作流、特殊需求 |
+| **\`explore\`** | ❌ 無（6 原生工具） | ❌ 無需注入 — subagent has NO Smart MCP routing rules | 快速檔案探索、關鍵字搜尋 |
+| **\`explorer\`** | ❌ 無（5 原生工具） | ❌ 無需注入 — subagent has NO Smart MCP routing rules | 最輕量探索 |
 
 #### 何時使用子代理：
 - 需要讀取 5+ 個檔案或大量搜尋

@@ -79,8 +79,8 @@ describe('SYSTEM_PROMPT_FRAGMENT', () => {
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('hybrid_router'));
   });
 
-  it('contains Task Subagent Isolation (Context防爆) rule', () => {
-    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('Task Subagent Isolation'));
+  it('contains Task Subagent Routing & Isolation (路由規則 + Context防爆) rule', () => {
+    assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('Task Subagent Routing'));
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('可用 Subagent 類型'));
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('mcp-agent'));
     assert.ok(SYSTEM_PROMPT_FRAGMENT.includes('11 個工具'));
