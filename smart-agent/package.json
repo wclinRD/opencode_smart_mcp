@@ -14,12 +14,12 @@
     "./install/install-agent": "./src/install/install-agent.mjs"
   },
   "scripts": {
-    "prepare": "node scripts/build-agent.mjs",
+    "build": "node scripts/build-agent.mjs",
     "postinstall": "node src/install/postinstall.mjs",
     "setup": "node src/install/postinstall.mjs --setup-agent",
     "install-agent": "node src/install/install-agent.mjs",
-    "test": "node --test tests/",
-    "prepublishOnly": "node scripts/build-agent.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
     "smart-mcp": "^3.2.0"

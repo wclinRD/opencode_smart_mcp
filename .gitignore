@@ -25,9 +25,6 @@ reports/*.html
 .test-memory-*/
 .test-git-*/
 .test-workflows-*
-.test-memory-*/
-.test-git-*/
-.test-workflows-*
 .test-impact-*/
 .test-hybrid-*/
 .test-ingest-*/
