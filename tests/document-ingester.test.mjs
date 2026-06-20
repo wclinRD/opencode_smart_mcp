@@ -159,22 +159,21 @@ describe('document-ingester', () => {
 </body></html>`);
 
     // 4. XLSX
-    const { default: XLSX } = await import('xlsx');
-    const wb = XLSX.utils.book_new();
-    const ws1 = XLSX.utils.aoa_to_sheet([
-      ['Name', 'Age', 'City'],
-      ['Alice', 30, 'Taipei'],
-      ['Bob', 25, 'Tokyo'],
-      ['Charlie', 35, 'New York'],
+    const { default: xlsx } = await import('node-xlsx');
+    const xlsxBuf = xlsx.build([
+      { name: 'People', data: [
+        ['Name', 'Age', 'City'],
+        ['Alice', 30, 'Taipei'],
+        ['Bob', 25, 'Tokyo'],
+        ['Charlie', 35, 'New York'],
+      ]},
+      { name: 'Products', data: [
+        ['Product', 'Price', 'Qty'],
+        ['Widget', 10, 100],
+        ['Gadget', 25, 50],
+      ]},
     ]);
-    XLSX.utils.book_append_sheet(wb, ws1, 'People');
-    const ws2 = XLSX.utils.aoa_to_sheet([
-      ['Product', 'Price', 'Qty'],
-      ['Widget', 10, 100],
-      ['Gadget', 25, 50],
-    ]);
-    XLSX.utils.book_append_sheet(wb, ws2, 'Products');
-    XLSX.writeFile(wb, resolve(fixturesDir, 'test.xlsx'));
+    writeFileSync(resolve(fixturesDir, 'test.xlsx'), xlsxBuf);
 
     // 5. Markdown
     writeFileSync(resolve(fixturesDir, 'test.md'), '# Test Markdown\n\nThis is a **markdown** file.\n\n- Item 1\n- Item 2\n');

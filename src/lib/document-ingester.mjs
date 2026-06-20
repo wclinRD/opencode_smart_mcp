@@ -468,17 +468,17 @@ CONVERTERS.html = async function convertHtml(filePath) {
 
 CONVERTERS.xlsx = async function convertXlsx(filePath) {
   const buf = readFileSync(filePath);
-  const XLSX = await import('xlsx');
-  const workbook = XLSX.read(buf, { type: 'buffer' });
+  const { default: xlsx } = await import('node-xlsx');
+  const workSheets = xlsx.parse(buf);
 
   const parts = [];
-  for (const sheetName of workbook.SheetNames) {
-    const sheet = workbook.Sheets[sheetName];
-    const json = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-    if (json.length === 0) continue;
+  for (const sheet of workSheets) {
+    const sheetName = sheet.name;
+    const data = sheet.data;
+    if (!data || data.length === 0) continue;
 
     parts.push(`## Sheet: ${sheetName}\n`);
-    parts.push(toMarkdownTable(json));
+    parts.push(toMarkdownTable(data));
   }
 
   const content = parts.join('\n') || '[Empty workbook]';
