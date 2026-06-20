@@ -338,6 +338,113 @@ function getWorkflowDefinitions() {
           hint: 'Perform deep analysis of the document content'
         }
       ]
-    }
+    },
+
+    'brainstorm-flow': {
+      description: 'Brainstorming before coding — confirm spec, save design doc, get user sign-off (Superpowers methodology)',
+      steps: [
+        {
+          tool: 'smart_think',
+          description: 'Clarify requirements with the user',
+          args: (ctx) => ({ mode: 'cit', thought: `Clarify requirements for: ${ctx.goal || 'new task'}. Define goal, acceptance criteria, and mark unclear requirements.` }),
+          hint: 'Use CiT to confirm understanding before writing code'
+        },
+        {
+          tool: 'smart_design_doc',
+          description: 'Create structured design document',
+          args: (ctx) => ({ goal: ctx.goal || '', context: ctx.context || '', approach: ctx.approach || '', risks: ctx.risks || '', testPlan: ctx.testPlan || '', acceptanceCriteria: ctx.acceptanceCriteria || '' }),
+          hint: 'Save the design decisions before implementation'
+        },
+        {
+          tool: 'smart_arch_overview',
+          description: 'Review architecture fit',
+          args: () => ({}),
+          hint: 'Check where the feature fits in the existing architecture'
+        },
+        {
+          tool: 'smart_planner',
+          description: 'Create implementation plan',
+          args: (ctx) => ({ goal: ctx.goal || '' }),
+          hint: 'Break the approved design into actionable steps'
+        }
+      ]
+    },
+
+    'tdd-flow': {
+      description: 'RED-GREEN-REFACTOR TDD cycle — write test first, implement, clean up (Superpowers methodology)',
+      steps: [
+        {
+          tool: 'smart_test',
+          description: 'RED: Write a failing test first',
+          args: () => ({ write: true, expectFail: true }),
+          hint: 'Write a test that describes the desired behavior. Run it to confirm it fails (RED).'
+        },
+        {
+          tool: 'smart_fast_apply',
+          description: 'GREEN: Write minimal code to pass the test',
+          args: () => ({ fix: '<<<MINIMAL_IMPLEMENTATION>>>' }),
+          hint: 'Write the minimum code needed to make the test pass. No more, no less.'
+        },
+        {
+          tool: 'smart_test',
+          description: 'GREEN: Confirm test passes',
+          args: () => ({}),
+          hint: 'Run the test suite to confirm GREEN'
+        },
+        {
+          tool: 'smart_fast_apply',
+          description: 'REFACTOR: Clean up while keeping tests green',
+          args: () => ({ fix: '<<<REFACTOR_CLEANUP>>>' }),
+          hint: 'Improve code quality without changing behavior. Tests must stay green.'
+        },
+        {
+          tool: 'smart_test',
+          description: 'REFACTOR: Verify tests still pass',
+          args: () => ({}),
+          hint: 'Confirm refactoring didn\'t break anything'
+        }
+      ]
+    },
+    'onboard': {
+      description: 'Onboard to a new project — learn structure, conventions, dependencies, tests, security',
+      steps: [
+        {
+          tool: 'smart_learn',
+          description: 'Learn project structure',
+          args: () => ({}),
+          hint: 'Analyze the project: language, structure, conventions'
+        },
+        {
+          tool: 'smart_rules',
+          description: 'Check project rules',
+          args: () => ({}),
+          hint: 'Read AGENTS.md, .cursorrules, and other project conventions'
+        },
+        {
+          tool: 'smart_arch_overview',
+          description: 'Architecture overview',
+          args: () => ({}),
+          hint: 'Get a high-level view of the architecture'
+        },
+        {
+          tool: 'smart_import_graph',
+          description: 'Analyze dependencies',
+          args: () => ({}),
+          hint: 'Understand module dependencies'
+        },
+        {
+          tool: 'smart_test',
+          description: 'Run existing tests',
+          args: () => ({}),
+          hint: 'Verify the test suite works and understand test patterns'
+        },
+        {
+          tool: 'smart_security',
+          description: 'Security baseline',
+          args: () => ({ scan: 'all' }),
+          hint: 'Establish a security baseline'
+        }
+      ]
+  }
   };
 }
