@@ -236,7 +236,7 @@ permission:
 | Session 快取 | `第一次 smart_read 會讀取檔案 → 第二次相同呼叫直接回傳快取結果（mtime 檢查 + 10min TTL）` |
 | 工作流模板 | `ssr(workflow args:{command:"list"}) → ssr(workflow args:{command:"run", name:"bug-fix"})` |
 | 重構計畫 | `ssr(refactor_plan args:{symbol:"...", newApi:"..."}) → 產出遷移計畫 → ssr(fast_apply)` |
-| 目標追蹤 | `ssr(goal command:"set", description:"...", condition:"...")` → **自動**：每步後自檢查條件 → 達標後 `ssr(goal command:"clear")` → 匯報 |
+| 目標追蹤 | `ssr(goal command:"set", description:"...", condition:"...")` → **自動**建立 todo + 每步後自檢查條件 → 達標後 `ssr(goal command:"clear")` + todo 自動完成 → 匯報 |
 
 ---
 
@@ -257,9 +257,10 @@ permission:
    }})
 
 2️⃣ 自動行為（LLM 自主遵守）
+   - 設定 goal 時**自動建立對應 todo**（server hook 橋接），可在 todo list 中追蹤
    - 有 active goal 時，每步完成後自動檢查 condition 是否滿足
    - 條件滿足 → ssr({tool:"goal", args:{command:"check", checkResult:"met", checkSummary:"..."}})
-     → ssr({tool:"goal", args:{command:"clear"}}) → 向使用者回報 ✅
+     → ssr({tool:"goal", args:{command:"clear"}}) → todo 自動完成 → 向使用者回報 ✅
    - 條件不滿足 → 繼續下一步，無需問使用者
    - 卡住或失敗 → ssr({tool:"goal", args:{command:"clear", status:"failed"}}) → 向使用者解釋
 

@@ -1218,13 +1218,22 @@ export class ContextManager {
     const s = rc.summary || {};
     parts.push(`📊 Session: ${s.totalCalls || 0} calls, ${s.errorCount || 0} errors, ${s.uniqueTools || 0} tools`);
 
-    // Active goal (from shared goals.json)
+    // Active goal (from shared goals.json) — cross-reference with todos
     const goalState = this.getActiveGoalSummary();
     if (goalState) {
       const statusIcon = goalState.lastCheckResult === 'met' ? '✅' : '🎯';
       parts.push(`${statusIcon} Active Goal: ${goalState.description}`);
       parts.push(`   Condition: ${goalState.condition}`);
       parts.push(`   Checks: ${goalState.checkCount} | Turns: ${goalState.turnCount}`);
+      // Find linked todo if exists
+      const todos = this.listTodos();
+      const goalTodo = [...todos].reverse().find(t =>
+        (t.text.startsWith('🎯 [Goal]') || t.text.startsWith('[Goal]'))
+      );
+      if (goalTodo) {
+        const icon = goalTodo.status === 'completed' ? '✅' : goalTodo.status === 'in_progress' ? '⏳' : goalTodo.status === 'cancelled' ? '❌' : '🎯';
+        parts.push(`   → ${icon} Todo #${goalTodo.id}: ${goalTodo.status}`);
+      }
     }
 
     // Pending todos (排序：in_progress 優先 > pending 依優先級 > completed 置底)
@@ -1241,7 +1250,12 @@ export class ContextManager {
     if (sortedTodos.length > 0) {
       parts.push('📝 Todos:');
       for (const t of sortedTodos) {
-        const icon = t.status === 'completed' ? '✅' : t.status === 'in_progress' ? '⏳' : t.status === 'cancelled' ? '❌' : '☐';
+        // Goal-related todos get 🎯 icon for visibility
+        const isGoal = t.text.startsWith('🎯 [Goal]') || t.text.startsWith('[Goal]');
+        const icon = isGoal ? '🎯'
+          : t.status === 'completed' ? '✅'
+          : t.status === 'in_progress' ? '⏳'
+          : t.status === 'cancelled' ? '❌' : '☐';
         parts.push(`  ${icon} ${t.id}. ${t.text}`);
       }
     }

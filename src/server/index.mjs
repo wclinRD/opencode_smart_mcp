@@ -512,6 +512,47 @@ function initBuiltinHooks() {
     },
   });
 
+  // Goal-Todo Bridge — auto-create/complete todos when goals change
+  registerPostHook({
+    name: 'goal-todo-bridge',
+    description: 'Create/complete todos when goals are set/cleared',
+    match: (toolName, args) =>
+      toolName === 'smart_smart_run' && args?.tool === 'goal',
+    handler: async (ctx) => {
+      try {
+        const goalArgs = ctx.args?.args || {};
+        const command = goalArgs.command;
+        if (!command) return;
+
+        if (command === 'set' && goalArgs.description) {
+          contextManager.addTodo(`🎯 [Goal] ${goalArgs.description}`);
+        } else if (command === 'check' && goalArgs.checkResult === 'met') {
+          const todos = contextManager.listTodos();
+          const goalTodo = [...todos].reverse().find(t =>
+            (t.text.startsWith('🎯 [Goal]') || t.text.startsWith('[Goal]')) &&
+            t.status !== 'completed'
+          );
+          if (goalTodo) contextManager.doneTodo(goalTodo.id);
+        } else if (command === 'clear') {
+          const todos = contextManager.listTodos();
+          const goalTodo = [...todos].reverse().find(t =>
+            (t.text.startsWith('🎯 [Goal]') || t.text.startsWith('[Goal]')) &&
+            t.status !== 'completed'
+          );
+          if (goalTodo) contextManager.doneTodo(goalTodo.id);
+        } else if (command === 'retry') {
+          const todos = contextManager.listTodos();
+          const goalTodo = [...todos].reverse().find(t =>
+            (t.text.startsWith('🎯 [Goal]') || t.text.startsWith('[Goal]'))
+          );
+          if (goalTodo && goalTodo.status === 'completed') {
+            contextManager.updateTodoStatus(goalTodo.id, 'in_progress');
+          }
+        }
+      } catch { /* silent */ }
+    },
+  });
+
   // Background Security Scan — after file edits (Sprint 2C)
   registerPostHook({
     name: 'security-background-scan',
