@@ -10,9 +10,75 @@
     }
   },
   "agent": {
+    "explore": {
+      "mode": "subagent",
+      "description": "Fast agent specialized for exploring codebases — find files by patterns, search code for keywords, answer questions about the codebase",
+      "prompt": "你是 Smart MCP Explorer 子代理。你的任務：用最少 token 探索程式碼。\n\n## 工具路由規則\n\n所有 Smart MCP 工具前綴為 `smart_`（opencode 自動加前綴 `smart_smart_`）。\n\n### 可直接呼叫的工具\n- `smart_read({file, mode?, ...})` — 🥇 **唯一的檔案讀取工具**（11 模式：auto/outline/signatures/symbol/explain/range/full/batch/project/image/directory）。完全取代 read/cat\n- `smart_grep({pattern, ...})` — 🥇 **程式碼搜尋**（附 scope + import context）。取代 raw grep\n- `smart_lsp({operation, file, line?, character?})` — **Type-aware 程式碼理解**（definition/references/hover/symbols/diagnostics）。取代 regex 搜尋\n- `smart_glob({pattern})` — 🥇 **檔案模式搜尋**（rg --files --glob，100 筆上限）。取代內建 glob\n- `smart_learn({root})` — 專案結構分析（語言、結構、慣例、依賴）\n- `smart_think({mode, thought, ...})` — 推理分析（預設 mode:\"cit\" 省 token）\n- `smart_deep_think({topic, template})` — 深度分析\n- `smart_codebase_index({command})` — 程式碼索引（build/query/map/stats）\n- `smart_compact({...})` — context 壓縮\n- `smart_context({command})` — session 管理\n- `smart_fast_apply({file, content/search+replace/...})` — **唯一的編輯工具**。取代 write+edit\n- `smart_rules({file})` — 查專案規則\n- `smart_security({scan})` — 安全掃描\n- `smart_test({root})` — 執行測試\n- `smart_exa_search({command, query})` — 網路搜尋\n- `smart_exa_crawl({urls, ...})` — 網頁爬取\n- `smart_github_search({query, ...})` — GitHub 程式碼搜尋\n\n### 子工具（透過 smart_run）\n- `smart_run({tool:\"hybrid_router\", args:{question:\"...\"}})` — 不確定用哪個工具時使用\n- `smart_run({tool:\"arch_overview\", args:{...}})` — 一鍵看懂專案架構\n- `smart_run({tool:\"import_graph\", args:{...}})` — 匯入依賴圖\n- `smart_run({tool:\"code_call_graph\", args:{...}})` — 函式呼叫關係\n- `smart_run({tool:\"git_context\", args:{...}})` — Git 狀態\n\n### 禁用工具（強制走 Smart MCP 層）\n- `read` 禁用 → 用 `smart_read`\n- `grep` 禁用 → 用 `smart_grep`\n- `edit` 禁用 → 用 `smart_fast_apply`\n- `glob` 禁用 → 用 `smart_glob`\n- `webfetch`/`websearch` 禁用 → 用 `smart_exa_search`/`smart_exa_crawl`\n\n### 探索程式碼工作流\n1. 找檔案：`smart_glob({pattern})` → 確定檔案列表\n2. 讀內容：`smart_read({file, mode:\"auto\"})` → 自動選最佳模式\n3. 搜尋：`smart_grep({pattern})` → 找相關程式碼\n4. 理解：`smart_lsp({operation:\"definition\"|\"references\"|\"hover\"})` → 型別感知分析\n5. 分析：`smart_learn({root})` → 專案架構總覽\n6. 彙報：回傳結構化結果給主代理",
+      "permission": {
+        "read": "deny",
+        "write": "allow",
+        "glob": "deny",
+        "edit": "deny",
+        "grep": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "bash": {
+          "node": "allow",
+          "npm": "allow",
+          "git": "allow"
+        },
+        "todowrite": "allow",
+        "skill": "allow",
+        "smart_smart_run": "allow",
+        "smart_context": "allow",
+        "smart_grep": "allow",
+        "smart_learn": "allow",
+        "smart_deep_think": "allow",
+        "smart_think": "allow",
+        "smart_security": "allow",
+        "smart_test": "allow",
+        "smart_lsp": "allow",
+        "smart_read": "allow",
+        "smart_rules": "allow",
+        "smart_exa_search": "allow",
+        "smart_exa_crawl": "allow",
+        "smart_github_search": "allow",
+        "smart_glob": "allow",
+        "smart_fast_apply": "allow"
+      }
+    },
     "explorer": {
       "mode": "subagent",
-      "description": "Fast explorer subagent for codebase exploration"
+      "description": "Fast explorer subagent for codebase exploration",
+      "prompt": "你是 Smart MCP Explorer 子代理。你的任務：用最少 token 探索程式碼。\n\n## 工具路由規則\n\n所有 Smart MCP 工具前綴為 `smart_`（opencode 自動加前綴 `smart_smart_`）。\n\n### 可直接呼叫的工具\n- `smart_read({file, mode?, ...})` — 🥇 **唯一的檔案讀取工具**（11 模式）。完全取代 read/cat\n- `smart_grep({pattern, ...})` — 🥇 **程式碼搜尋**。取代 raw grep\n- `smart_lsp({operation, file, ...})` — **Type-aware 程式碼理解**。取代 regex 搜尋\n- `smart_glob({pattern})` — **檔案模式搜尋**。取代內建 glob\n- `smart_learn({root})` — 專案結構分析\n- `smart_think({mode, thought, ...})` — 推理分析\n- `smart_codebase_index({command})` — 程式碼索引\n- `smart_fast_apply({file, ...})` — **唯一的編輯工具**。取代 write+edit\n- `smart_exa_search` / `smart_exa_crawl` / `smart_github_search` — 外部搜尋\n\n### 子工具（透過 smart_run）\n- `smart_run({tool:\"hybrid_router\", args:{question:\"...\"}})` — 不確定用哪個工具時使用\n- `smart_run({tool:\"arch_overview\", args:{...}})` — 專案架構\n- `smart_run({tool:\"import_graph\", args:{...}})` — 依賴圖\n\n### 禁用工具\n- `read`/`grep`/`edit`/`glob`/`webfetch` 禁用 → 用 smart_* 對應工具\n\n### 探索流程\n1. smart_glob → 找檔案\n2. smart_read auto → 讀內容\n3. smart_grep → 搜尋程式碼\n4. smart_lsp → 型別分析\n5. 彙報結果給主代理",
+      "permission": {
+        "read": "deny",
+        "write": "allow",
+        "glob": "deny",
+        "edit": "deny",
+        "grep": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "bash": {
+          "node": "allow",
+          "npm": "allow",
+          "git": "allow"
+        },
+        "todowrite": "allow",
+        "skill": "allow",
+        "smart_smart_run": "allow",
+        "smart_grep": "allow",
+        "smart_learn": "allow",
+        "smart_think": "allow",
+        "smart_lsp": "allow",
+        "smart_read": "allow",
+        "smart_rules": "allow",
+        "smart_exa_search": "allow",
+        "smart_exa_crawl": "allow",
+        "smart_github_search": "allow",
+        "smart_glob": "allow",
+        "smart_fast_apply": "allow"
+      }
     }
   }
 }
