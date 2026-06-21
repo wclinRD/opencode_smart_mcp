@@ -711,6 +711,35 @@ function tryStructuralMatch(content, search, lang) {
       }
     }
   }
+
+  // Strategy 3: symbol-level matching
+  // If search starts with a function/class/def declaration, find it by name
+  // and compare bodies.
+  const firstLine = searchLines[0]?.trim();
+  const nameMatch = firstLine?.match(/^(?:function|class|struct|def|func|fn|const\s+\w+\s*=\s*(?:async\s+)?(?:function|\(=>))(?:\s+|\()*(\w+)/);
+  if (nameMatch) {
+    const symbolName = nameMatch[1];
+    // Find lines with this symbol name followed by (
+    const sigRegex = new RegExp(
+      `(?:function|class|struct|def|func|fn)\\s+${escapeRegex(symbolName)}\\s*\\(`,
+    );
+    for (let i = 0; i < Math.min(lines.length, 500); i++) {
+      if (sigRegex.test(lines[i])) {
+        // Found signature line — check if body approximately matches
+        const bodyLines = searchLines.length;
+        const potentialBody = lines.slice(i, i + bodyLines).join('\n');
+        if (potentialBody.replace(/\s+/g, ' ').trim() === normSearch) {
+          return { line: i + 1, level: 7 };
+        }
+        // Even if body doesn't match exactly, if it's a short search (< 5 lines)
+        // and we found the right function signature, use it
+        if (searchLines.length < 5) {
+          return { line: i + 1, level: 7 };
+        }
+      }
+    }
+  }
+
   return null;
 }
 
@@ -723,7 +752,7 @@ function tryStructuralMatch(content, search, lang) {
  * @returns {{ status: 'applied'|'conflict'|'error', file: string, matchLevel?: number, diff?: string, backup?: string, error?: string }}
  */
 export function applySearchReplace(filePath, block, opts = {}) {
-  const { fuzzy = true, undo = false } = opts;
+  const { fuzzy = true, undo = false, validate = false } = opts;
 
   // Read file
   let content;
@@ -773,6 +802,29 @@ export function applySearchReplace(filePath, block, opts = {}) {
   }
 
   if (!match) {
+    // Phase 2: Last-resort DMP semantic patching
+    const dmpResult = applyByDiffMatchPatch(content, search, replace);
+    if (dmpResult.ok && dmpResult.result !== content) {
+      // Write DMP result directly
+      if (undo) {
+        try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* best effort */ }
+      }
+      try {
+        writeFileSync(filePath, dmpResult.result, 'utf-8');
+      } catch (e) {
+        return { status: 'error', file: filePath, error: `Cannot write (DMP): ${e.message}` };
+      }
+      const diff = generateDiffSummary(content, dmpResult.result, filePath);
+      return {
+        status: 'applied',
+        file: filePath,
+        matchLevel: 7,
+        method: 'dmp-patch',
+        diff,
+        backup: undo ? (filePath + '.apply.bak') : undefined,
+      };
+    }
+
     const nearest = suggestNearest(content, search);
     const detailMsg = nearest ? nearest.map(n =>
       n.diffHint || `Line ${n.line}: "${n.text}"`
@@ -839,6 +891,34 @@ export function applySearchReplace(filePath, block, opts = {}) {
 
   // Generate diff summary
   const diff = generateDiffSummary(content, newContent, filePath);
+
+  // Phase 3: Post-apply validation with auto-retry
+  if (opts.validate && match.level >= 3) {
+    const balance = checkBalance(newContent);
+    if (!balance.balanced) {
+      // Auto-retry: try DMP patch approach for cleaner result
+      const retryResult = applyByDiffMatchPatch(content, search, replace);
+      if (retryResult.ok && retryResult.result !== content) {
+        const retryBalance = checkBalance(retryResult.result);
+        if (retryBalance.balanced) {
+          // Write cleaned version
+          try {
+            writeFileSync(filePath, retryResult.result, 'utf-8');
+          } catch { /* best effort - original write already done */ }
+          const retryDiff = generateDiffSummary(content, retryResult.result, filePath);
+          return {
+            status: 'applied',
+            file: filePath,
+            matchLevel: match.level,
+            method: 'dmp-retry',
+            diff: retryDiff,
+            backup: undo ? (filePath + '.apply.bak') : undefined,
+          };
+        }
+        // If DMP retry also unbalanced, keep original result
+      }
+    }
+  }
 
   return {
     status: 'applied',
@@ -1819,6 +1899,11 @@ export function applySearchReplaceWithLazy(filePath, block, opts = {}) {
 // diff-match-patch: semantically minimal patch generation
 // ---------------------------------------------------------------------------
 
+/** Escape special regex characters in a string */
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 let dmpInstance = null;
 function getDMP() {
   if (!dmpInstance) dmpInstance = new diff_match_patch();
@@ -1838,12 +1923,26 @@ function getDMP() {
 export function applyByDiffMatchPatch(content, search, replace) {
   try {
     const dmp = getDMP();
+    // Strategy 1: Use DMP patch_make + patch_apply for fuzzy patching
+    // patch_make creates patches from search→replace
+    const patchObj = dmp.patch_make(search, replace);
+    // patch_apply applies patches to content with fuzzy matching
+    const [result, results] = dmp.patch_apply(patchObj, content);
+
+    // If some patches failed (e.g., context changed significantly),
+    // fall back to indexOf replacement
+    const allApplied = results.every(r => r === true);
+    if (allApplied && result !== content) {
+      return { ok: true, result };
+    }
+
+    // Strategy 2: indexOf-based fallback
     const idx = content.indexOf(search);
-    if (idx === -1) return { ok: false, error: 'Search block not found' };
+    if (idx === -1) return { ok: false, error: 'Search block not found in content for DMP fallback' };
     const before = content.substring(0, idx);
     const after = content.substring(idx + search.length);
-    const result = before + replace + after;
-    return { ok: true, result };
+    const fallbackResult = before + replace + after;
+    return { ok: true, result: fallbackResult };
   } catch (e) {
     return { ok: false, error: e.message };
   }

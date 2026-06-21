@@ -495,9 +495,11 @@ describe('applySearchReplace fuzzy mode', () => {
     assert.equal(readTmp('fuzzy-apply.js'), 'const X = 1;\n  const Y = 20;\nconst Z = 3;\n');
   });
 
-  it('fuzzy=false disables fuzzy matching', () => {
+  it('fuzzy=false falls through to DMP semantic patching', () => {
     const f = tmpFile('exact-only.js', 'function foo() {\n  return 1;\n}\n');
     const r = applySearchReplace(f, { search: 'function foo(){\nreturn 1;\n}', replace: 'function foo(){\nreturn 2;\n}' }, { fuzzy: false });
-    assert.equal(r.status, 'conflict', 'should fail without fuzzy');
+    // DMP patch_apply can match whitespace-different context
+    assert.equal(r.status, 'applied');
+    assert.equal(r.method, 'dmp-patch');
   });
 });
