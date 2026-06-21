@@ -66,13 +66,13 @@ permission:
 
 | 工具 | 時機 |
 |------|------|
-| `smart_grep({pattern})` | 程式碼搜尋（附 scope/import） |
+| `smart_grep({pattern, budget?, compress?})` | 程式碼搜尋（附 scope/import/BM25；`--budget N` token 預算；`--compress L0|L1|L2` 壓縮等級） |
 | `smart_learn({root})` | 新專案 onboarding |
 | `smart_think({mode, thought, nextThoughtNeeded})` | 🥇 快思。`mode:"cit"` 預設 BN-DP 自動分支。`"beam"` 高風險多路徑。`"structured"` GOAL/STATE/ALGO/EDGE/VERIFY 省 50-70% token |
 | `smart_deep_think({topic, template})` | 慢想深度分析（10 模板含 peer_review） |
 | `smart_security({scan})` | 安全掃描 |
 | `smart_test({root})` | 測試執行 |
-| `smart_fast_apply({file, content\|search, replace\|sed, file, sed})` | 🥇 統一編輯（10 格式，6 級 fuzzy match，atomic multi-file，dry-run 安全） |
+| `smart_fast_apply({file, content\|search, replace\|sed, file, sed})` | 🥇 統一編輯（10 格式，6 級 fuzzy → structural → DMP patch → conflict，validate+auto-retry，atomic multi-file，dry-run 安全） |
 | `smart_context({command})` | Session 管理 + budget 查詢 |
 | `smart_rules({file})` | **編輯前必查**專案規則 |
 | `smart_lsp({operation, file, line, character})` | Type-aware 程式碼理解（definition/references/hover/diagnostics/symbols） |
@@ -100,11 +100,13 @@ permission:
 | Git | `git_context`, `git_commit`, `git_review`, `git_pr` |
 | 除錯 | `error_diagnose`, `debug` |
 | 規劃/目標 | `planner`, `goal`（持久化目標追蹤，跨回合自動檢查）, `memory_store`, `design_doc` |
+| Onboarding | `setup`（專案偵測 → 自動產生 opencode 設定） |
+| 依賴 | `deps`（npm audit/outdated/analyze 包裝） |
 | 自動化 | `autofix`, `pr_review`, `agent_execute`, `compose`, `workflow`（7 模板） |
 | 重構 | `refactor_plan`, `exec`（沙箱 bash/node/python/deno） |
 | 學術 | `academic_search`, `academic_review`, `docx_generate`, `hallucination_check` |
 | 知識庫 | `obsidian_write`, `kg`, `adr` |
-| 資料 | `db`（SQLite/PostgreSQL 唯讀） |
+| 資料 | `db`（SQLite 讀寫/遷移/比較；PostgreSQL 唯讀） |
 | 排程 | `schedule`, `progress` |
 | 瀏覽器 | `pw_browser`（navigate/click/fill/screenshot） |
 
@@ -190,11 +192,22 @@ Golden Rules（機械化執行）：
 
 ## 🛠 fast_apply 速查
 
-`smart_fast_apply` 是統一編輯工具，取代 write+edit+sed。支援 10 格式（unified-diff/lazy/hashline/block-diff/search-replace/whole-file/partial/sed/multi-hunk/batch），6 級 fuzzy match，atomic multi-file，預設 dry-run 安全。
+`smart_fast_apply` 是統一編輯工具，取代 write+edit+sed。支援 10 格式 + **3 階段降級管線**：
+
+**匹配管線（自動降級）：**
+- **L1-L6 fuzzy match** — 6 級模糊匹配（exact → trimmed → anchor → whitespace → gapped → subsequence）
+- **tryStructuralMatch**（Phase 1）— L7 結構化匹配（空白正規化、anchor line、symbol-level 函式/class 名稱匹配）
+- **DMP patch_apply**（Phase 2）— 最終防線：Google diff-match-patch 模糊修補，處理排版/縮排差異
+- **suggestNearest** — 當全部失敗時，回傳最接近的匹配行 + diffHint 協助除錯
+
+**Post-apply 驗證（Phase 3）：**
+- `{validate: true}` 啟用 `checkBalance()` 括號平衡檢查
+- 不平衡時自動以 DMP retry 修復（最多 1 輪）
+- 修復失敗時保留原始結果
 
 常用格式：
 - `{file, content}` — 創建/覆寫
-- `{file, search, replace}` — 字串取代
+- `{file, search, replace}` — 字串取代（`{fuzzy: false}` 強制走 DMP path）
 - `{format:"sed", file, sed:"s/foo/bar/"}` — sed 取代
 - `{format:"block-diff", file, symbol, newContent}` — symbol 區塊編輯（最可靠）
 - `{format:"hashline", changes:[{file,startLine,endLine,newContent}]}` — 大檔案精確編輯
@@ -204,6 +217,11 @@ Golden Rules（機械化執行）：
 ## 🎯 Token 優化
 
 Smart MCP 自動壓縮大型輸出（L0/L1/L2）。`_optimized` level 0/1 資料完整可直接用；level ≥ 2 用 `format:'full'` 重取。
+
+`smart_grep` 支援 Token Budget 控制：
+- `--budget N`：在 N token 預算內回傳最高相關性結果（greedy selection by score）
+- `--compress L0|L1|L2`：強制壓縮等級（L0=signature only ~15t/result，L1=+3行context ~100t，L2=full detail ~500t）
+- 自動 token 估算：~3.5 chars/token（用於 code 內容）
 
 ---
 
