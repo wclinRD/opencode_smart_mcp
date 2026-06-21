@@ -1653,14 +1653,23 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
       }
     }).catch(() => {});
   }
-  // Phase 26: Record tool usage as implicit feedback
+  // Phase 26: Record tool usage with recommendation comparison
   if (success && toolName !== 'smart_memory_store' && toolName !== 'smart_context') {
     import('./lib/memory-db.mjs').then(({ getMemoryDB }) => {
       try {
         const db = getMemoryDB();
         const goalCtx = args.thought || args.pattern || args.file || args.query || args.tool || '';
         if (goalCtx) {
-          db.recordFeedback(goalCtx.slice(0, 200), toolName, toolName, elapsedMs);
+          // Compare actual tool vs the last recommendation from tool-strategy
+          const rec = global.__lastRecommendation;
+          let recommended = toolName;
+          if (rec && Array.isArray(rec.chain)) {
+            // Tool not in recommended chain → record mismatch
+            if (!rec.chain.includes(toolName)) {
+              recommended = rec.primary || toolName;
+            }
+          }
+          db.recordFeedback(goalCtx.slice(0, 200), recommended, toolName, elapsedMs);
         }
       } catch {
         // Best-effort

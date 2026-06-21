@@ -1778,16 +1778,18 @@ export class MemoryDB {
     const chains = [];
     const visited = new Set();
 
-    function dfs(current, path, depth) {
+    function dfs(current, path, depth, cumScore) {
       if (depth >= minLength && path.length >= minLength) {
-        chains.push({ chain: [...path], score: path.length });
+        // Use cumulative edge success rate as chain score (product of edge scores)
+        const chainScore = cumScore / (path.length - 1);
+        chains.push({ chain: [...path], score: Math.round(chainScore * 1000) / 1000 });
         if (chains.length >= 5) return;
       }
       if (!adj[current] || depth >= 6) return;
       for (const next of adj[current].sort((a, b) => b.score - a.score).slice(0, 2)) {
         if (!visited.has(next.to)) {
           visited.add(next.to);
-          dfs(next.to, [...path, next.to], depth + 1);
+          dfs(next.to, [...path, next.to], depth + 1, cumScore + next.score);
           visited.delete(next.to);
         }
       }
@@ -1799,7 +1801,7 @@ export class MemoryDB {
       if (chains.length >= 5) break;
       visited.clear();
       visited.add(start);
-      dfs(start, [start], 1);
+      dfs(start, [start], 1, 0);
     }
 
     return chains.slice(0, 5);
@@ -1880,10 +1882,13 @@ export class MemoryDB {
   cacheGoal(goal, toolChain, embedding) {
     this.#ensureOpen();
     const hash = crypto.createHash('sha256').update(goal).digest('hex').substring(0, 16);
+    // Auto-generate embedding if not provided (for similarity search support)
+    const emb = embedding || this.#hashEmbed(goal);
+    const embBlob = emb ? Buffer.from(emb.buffer) : null;
     this.#db.prepare(`
       INSERT OR REPLACE INTO semantic_cache (goal, goal_hash, goal_embedding, tool_chain, last_seen)
       VALUES (?, ?, ?, ?, datetime('now'))
-    `).run(goal, hash, embedding || null, toolChain);
+    `).run(goal, hash, embBlob, toolChain);
   }
 
   /**

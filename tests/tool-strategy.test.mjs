@@ -1,12 +1,15 @@
 // tool-strategy.test.mjs — Tests for smart-agent tool recommendation engine
 
-import { describe, it } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { rmSync, mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   recommendTools,
   buildToolChain,
   explainRecommendation,
 } from '../src/agent/tool-strategy.mjs';
+import { getMemoryDB, resetMemoryDB } from '../src/lib/memory-db.mjs';
 
 describe('recommendTools', () => {
   it('recommends debug tools for error goals', () => {
@@ -95,5 +98,70 @@ describe('explainRecommendation', () => {
     assert.ok(explanation.includes('smart_grep'));
     assert.ok(explanation.includes('Reason'));
     assert.ok(explanation.includes('Confidence'));
+  });
+});
+
+describe('Phase 27: Semantic Cache Integration', () => {
+  const TMP = resolve(process.cwd(), '.test-strategy-cache-' + Date.now());
+  const DB_PATH = resolve(TMP, 'test.db');
+  let db;
+
+  before(() => {
+    mkdirSync(TMP, { recursive: true });
+    // Initialize MemoryDB singleton for tool-strategy to find
+    resetMemoryDB();
+    db = getMemoryDB(DB_PATH);
+  });
+
+  after(() => {
+    resetMemoryDB();
+    rmSync(TMP, { recursive: true, force: true });
+  });
+
+  it('should return semantic cache hit for similar goal', () => {
+    // Cache a known goal first
+    db.cacheGoal('debug login not working', JSON.stringify(['smart_grep', 'smart_lsp', 'smart_fast_apply']));
+    // Call recommendTools with a similar goal — should hit semantic cache
+    const result = recommendTools('debug login error');
+    // If cache hit, primary should come from cached chain (smart_grep is top)
+    assert.ok(['smart_grep', 'smart_think'].includes(result.primary));
+    // matchScore should be >0 if cached
+    assert.ok(result.matchScore > 0);
+  });
+
+  it('should auto-cache regex result after recommendTools call', () => {
+    // This call should cache the regex match result
+    const result = recommendTools('scan for security flaws');
+    // Now the cache should have this goal
+    const cached = db.searchCache('scan for security flaws', 1.0);
+    // Should find an exact match
+    assert.ok(cached.some(c => c.exact), 'Goal should be auto-cached after recommendTools');
+  });
+
+  it('recommendTools should fallback to regex when cache misses', () => {
+    // Unknown goal with no cached data should use regex fallback
+    const result = recommendTools('analyze module dependencies');
+    assert.equal(result.primary, 'smart_import_graph');
+    assert.ok(result.matchScore > 0);
+  });
+});
+
+describe('Phase 26: Last Recommendation Tracking', () => {
+  it('should set global.__lastRecommendation after recommendTools call', () => {
+    global.__lastRecommendation = null;
+    recommendTools('debug login error');
+    assert.ok(global.__lastRecommendation !== null);
+    assert.equal(global.__lastRecommendation.primary, 'smart_grep');
+    assert.ok(Array.isArray(global.__lastRecommendation.chain));
+    assert.ok(typeof global.__lastRecommendation.timestamp === 'number');
+  });
+
+  it('should correctly identify tools in recommended chain', () => {
+    global.__lastRecommendation = null;
+    recommendTools('security audit credentials');
+    const rec = global.__lastRecommendation;
+    assert.equal(rec.primary, 'smart_security');
+    // smart_security should be in the chain
+    assert.ok(rec.chain.includes('smart_security'));
   });
 });

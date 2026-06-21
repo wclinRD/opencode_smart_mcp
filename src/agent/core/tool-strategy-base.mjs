@@ -6,6 +6,7 @@
 // Usage:
 //   import { recommendTools, buildToolChain } from 'smart-agent/tool-strategy';
 
+import crypto from 'node:crypto';
 import { getMemoryDB } from '../../lib/memory-db.mjs';
 //   const rec = recommendTools('debug login error');
 //   // => { primary: 'smart_grep', alternatives: [...], reason: '...' }
@@ -115,6 +116,8 @@ const TASK_PATTERNS = [
 let _feedbackWeights = null;
 let _lastFeedbackLoad = 0;
 
+
+
 /**
  * Load feedback weights lazily (cache for 60s).
  */
@@ -151,6 +154,30 @@ function _loadFeedbackWeights() {
  * @returns {{ primary: string, alternatives: string[], chain: string[], reason: string, matchScore: number }}
  */
 export function recommendTools(goal, context = {}) {
+  // Phase 27: Check semantic cache first (fastest path, O(1) for exact match)
+  try {
+    const db = getMemoryDB();
+    const cached = db.searchCache(goal, 0.85);
+    if (cached.length > 0) {
+      const best = cached[0];
+      // Update hit stats
+      const hash = crypto.createHash('sha256').update(goal).digest('hex').substring(0, 16);
+      db.updateCacheStats(hash, true);
+      // Bump hit_count for the cached goal too
+      const cachedHash = crypto.createHash('sha256').update(best.goal).digest('hex').substring(0, 16);
+      db.updateCacheStats(cachedHash, true);
+      return {
+        primary: best.toolChain[0] || 'smart_think',
+        alternatives: best.toolChain.slice(1),
+        chain: best.toolChain,
+        reason: `Cache hit (${best.exact ? 'exact' : 'semantic'}, score: ${best.score}): past goal "${best.goal}"`,
+        matchScore: best.score,
+      };
+    }
+  } catch {
+    // Semantic cache not available — fall through to regex matching
+  }
+
   const match = matchTaskPattern(goal);
 
   if (!match) {
@@ -184,6 +211,31 @@ export function recommendTools(goal, context = {}) {
     const used = chain.filter(t => recent.has(t));
     const unused = chain.filter(t => !recent.has(t));
     chain = [...unused, ...used];
+  }
+
+  // Phase 26: Track last recommendation for server feedback comparison
+  try {
+    global.__lastRecommendation = {
+      primary: match.primary,
+      chain,
+      alternatives: match.alternatives,
+      timestamp: Date.now(),
+    };
+  } catch {
+    // Best-effort
+  }
+
+  // Phase 27: Auto-cache regex match result for future semantic lookups
+  try {
+    const db = getMemoryDB();
+    const chainJson = JSON.stringify(chain);
+    // Only cache if not already cached (avoid unnecessary writes)
+    const existing = db.searchCache(goal, 1.0);
+    if (existing.length === 0 || !existing.some(e => e.exact)) {
+      db.cacheGoal(goal, chainJson);
+    }
+  } catch {
+    // Best-effort
   }
 
   return {
