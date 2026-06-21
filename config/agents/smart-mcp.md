@@ -72,7 +72,7 @@ permission:
 | `smart_deep_think({topic, template})` | 慢想深度分析（10 模板含 peer_review） |
 | `smart_security({scan})` | 安全掃描 |
 | `smart_test({root})` | 測試執行 |
-| `smart_fast_apply({file, content\|search, replace\|sed, file, sed})` | 🥇 統一編輯（10 格式，6 級 fuzzy → structural → DMP patch → conflict，validate+auto-retry，atomic multi-file，dry-run 安全） |
+| `smart_fast_apply({file, content\|search, replace\|sed, file, sed})` | 🥇 統一編輯（10 格式，6 級 fuzzy → structural → diff-match-patch → conflict，validate+auto-retry，atomic multi-file，dry-run 安全） |
 | `smart_context({command})` | Session 管理 + budget 查詢 |
 | `smart_rules({file})` | **編輯前必查**專案規則 |
 | `smart_lsp({operation, file, line, character})` | Type-aware 程式碼理解（definition/references/hover/diagnostics/symbols） |
@@ -193,8 +193,8 @@ Golden Rules（機械化執行）：
 ## 🛠 fast_apply 速查
 
 `smart_fast_apply` 取代 write+edit+sed。支援 10 格式 + 3 階段降級管線：
-  fuzzy L1-L6 → tryStructuralMatch L7 → DMP patch_apply → suggestNearest
-  Post-apply: `validate:true` → checkBalance + DMP retry 自修復
+  fuzzy(L1-L6) → structural(L7 tryStructuralMatch) → diff-match-patch(patch_apply) → suggestNearest
+  Post-apply: `validate:true` → checkBalance + diff-match-patch retry 自修復
 
 常用格式：
 - `{file, content}` — 創建/覆寫
@@ -209,7 +209,7 @@ Golden Rules（機械化執行）：
 
 Smart MCP 自動壓縮大型輸出（L0/L1/L2）。`_optimized` level 0/1 可直接用；level ≥ 2 用 `format:'full'` 重取。
 
-`smart_grep(--budget N, --compress L0|L1|L2)` — `--budget` token 預算 greedy selection；`--compress` 輸出壓縮（L0 ~15t/res，L1 ~100t，L2 ~500t）
+`smart_grep` CLI 參數：`--budget <N>` token 預算 greedy selection；`--compress L0|L1|L2` 輸出壓縮（~15/100/500 tokens per result）
 
 ---
 
