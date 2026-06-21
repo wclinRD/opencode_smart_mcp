@@ -1781,7 +1781,8 @@ export class MemoryDB {
     function dfs(current, path, depth, cumScore) {
       if (depth >= minLength && path.length >= minLength) {
         // Use cumulative edge success rate as chain score (product of edge scores)
-        const chainScore = cumScore / (path.length - 1);
+        const divider = Math.max(path.length - 1, 1);
+        const chainScore = cumScore / divider;
         chains.push({ chain: [...path], score: Math.round(chainScore * 1000) / 1000 });
         if (chains.length >= 5) return;
       }
@@ -1977,18 +1978,47 @@ export class MemoryDB {
     const dim = 384;
     const vec = new Float32Array(dim);
     const chars = text.split('');
-    const seed = chars.reduce((acc, c) => acc + c.charCodeAt(0), 0);
+    const len = chars.length;
 
-    for (let i = 0; i < dim; i++) {
-      let h = seed + i * 31;
-      for (let j = 0; j < chars.length; j++) {
-        h = ((h << 5) - h) + chars[j].charCodeAt(0);
-        h = h & h;
+    if (len === 0) {
+      for (let i = 0; i < dim; i++) {
+        const h = ((i * 2654435761) ^ (i * 2246822519)) >>> 0;
+        vec[i] = (h % 20001 - 10000) / 10000;
       }
-      vec[i] = (h % 20001 - 10000) / 10000;
+    } else {
+      for (let i = 0; i < dim; i++) {
+        // Three seeds per dimension (golden-ratio primes) for better distribution
+        const s1 = i * 2654435761;
+        const s2 = (i + 1) * 2246822519;
+        const s3 = (i + 2) * 3266489917;
+
+        let h1 = s1 >>> 0;
+        let h2 = s2 >>> 0;
+        let h3 = s3 >>> 0;
+
+        for (let j = 0; j < len; j++) {
+          const c = chars[j].charCodeAt(0);
+          const prev = j > 0 ? chars[j - 1].charCodeAt(0) : 0;
+          const bigram = (c << 8) ^ prev; // bigram feature so "ab" ≠ "ba"
+          const posMix = c ^ (j * 12345); // position-dependent mixing
+
+          h1 = ((h1 << 5) - h1) + c;
+          h1 = h1 | 0; // force int32
+
+          h2 = ((h2 << 5) - h2) + bigram;
+          h2 = h2 | 0;
+
+          h3 = ((h3 << 5) - h3) + posMix;
+          h3 = h3 | 0;
+        }
+
+        // Combine three streams via XOR for better entropy per dimension
+        const combined = (h1 ^ h2 ^ h3) >>> 0;
+        vec[i] = (combined % 20001 - 10000) / 10000;
+      }
     }
 
-    // Normalize the vector
+    // Normalize
     let norm = 0;
     for (let i = 0; i < dim; i++) norm += vec[i] * vec[i];
     norm = Math.sqrt(norm);

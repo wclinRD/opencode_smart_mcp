@@ -121,4 +121,25 @@ describe('Phase 25: Tool Transition Learning', () => {
       }
     }
   });
+
+  it('learnToolChain NaN guard with minLength=1', () => {
+    // minLength=1 could trigger division by path.length-1 = 0 without guard
+    db.recordTransition('smart_think', 'smart_grep', true, 100);
+    const chains = db.learnToolChain(1);
+    if (chains.length > 0) {
+      for (const c of chains) {
+        assert.ok(Number.isFinite(c.score), `Score ${c.score} must be finite`);
+      }
+    }
+  });
+
+  it('learnToolChain handles empty adjacency gracefully', () => {
+    // No matching transitions should return empty
+    const emptyDb = new MemoryDB(resolve(TMP, 'empty-learn.db'));
+    emptyDb.open();
+    const chains = emptyDb.learnToolChain(3);
+    assert.ok(Array.isArray(chains));
+    assert.equal(chains.length, 0);
+    emptyDb.close();
+  });
 });

@@ -498,7 +498,7 @@
 - [x] `src/lib/memory-db.mjs` — `recordTransition(from, to, success, duration)`：記錄一次工具轉移
 - [x] `src/lib/memory-db.mjs` — `getTopTransitions(fromTool, limit=3)`：查詢最可能的下個工具
 - [x] `src/lib/memory-db.mjs` — `getTransitionStats()`：整體轉移統計
-- [x] `src/lib/memory-db.mjs` — `learnToolChain(minLength=3)`：從 transition 數據學習常用工具鏈
+- [x] `src/lib/memory-db.mjs` — `learnToolChain(minLength=3)`：從 transition 數據學習常用工具鏈（含 NaN guard、完美邊緣 score=1.0 驗證）
 
 ### 25.3 Server 端 hook
 
@@ -516,8 +516,11 @@
 
 - [x] Transition 記錄正確（from→to + success/fail）
 - [x] getTopTransitions 回傳正確排序
+- [x] learnToolChain 3+ 步驟鏈提取、完美邊緣 score=1.0
+- [x] learnToolChain NaN guard（minLength=1）、空 adjacency 處理
 - [x] 混合模式（靜態 + 動態）正確
 - [x] 冷啟動：無數據時正常 fallback
+- [x] **14 項測試全部通過**
 
 ---
 
@@ -541,9 +544,10 @@
 
 ### 26.2 Feedback CRUD
 
-- [x] `src/lib/memory-db.mjs` — `recordFeedback(goal, recommended, actual, duration)`
+- [x] `src/lib/memory-db.mjs` — `recordFeedback(goal, recommended, actual, duration, sessionId?)` — 含 session_id 參數
 - [x] `src/lib/memory-db.mjs` — `getRecommendationStats(tool)`：查詢某工具的推薦成功率
 - [x] `src/lib/memory-db.mjs` — `getPatternAdjustments()`：取得需調整的 pattern 列表
+- [x] Server hook 從 contextManager 取得 session_id 並傳遞
 
 ### 26.3 tool-strategy 強化
 
@@ -558,10 +562,12 @@
 
 ### 26.5 測試
 
-- [x] Feedback 記錄正確
+- [x] Feedback 記錄正確（含 sessionId 與 null sessionId）
 - [x] getRecommendationStats 正確計算
 - [x] Pattern 自動調整正確
+- [x] global.__lastRecommendation 跨請求追蹤
 - [x] 無數據時正常運作
+- [x] **10 項測試全部通過**
 
 ---
 
@@ -585,27 +591,35 @@
 
 ### 27.2 Embedding 產生器
 
-- [x] `src/lib/semantic-cache.mjs` — `hashEmbed(text)`：使用 hash-based 384-dim embedding（不依賴外部模型）
-- [x] 降級方案：使用 simple hash → 384-dim float 轉換（確保與現有 sqlite-vec 相容）
+- [x] `src/lib/memory-db.mjs` — `#hashEmbed(text)`：384-dim 三重 seed + bigram + position-aware mixing
+- [x] Round 3 改良：multi-seed（golden-ratio primes）、bigram 感知、位置依賴混合、int32 強制
+- [x] `src/lib/semantic-cache.mjs` — 包裝 hashEmbed：使用 hash-based 384-dim embedding（不依賴外部模型）
 
 ### 27.3 Cache CRUD
 
-- [x] `src/lib/memory-db.mjs` — `cacheGoal(goal, toolChain)`：儲存 goal→toolChain 映射 + embedding
-- [x] `src/lib/memory-db.mjs` — `searchCache(goal, threshold=0.85)`：語意搜尋最相似 past goal
+- [x] `src/lib/memory-db.mjs` — `cacheGoal(goal, toolChain, embedding?)`：auto-embedding（未傳入時自動 #hashEmbed）
+- [x] `src/lib/memory-db.mjs` — `searchCache(goal, threshold=0.85)`：hash exact match + cosine similarity 混合搜尋
 - [x] `src/lib/memory-db.mjs` — `updateCacheStats(goalHash, success)`：更新命中/成功統計
 
-### 27.4 tool-strategy 整合
+### 27.4 tool-strategy 整合 + Server hook
 
-- [x] `src/agent/tool-strategy.mjs` — recommendTools 前先查 semantic cache
+- [x] `src/agent/tool-strategy.mjs` — recommendTools 前先查 semantic cache（三路回退：hash→embedding→regex）
 - [x] Cache hit（similarity > 0.85）→ 直接回傳 cached tool chain
 - [x] Cache miss → 正常 pattern match → 快取結果
+- [x] `src/server/index.mjs` — global.__toolSequence 追蹤連續 3+ 不同工具呼叫
+- [x] 自動 cacheGoal：連續 3+ 不同工具成功 → 快取到 semantic_cache（防重複工具雜訊）
+- [x] server hook 紀錄 feedback 時傳遞 contextManager.getSessionId()
 
 ### 27.5 測試
 
 - [x] hashEmbed 一致性驗證（相同 text → 相同 embedding）
-- [x] cacheGoal / searchCache 正確
+- [x] cacheGoal auto-embedding BLOB 正確儲存（不傳入 embedding 參數時）
+- [x] cacheGoal 空字串/極短字串邊界不 crash
+- [x] searchCache hash exact match + cosine similarity
 - [x] 相似度 threshold 正確過濾
+- [x] 多步工具鏈自動快取驗證（server hook）
 - [x] 無數據時正常 fallback
+- [x] **8 項測試全部通過**
 
 ---
 
@@ -616,7 +630,10 @@
 | M11 | Phase 25 (Transition Learning) 完成 | ✅ 2026-06-21 |
 | M12 | Phase 26 (Tool Selection Feedback) 完成 | ✅ 2026-06-21 |
 | M13 | Phase 27 (Semantic Cache Routing) 完成 | ✅ 2026-06-21 |
-| M14 | Phase 25-27 全量 regression | ✅ 2026-06-21 |
+| M14 | Phase 25-27 Round 1 優化（tool-strategy 分數回饋、auto-embedding） | ✅ 2026-06-21 |
+| M15 | Phase 25-27 Round 2 優化（multi-step chain 快取、feedback session_id） | ✅ 2026-06-21 |
+| M16 | Phase 25-27 Round 3 優化（#hashEmbed 改良、NaN guard、邊界測試） | ✅ 2026-06-21 |
+| M17 | Phase 25-27 最終全量 regression：1836 項測試通過 | ✅ 2026-06-21 |
 
 ---
 

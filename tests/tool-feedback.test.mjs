@@ -83,4 +83,20 @@ describe('Phase 26: Tool Selection Feedback', () => {
     assert.equal(adjustments.length, 0);
     emptyDb.close();
   });
+
+  it('should record feedback with sessionId', () => {
+    // recordFeedback with sessionId should not crash & stats should still work
+    db.recordFeedback('debug login error', 'smart_grep', 'smart_grep', 150, 'test-session-001');
+    const stats = db.getRecommendationStats('smart_grep');
+    assert.equal(stats.total, 4); // 3 from prev tests + 1
+    assert.equal(stats.success, 3); // 2 from prev tests + 1
+  });
+
+  it('should record feedback with null sessionId', () => {
+    // Edge case: explicit null sessionId should not crash
+    db.recordFeedback('test null session', 'smart_read', 'smart_read', 100, null);
+    const stats = db.getRecommendationStats('smart_read');
+    assert.equal(stats.total, 1);
+    assert.equal(stats.success, 1);
+  });
 });

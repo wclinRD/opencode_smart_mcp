@@ -521,11 +521,12 @@ Phase 25 改為：
 |---|------|------|------|
 | 1 | `tool_transitions` 表 | `src/lib/memory-db.mjs` | from_tool, to_tool, success_count, fail_count, avg_duration, last_seen |
 | 2 | Transition CRUD | `src/lib/memory-db.mjs` | recordTransition, getTopTransitions, getTransitionStats |
-| 3 | Server hook | `src/server/index.mjs` | 每次成功工具呼叫後記錄 transition（前一個工具 → 當前工具） |
-| 4 | Prefetch 強化 | `src/lib/prefetch-engine.mjs` | 查詢 DB transitions 取代/補充靜態規則 |
-| 5 | Recipe 學習 | `src/lib/prefetch-engine.mjs` | 自動分析 3+ 步驟的常見工具鏈序列 |
-| 6 | System prompt | `src/agent/system-prompt.mjs` | 提及 transition learning |
-| 7 | 測試 | `tests/transition-learn.test.mjs` | 記錄/查詢/統計驗證 |
+| 3 | Tool chain learning | `src/lib/memory-db.mjs` | learnToolChain：從 transitions 提取 3+ 步驟工具鏈、NaN guard |
+| 4 | Server hook | `src/server/index.mjs` | 每次成功工具呼叫後記錄 transition（前一個工具 → 當前工具） |
+| 5 | Prefetch 強化 | `src/lib/prefetch-engine.mjs` | 查詢 DB transitions 取代/補充靜態規則 |
+| 6 | Recipe 學習 | `src/lib/prefetch-engine.mjs` | 自動分析 3+ 步驟的常見工具鏈序列 |
+| 7 | System prompt | `src/agent/system-prompt.mjs` | 提及 transition learning |
+| 8 | 測試 | `tests/transition-learn.test.mjs` | 14 項：記錄/查詢/鏈提取/NaN 防護/空 DB 處理 |
 
 ### 預期成效
 
@@ -535,6 +536,7 @@ Phase 25 改為：
 | Pre-fetch 準確率 | 靜態規則（50-60%） | 動態學習（70-85%+） |
 | 冷啟動時間 | 需手動編寫規則 | 5-10 次使用後自動學習模式 |
 | 適應不同專案 | 通用規則，不適應專案差異 | 自動學習專案特有模式 |
+| 鏈準確度 | 無鏈感知 | learnToolChain 完美邊緣 score=1.0 |
 
 ---
 
@@ -563,13 +565,14 @@ Phase 26 改為：
 
 | # | 項目 | 檔案 | 說明 |
 |---|------|------|------|
-| 1 | `tool_feedback` 表 | `src/lib/memory-db.mjs` | goal_context, recommended_tool, actual_tool, success, duration, timestamp |
-| 2 | Feedback CRUD | `src/lib/memory-db.mjs` | recordFeedback, getRecommendationStats, getPatternAdjustments |
-| 3 | Server hook | `src/server/index.mjs` | 記錄每次推薦 → 實際選擇的對比 |
+| 1 | `tool_feedback` 表 | `src/lib/memory-db.mjs` | goal_context, recommended_tool, actual_tool, success, duration, session_id, timestamp |
+| 2 | Feedback CRUD | `src/lib/memory-db.mjs` | recordFeedback (含 sessionId 參數), getRecommendationStats, getPatternAdjustments |
+| 3 | Server hook | `src/server/index.mjs` | 記錄每次推薦 → 實際選擇的對比（含 session_id） |
 | 4 | tool-strategy 強化 | `src/agent/tool-strategy.mjs` | 查詢回饋統計，調整 pattern 分數 |
 | 5 | 自動調整 | `src/agent/tool-strategy.mjs` | 低成功率 pattern 降級，高成功率 pattern 升級 |
-| 6 | System prompt | `src/agent/system-prompt.mjs` | 提及回饋機制 |
-| 7 | 測試 | `tests/tool-feedback.test.mjs` | 記錄/查詢/調整驗證 |
+| 6 | Last recommendation | `src/agent/tool-strategy.mjs` | global.__lastRecommendation 跨請求追蹤 |
+| 7 | System prompt | `src/agent/system-prompt.mjs` | 提及回饋機制 |
+| 8 | 測試 | `tests/tool-feedback.test.mjs` | 10 項：含 sessionId/null sessionId/空 DB 邊界 |
 
 ### 預期成效
 
@@ -578,6 +581,7 @@ Phase 26 改為：
 | 工具推薦準確率 | 靜態（~70%） | 自適應（80-90%+） |
 | 錯誤推薦率 | 固定（~30% 不適用） | 持續下降（每 20 次使用調整一次） |
 | 適應性 | 永不改變 | 隨使用模式持續進化 |
+| 推薦可追溯性 | 無 | session_id 連結每次推薦與實際使用 |
 
 ---
 
@@ -608,13 +612,14 @@ Phase 27 改為：
 
 | # | 項目 | 檔案 | 說明 |
 |---|------|------|------|
-| 1 | `semantic_cache` 表 | `src/lib/memory-db.mjs` | goal TEXT, goal_embedding BLOB(384), tool_chain TEXT, hit_count, success_count, created_at |
-| 2 | Cache CRUD | `src/lib/memory-db.mjs` | cacheGoal, searchCache, updateCacheStats |
-| 3 | Embedding 產生器 | `src/lib/semantic-cache.mjs` | 從 goal text 產生 384-dim embedding（hash-based 降級方案） |
-| 4 | tool-strategy 整合 | `src/agent/tool-strategy.mjs` | recommendTools 前先查 cache |
-| 5 | Server hook | `src/server/index.mjs` | 每次成功工具鏈後快取 |
-| 6 | System prompt | `src/agent/system-prompt.mjs` | 提及語意快取 |
-| 7 | 測試 | `tests/semantic-cache.test.mjs` | 快取/命中/未命中/相似度驗證 |
+| 1 | `semantic_cache` 表 | `src/lib/memory-db.mjs` | goal TEXT, goal_embedding BLOB(384), tool_chain TEXT, hit_count, success_count, session_id, created_at |
+| 2 | Cache CRUD | `src/lib/memory-db.mjs` | cacheGoal (auto-embedding), searchCache (hash+cosine), updateCacheStats |
+| 3 | Embedding 產生器 | `src/lib/memory-db.mjs` | #hashEmbed：384-dim 三重 seed + bigram + position mixing（改良版） |
+| 4 | tool-strategy 整合 | `src/agent/tool-strategy.mjs` | recommendTools 前先查 cache（含回退：hash→embedding→regex）  |
+| 5 | Server hook | `src/server/index.mjs` | 工具鏈自動快取：追蹤連續 3+ 不同工具成功後快取 |
+| 6 | Multi-step chain | `src/server/index.mjs` | global.__toolSequence 追蹤多步序列，自動 cacheGoal |
+| 7 | System prompt | `src/agent/system-prompt.mjs` | 提及語意快取 |
+| 8 | 測試 | `tests/semantic-cache.test.mjs` | 8 項：快取/命中/未命中/auto-embedding/空字串邊界 |
 
 ### 預期成效
 
@@ -624,6 +629,7 @@ Phase 27 改為：
 | 冷啟動 | 無歷史 | 5-10 次使用後開始有 cache hit |
 | 重複任務處理 | 每次都重新匹配 | 命中後直接回傳（省 100% pattern match token） |
 | 長期準確率 | 靜態 | 隨 cache 累積持續提升 |
+| 多步快取 | 僅單一 goal→chain | 自動累積 3+ 連續呼叫為 chain |
 
 ---
 
@@ -654,12 +660,14 @@ Phase 27 改為：
 |--------|------|---------|
 | M1-M10 | Phase 16-24 完成 | ✅ 2026-06-13 |
 | M11 | Phase 25-27 完成 | ✅ 2026-06-21 |
-| M12 | Phase 25-27 全量 regression | ✅ 2026-06-21 |
+| M12 | Phase 25-27 Round 1 優化（tool-strategy 分數回饋、cacheGoal auto-embedding） | ✅ 2026-06-21 |
+| M13 | Phase 25-27 Round 2 優化（multi-step 鏈快取、feedback session_id） | ✅ 2026-06-21 |
+| M14 | Phase 25-27 Round 3 優化（#hashEmbed 改良、NaN guard、全邊界測試） | ✅ 2026-06-21 |
 | ⋮ | ⋮ | ⋮ |
-| M13 | Phase 28-30 (P0：語意路由+自我反思+輸出管理) 完成 | 📅 下期 |
-| M14 | Phase 31-32 (P1：平行執行+多Agent協作) 完成 | 📅 下期 |
-| M15 | Phase 33 (P2：Skill自動生成+知識圖譜) 完成 | 📅 下下期 |
-| M16 | Phase 28-33 全量 regression | 📅 下下期 |
+| M15 | Phase 28-30 (P0：語意路由+自我反思+輸出管理) 完成 | 📅 下期 |
+| M16 | Phase 31-32 (P1：平行執行+多Agent協作) 完成 | 📅 下期 |
+| M17 | Phase 33 (P2：Skill自動生成+知識圖譜) 完成 | 📅 下下期 |
+| M18 | Phase 28-33 全量 regression | 📅 下下期 |
 
 > 基於 2026-06-14 競爭品研究與前沿技術分析，Phase 28-33 聚焦三大方向：
 > **效率**（推測預取、平行執行、token 壓縮）、**智能**（語意匹配、自我反思、adaptive routing）、**協作**（多 agent 記憶共享、role specialization、知識圖譜）
