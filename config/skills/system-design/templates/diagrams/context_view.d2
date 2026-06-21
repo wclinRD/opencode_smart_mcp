@@ -1,0 +1,29 @@
+# C1: 系統上下文圖（System Context Diagram）
+# 展示系統邊界、外部角色、主要資料流
+
+direction: right
+
+使用者: "" {
+  shape: person
+}
+
+系統: "本系統" {
+  shape: rectangle
+}
+
+外部服務A: "第三方服務 A" {
+  shape: rectangle
+}
+
+外部服務B: "第三方服務 B" {
+  shape: rectangle
+}
+
+資料庫: "資料庫" {
+  shape: cylinder
+}
+
+使用者 -> 系統: "使用"
+系統 -> 外部服務A: "呼叫 API"
+系統 -> 資料庫: "讀寫"
+外部服務A -> 外部服務B: "轉發"

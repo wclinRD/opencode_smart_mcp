@@ -1,0 +1,35 @@
+# C3: 元件細節圖（Component Diagram）
+# 展示單一 container 內部的模組與介面
+
+direction: down
+
+controller: "Controller" {
+  shape: rectangle
+}
+
+service: "Service Layer" {
+  shape: rectangle
+}
+
+repository: "Repository" {
+  shape: rectangle
+}
+
+validator: "Validator" {
+  shape: rectangle
+}
+
+dto: "DTO / Schema" {
+  shape: rectangle
+}
+
+external: "External API Client" {
+  shape: rectangle
+}
+
+controller -> validator: "驗證輸入"
+controller -> service: "委派業務邏輯"
+service -> repository: "資料存取"
+service -> external: "外部呼叫"
+repository -> dto: "映射"
+validator -> dto: "參考"

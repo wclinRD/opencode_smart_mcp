@@ -1,0 +1,40 @@
+# C2: 容器架構圖（Container Diagram）
+# 展示系統內部的 service / API / database 部署
+
+direction: right
+
+client: "Client (Web/Mobile)" {
+  shape: rectangle
+}
+
+api_gw: "API Gateway" {
+  shape: rectangle
+}
+
+web_svc: "Web Service" {
+  shape: rectangle
+}
+
+worker_svc: "Worker Service" {
+  shape: rectangle
+}
+
+db_primary: "Primary DB" {
+  shape: cylinder
+}
+
+db_cache: "Cache (Redis)" {
+  shape: cylinder
+}
+
+queue: "Message Queue" {
+  shape: rectangle
+}
+
+client -> api_gw: "REST/GraphQL"
+api_gw -> web_svc: "路由"
+web_svc -> db_primary: "讀寫"
+web_svc -> db_cache: "快取"
+api_gw -> queue: "發送事件"
+queue -> worker_svc: "消費"
+worker_svc -> db_primary: "非同步寫入"
