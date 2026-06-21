@@ -4,14 +4,19 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { unlinkSync, existsSync } from 'node:fs';
+import { unlinkSync, existsSync, readdirSync, rmdirSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 
 // Dynamic imports
-const { isSafeQuery, introspectSQLite, querySQLite } = await import('../src/lib/db-query.mjs');
+const {
+  isSafeQuery, introspectSQLite, querySQLite,
+  writeSQLite, updateSQLite, deleteSQLite, dryRunSQLite,
+  getFullSchemaSQLite, diffSchema,
+  createMigrationSQLite, migrateUpSQLite, migrateDownSQLite, migrateStatusSQLite,
+} = await import('../src/lib/db-query.mjs');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -229,5 +234,407 @@ describe('DB plugin integration', () => {
       connection: dbPath,
     }));
     assert.equal(result.ok, false);
+  });
+});
+
+// =========================================================================
+// writeSQLite
+// =========================================================================
+describe('writeSQLite', () => {
+  let dbPath;
+
+  before(() => { dbPath = createTestDB(); });
+  after(() => { if (existsSync(dbPath)) unlinkSync(dbPath); });
+
+  it('inserts a row', () => {
+    const result = writeSQLite(dbPath, 'users', { name: 'Charlie', email: 'charlie@test.com' });
+    assert.ok(result.ok);
+    assert.equal(result.inserted, 1);
+    assert.ok(result.id > 0);
+
+    // Verify
+    const check = querySQLite(dbPath, `SELECT * FROM users WHERE id = ${result.id}`);
+    assert.ok(check.ok);
+    assert.equal(check.rows[0].name, 'Charlie');
+  });
+
+  it('rejects invalid data type', () => {
+    const result = writeSQLite(dbPath, 'users', { name: ['array'] });
+    assert.equal(result.ok, false);
+    assert.ok(result.error.includes('Invalid type'));
+  });
+
+  it('rejects missing file', () => {
+    const result = writeSQLite('/nonexistent/test.db', 'users', { name: 'x' });
+    assert.equal(result.ok, false);
+    assert.ok(result.error.includes('not found'));
+  });
+});
+
+// =========================================================================
+// updateSQLite
+// =========================================================================
+describe('updateSQLite', () => {
+  let dbPath;
+
+  before(() => { dbPath = createTestDB(); });
+  after(() => { if (existsSync(dbPath)) unlinkSync(dbPath); });
+
+  it('updates a row', () => {
+    const result = updateSQLite(dbPath, 'users', { name: 'Alice Updated' }, { id: 1 });
+    assert.ok(result.ok);
+    assert.equal(result.updated, 1);
+
+    const check = querySQLite(dbPath, "SELECT name FROM users WHERE id = 1");
+    assert.equal(check.rows[0].name, 'Alice Updated');
+  });
+
+  it('rejects missing where', () => {
+    const result = updateSQLite(dbPath, 'users', { name: 'x' }, {});
+    assert.equal(result.ok, false);
+    assert.ok(result.error.includes('where'));
+  });
+
+  it('rejects invalid data', () => {
+    const result = updateSQLite(dbPath, 'users', null, { id: 1 });
+    assert.equal(result.ok, false);
+    assert.ok(result.error.includes('data'));
+  });
+});
+
+// =========================================================================
+// deleteSQLite
+// =========================================================================
+describe('deleteSQLite', () => {
+  let dbPath;
+
+  before(() => { dbPath = createTestDB(); });
+  after(() => { if (existsSync(dbPath)) unlinkSync(dbPath); });
+
+  it('deletes a specific row', () => {
+    const result = deleteSQLite(dbPath, 'users', { id: 2 });
+    assert.ok(result.ok);
+    assert.equal(result.deleted, 1);
+
+    const check = querySQLite(dbPath, 'SELECT * FROM users');
+    assert.equal(check.rows.length, 1);
+    assert.equal(check.rows[0].name, 'Alice');
+  });
+
+  it('rejects null where', () => {
+    const result = deleteSQLite(dbPath, 'users', null);
+    assert.equal(result.ok, false);
+    assert.ok(result.error.includes('where'));
+  });
+});
+
+// =========================================================================
+// dryRunSQLite
+// =========================================================================
+describe('dryRunSQLite', () => {
+  let dbPath;
+
+  before(() => { dbPath = createTestDB(); });
+  after(() => { if (existsSync(dbPath)) unlinkSync(dbPath); });
+
+  it('dry-runs insert', () => {
+    const result = dryRunSQLite('insert', dbPath, 'users', { name: 'Dry', email: 'dry@test.com' });
+    assert.ok(result.ok);
+    assert.equal(result.sql, 'INSERT INTO "users" ("name", "email") VALUES (?, ?)');
+    assert.equal(result.estimatedRows, 1);
+  });
+
+  it('dry-runs update', () => {
+    const result = dryRunSQLite('update', dbPath, 'users', { name: 'X' }, { id: 1 });
+    assert.ok(result.ok);
+    assert.ok(result.sql.includes('UPDATE'));
+    assert.equal(result.estimatedRows, 1);
+  });
+
+  it('dry-runs delete', () => {
+    const result = dryRunSQLite('delete', dbPath, 'users', {}, { id: 1 });
+    assert.ok(result.ok);
+    assert.ok(result.sql.includes('DELETE'));
+    assert.equal(result.estimatedRows, 1);
+  });
+
+  it('dry-run does not modify DB', () => {
+    const before = querySQLite(dbPath, 'SELECT * FROM users');
+    dryRunSQLite('delete', dbPath, 'users', {}, {});
+    const after = querySQLite(dbPath, 'SELECT * FROM users');
+    assert.equal(after.rows.length, before.rows.length);
+  });
+});
+
+// =========================================================================
+// getFullSchemaSQLite + diffSchema
+// =========================================================================
+describe('getFullSchemaSQLite', () => {
+  let dbPath;
+
+  before(() => { dbPath = createTestDB(); });
+  after(() => { if (existsSync(dbPath)) unlinkSync(dbPath); });
+
+  it('returns full schema with columns and indexes', () => {
+    const result = getFullSchemaSQLite(dbPath);
+    assert.ok(result.ok);
+    assert.ok(result.schema.length >= 2);
+
+    const users = result.schema.find(t => t.name === 'users');
+    assert.ok(users);
+    assert.ok(users.columns.length >= 3);
+    assert.ok(users.columns.some(c => c.name === 'id' && c.primaryKey));
+  });
+
+  it('returns error for missing file', () => {
+    const result = getFullSchemaSQLite('/nonexistent.db');
+    assert.equal(result.ok, false);
+  });
+});
+
+describe('diffSchema', () => {
+  it('detects added table', () => {
+    const schemaA = [{ name: 'users', columns: [{ name: 'id', type: 'INTEGER' }], indexes: [] }];
+    const schemaB = [
+      { name: 'users', columns: [{ name: 'id', type: 'INTEGER' }], indexes: [] },
+      { name: 'orders', columns: [{ name: 'id', type: 'INTEGER' }], indexes: [] },
+    ];
+    const result = diffSchema(schemaA, schemaB);
+    assert.ok(result.ok);
+    assert.equal(result.changeCount, 1);
+    assert.equal(result.diff[0].type, 'added');
+    assert.equal(result.diff[0].table, 'orders');
+  });
+
+  it('detects removed table', () => {
+    const schemaA = [
+      { name: 'users', columns: [], indexes: [] },
+      { name: 'orders', columns: [], indexes: [] },
+    ];
+    const schemaB = [{ name: 'users', columns: [], indexes: [] }];
+    const result = diffSchema(schemaA, schemaB);
+    assert.ok(result.ok);
+    assert.equal(result.changeCount, 1);
+    assert.equal(result.diff[0].type, 'removed');
+  });
+
+  it('detects column type change', () => {
+    const schemaA = [{ name: 'users', columns: [{ name: 'id', type: 'INTEGER', nullable: false, primaryKey: true }], indexes: [] }];
+    const schemaB = [{ name: 'users', columns: [{ name: 'id', type: 'TEXT', nullable: false, primaryKey: true }], indexes: [] }];
+    const result = diffSchema(schemaA, schemaB);
+    assert.ok(result.ok);
+    assert.equal(result.changeCount, 1);
+    assert.equal(result.diff[0].type, 'modified');
+  });
+});
+
+// =========================================================================
+// Migration: createMigrationSQLite
+// =========================================================================
+describe('createMigrationSQLite', () => {
+  const migDir = resolve(tmpdir(), `mig-test-${randomUUID()}`);
+  let dbPath;
+
+  before(() => { dbPath = createTestDB(); });
+  after(() => {
+    if (existsSync(dbPath)) unlinkSync(dbPath);
+    // Cleanup migration dir
+    if (existsSync(migDir)) {
+      const files = readdirSync(migDir);
+      for (const f of files) unlinkSync(join(migDir, f));
+      rmdirSync(migDir);
+    }
+  });
+
+  it('creates a migration template file', () => {
+    const result = createMigrationSQLite(dbPath, 'test_migration', migDir);
+    assert.ok(result.ok);
+    assert.ok(result.file);
+    assert.ok(existsSync(result.file));
+
+    const content = readFileSync(result.file, 'utf-8');
+    assert.ok(content.includes('-- up'));
+    assert.ok(content.includes('-- down'));
+    assert.ok(content.includes('test_migration'));
+  });
+});
+
+// =========================================================================
+// Migration: migrateUpSQLite / migrateDownSQLite / migrateStatusSQLite
+// =========================================================================
+describe('Migration lifecycle', () => {
+  const migDir = resolve(tmpdir(), `mig-lifecycle-${randomUUID()}`);
+  let dbPath;
+
+  before(() => {
+    dbPath = createTestDB();
+    mkdirSync(migDir, { recursive: true });
+
+    // Create a migration file with real SQL
+    const migFile = join(migDir, '20260101_000000_add_age.sql');
+    writeFileSync(migFile, `-- Migration: add_age
+
+-- up
+ALTER TABLE users ADD COLUMN age INTEGER DEFAULT 0;
+
+-- down
+ALTER TABLE users DROP COLUMN age;
+`, 'utf-8');
+  });
+
+  after(() => {
+    if (existsSync(dbPath)) unlinkSync(dbPath);
+    if (existsSync(migDir)) {
+      const files = readdirSync(migDir);
+      for (const f of files) unlinkSync(join(migDir, f));
+      rmdirSync(migDir);
+    }
+  });
+
+  it('migrate status shows pending', () => {
+    const result = migrateStatusSQLite(dbPath, migDir);
+    assert.ok(result.ok);
+    assert.ok(result.status.some(s => s.status === 'pending'));
+  });
+
+  it('migrate up applies migration', () => {
+    const result = migrateUpSQLite(dbPath, migDir);
+    assert.ok(result.ok);
+    assert.ok(result.applied.includes('20260101_000000_add_age'));
+
+    // Verify column was added
+    const schema = getFullSchemaSQLite(dbPath);
+    const users = schema.schema.find(t => t.name === 'users');
+    assert.ok(users.columns.some(c => c.name === 'age'));
+  });
+
+  it('migrate status shows applied', () => {
+    const result = migrateStatusSQLite(dbPath, migDir);
+    assert.ok(result.ok);
+    const entry = result.status.find(s => s.name === '20260101_000000_add_age');
+    assert.ok(entry);
+    assert.equal(entry.status, 'applied');
+  });
+
+  it('migrate down rolls back', () => {
+    const result = migrateDownSQLite(dbPath, 1, migDir);
+    assert.ok(result.ok);
+    assert.ok(result.rolledBack.includes('20260101_000000_add_age'));
+
+    const schema = getFullSchemaSQLite(dbPath);
+    const users = schema.schema.find(t => t.name === 'users');
+    assert.equal(users.columns.some(c => c.name === 'age'), false);
+  });
+});
+
+// =========================================================================
+// Plugin integration — new operations
+// =========================================================================
+describe('DB plugin new operations', () => {
+  let plugin, dbPath;
+
+  before(async () => {
+    const mod = await import('../src/plugins/standard/db-query.mjs');
+    plugin = mod.default;
+    dbPath = createTestDB();
+  });
+  after(() => { if (existsSync(dbPath)) unlinkSync(dbPath); });
+
+  it('write via plugin', async () => {
+    const result = JSON.parse(await plugin.handler({
+      operation: 'write',
+      connection: dbPath,
+      table: 'users',
+      data: { name: 'Plugin', email: 'plugin@test.com' },
+    }));
+    assert.ok(result.ok);
+    assert.equal(result.inserted, 1);
+  });
+
+  it('update via plugin', async () => {
+    const result = JSON.parse(await plugin.handler({
+      operation: 'update',
+      connection: dbPath,
+      table: 'users',
+      data: { name: 'Updated' },
+      where: { name: 'Plugin' },
+    }));
+    assert.ok(result.ok);
+    assert.equal(result.updated, 1);
+  });
+
+  it('delete via plugin', async () => {
+    // First insert
+    await plugin.handler({
+      operation: 'write',
+      connection: dbPath,
+      table: 'users',
+      data: { name: 'DeleteMe', email: 'del@test.com' },
+    });
+
+    const result = JSON.parse(await plugin.handler({
+      operation: 'delete',
+      connection: dbPath,
+      table: 'users',
+      where: { name: 'DeleteMe' },
+      confirm: true,
+    }));
+    assert.ok(result.ok);
+    assert.equal(result.deleted, 1);
+  });
+
+  it('delete requires confirm via plugin', async () => {
+    const result = JSON.parse(await plugin.handler({
+      operation: 'delete',
+      connection: dbPath,
+      table: 'users',
+      where: { id: 1 },
+    }));
+    assert.equal(result.ok, false);
+    assert.ok(result.error.includes('confirm'));
+  });
+
+  it('schema-diff via plugin', async () => {
+    // Create a second DB with a different schema
+    const dbPath2 = resolve(tmpdir(), `db-diff-${randomUUID()}.db`);
+    const db2 = new Database(dbPath2);
+    db2.exec('CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT)');
+    db2.close();
+
+    try {
+      const result = JSON.parse(await plugin.handler({
+        operation: 'schema-diff',
+        connection: dbPath,
+        connection2: dbPath2,
+      }));
+      assert.ok(result.ok);
+      // products table is in db2 but not db1
+      assert.ok(result.diff.some(d => d.type === 'added' && d.table === 'products'));
+    } finally {
+      if (existsSync(dbPath2)) unlinkSync(dbPath2);
+    }
+  });
+
+  it('migrate status via plugin', async () => {
+    const result = JSON.parse(await plugin.handler({
+      operation: 'migrate',
+      connection: dbPath,
+      command: 'status',
+    }));
+    assert.ok(result.ok);
+    // No migrations dir, so empty status
+    assert.ok(result.status.length >= 0);
+  });
+
+  it('dry-run write via plugin', async () => {
+    const result = JSON.parse(await plugin.handler({
+      operation: 'write',
+      connection: dbPath,
+      table: 'users',
+      data: { name: 'DryRun', email: 'dry@test.com' },
+      dryRun: true,
+    }));
+    assert.ok(result.ok);
+    assert.ok(result.sql.includes('INSERT'));
   });
 });

@@ -1,8 +1,96 @@
 # Smart MCP — 完整強化路線圖
 
-> 最後更新：2026-06-13 (M10 regression ✅)
-> 基於競爭品分析（smart-mcp、MCPlex、Continuum、Tool Compass、mcpflow-router、ReasonKit Think 等）
-> 與前沿技術研究（Structured CoT、MCTS Tool Planning、Meta-Reasoning、Self-Evolving Codegen 等）
+> 最後更新：2026-06-21 | Phase 重新編碼 1-20（對照表文末）
+> 平行文件：子系統計畫 `docs/plans/` | 子系統待辦 `docs/todos/`
+
+---
+
+## 📋 LLM 標準作業流程（SOP）
+
+### 📖 閱讀（READ）
+1. **掃描**優先級總覽 → 知哪些完成、哪些待做
+2. **查閱**子系統索引（文末）→ 知有哪些子系統與狀態
+3. **深讀**特定 Phase → 點 `docs/plans/` 或 `docs/todos/` 下對應文件
+4. **驗證** `npm test` 或 `git diff` 確認文件與程式碼一致
+
+### ✏️ 新增（ADD）
+1. 🧠 Brainstorm ≥2 方案 → 2. 📝 寫 Spec → 3. 📄 更新此文件 + `docs/plans/` → 4. 🟥 測試計畫 / 🟨 相依圖 → 5. 💻 實作 + 測試 → 6. ✅ Regression → 7. 🧹 熵減（清過時文件、同步 INDEX）
+
+### 🔧 修改（MODIFY）
+1. 🔗 查相依（優先級表格）→ 2. 📄 文件優先更新 → 3. 🔄 同步 INDEX → 4. 🧪 `npm test` → 5. 🧹 熵減（順便清理附近過時內容）
+
+---
+
+## 📐 文件維護規範（強制規則）
+
+> 🟥 以下規則為強制等級，違反將導致 plan.md ↔ todo.md 不同步，未來 LLM 無法正確解讀路線圖。
+
+### 一、Phase 新增規則
+
+| 規則 | 說明 |
+|------|------|
+| **雙文件同步** | 新增 Phase 必須「同時」更新 `plan.md`（設計架構）與 `todo.md`（實作細項），使用相同 Phase 編號與名稱 |
+| **編號連續** | 新 Phase 接續最大編號 +1，不可跳號或插入中間 |
+| **模板一致** | 兩份文件的 Phase 章節格式必須一致（見下表） |
+
+Phase 模板對照：
+
+| 元素 | `plan.md` | `todo.md` |
+|------|-----------|-----------|
+| 標題 | `## Phase N：名稱 ${狀態圖示}` | `## Phase N：名稱` |
+| 來源 | `> 參考：...` | `> 參考：...` |
+| 核心描述 | 核心洞察 + 設計（含 ascii 架構圖） | 一句話目標 + 預估成效 |
+| 實作範圍 | 表格：`#/項目/檔案/說明` | 子章節 `N.1` ~ `N.7`（含 checklist） |
+| 完成標記 | 標題尾綴 `✅` | 全部 checkbox 設為 `[x]` + 完成日期 |
+
+### 二、編輯現有 Phase 規則
+
+- **理由必填**：修改已完成 Phase（標題有 ✅）時，必須說明修改理由
+- **狀態同步**：修改 `plan.md` 的狀態時，`todo.md` 的 checkbox 須同步更新
+- **版本註記**：修改後必須更新檔首 `最後更新` 日期
+
+### 三、子系統索引同步規則
+
+> 🟥 子系統索引存在於 **4 個位置**，修改任一處必須同步其他三處。
+
+| 位置 | 用途 |
+|------|------|
+| `docs/plan.md` 文末 | 主路線圖子系統一覽（含依賴/說明） |
+| `docs/todo.md` 文末 | 待辦子系統一覽（含對應計畫） |
+| `docs/plans/INDEX.md` | 子系統計畫索引（含行數/檔案） |
+| `docs/todos/INDEX.md` | 子系統待辦索引（含行數/對應計畫） |
+
+同步檢查清單：
+- [ ] **編號一致**：所有索引中的 `#` 編號必須完全相同
+- [ ] **名稱一致**：子系統名稱（含描述文字）在 4 處必須一致
+- [ ] **狀態一致**：狀態圖示（✅/🟡/⬜）在 4 處必須一致
+- [ ] **相依圖一致**：相依關係在 4 處的相依圖區塊必須同步
+
+### 四、相依關係管理
+
+- **明確註記**：Phase 之間的依賴必須在 `plan.md` 的設計段落開頭明確標示
+- **變更傳播**：相依關係變更時，受影響 Phase 的狀態應重新評估並同步
+- **對照表維護**：若有重新編號，必須同時更新文末的 Phase 新舊編號對照表
+
+---
+
+## 🏭 工程方法論框架
+
+### Harness Engineering
+
+| 原則 | 應用 |
+|------|------|
+| **機械化一致性** | 統一 Phase 模板（背景→設計→實作→測試→成效）。重複 pattern 萃取為 skill |
+| **熵管理** | 每次修改附帶熵減：清過時文件、移除 done todo、同步 INDEX |
+| **工廠模式** | 每個 Phase 遵循標準輸入→流程→輸出。新增 Phase 複製既有模板 |
+
+### Superpowers
+
+| 原則 | 應用 |
+|------|------|
+| **Brainstorming** | ≥2 方案才選擇。Phase 13+ 設計時列出多方案權衡 |
+| **Spec→Plan→Review** | 先規格→再計畫→後審查。禁止邊做邊想 |
+| **🟥🟨🟩 品質閘** | 🟥強制（安全/測試全綠/文件同步）/ 🟨建議（效能優化）/ 🟩可跳過（格式） |
 
 ---
 
@@ -48,7 +136,7 @@
 
 ---
 
-## Phase 16：Structured Thinking — Grammar-Constrained CoT
+## Phase 1：Structured Thinking — Grammar-Constrained CoT ✅
 
 > 參考：andthattoo/structured-cot（22× token 壓縮，+14pp LiveCodeBench）
 > 核心洞察：LLM 的 verbose prose thinking 中大量是 scaffolding，不是真正的推理。
@@ -60,7 +148,7 @@
 目前 smart_think：
   LLM 自由格式思考 → 大量 "Let me think about this..." "I should consider..." 等 scaffolding
 
-Phase 16 改為：
+Phase 1 改為：
   smart_think 新增 mode: "structured" 參數
   → 內部注入 GBNF-style 格式約束：
     GOAL: <一句話目標>
@@ -87,9 +175,14 @@ Phase 16 改為：
 | 推理品質 | 基準 | 不變或略升（結構化減少雜訊） |
 | 適用場景 | — | debug/refactor/architecture 模板 |
 
----
+### 實作摘要
 
-## Phase 17：MCTS Tool Planning — 蒙地卡羅樹搜尋工具規劃 ✅
+- `src/plugins/core/thinking.mjs` — smart_think 新增 `mode:"structured"`（GOAL/STATE/ALGO/EDGE/VERIFY 五段式 GBNF 格式約束）
+- `src/lib/context-budget.mjs` — structured vs free-form token 差異統計
+- `config/agents/smart-mcp.md` — 加入 structured thinking 使用時機
+- `tests/thinking.test.mjs` — structured mode 格式驗證 + token 節省驗證，全部通過
+
+## Phase 2：MCTS Tool Planning — 蒙地卡羅樹搜尋工具規劃 ✅
 
 > 參考：ToolTree (ICLR 2026) — 雙回饋 MCTS + 雙向剪枝
 > 核心洞察：目前 tool-strategy 是靜態正則匹配，無法處理複雜 multi-step 任務的工具選擇。
@@ -102,7 +195,7 @@ Phase 16 改為：
 目前 tool-strategy：
   任務 → 正則匹配 → 靜態工具鏈 → 執行
 
-Phase 17 改為：
+Phase 2 改為：
   任務 →
     Selection → 選最有潛力的工具節點
     Pre-Evaluation → 快速預估工具適用性（schema/slot 檢查）
@@ -143,7 +236,7 @@ Phase 17 改為：
 
 ---
 
-## Phase 18：Speculative Tool Pre-fetch — 推測性工具預取
+## Phase 3：Speculative Tool Pre-fetch — 推測性工具預取 ✅
 
 > 參考：naimengye/speculative-action
 > 核心洞察：LLM 呼叫工具是序列化的（call → wait → result → next call）。
@@ -156,7 +249,7 @@ Phase 17 改為：
   LLM → smart_grep("error") → wait → result
   LLM → smart_lsp({operation:"hover", ...}) → wait → result
 
-Phase 18 改為：
+Phase 3 改為：
   LLM → smart_grep("error")
        → server 同時 pre-fetch smart_lsp hover（推測 LLM 下一步會查型別）
        → 如果 LLM 真的呼叫 smart_lsp → 直接回傳 cached result（0ms）
@@ -190,10 +283,16 @@ Phase 18 改為：
 | 平均 tool call round-trip | 3-5 輪 | 2-3 輪（pre-fetch hit 省 1-2 輪） |
 | Cache hit rate | — | 預估 40-60% |
 | Token 成本 | 基準 | 無增加（pre-fetch 結果不進 context 除非命中） |
+### 實作摘要
+
+- `src/lib/prefetch-engine.mjs` — Pre-fetch 規則引擎（5 條靜態規則 + TTL 5s in-memory cache）
+- `src/server/index.mjs` — invokeTool 後 fire-and-forget pre-fetch + invokeTool 前 cache hit 檢查
+- `tests/prefetch.test.mjs` — cache hit/miss/expiry 驗證，全部通過
 
 ---
+---
 
-## Phase 19：Cross-Agent Shared Memory — 跨 Agent 記憶共享
+## Phase 4：Cross-Agent Shared Memory — 跨 Agent 記憶共享 ✅
 
 > 參考：Continuum (redstone-md)、mcp-agora
 > 核心洞察：目前 memory_store 是單一 agent 的。但使用者可能在 Claude Code、OpenCode、Codex 之間切換。
@@ -206,7 +305,7 @@ Phase 18 改為：
   Claude Code session → memory_store → ~/.smart/memory/memory.db
   OpenCode session   → memory_store → ~/.smart/memory/memory.db（同一 DB，但無 agent 標記）
 
-Phase 19 改為：
+Phase 4 改為：
   memory_store 新增 agent_id 欄位
   → Claude Code 存的記憶標記 agent_id: "claude-code"
   → OpenCode 存的記憶標記 agent_id: "opencode"
@@ -232,9 +331,16 @@ Phase 19 改為：
 | 新 agent 冷啟動 | 從零開始 | 立即受益於其他 agent 的學習 |
 | 重複錯誤率 | 中 | 低（跨 agent 共享 fix） |
 
+### 實作摘要
+
+- `src/lib/memory-db.mjs` — schema 擴充：memory_entries 表新增 agent_id 欄位 + searchHybrid 支援 agent_id 過濾
+- `src/plugins/standard/memory-store.mjs` — 接受 agent_id 參數，自動偵測來源 agent
+- `config/agents/smart-mcp.md` — 跨 agent 記憶使用說明
+- `tests/memory-db.test.mjs` — agent_id 寫入/查詢/過濾驗證，全部通過
+
 ---
 
-## Phase 20：Execution-Grounded Verification — 執行驗證的程式碼生成 ✅
+## Phase 5：Execution-Grounded Verification — 執行驗證的程式碼生成 ✅
 
 > 參考：IBM/verified-code-cot
 > 核心洞察：目前 smart_exec 可以執行 code，但沒有自動驗證 code generation 的結果。
@@ -247,7 +353,7 @@ Phase 19 改為：
 目前：
   LLM 產生 code → 回傳給使用者（可能無法執行）
 
-Phase 20 改為：
+Phase 5 改為：
   LLM 產生 code → smart_exec 在 sandbox 執行 → 驗證 exit code + output
     → 成功 → 回傳 code + 執行結果
     → 失敗 → 回傳 code + 錯誤訊息，LLM 自動修正（最多 1 輪）
@@ -282,30 +388,30 @@ Phase 20 改為：
 
 | 優先 | Phase | 名稱 | 難度 | 影響 | 估時 |
 |:----:|-------|------|:----:|:----:|:----:|
-| 🥇 | **16** | Structured Thinking (Grammar-Constrained CoT) | 🟡 中 | 🔥 高（省 50-70% 思考 token） | ✅ 完成 (2026-06-13) |
-| 🥇 | **18** | Speculative Tool Pre-fetch | 🟢 低 | 🔥 高（省 1-2 輪 round-trip） | ✅ 完成 (2026-06-13) |
-| 🥇 | **17** | MCTS Tool Planning | 🔴 高 | 🔥 高（複雜任務工具選擇準確率 ~85%+） | ✅ 完成 (2026-06-13) |
-| 🥈 | **19** | Cross-Agent Shared Memory | 🟢 低 | 🟡 中（跨 agent 學習） | ✅ 完成 (2026-06-13) |
-| 🥈 | **20** | Execution-Grounded Verification | 🟡 中 | 🟡 中（code 品質提升，可執行率 ~95%+） | ✅ 完成 (2026-06-13) |
-| 🥇 | **21** | smart_read — 漸進式檔案讀取 | 🟢 低 | 🔥 高（省 60-80% read token） | ✅ 完成 (2026-06-13) |
-| 🥈 | **22** | smart_edit_ast — AST 感知編輯 | 🟢 低 | 🟡 中（更精確的編輯，減少編輯錯誤） | ✅ 完成 (2026-06-13) |
-| 🥇 | **23** | smart_read 強化 — auto/range/batch/compact | 🟢 低 | 🔥 高（auto預設省token、range精準讀取、batch批量） | ✅ 完成 (2026-06-13) |
-| 🥇 | **24** | Session Cache + Explain + Project Map | 🟢 低 | 🔥 高（explain一次取代三次呼叫、cache省重讀token、project一覽專案符號） | ✅ 完成 (2026-06-13) |
+| 🥇 | **1** | Structured Thinking (Grammar-Constrained CoT) | 🟡 中 | 🔥 高（省 50-70% 思考 token） | ✅ 完成 (2026-06-13) |
+| 🥇 | **3** | Speculative Tool Pre-fetch | 🟢 低 | 🔥 高（省 1-2 輪 round-trip） | ✅ 完成 (2026-06-13) |
+| 🥇 | **2** | MCTS Tool Planning | 🔴 高 | 🔥 高（複雜任務工具選擇準確率 ~85%+） | ✅ 完成 (2026-06-13) |
+| 🥈 | **4** | Cross-Agent Shared Memory | 🟢 低 | 🟡 中（跨 agent 學習） | ✅ 完成 (2026-06-13) |
+| 🥈 | **5** | Execution-Grounded Verification | 🟡 中 | 🟡 中（code 品質提升，可執行率 ~95%+） | ✅ 完成 (2026-06-13) |
+| 🥇 | **6** | smart_read — 漸進式檔案讀取 | 🟢 低 | 🔥 高（省 60-80% read token） | ✅ 完成 (2026-06-13) |
+| 🥈 | **7** | smart_fast_apply（前身 smart_edit_ast）| 🟢 低 | 🟡 中（更精確的編輯，減少編輯錯誤） | ✅ 完成 (2026-06-13) |
+| 🥇 | **8** | smart_read 強化 — auto/range/batch/compact | 🟢 低 | 🔥 高（auto預設省token、range精準讀取、batch批量） | ✅ 完成 (2026-06-13) |
+| 🥇 | **9** | Session Cache + Explain + Project Map | 🟢 低 | 🔥 高（explain一次取代三次呼叫、cache省重讀token、project一覽專案符號） | ✅ 完成 (2026-06-13) |
 
 ## 里程碑
 
 | 里程碑 | 內容 | 預計日期 |
 |--------|------|---------|
-| M1-M5 | Phase 16-20 完成 | ✅ 2026-06-13 |
-| M6 | Phase 21 (smart_read) 完成 | ✅ 2026-06-13 |
-| M7 | Phase 22 (smart_edit_ast) 完成 | ✅ 2026-06-13 |
-| M8 | Phase 23 (smart_read 強化) 完成 | ✅ 2026-06-13 |
-| M9 | Phase 24 (Session Cache + Explain + Project Map) 完成 | ✅ 2026-06-13 |
+| M1-M5 | Phase 1-5 完成 | ✅ 2026-06-13 |
+| M6 | Phase 6 (smart_read) 完成 | ✅ 2026-06-13 |
+| M7 | Phase 7 (smart_fast_apply，前身 smart_edit_ast) 完成 | ✅ 2026-06-13 |
+| M8 | Phase 8 (smart_read 強化) 完成 | ✅ 2026-06-13 |
+| M9 | Phase 9 (Session Cache + Explain + Project Map) 完成 | ✅ 2026-06-13 |
 | M10 | 全量 regression + 效能 benchmark | ✅ 2026-06-13 |
 
 ---
 
-## Phase 21：smart_read — 漸進式檔案讀取 ✅
+## Phase 6：smart_read — 漸進式檔案讀取 ✅
 
 > 參考：Arrayo/smart-context-mcp（90% token 省採用 outline/signatures/symbol/full 四層壓縮）
 > 核心洞察：LLM 讀檔案時 80% 的情況只需要結構或特定函式內容，不需要整份檔案。
@@ -320,7 +426,7 @@ Phase 20 改為：
   → 回傳整份檔案（可能 500+ lines）
   → LLM 只看其中某個函式（浪費 90% token）
 
-Phase 21 smart_read 改為：
+Phase 6 smart_read 改為：
   LLM：「smart_read({file: "src/auth.ts", mode:"outline"})」
   → 回傳檔案結構（5-10 lines summary of functions/classes）
   
@@ -365,7 +471,7 @@ Phase 21 smart_read 改為：
 
 ---
 
-## Phase 22：smart_edit_ast — AST 感知編輯 ✅
+## Phase 7：smart_fast_apply（前身 smart_edit_ast）✅
 
 > 參考：Zenith-MCP（AST-based editing with content-match / block-boundary / symbol-edit 三模式）
 > 核心洞察：傳統字串取代編輯（smart_edit）無法感知程式碼結構。AST 感知編輯可以：
@@ -381,7 +487,7 @@ Phase 21 smart_read 改為：
   { oldString: "function foo()", newString: "function bar()" }
   → 只能做 exact string match，無法感知結構
 
-Phase 22 smart_edit_ast 改為：
+Phase 7 smart_fast_apply 改為：
   { mode: "content-match", match: "function authenticate", replace: "async function authenticate" }
     → 上下文容錯取代（trim-tolerant） 
   
@@ -398,7 +504,18 @@ Phase 22 smart_edit_ast 改為：
 |---|------|------|------|
 | 1 | content-match mode | `src/plugins/standard/smart-edit-ast.mjs` | trim-tolerant 匹配 + context 顯示 |
 | 2 | block-boundary mode | `src/plugins/standard/smart-edit-ast.mjs` | insert-before/insert-after/replace/delete |
-| 3 | symbol-edit mode | `src/plugins/standard/smart-edit-ast.mjs` | 結合 smart_read extractSymbol 定位 + append/prepend/replace-body/delete |
+### 實作摘要
+
+> **演化註記**：此 Phase 原名 `smart_edit_ast`，AST 感知編輯引擎最初設計為獨立工具。後被吸收進 `smart_fast_apply`（統一編輯工具），其 AST 能力以 `block-diff` format + symbol-aware editing 的形式存在於 `src/lib/code-ast.mjs`、`src/lib/ast-engine.mjs`、`src/plugins/standard/fast-apply.mjs` 中。
+
+- `src/plugins/standard/smart-edit-ast.mjs`（原始）→ 功能合併至 `src/plugins/standard/fast-apply.mjs`
+- `src/lib/code-ast.mjs` — AST 解析引擎（language detection / tree-sitter wrapper）
+- `src/lib/ast-engine.mjs` — block-diff / symbol-edit / content-match 三模式
+- 6 級 fuzzy match（L1 exact → L6 gap-tolerant subsequence）
+- 支援 10 種輸入格式（search-replace / unified-diff / lazy / hashline / block-diff / sed / multi-hunk / batch 等）
+- 預設 dry-run + undo snapshot + atomic multi-file
+
+---
 | 4 | Simple diff | `src/plugins/standard/smart-edit-ast.mjs` | 編輯前後 diff 預覽 |
 | 5 | Dry-run | `src/plugins/standard/smart-edit-ast.mjs` | 預設 dry-run，apply:true 才寫入 |
 | 6 | Agent config | `config/agents/smart-mcp.md` | Layer 2 sub-tool，透過 ssr() 存取 |
@@ -414,7 +531,7 @@ Phase 22 smart_edit_ast 改為：
 
 ---
 
-## Phase 23：smart_read 強化 ✅
+## Phase 8：smart_read 強化 ✅
 
 > 基於競爭品研究（Arrayo/smart-context-mcp, rjkaes/trueline-mcp, breca/codemap, cortex-works）
 > 讓 smart_read 比原生 read 更強大、更有效率
@@ -453,7 +570,7 @@ Phase 22 smart_edit_ast 改為：
 
 ---
 
-## Phase 24：Session Memory Cache + Explain + Project Map ✅
+## Phase 9：Session Cache + Explain + Project Map ✅
 
 > 參考：Continuum（session cache）、cortex-works（漸進揭露）
 > 目標：同一 session 內不重讀未修改檔案（Cache HIT 直接回傳），新增 explain 模式（符號 + imports + callers 一次取得），新增 project 模式（專案符號地圖 <500 tokens）。
@@ -494,12 +611,12 @@ Phase 22 smart_edit_ast 改為：
 
 ---
 
-## Phase 25：Tool Transition Learning — 工具轉移學習 ✅
+## Phase 10：Tool Transition Learning — 工具轉移學習 ✅
 
 > 參考：AutoTool（Learning to Route Tools）— 觀察工具呼叫序列，學習工具間的轉移模式
 > 核心洞察：LLM 使用工具有固定序列模式（如 grep→lsp hover→fast_apply→test）。
 > 目前 prefetch-engine 的 5 條規則是硬編碼的，無法適應實際使用模式。
-> Phase 25 透過 SQLite 記錄工具轉移統計，讓 prefetch 和路由建議從數據中學習。
+> Phase 10 透過 SQLite 記錄工具轉移統計，讓 prefetch 和路由建議從數據中學習。
 > **完成日期：2026-06-21**
 
 ### 設計
@@ -508,7 +625,7 @@ Phase 22 smart_edit_ast 改為：
 目前：
   5 條硬編碼 pre-fetch 規則（維護者必須手動更新）
 
-Phase 25 改為：
+Phase 10 改為：
   工具 A 執行後 → 記錄工具 A → 工具 B 的轉移
   → 累積統計：from_tool × to_tool × success_count × avg_duration
   → prefetch-engine 查詢 DB：工具 A 後最可能用什麼？前 3 名
@@ -540,11 +657,11 @@ Phase 25 改為：
 
 ---
 
-## Phase 26：Tool Selection Feedback — 工具選擇回饋 ✅
+## Phase 11：Tool Selection Feedback — 工具選擇回饋 ✅
 
 > 參考：JTPRO（Just-in-Time Prompt Routing）— 根據實際使用結果回饋調整路由策略
 > 核心洞察：tool-strategy 的 12 條靜態規則永遠不會知道自己選對還是選錯。
-> Phase 26 加入回饋迴路：推薦工具 → LLM 實際選擇 → 比較 → 調整。
+> Phase 11 加入回饋迴路：推薦工具 → LLM 實際選擇 → 比較 → 調整。
 > **完成日期：2026-06-21**
 
 ### 設計
@@ -553,7 +670,7 @@ Phase 25 改為：
 目前：
   任務描述 → 正則匹配 12 條規則 → 靜態推薦（永不修正）
 
-Phase 26 改為：
+Phase 11 改為：
   任務描述 → 正則匹配 → 推薦工具
   → LLM 實際呼叫的工具（由 server 記錄）
   → 對比推薦 vs 實際
@@ -585,7 +702,7 @@ Phase 26 改為：
 
 ---
 
-## Phase 27：Semantic Cache Routing — 語意快取路由 ✅
+## Phase 12：Semantic Cache Routing — 語意快取路由 ✅
 
 > 參考：semantic-cache（Embedding-based caching for LLM routing decisions）
 > 核心洞察：相同或類似的任務目標通常需要相同的工具鏈。
@@ -599,7 +716,7 @@ Phase 26 改為：
   每次任務 → 正則匹配（O(n) 掃描 12 條規則）
   → 每次匹配結果相同（無記憶）
 
-Phase 27 改為：
+Phase 12 改為：
   新任務 →
     1. 產生任務目標 embedding（384-dim）
     2. 查詢 semantic_cache 表（sqlite-vec ANN）：找最相似 past goal
@@ -628,8 +745,15 @@ Phase 27 改為：
 | 任務路由延遲 | O(n) pattern match | O(1) cache hit（相似度 > 0.85） |
 | 冷啟動 | 無歷史 | 5-10 次使用後開始有 cache hit |
 | 重複任務處理 | 每次都重新匹配 | 命中後直接回傳（省 100% pattern match token） |
-| 長期準確率 | 靜態 | 隨 cache 累積持續提升 |
+
 | 多步快取 | 僅單一 goal→chain | 自動累積 3+ 連續呼叫為 chain |
+
+### 實作摘要
+
+- `src/lib/memory-db.mjs` — `semantic_cache` 表 + cacheGoal/searchCache/updateCacheStats CRUD + #hashEmbed 384-dim 三重 seed embedding
+- `src/agent/tool-strategy.mjs` — recommendTools 整合語意快取（hash→embedding→regex 回退鏈）
+- `src/server/index.mjs` — 工具鏈自動快取 hook + multi-step chain 累積
+- `tests/semantic-cache.test.mjs` — 8 項：快取/命中/未命中/auto-embedding/空字串邊界，全部通過
 
 ---
 
@@ -637,44 +761,40 @@ Phase 27 改為：
 
 | 優先 | Phase | 名稱 | 難度 | 影響 | 估時 |
 |:----:|-------|------|:----:|:----:|:----:|
-| 🥇 | **16** | Structured Thinking (Grammar-Constrained CoT) | 🟡 中 | 🔥 高 | ✅ 完成 |
-| 🥇 | **17** | MCTS Tool Planning | 🔴 高 | 🔥 高 | ✅ 完成 |
-| 🥇 | **18** | Speculative Tool Pre-fetch | 🟢 低 | 🔥 高 | ✅ 完成 |
-| 🥈 | **19** | Cross-Agent Shared Memory | 🟢 低 | 🟡 中 | ✅ 完成 |
-| 🥈 | **20** | Execution-Grounded Verification | 🟡 中 | 🟡 中 | ✅ 完成 |
-| 🥇 | **21** | smart_read — 漸進式檔案讀取 | 🟢 低 | 🔥 高 | ✅ 完成 |
-| 🥈 | **22** | smart_edit_ast — AST 感知編輯 | 🟢 低 | 🟡 中 | ✅ 完成 |
-| 🥇 | **23** | smart_read 強化 | 🟢 低 | 🔥 高 | ✅ 完成 |
-| 🥇 | **24** | Session Cache + Explain + Project Map | 🟢 低 | 🔥 高 | ✅ 完成 |
-| 🥇 | **25** | Tool Transition Learning | 🟡 中 | 🔥 高（自適應 prefetch） | ✅ 完成 (2026-06-21) |
-| 🥇 | **26** | Tool Selection Feedback | 🟡 中 | 🔥 高（自適應路由） | ✅ 完成 (2026-06-21) |
-| 🥈 | **27** | Semantic Cache Routing | 🔴 高 | 🟡 中（長期累積效益） | ✅ 完成 (2026-06-21) |
-| 🔴 | **28** | Semantic Tool Router（embedding 語意匹配） | 🟡 中 | 🔥 高（推薦準確率 +30-50%） | 3-4h |
-| 🔴 | **29** | Self-Reflection & Adaptive Learning | 🟡 中 | 🔥 高（錯誤重複率 -50%） | 4-5h |
-| 🔴 | **30** | Smart Output Management（截斷+壓縮+streaming） | 🟡 中 | 🔥 高（token -15-25%） | 3-4h |
-| 🟡 | **31** | Parallel Execution & Pre-Indexing | 🟡 中 | 🔥 高（速度 2-3x） | 4-5h |
-| 🟡 | **32** | Multi-Agent Collaboration Enhancement | 🟡 中 | 🟡 中（跨 agent 共享） | 3-4h |
-| 🟢 | **33** | Skill Auto-Generation & Knowledge Graph | 🔴 高 | 🟡 中（長期累積） | 5-6h |
+| 🥇 | **10** | Tool Transition Learning | 🟡 中 | 🔥 高（自適應 prefetch） | ✅ 完成 (2026-06-21) |
+| 🥇 | **11** | Tool Selection Feedback | 🟡 中 | 🔥 高（自適應路由） | ✅ 完成 (2026-06-21) |
+| 🥈 | **12** | Semantic Cache Routing | 🔴 高 | 🟡 中（長期累積效益） | ✅ 完成 (2026-06-21) |
+| 🔴 | **19** | Server 重構 — 單體拆分 | 🟡 中 | 🔥 高（除錯與開發速度） | 4-5h |
+| 🔴 | **20** | README 工具清單同步 | 🟢 低 | 🟡 中（使用者知道有什麼可用） | 0.5h |
+| 🔴 | **13** | Semantic Tool Router（embedding 語意匹配） | 🟡 中 | 🔥 高（推薦準確率 +30-50%） | 3-4h |
+| 🔴 | **14** | Self-Reflection & Adaptive Learning | 🟡 中 | 🔥 高（錯誤重複率 -50%） | 4-5h |
+| 🔴 | **15** | Smart Output Management（截斷+壓縮+streaming） | 🟡 中 | 🔥 高（token -15-25%） | 3-4h |
+| 🟡 | **16** | Parallel Execution & Pre-Indexing | 🟡 中 | 🔥 高（速度 2-3x） | 4-5h |
+| 🟡 | **17** | Multi-Agent Collaboration Enhancement | 🟡 中 | 🟡 中（跨 agent 共享） | 3-4h |
+| 🟢 | **18** | Skill Auto-Generation & Knowledge Graph | 🔴 高 | 🟡 中（長期累積） | 5-6h |
+
+> 詳細 Phase 1-9 優先級請見上方「優先級總覽」表格
 
 | 里程碑 | 內容 | 預計日期 |
 |--------|------|---------|
-| M1-M10 | Phase 16-24 完成 | ✅ 2026-06-13 |
-| M11 | Phase 25-27 完成 | ✅ 2026-06-21 |
-| M12 | Phase 25-27 Round 1 優化（tool-strategy 分數回饋、cacheGoal auto-embedding） | ✅ 2026-06-21 |
-| M13 | Phase 25-27 Round 2 優化（multi-step 鏈快取、feedback session_id） | ✅ 2026-06-21 |
-| M14 | Phase 25-27 Round 3 優化（#hashEmbed 改良、NaN guard、全邊界測試） | ✅ 2026-06-21 |
+| M1-M10 | Phase 1-9 完成 | ✅ 2026-06-13 |
+| M11 | Phase 10-12 完成 | ✅ 2026-06-21 |
+| M12 | Phase 10-12 Round 1 優化（tool-strategy 分數回饋、cacheGoal auto-embedding） | ✅ 2026-06-21 |
+| M13 | Phase 10-12 Round 2 優化（multi-step 鏈快取、feedback session_id） | ✅ 2026-06-21 |
+| M14 | Phase 10-12 Round 3 優化（#hashEmbed 改良、NaN guard、全邊界測試） | ✅ 2026-06-21 |
 | ⋮ | ⋮ | ⋮ |
-| M15 | Phase 28-30 (P0：語意路由+自我反思+輸出管理) 完成 | 📅 下期 |
-| M16 | Phase 31-32 (P1：平行執行+多Agent協作) 完成 | 📅 下期 |
-| M17 | Phase 33 (P2：Skill自動生成+知識圖譜) 完成 | 📅 下下期 |
-| M18 | Phase 28-33 全量 regression | 📅 下下期 |
+| M15 | Phase 19 (Server 重構) + Phase 20 (README 同步) 完成 | 📅 本期 |
+| M16 | Phase 13-15 (P0：語意路由+自我反思+輸出管理) 完成 | 📅 下期 |
+| M17 | Phase 16-17 (P1：平行執行+多Agent協作) 完成 | 📅 下期 |
+| M18 | Phase 18 (P2：Skill自動生成+知識圖譜) 完成 | 📅 下下期 |
+| M19 | Phase 13-20 全量 regression | 📅 下下期 |
 
-> 基於 2026-06-14 競爭品研究與前沿技術分析，Phase 28-33 聚焦三大方向：
+> 基於 2026-06-14 競爭品研究與前沿技術分析，Phase 13-20 聚焦三大方向：
 > **效率**（推測預取、平行執行、token 壓縮）、**智能**（語意匹配、自我反思、adaptive routing）、**協作**（多 agent 記憶共享、role specialization、知識圖譜）
 
 ---
 
-## Phase 28：Semantic Tool Router — Embedding 語意工具匹配
+## Phase 13：Semantic Tool Router — Embedding 語意工具匹配
 
 > 參考：OpenAI Agents SDK（semantic tool matching）、Cursor（relevance-based context）
 > 核心洞察：目前 `tool-strategy.mjs` 用 12 條 regex 規則匹配工具，無法處理模糊/新穎的任務描述。
@@ -686,7 +806,7 @@ Phase 27 改為：
 目前 tool-strategy：
   任務描述 → regex 匹配 12 條規則 → 靜態推薦
 
-Phase 28 改為：
+Phase 13 改為：
   任務描述 →
     1. Regex 快速匹配（現有，作為 fallback）
     2. TF-IDF 語意相似度計算（對工具 description + inputSchema）
@@ -717,7 +837,7 @@ Phase 28 改為：
 
 ---
 
-## Phase 29：Self-Reflection & Adaptive Learning — 自我反思與自適應學習
+## Phase 14：Self-Reflection & Adaptive Learning — 自我反思與自適應學習
 
 > 參考：Reflexion Pattern（agent 自我反思）、OpenAI Agents SDK（tool guardrails）
 > 核心洞察：目前 agent 完成任務後不會反思「哪些步驟多餘？哪個工具效果差？」。
@@ -729,7 +849,7 @@ Phase 28 改為：
 目前：
   任務 → 執行 → 完成（無反思）
 
-Phase 29 改為：
+Phase 14 改為：
   任務 → 執行 →
     Post-Task Reflection Hook：
       1. 分析 tool call history：哪些工具被呼叫但結果未使用？
@@ -765,7 +885,7 @@ Phase 29 改為：
 
 ---
 
-## Phase 30：Smart Output Management — 智能輸出管理
+## Phase 15：Smart Output Management — 智能輸出管理
 
 > 參考：Sophon（21 種 domain filter）、Anthropic prompt caching、structured-cot（22× token 壓縮）
 > 核心洞察：目前工具輸出無自動截斷，大輸出直接塞進 context。Context budget 警告頻繁但無自動節流。
@@ -777,7 +897,7 @@ Phase 29 改為：
 目前：
   工具輸出 → 直接回傳（可能 50K+ chars）→ context budget 爆表
 
-Phase 30 改為：
+Phase 15 改為：
   工具輸出 →
     1. 智能截斷：超過 threshold 自動摘要 + "[展開完整輸出]" 連結
     2. Caveman 通用壓縮：所有工具輸出可選 compress:"caveman"（省 20-40%）
@@ -813,7 +933,7 @@ Phase 30 改為：
 
 ---
 
-## Phase 31：Parallel Execution & Pre-Indexing — 平行執行與預索引
+## Phase 16：Parallel Execution & Pre-Indexing — 平行執行與預索引
 
 > 參考：Anthropic parallel tool calling、Cursor codebase indexing
 > 核心洞察：目前 workflow dispatch 是 sequential 執行，無法利用平行化加速。
@@ -826,7 +946,7 @@ smart_learn 是 on-demand 分析，非 pre-indexed，首次使用慢。
   workflow dispatch → tool A → tool B → tool C（sequential）
   smart_learn → 每次 on-demand 分析（慢）
 
-Phase 31 改為：
+Phase 16 改為：
   workflow dispatch →
     group A: [tool A, tool B]（平行，無相依）
     group B: [tool C]（相依於 A 結果）
@@ -859,10 +979,10 @@ Phase 31 改為：
 
 ---
 
-## Phase 32：Multi-Agent Collaboration Enhancement — 多 Agent 協作強化
+## Phase 17：Multi-Agent Collaboration Enhancement — 多 Agent 協作強化
 
 > 參考：Continuum（跨 agent daemon + AST KG）、mcp-agora（ChromaDB 語義路由）
-> 核心洞察：Phase 19 已加入 agent_id 標記，但缺少真正的共享記憶池與 role-based 工具權限。
+> 核心洞察：Phase 4 已加入 agent_id 標記，但缺少真正的共享記憶池與 role-based 工具權限。
 
 ### 設計
 
@@ -871,7 +991,7 @@ Phase 31 改為：
   memory_store → 單一 agent 記憶（有 agent_id 標記但無共享查詢）
   subagent → 相同工具權限（無 allowlist/denylist）
 
-Phase 32 改為：
+Phase 17 改為：
   Shared Memory Pool：
     memory_store search → 可選 scope:"all"（跨 agent）或 scope:"self"
     → 跨 agent 搜尋時顯示來源 agent + 信心分數
@@ -907,7 +1027,7 @@ Phase 32 改為：
 
 ---
 
-## Phase 33：Skill Auto-Generation & Knowledge Graph — 技能自動生成與知識圖譜
+## Phase 18：Skill Auto-Generation & Knowledge Graph — 技能自動生成與知識圖譜
 
 > 參考：self-evolving-codegen（tester agent 自我進化）、Continuum（AST 知識圖譜）
 > 核心洞察：目前 skill 需手動編寫。累積足夠的成功 pattern 後應自動生成。
@@ -950,14 +1070,175 @@ Knowledge Graph：
 | 知識結構 | 平面 memory entries | 結構化 entity-relation graph |
 | 跨任務理解 | 無（孤立記憶） | KG 語意查詢 |
 
-## 不上什麼（競爭品分析後的取捨）
+---
 
-| 項目 | 競爭品有 | 不做的原因 |
-|------|---------|-----------|
-| MCP Proxy 層工具路由 | smart-mcp, MCPlex, Tool Compass | Smart MCP 已有 hybrid_router + Layer 1/2 分層 + Phase 28 semantic router |
-| RBAC + Audit + Dashboard | MCPlex | 單開發者不需要企業級功能（Phase 32 role-based access 已足夠） |
-| 跨 agent daemon | Continuum | 架構複雜度高，Phase 19 + Phase 32 共享記憶池已足夠 |
-| Rust 重寫 | MCPlex, agent-context-mcp | Node.js 生態整合更好，效能瓶頸不在語言 |
-| 外部 LLM API 依賴 | ReasonKit Think | Smart MCP 是 MCP server，不應依賴外部 API |
-| Multi-Agent Debate | — | Beam Search / Forest-of-Thought 已達類似效果 |
-| DSPy Prompt Optimization | — | Skill-level Learning (skill_patch) + Phase 33 auto-gen 為輕量替代 |
+## Phase 19：Server 重構 — 單體拆分（Monolith Decomposition）
+
+> 參考：Node.js 模組化模式、職責分離原則（Separation of Concerns）
+> 核心洞察：`src/server/index.mjs` 目前 3,705 行，一檔包含 11 項職責：
+> JSON-RPC protocol、tool dispatch、error recovery、context management、memory injection、router config、concurrency gate、cross-session memory bridge、health check、stats tracking、retry logic。
+> 除錯時需在數千行中往返跳轉，開發效率低落。
+
+### 設計
+
+```
+目前：
+  src/server/index.mjs（3,705 行）
+    ├─ JSON-RPC 2.0 handler（~450 行）
+    ├─ invokeTool + dispatch（~400 行）
+    ├─ handleRequest + handleSmartContext（~800 行）
+    ├─ builtin hooks（~160 行）
+    ├─ error fixes lookup table（~150 行）
+    ├─ session checkpoint（~50 行）
+    ├─ config/CLI/args（~70 行）
+    ├─ stats tracking（~50 行）
+    ├─ health check（~30 行）
+    ├─ auto-classifier（~80 行）
+    └─ main loop + respond（~100 行）
+
+Phase 19 改為（職責拆分）：
+  src/server/
+    ├─ index.mjs      → entry point，僅 ~200 行（import + wire）
+    ├─ config.mjs     → CLI args、env、~/.smart/config.json
+    ├─ session.mjs    → checkpoint、cross-session bridge、auto-inject memory
+    ├─ hooks.mjs      → initBuiltinHooks、所有 post-tool hooks
+    ├─ dispatch.mjs   → invokeTool、retry、fallback、pre-check、gated execution
+    ├─ protocol.mjs   → JSON-RPC 2.0：writeMsg、respond、handleRequest、handleSmartContext
+    ├─ error-fixes.mjs → ERROR_FIXES table + getErrorFix
+    └─ stats.mjs      → stats object + recordStats + getStatsSummary
+          loader.mjs  → 已存在（plugin loader，130 行）
+```
+
+### 實作範圍
+
+| # | 項目 | 新檔案 | 原檔案行數範圍 | 說明 |
+|---|------|--------|---------------|------|
+| 1 | Entry point | `index.mjs` | 全部（縮減） | import + signal handler + main loop |
+| 2 | CLI/Config | `config.mjs` | 1-137, 624-664 | args、env、model size、config.json |
+| 3 | Session | `session.mjs` | 171-247 | checkpoint、cross-session bridge |
+| 4 | Builtin hooks | `hooks.mjs` | 462-618 | post-tool hooks、goal tracking |
+| 5 | Tool dispatch | `dispatch.mjs` | 1997-2515 | invokeTool、retry、fallback、preCheck、gated |
+| 6 | Protocol | `protocol.mjs` | 2556-3147, 3147-3681 | respond、handleRequest、handleSmartContext |
+| 7 | Error fixes | `error-fixes.mjs` | 721-873 | ERROR_FIXES table |
+| 8 | Stats | `stats.mjs` | 252-453 | stats、recordStats、getStatsSummary |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| 單檔行數 | 3,705 行 | ~200 行（entry point） |
+| 新增除錯 | 需看懂整檔 | 只看對應模組 |
+| 職責可見度 | 混合 11 項 | 8 檔各司其職 |
+| 重啟 server | 全重啟 | 僅重啟修改模組（hot reload 潛力） |
+
+
+
+
+---
+
+## Phase 20：README 工具清單同步
+
+> 核心洞察：README 入口檔 header 仍寫「5 native + 18 standard」（過時資料）。
+> 實際有 **15 core + 65 standard = 80 個工具**。使用者無從得知可用工具。
+
+### 設計
+
+```
+更新範圍：
+  docs/README.md：
+    ├─ 標題：從「5 個原生工具 + 18 個標準工具 = 23 工具」
+    │   改為「15 個直接工具 + 65 個子工具 = 80 工具」
+    ├─ 工具分類表格：完整列出所有 15 個 Direct tool
+    ├─ Sub-tool 分類表格：完整列出所有 65 個 sub-tool（按分類）
+    ├─ 移除「Prerequisites」中過時的安裝說明（已由 install.mjs 處理）
+    └─ 移除「Roadmap」中已完成的 Phase（保持精簡）
+```
+
+### 實作範圍
+
+| # | 項目 | 說明 |
+|---|------|------|
+| 1 | README header | 從 5+18 更新為 15+65 |
+| 2 | Direct tool table | 15 個 smart_* 工具清單 + 說明 |
+| 3 | Sub-tool table | 65 個工具按 13 分類排列 |
+| 4 | Remove outdated | Prerequisites / Roadmap 過時區塊 |
+| 5 | peer_review | 產出後請使用者 review 確認 |
+
+### 預期成效
+
+| 指標 | 改善前 | 改善後 |
+|------|--------|--------|
+| 工具數量正確性 | ❌ 5+18（嚴重過時） | ✅ 15+65（真實數據） |
+| 使用者可發現性 | 低（不知道 sub-tool 存在） | 高（完整目錄） |
+| 維護性 | 每次新增工具需手動更新 | 建立工具盤點自動化腳本 |
+
+
+## 不上什麼（競爭品分析後的取捨）
+---
+
+
+## 子系統計畫索引
+
+> 完整計畫文件已移至 `docs/plans/`。下表為各子系統快速一覽。
+
+| # | 子系統 | 狀態 | 檔案 | 依賴 | 說明 |
+|:-:|--------|:----:|------|------|------|
+| 1 | **Boulder** — 狀態持久化 | ✅ 已完成 | [`boulder`](docs/plans/boulder.md) | memory-db | SQLite 持久化層 + CLI + Agent Integration（CLI 889 lines、3 表 CRUD 完整） |
+| 2 | **CBM Integration** | ⬜ 全部待開始 | [`cbm-integration`](docs/plans/cbm-integration.md) | Smart MCP core | 158 語言 AST + Cypher 圖查詢 |
+| 3 | **Claude Features** | ✅ 已完成 | [`claude-features`](docs/plans/claude-features.md) | — | Hooks 系統 + Auto Mode |
+| 4 | **Design Capability** | 🟡 Ph2 🟡 Ph3 ⬜ | [`design-capability`](docs/plans/design-capability.md) | d2, wiki | Harness Engineering + Superpowers |
+| 5 | **Smart Glob** | ✅ Phase 1 完成（CLI 113 lines + Plugin 22 lines，工具已註冊）| [`smart-glob`](docs/plans/smart-glob.md) | ripgrep | ripgrep 增強的 glob 搜尋 |
+| 6 | **Three-Tier Architecture** | ⬜ 全部待開始 | [`three-tier-architecture`](docs/plans/three-tier-architecture.md) | Smart MCP core | L0/L1/L2 漸進式載入 |
+| 7 | **Cross-Session Memory** | ✅ Phase 3 完成（checkpoint CRUD 完整，memory-db 內） | [`cross-session-memory`](docs/plans/cross-session-memory.md) | memory-db | 記憶注入強化 + Session Checkpoint |
+| 8 | **Agent Configuration** — 洋蔥路由架構 | 🟡 活躍維護中 | [`smart-mcp.md`](config/agents/smart-mcp.md) | 所有 Phase | Agent 設定檔：Direct→Sub-tools→Router→Skills 四層路由、行為閘、工具優先級體系。每次 Phase 更新同步回饋 |
+| 9 | **Skills Ecosystem** — 24 個 Skill | 🟡 8 內建 ✅ / 16 companion ⬜ | [`README.md`](config/skills/README.md) | MCP core tools | 8 內建（crawl/debug/git/lang/refactor/report/security/test）+ 16 companion（LSP/天氣/股市/個人助理/會議/週報...） |
+| 10 | **Code Intelligence** — LSP + AST 分析 | ✅ 已完成 | `lsp-bridge`, `ast-engine`, import/call-graph, impact | MCP core | LSP 橋接（TS/Python/Rust/Swift/PHP）、AST 引擎、import/call-graph、impact analysis、naming、rename-safety |
+| 11 | **Search & Security** — 搜尋 + 安全檢驗 | ✅ 已完成 | `exa-search`, semantic-search, security-scan, hallucination-judge | MCP core, network | Exa 網路搜尋/爬取、語義搜尋（BM25+hybrid）、GitHub 搜尋、安全性掃描、幻覺檢測、程式碼驗證 |
+| 12 | **Infrastructure & Workflow** — 代理 + 自動化 | 🟡 核心完成 | `src/agent/`, git-*, workflow, compose, hooks, install | MCP core | Agent 層（tool-strategy/system-prompt）、Git 工具鏈、Workflow/Compose 引擎、Hooks/Auto-classifier/Output Optimizer/Context Budget/Install |
+
+### 相依圖
+
+```
+Boulder ─── memory-db
+CBM ─────── Smart MCP core
+Claude ──── (獨立，已完成)
+Design ──── d2 + wiki
+Smart Glob ─ ripgrep
+Three-Tier ─ Smart MCP core
+Memory ──── memory-db + SQLite
+Agent Config ─ 所有 Phase（雙向同步）
+Skills ── MCP core tools
+Code Intel ─ MCP core
+Search & Security ─ MCP core + network
+Infra/Workflow ─ MCP core
+```
+
+---
+
+## Phase 新舊編號對照表
+
+> 2026-06-21 為簡化路圖而重新編號：將 Phase 16-35 重新編號為 1-20。
+> 新編號反映實際完成順序與開發階段（核心基礎建設 → 學習與路由 → 進階）。
+
+| 新編號 | 舊編號 | 名稱 | 備註 |
+|:------:|:------:|------|------|
+| Phase 1 | Phase 16 | Structured Thinking — Grammar-Constrained CoT | ✅ 核心基礎建設 |
+| Phase 2 | Phase 17 | MCTS Tool Planning — 蒙地卡羅樹搜尋工具規劃 | ✅ 核心基礎建設 |
+| Phase 3 | Phase 18 | Speculative Tool Pre-fetch — 推測性工具預取 | ✅ 核心基礎建設 |
+| Phase 4 | Phase 19 | Cross-Agent Shared Memory — 跨 Agent 記憶共享 | ✅ 核心基礎建設 |
+| Phase 5 | Phase 20 | Execution-Grounded Verification — 執行驗證的程式碼生成 | ✅ 核心基礎建設 |
+| Phase 6 | Phase 21 | smart_read — 漸進式檔案讀取 | ✅ 核心基礎建設 |
+| Phase 7 | Phase 22 | smart_fast_apply（前身 smart_edit_ast） | ✅ 核心基礎建設（AST 能力已合併至 fast-apply） |
+| Phase 8 | Phase 23 | smart_read 強化 | ✅ 核心基礎建設 |
+| Phase 9 | Phase 24 | Session Cache + Explain + Project Map | ✅ 核心基礎建設 |
+| Phase 10 | Phase 25 | Tool Transition Learning — 工具轉移學習 | ✅ 學習與路由 |
+| Phase 11 | Phase 26 | Tool Selection Feedback — 工具選擇回饋 | ✅ 學習與路由 |
+| Phase 12 | Phase 27 | Semantic Cache Routing — 語意快取路由 | ✅ 學習與路由 |
+| Phase 13 | Phase 28 | Semantic Tool Router — Embedding 語意工具匹配 | ⬜ 進階 |
+| Phase 14 | Phase 29 | Self-Reflection & Adaptive Learning — 自我反思與自適應學習 | ⬜ 進階 |
+| Phase 15 | Phase 30 | Smart Output Management — 智能輸出管理 | ⬜ 進階 |
+| Phase 16 | Phase 31 | Parallel Execution & Pre-Indexing — 平行執行與預索引 | ⬜ 進階 |
+| Phase 17 | Phase 32 | Multi-Agent Collaboration Enhancement — 多 Agent 協作強化 | ⬜ 進階 |
+| Phase 18 | Phase 33 | Skill Auto-Generation & Knowledge Graph — 技能自動生成與知識圖譜 | ⬜ 進階 |
+| Phase 19 | Phase 34 | Server 重構 — 單體拆分 | ⬜ 本期 |
+| Phase 20 | Phase 35 | README 工具清單同步 | ⬜ 本期 |

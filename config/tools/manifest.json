@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-21T13:24:48.102Z",
+  "generatedAt": "2026-06-21T15:18:11.709Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -1022,6 +1022,19 @@
           "semanticWeight": {
             "type": "number",
             "description": "Custom semantic weight 0.0-1.0 (auto-detected from query type)"
+          },
+          "budget": {
+            "type": "number",
+            "description": "Token budget — greedily select top results to fit N tokens (L0/L1 compression)"
+          },
+          "compress": {
+            "type": "string",
+            "enum": [
+              "L0",
+              "L1",
+              "L2"
+            ],
+            "description": "Compression level: L0=signature only, L1=+context+scope, L2=full (default)"
           }
         },
         "required": [
@@ -1366,6 +1379,45 @@
           }
         },
         "required": []
+      }
+    },
+    {
+      "name": "deps",
+      "description": "Dependency audit tool — audit security, check outdated packages, analyze structure.\nCommands:\n  audit   — npm audit wrapper, returns vulnerability report with severity breakdown\n  outdated — npm outdated wrapper, lists out-of-date packages\n  analyze — reads package.json, reports dependency count and lock file size\nUse when: need to check for vulnerable deps, review outdated packages, understand dep structure.",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "audit",
+              "outdated",
+              "analyze"
+            ],
+            "description": "audit = security audit, outdated = outdated packages, analyze = dep structure"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: current working directory)"
+          }
+        },
+        "required": [
+          "command"
+        ]
       }
     },
     {
@@ -2392,7 +2444,7 @@
     },
     {
       "name": "smart_db",
-      "description": "Database query tools — read-only SQL access.\nOperations: introspect (schema), query (SELECT only).\nSupports SQLite (built-in) and PostgreSQL (optional pg npm).\nSafety: read-only, timeout 10s, row limit 1000, DDL/DML blocked.\nUse when: need to explore database schema, verify data, or answer data questions.",
+      "description": "Database tools — read, write, migrate, and diff.\nOperations:\n  introspect — show schema (tables, columns, types)\n  query     — run SELECT (read-only)\n  write     — INSERT a row (use data object, not raw SQL)\n  update    — UPDATE rows (use data + where objects)\n  delete    — DELETE rows (requires --confirm; use {} to delete all)\n  migrate   — manage schema migrations (create/up/down/status)\n  schema-diff — compare schemas between two databases\nSupports SQLite (built-in) and PostgreSQL (read-only ops only).\nWrite/migrate/diff operations: SQLite only (Phase 1).\nSafety: parameterized queries (SQL injection safe), --dry-run, --confirm for destructive ops.",
       "category": "standard",
       "domain": "general",
       "safetyLevel": "medium",
@@ -2414,17 +2466,68 @@
             "type": "string",
             "enum": [
               "introspect",
-              "query"
+              "query",
+              "write",
+              "update",
+              "delete",
+              "migrate",
+              "schema-diff"
             ],
-            "description": "introspect = show schema, query = run SELECT"
+            "description": "Operation to perform"
           },
           "connection": {
             "type": "string",
-            "description": "SQLite: path to .db file. PostgreSQL: postgresql: //<user>:<password>@<host>/<db>"
+            "description": "SQLite: path to .db file. PostgreSQL: postgresql://user:pass@host/db"
+          },
+          "table": {
+            "type": "string",
+            "description": "Table name (required for write/update/delete)"
+          },
+          "data": {
+            "type": "object",
+            "description": "Column-value pairs (required for write, for update)"
+          },
+          "where": {
+            "type": "object",
+            "description": "WHERE conditions as object, e.g. {id: 42} (required for update, for delete)"
+          },
+          "confirm": {
+            "type": "boolean",
+            "description": "Must be true for destructive operations (delete, migrate down)"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Preview changes without committing"
+          },
+          "command": {
+            "type": "string",
+            "enum": [
+              "create",
+              "up",
+              "down",
+              "status"
+            ],
+            "description": "Migration sub-command (used with operation:\"migrate\")"
+          },
+          "name": {
+            "type": "string",
+            "description": "Migration name (used with migrate:create)"
+          },
+          "steps": {
+            "type": "number",
+            "description": "Steps to roll back (used with migrate:down, default: 1)"
+          },
+          "migrationsDir": {
+            "type": "string",
+            "description": "Migrations directory (default: \"migrations\")"
+          },
+          "connection2": {
+            "type": "string",
+            "description": "Second database path (used with schema-diff)"
           },
           "sql": {
             "type": "string",
-            "description": "SQL query (SELECT only, required for query operation)"
+            "description": "SQL query (SELECT only, for query operation)"
           },
           "engine": {
             "type": "string",
@@ -3196,6 +3299,72 @@
             "description": "Max review comments per file (default: 5)"
           }
         }
+      }
+    },
+    {
+      "name": "smart_edit",
+      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
+      "category": "standard",
+      "domain": "edit",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "File path to edit (required)"
+          },
+          "oldString": {
+            "type": "string",
+            "description": "Text to find and replace (exact match by default, regex if regex=true)"
+          },
+          "newString": {
+            "type": "string",
+            "description": "Replacement text"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Multiple files to edit (alternative to file)"
+          },
+          "regex": {
+            "type": "boolean",
+            "description": "Use regex matching instead of exact (default: false)"
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Apply changes (default: false — dry run)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: current dir)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "description": "Output format (default: json — includes nextCommand)"
+          }
+        },
+        "required": [
+          "oldString",
+          "newString"
+        ]
       }
     },
     {
@@ -4692,11 +4861,11 @@
       }
     },
     {
-      "name": "smart_edit",
-      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
+      "name": "setup",
+      "description": "Project onboarding — detect project type and generate configuration.\nAnalyzes the project directory to determine language, framework, and conventions.\nOptionally generates a minimal opencode.json config for the project.\nUse when: entering a new project, setting up agent config for a project.",
       "category": "standard",
-      "domain": "edit",
-      "safetyLevel": "high",
+      "domain": "general",
+      "safetyLevel": "medium",
       "routingRules": {
         "autoRoute": true,
         "interceptorRequired": false,
@@ -4711,50 +4880,19 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "file": {
-            "type": "string",
-            "description": "File path to edit (required)"
-          },
-          "oldString": {
-            "type": "string",
-            "description": "Text to find and replace (exact match by default, regex if regex=true)"
-          },
-          "newString": {
-            "type": "string",
-            "description": "Replacement text"
-          },
-          "files": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Multiple files to edit (alternative to file)"
-          },
-          "regex": {
-            "type": "boolean",
-            "description": "Use regex matching instead of exact (default: false)"
-          },
-          "apply": {
-            "type": "boolean",
-            "description": "Apply changes (default: false — dry run)"
-          },
           "root": {
             "type": "string",
-            "description": "Project root (default: current dir)"
+            "description": "Project root directory (default: current working directory)"
           },
-          "format": {
-            "type": "string",
-            "enum": [
-              "json",
-              "text"
-            ],
-            "description": "Output format (default: json — includes nextCommand)"
+          "generate": {
+            "type": "boolean",
+            "description": "Actually write the setup config (default: false, preview only)"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Preview detected info without writing (default: true when generate is false)"
           }
-        },
-        "required": [
-          "oldString",
-          "newString"
-        ]
+        }
       }
     },
     {

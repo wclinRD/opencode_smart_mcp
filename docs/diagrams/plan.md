@@ -220,7 +220,7 @@ MCP Server
 |------|------|
 | **document-ingester** | 文件攝取（PDF/DOCX/XLSX/PPTX/HTML + OCR） |
 | **document-registry** | 文件註冊與索引 |
-| **db-query** | 資料庫查詢（SQLite/PostgreSQL 唯讀） |
+| **db-query** | 資料庫操作（SQLite 讀寫/遷移/比較；PostgreSQL 唯讀） |
 
 ### 關鍵依賴鏈
 

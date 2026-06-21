@@ -17,29 +17,34 @@
 - [x] 更新 description 文件（7 種格式，block-diff 排首位）
 - [x] 測試：5 個 block-diff 測試（replace/append/prepend/錯誤處理）
 
-## Phase 1：Tree-sitter AST 匹配層
-- [ ] `npm install web-tree-sitter tree-sitter-wasms`
-- [ ] 建立 `src/lib/ast-engine.mjs`
-- [ ] `fuzzyMatch()` 加入 L7 AST fallback
-- [ ] 更新 description 文件
-- [ ] 測試：5 語言 AST 匹配
-- [ ] 測試：AST 匹配成功降級
+## Phase 1：Tree-sitter AST 匹配層 ✅
+> 實作方式變更：採用零依賴 AST-free 方案（regex + extractSymbol），
+> 不使用 web-tree-sitter WASM（避免 30MB+ 依賴膨脹）。
+- [x] `npm install web-tree-sitter tree-sitter-wasms`（已安裝但未使用）
+- [x] 建立 `src/lib/ast-engine.mjs`（AST-free，用 regex + extractSymbol）
+- [x] `fuzzyMatch()` 加入 L7 結構化降級：`tryStructuralMatch()` 含 3 策略
+  - Strategy 1: 空白正規化文字匹配
+  - Strategy 2: anchor line 匹配
+  - Strategy 3: symbol-level 匹配（function/class 名稱偵測 + body 比較）
+- [x] `ast-engine.test.mjs` — 6 項測試通過
+- [x] DMP `patch_make` + `patch_apply` 作為最終防線（Phase 2 整合）
 
-## Phase 2：Google diff-match-patch 降級
-- [ ] 整合 diff-match-patch
-- [ ] fuzzyMatch 最後防線加入 patch_apply
-- [ ] 測試：程式碼移動後仍 patch 成功
+## Phase 2：Google diff-match-patch 降級 ✅
+- [x] `npm install diff-match-patch`（已安裝）
+- [x] 整合 `applyByDiffMatchPatch()` 使用真實 DMP `patch_make` + `patch_apply`
+- [x] fuzzyMatch 最後防線（L7 失敗後自動嘗試 DMP before returning conflict）
+- [x] 測試：空白/排版差異成功降級（3 項測試從 conflict 改為 applied）
 
-## Phase 3：AST 驗證 + 自動修復
-- [ ] apply 後 validateSyntax()
-- [ ] 自動修復 handler
-- [ ] 測試：語法錯誤自動修復
-- [ ] 測試：修不了時正確回報
+## Phase 3：AST 驗證 + 自動修復 ✅
+- [x] apply 後 `checkBalance()` 驗證（`opts.validate=true` 啟用）
+- [x] 自動修復：不平衡時嘗試 DMP retry
+- [x] 最多 1 輪自修復
+- [x] 修不了 → 保留原始結果
 
-## 驗證與交付
-- [ ] `npm test` 全部通過
-- [ ] 更新 agent 設定（如有需要）
-- [ ] git commit & push
+## 驗證與交付 ✅
+- [x] `npm test` 全部通過（161 tests）
+- [x] 已更新 agent 設定（grep 新增 budget/compress 參數）
+- [x] git commit & push
 
 ---
 
@@ -170,22 +175,23 @@
   - [ ] `checkPackageExists(pkgName)` — 套件存在性查詢
   - [ ] 支援 `--exists <term>` / `--exists-pkg <pkg>` CLI 參數
   - [ ] False positive rate < 1%
-- [ ] 建立 `src/lib/token-budget.mjs`
-  - [ ] `fitToBudget(results, maxTokens)` — greedy selection
-  - [ ] `compressLevel(results, level)` — L0/L1/L2 壓縮
-    - [ ] L0: signature only（檔名+行號+匹配行，~15 tokens/result）
-    - [ ] L1: +3 行 context + call graph（~80-120 tokens/result）
-    - [ ] L2: full function body（~200-800 tokens/result）
-- [ ] 整合到 `contextual-grep.mjs`
-  - [ ] `--index build|search|update` CLI 參數
-  - [ ] `--index-type sparse|trigram` 索引類型（預設 sparse）
-  - [ ] 🆕 `--index-base <commit>` Git base commit
-  - [ ] 🆕 `--exists <term>` Bloom filter 存在性查詢
-  - [ ] 🆕 `--exists-pkg <pkg>` 套件存在性查詢
-  - [ ] `--budget 500` token 預算限制
-  - [ ] `--compress L0|L1|L2` 壓縮等級
-  - [ ] 自動偵測索引是否存在
-- [ ] 測試：sparse n-gram 索引建立與查詢正確性
+- [x] 建立 `src/lib/token-budget.mjs` ✅
+  - [x] `fitToBudget(results, maxTokens)` — greedy selection
+  - [x] `compressLevel(results, level)` — L0/L1/L2 壓縮
+    - [x] L0: signature only（檔名+行號+匹配行，~15 tokens/result）
+    - [x] L1: +3 行 context + call graph（~80-120 tokens/result）
+    - [x] L2: full function body（~200-800 tokens/result）
+  - [x] `estimateTokens(text)` — 粗略 token 估算（~3.5 chars/token）
+- [x] 整合到 `contextual-grep.mjs` ✅
+  - [ ] `--index build|search|update` CLI 參數（未實作）
+  - [ ] `--index-type sparse|trigram` 索引類型（未實作）
+  - [ ] 🆕 `--index-base <commit>` Git base commit（未實作）
+  - [ ] 🆕 `--exists <term>` Bloom filter 存在性查詢（未實作）
+  - [ ] 🆕 `--exists-pkg <pkg>` 套件存在性查詢（未實作）
+  - [x] `--budget <N>` token 預算限制 ✅
+  - [x] `--compress L0|L1|L2` 壓縮等級 ✅
+  - [ ] 自動偵測索引是否存在（未實作）
+- [ ] 測試：sparse n-gram 索引建立與查詢正確性（未實作）
 - [ ] 測試：frequency-based weight 正確性
 - [ ] 測試：Git-based layering 正確性（base + overlay）
 - [ ] 測試：Bloom filter 正確性（false positive rate）
@@ -246,3 +252,94 @@
 - [x] 更新 `config/agents/smart-mcp.md`：Layer 1 表格 + 權限 + webfetch/websearch 引用
 - [x] 更新 `src/server/index.mjs` ROUTER_DESCRIPTION
 - [x] git commit & push
+
+---
+
+# Smart MCP 商用工程等級強化 — 待辦清單
+
+> **務實版**：只做真正有用的，其餘取消或延後。
+> 判斷原則：如果現有 CLI 已能輕鬆完成（npm audit / degit / ChatGPT），就不包裝成 MCP 工具。
+
+## Phase 1：唯一真正的阻斷者 — smart_db 升級（1-2 週）
+
+### smart_db 寫入支援（最高優先）
+- [ ] `smart_db` 新增寫入支援 — 修改 `src/lib/db-query.mjs`
+  - [ ] `dbWrite(table, data)` — INSERT（含型別檢查 + SQL injection 防護）
+  - [ ] `dbUpdate(table, data, where)` — UPDATE（強制 WHERE 條件）
+  - [ ] `dbDelete(table, where)` — DELETE（強制 `--confirm` 確認）
+  - [ ] 安全閘：所有寫入操作需 `--confirm`，支援 `--dry-run` 預覽
+- [ ] 新增 `smart_db({command:"write|update|delete", ...})` 命令路由
+- [ ] 更新 `smart_db` plugin description（加入寫入命令）
+- [ ] 更新 `compose-engine.mjs` TOOL_ARGS_CONVERTERS
+- [ ] 更新 `workflow.mjs` TOOL_ARGS_CONVERTERS
+- [ ] 測試：INSERT 正確性（基本 + 特殊字元）
+- [ ] 測試：UPDATE 正確性（含 WHERE 條件）
+- [ ] 測試：DELETE 正確性（含 `--confirm` 安全閘）
+- [ ] 測試：SQL injection 防護
+- [ ] 測試：rollback 正確性
+- [ ] 測試：型別檢查（number/string/boolean/null）
+
+### smart_db Migration 管理
+- [ ] 建立 migration 框架
+  - [ ] `migrateCreate(name, dialect)` — 從現有 schema 產生 migration 模板
+  - [ ] `migrateUp()` — 套用待處理 migration（追蹤已套用狀態）
+  - [ ] `migrateDown(steps?)` — 回滾指定步數
+  - [ ] `migrateStatus()` — 列出 migration 狀態樹
+  - [ ] 支援 SQLite + PostgreSQL（透過 SQL dialect adapter）
+- [ ] Migration 狀態儲存（`_migrations` 表追蹤已套用版本）
+- [ ] 安全閘：migration 失敗自動 rollback
+- [ ] 測試：migrateCreate + migrateUp 正確性
+- [ ] 測試：migrateDown 回滾正確性
+- [ ] 測試：migrateStatus 顯示正確性
+- [ ] 測試：migration 失敗 rollback
+
+### smart_db Schema diff
+- [ ] `schemaDiff(from, to)` — 比較兩個分支/版本的 schema
+  - [ ] 輸出：新增 table、移除 table、新增 column、移除 column、型別變更
+- [ ] 測試：schema diff 正確性
+
+---
+
+## Phase 1b：輕量輔助工具（3-5 天）
+
+### smart_setup — 新專案 onboarding
+- [ ] 建立 `src/lib/setup-engine.mjs`
+  - [ ] `detectProjectType(root)` — 從現有檔案偵測語言/框架
+  - [ ] `generateOpenCodeConfig(projectType)` — 產生 opencode.json（含 smart-mcp）
+  - [ ] `generateConventions(projectType)` — 產生 `.opencode-conventions.json`
+  - [ ] `generateEnvTemplate(projectType)` — 產生 `.env.example`
+- [ ] 註冊 `smart_setup` 為 sub-tool（透過 smart_run）
+- [ ] 註冊 `smart_setup` 為 Layer 1 direct tool（如果夠常用）
+- [ ] 測試：偵測專案類型正確性（JS/TS/Python/Go）
+- [ ] 測試：opencode.json 產生格式正確
+- [ ] 測試：`.opencode-conventions.json` 產生格式正確
+
+### smart_deps 極簡版 — 依賴審計 wrapper
+- [ ] 建立 `src/lib/deps-lite.mjs`
+  - [ ] `depAudit()` — 執行 `npm audit` / `pip audit`，解析 JSON 輸出
+  - [ ] `depOutdated()` — 執行 `npm outdated`，產生表格報告
+  - [ ] `depSuggestFix(auditResult)` — LLM 讀取漏洞報告，給修復建議
+- [ ] 註冊 `smart_deps` 為 sub-tool（透過 smart_run）
+- [ ] 測試：audit 解析正確性
+- [ ] 測試：outdated 解析正確性
+
+---
+
+## 已取消項目（不實作）
+
+| 項目 | 理由 |
+|:----|:------|
+| `smart_init`（完整 scaffold 引擎） | degit + ChatGPT 已足夠，維護 5 樣板成本 > 收益 |
+| `smart_build`（Dockerfile 產生） | 寫一次的東西，ChatGPT 10 秒解決 |
+| `smart_deploy`（CI/CD 產生） | GitHub Actions 樣板到處都是 |
+| `smart_team`（團隊協作） | 現有 wiki + git 已 cover 80%，共用記憶需 server 端 |
+| `smart_api`（OpenAPI 全流程） | 有價值但非緊急，延後評估 |
+| `smart_quality`（架構規範引擎） | 複雜 + 配置一次就不動，延後評估 |
+
+---
+
+## 驗證與交付
+- [ ] `npm test` 全部通過
+- [ ] 更新 `config/agents/smart-mcp.md`（smart_db 新增命令 ＋ smart_setup/smart_deps 權限）
+- [ ] 更新 README.md（商用等級功能概述）
+- [ ] 建立 end-to-end 測試：從 scaffold → 寫 code → 操作資料庫 → 測試

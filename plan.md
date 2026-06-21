@@ -360,3 +360,256 @@ smart_exa_search({command:"search", query:"latest AI news"})
 smart_exa_crawl({urls:"https://example.com", clean:true, markdown:true})
 smart_github_search({query:"useState", language:"typescript"})
 ```
+
+---
+
+# Smart MCP 商用工程等級強化計畫（2026-06）
+
+## 背景
+Smart MCP 在**開發中段**（編輯→分析→測試→除錯）已相當成熟，但在**開發前後端**（初始化→建置→部署→協作）有系統性缺口。此計畫補足 7 大關鍵缺口，分三階段達成商用工程等級。
+
+## 總覽圖
+```
+Phase 1 (3-4週)       Phase 2 (5-6週)        Phase 3 (4-5週)
+┌────────────────┐   ┌────────────────┐    ┌────────────────┐
+│ 商用基礎 🏗️     │ → │ 專業工作流 🚀   │ →  │ 企業治理 🏢    │
+│                │   │                │    │                │
+│ smart_init     │   │ smart_api      │    │ smart_quality  │
+│ smart_db 升級  │   │ smart_build    │    │ smart_team     │
+│ scaffold 樣板  │   │ smart_deploy   │    │ wiki 協作強化  │
+│                │   │ smart_deps     │    │ 規範同步       │
+└────────────────┘   └────────────────┘    └────────────────┘
+```
+
+## 7 大關鍵缺口與對應工具
+
+### 🔴 缺口 1：專案 Scaffold 與初始化
+**現狀**：手動建目錄、寫 package.json / pyproject.toml  
+**商用級要求**：`opencode init` 一條命令完成，官方+社群樣板庫  
+**新工具**：`smart_init`
+
+```
+smart_init({
+  template: "monorepo-ts" | "fastify-api" | "next-app" | "python-lib" | "cli-tool",
+  projectName: "my-project",
+  features: ["docker", "ci", "testing", "database"],
+  packageManager: "pnpm" | "npm" | "yarn"
+})
+```
+
+**配套**：`smart_template({command:"list|search|publish|install", ...})` 樣板管理系統
+
+---
+
+### 🔴 缺口 2：資料庫生命週期管理
+**現狀**：SQLite/PostgreSQL **唯讀**查詢  
+**商用級要求**：完整 CRUD + Migration + Seed + Schema diff  
+**升級**：現有 `smart_db` 擴充
+
+```
+# 寫入
+smart_db({command:"write", table:"users", data:{name:"John", email:"..."}})
+
+# Migration 管理
+smart_db({command:"migrate:create", name:"add_users_table", dialect:"postgres"})
+smart_db({command:"migrate:up"})
+smart_db({command:"migrate:down", steps:1})
+smart_db({command:"migrate:status"})
+
+# Schema diff（分支間比較）
+smart_db({command:"schema:diff", from:"main", to:"feature-branch"})
+
+# Seed 資料
+smart_db({command:"seed:generate", tables:["users","posts"], count:100})
+```
+
+---
+
+### 🔴 缺口 3：API 開發全流程
+**現狀**：無 API 專用工具  
+**商用級要求**：OpenAPI 規範 ↔ 程式碼 雙向產生 + Mock server + Client 產生  
+**新工具**：`smart_api`
+
+```
+# 從程式碼產生 OpenAPI spec
+smart_api({command:"generate:spec", from:"src/routes/**/*.ts", format:"openapi3"})
+
+# 從 OpenAPI spec 產生 API client
+smart_api({command:"generate:client", spec:"openapi.yaml", lang:"typescript"})
+
+# 啟動 Mock server
+smart_api({command:"mock:serve", spec:"openapi.yaml", port:4000})
+
+# API 端點分析
+smart_api({command:"analyze:endpoints", source:"src/routes"})
+```
+
+---
+
+### 🔴 缺口 4：建置、容器化與部署
+**現狀**：無建置/部署工具  
+**商用級要求**：Docker 化 → CI/CD → 部署 一條龍  
+**新工具**：`smart_build` + `smart_deploy`
+
+```
+# Dockerfile 產生（多階段建置最佳化）
+smart_build({command:"docker:generate", base:"node:20-alpine", entry:"dist/index.js"})
+
+# Docker Compose 管理
+smart_build({command:"compose:generate", services:["app","db","redis"]})
+
+# CI/CD pipeline 產生
+smart_deploy({command:"ci:generate", platform:"github-actions", steps:["lint","test","build","deploy"]})
+
+# 環境設定管理
+smart_deploy({command:"env:validate", env:".env.production", template:".env.example"})
+```
+
+---
+
+### 🟡 缺口 5：套件與依賴管理
+**現狀**：透過 bash 手動操作 npm/pip  
+**商用級要求**：深度依賴分析 + 安全審計 + 更新自動化  
+**新工具**：`smart_deps`
+
+```
+smart_deps({command:"audit"})          // 依賴安全漏洞報告
+smart_deps({command:"outdated"})       // 過期套件列表 + 更新建議
+smart_deps({command:"upgrade", dryRun:true})  // 安全更新預覽
+smart_deps({command:"analyze"})        // 依賴圖分析、重複依賴、bundle size impact
+```
+
+---
+
+### 🟡 缺口 6：商用級程式碼品質閘
+**現狀**：LSP diagnostics + security scan  
+**商用級要求**：架構規範強制 + 技術債量化 + API 穩定性保證  
+**新工具**：`smart_quality`
+
+```
+# 架構規範檢查（ArchUnit 風格）
+smart_quality({command:"arch:check", rules:[
+  "domain 不得依賴 infrastructure",
+  "controller 只能呼叫 service 層",
+  "所有 public 方法必須有 JSDoc/TSDoc"
+]})
+
+# 技術債量化
+smart_quality({command:"debt:measure", metrics:["complexity","duplication","coverage","lint-errors"]})
+
+# Breaking change 檢測
+smart_quality({command:"breaking:check", from:"main", to:"feature"})
+
+# 公共 API 表面分析
+smart_quality({command:"api-surface", source:"src/"})
+```
+
+---
+
+### 🟡 缺口 7：團隊協作基礎建設
+**現狀**：個人工具，無團隊功能  
+**商用級要求**：共用知識庫 + Review 流程 + 規範同步  
+**新工具**：`smart_team` + 擴充 `memory_store`
+
+```
+# 共用記憶庫
+smart_team({command:"knowledge:push", topic:"deploy-troubleshooting", content:"..."})
+smart_team({command:"knowledge:pull", topic:"deploy-troubleshooting"})
+
+# PR review 規則引擎（強化現有 git_pr）
+smart_team({command:"review:rules", file:".review-rules.yaml"})
+
+# Coding 規範同步（wiki → .opencode-conventions.json）
+smart_team({command:"sync:rules", source:"wiki:team-coding-standards"})
+
+# Changelog 自動產生
+smart_team({command:"changelog", from:"v1.0.0", to:"HEAD"})
+```
+
+---
+
+## ☕ 務實重新排序：不是每個缺口都值得做
+
+### 優先級矩陣
+
+| 缺口 | 使用頻率 | 有無現成替代 | **判斷** |
+|:----|:--------|:-----------|:--------:|
+| **smart_db 寫入 + Migration** | 🔥 每天 | ❌ 需跳工具鏈 | **唯一阻斷者** |
+| smart_setup（opencode.json 產生） | 🟡 每季 | ⚠️ 手動設定易錯 | **輕量輔助** |
+| smart_deps（依賴審計） | 🟡 每月 | ✅ npm audit 有但無 LLM 修復 | **low-hanging fruit** |
+| smart_api（OpenAPI） | 🟢 每週 | ⚠️ 有 CLI 但 LLM 可加分 | 延後 |
+| smart_quality（架構規範） | 🟢 設定一次 | ❌ 無好用的 ArchUnit CLI | 延後 |
+| smart_init（完整 scaffold） | ⚫ 每季 | ✅ degit / npm create | ❌ 取消 |
+| smart_build（Docker） | ⚫ 設定一次 | ✅ ChatGPT 10 秒 | ❌ 取消 |
+| smart_deploy（CI/CD） | ⚫ 設定一次 | ✅ GitHub Actions 樣板 | ❌ 取消 |
+| smart_team（協作） | 🟡 每週 | ✅ git + wiki 已 cover | ❌ 取消 |
+
+---
+
+## ✅ 修正後路線圖
+
+### Phase 1：只做真正有用的事（2-3 週）
+
+```
+Phase 1（2-3 週，不是 3-4 週）
+┌─────────────────────────────────────────┐
+│ smart_db 升級（1-2 週） ← 唯一真・阻斷者  │
+│  ├─ 寫入支援（INSERT/UPDATE/DELETE）     │
+│  ├─ Migration 管理（create/up/down）     │
+│  └─ Schema diff（分支間比較）            │
+│                                         │
+│ smart_setup（3-5 天） ← 輕量 onboarding  │
+│  └─ 專案偵測 → 自動產生 opencode.json    │
+│                                         │
+│ smart_deps 極簡版（1 天） ← low-hanging  │
+│  └─ npm audit wrapper + LLM 修復建議    │
+└─────────────────────────────────────────┘
+```
+
+### 其餘項目：全數取消或無限期延後
+
+| 項目 | 處置 | 理由 |
+|:----|:----|:------|
+| `smart_init`（樣板引擎） | ❌ **取消** | 沒必要重做 degit。模板變數替換不難，但維護 5 個樣板的成本遠大於收益 |
+| `smart_build`（Dockerfile） | ❌ **取消** | 寫一次的東西。`degit` + 內建模板檔就夠了 |
+| `smart_deploy`（CI/CD） | ❌ **取消** | 同上。GitHub Actions 樣板到處都是 |
+| `smart_team`（協作） | ❌ **取消** | 現有 wiki + git 已 cover 80%。共用記憶庫需要 server 端，超出本專案 scope |
+| `smart_api`（OpenAPI） | ⏳ **延後** | 有價值但非緊急。Phase 2 有餘力再評估 |
+| `smart_quality`（架構規範） | ⏳ **延後** | 複雜 + 低配置頻率，適合 Phase 3 或獨立的 skill |
+
+### 為什麼這樣砍？
+
+**核心判斷原則**：一個 MCP 工具如果只是包裝既有的 CLI，而且那個 CLI 已經很好用，那就不值得做。
+
+- `npm audit` → 3 秒、一行命令 → 包成 MCP 工具不增加價值
+- `degit project template` → 5 秒、一行命令 → 包成 MCP 工具不增加價值
+- `docker init` → ChatGPT 幫你寫 → 包成 MCP 工具不增加價值
+
+**但 `smart_db` 不同**：現有的 `psql` / DataGrip / DBeaver 都是**圖形化或純 CLI**，無法與 LLM 對話流程整合。LLM 說「在 orders 表插入一筆訂單」，然後工具直接執行 — 這才是 LLM 原生工作流的價值。
+
+---
+
+## 整合方式
+
+```
+Direct Layer（常用工具）
+┌─────────────────────┐
+│ smart_db（擴充）     │ ← 升級現有工具，保持向後相容
+│ smart_deps（新增）   │ ← sub-tool 層級
+└─────────────────────┘
+
+基礎設施
+├── smart_db 延用現有 db-query.mjs 安全模型
+├── smart_setup 延用現有 opencode.json 生成邏輯
+├── goal 持久化追蹤（實作過程追蹤進度）
+└── memory_store 記錄實作決策
+```
+
+## 價值總結
+
+| 維度 | 現狀 | Phase 1 後 |
+|:----|:----|:----------|
+| **資料庫開發** | ⚠️ 唯讀查詢 | ✅ **完整 CRUD + Migration** ← 唯一真正的突破 |
+| **新專案 onboarding** | ⚠️ 手動設 opencode.json | ✅ 一條命令自動產生 |
+| **依賴安全** | ⚠️ 需跳出去跑 npm audit | ✅ 工具內審計 + LLM 修復 |
+| **其餘（API/容器/CI/品質/協作）** | — | — 維持現狀，有現成 CLI 替代 |
