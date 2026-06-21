@@ -1648,6 +1648,32 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
           db.recordTransition(prevTool, toolName, true, elapsedMs);
         }
         global.__lastTool = toolName;
+
+        // Phase 27: Build multi-step tool chain for semantic cache
+        if (!global.__toolSequence) global.__toolSequence = [];
+        // Only add distinct tools (skip same→same noise)
+        if (global.__toolSequence.length === 0 || global.__toolSequence[global.__toolSequence.length - 1] !== toolName) {
+          global.__toolSequence.push(toolName);
+        }
+        // Keep last 10 tools max
+        if (global.__toolSequence.length > 10) {
+          global.__toolSequence = global.__toolSequence.slice(-10);
+        }
+        // When we have 3+ distinct tools, cache the chain
+        if (global.__toolSequence.length >= 3) {
+          const chain = [...new Set(global.__toolSequence)]; // dedup consecutive repeats
+          if (chain.length >= 3) {
+            const chainJson = JSON.stringify(chain);
+            // Use last goal context as cache key
+            const goalCtx = args.thought || args.pattern || args.file || args.query || args.tool || '';
+            if (goalCtx && goalCtx.length >= 5) {
+              const existing = db.searchCache(goalCtx, 1.0);
+              if (existing.length === 0 || !existing.some(e => e.exact)) {
+                db.cacheGoal(goalCtx, chainJson);
+              }
+            }
+          }
+        }
       } catch {
         // Best-effort
       }
@@ -1669,7 +1695,9 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
               recommended = rec.primary || toolName;
             }
           }
-          db.recordFeedback(goalCtx.slice(0, 200), recommended, toolName, elapsedMs);
+          // Include session_id for better tracking
+          const sessionId = contextManager?.get()?.sessionId || null;
+          db.recordFeedback(goalCtx.slice(0, 200), recommended, toolName, elapsedMs, sessionId);
         }
       } catch {
         // Best-effort

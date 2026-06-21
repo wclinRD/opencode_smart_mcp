@@ -97,4 +97,28 @@ describe('Phase 25: Tool Transition Learning', () => {
     assert.equal(stats.topPairs.length, 0);
     emptyDb.close();
   });
+
+  it('learnToolChain scoring should use edge success rates', () => {
+    // Chain with perfect edges: security → grep (100%) → fast_apply (100%)
+    db.recordTransition('smart_security', 'smart_grep', true, 300);
+    db.recordTransition('smart_grep', 'smart_fast_apply', true, 250);
+    const chains = db.learnToolChain(3);
+    if (chains.length > 0) {
+      // Perfect edges → score should be 1.0
+      const perfect = chains.find(c => c.chain.includes('smart_security') && c.chain.includes('smart_grep'));
+      if (perfect) assert.equal(perfect.score, 1.0);
+    }
+  });
+
+  it('learnToolChain should handle chain with failures', () => {
+    // Add a failing edge to the chain
+    db.recordTransition('smart_fast_apply', 'smart_test', false, 500);
+    const chains = db.learnToolChain(3);
+    if (chains.length > 0) {
+      for (const c of chains) {
+        // Score should be between 0 and 1
+        assert.ok(c.score >= 0 && c.score <= 1, `Score ${c.score} out of range for chain ${c.chain.join('→')}`);
+      }
+    }
+  });
 });

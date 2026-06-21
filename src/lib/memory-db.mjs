@@ -1817,14 +1817,15 @@ export class MemoryDB {
    * @param {string} recommendedTool - Tool that was recommended
    * @param {string} actualTool - Tool actually used
    * @param {number} durationMs - Duration of the actual tool call
+   * @param {string} [sessionId] - Session identifier for tracking
    */
-  recordFeedback(goalContext, recommendedTool, actualTool, durationMs) {
+  recordFeedback(goalContext, recommendedTool, actualTool, durationMs, sessionId) {
     this.#ensureOpen();
     const success = recommendedTool === actualTool ? 1 : 0;
     this.#db.prepare(`
-      INSERT INTO tool_feedback (goal_context, recommended_tool, actual_tool, success, duration_ms)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(goalContext || null, recommendedTool, actualTool, success, durationMs || null);
+      INSERT INTO tool_feedback (goal_context, recommended_tool, actual_tool, success, duration_ms, session_id)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(goalContext || null, recommendedTool, actualTool, success, durationMs || null, sessionId || null);
   }
 
   /**
