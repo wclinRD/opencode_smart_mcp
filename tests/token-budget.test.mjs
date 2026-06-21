@@ -62,10 +62,12 @@ describe('formatMatch', () => {
 });
 
 describe('compressLevel', () => {
-  it('returns same for L2 (passthrough)', () => {
-    const results = [makeResult('a.js', [makeMatch(1, 'x')])];
+  it('L2 compresses with full match detail', () => {
+    const results = [makeResult('a.js', [makeMatch(1, 'const x = 1;')])];
     const out = compressLevel(results, 'L2');
-    assert.equal(out, results);
+    assert.ok(Array.isArray(out));
+    assert.ok(out[0].includes('a.js:1'));
+    assert.ok(typeof out[0] === 'string');
   });
 
   it('L0 compresses to file:line: text', () => {
@@ -73,6 +75,20 @@ describe('compressLevel', () => {
     const out = compressLevel(results, 'L0');
     assert.ok(Array.isArray(out));
     assert.ok(out[0].includes('a.js:1'));
+  });
+
+  it('empty results returns empty array', () => {
+    assert.deepEqual(compressLevel(null, 'L0'), []);
+    assert.deepEqual(compressLevel([], 'L1'), []);
+  });
+
+  it('compresses all levels to strings', () => {
+    const results = [makeResult('x.js', [makeMatch(5, 'z = 3')])];
+    for (const level of ['L0', 'L1', 'L2']) {
+      const out = compressLevel(results, level);
+      assert.ok(Array.isArray(out));
+      assert.ok(typeof out[0] === 'string', `L2 should also return strings, got ${typeof out[0]}`);
+    }
   });
 });
 

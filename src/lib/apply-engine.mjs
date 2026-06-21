@@ -716,15 +716,23 @@ function tryStructuralMatch(content, search, lang) {
   // If search starts with a function/class/def declaration, find it by name
   // and compare bodies.
   const firstLine = searchLines[0]?.trim();
-  const nameMatch = firstLine?.match(/^(?:function|class|struct|def|func|fn|const\s+\w+\s*=\s*(?:async\s+)?(?:function|\(=>))(?:\s+|\()*(\w+)/);
+  // Match: function/class/def Name(...), const Name = ..., Name = (...) => { etc.
+  let nameMatch = firstLine?.match(/^(?:function|class|struct|def|func|fn)\s+(\w+)\b/);
+  if (!nameMatch) {
+    nameMatch = firstLine?.match(/^(?:const|let|var)\s+(\w+)\s*[=:]\s*(?:async\s+)?(?:function\s*[<(]|\([^)]*\)\s*(?:=>|{))/);
+  }
+  if (!nameMatch) {
+    // Bare: Name = (...) => or Name(:...) {
+    nameMatch = firstLine?.match(/^(\w+)\s*[=:]\s*(?:async\s+)?(?:function|\([^)]*\)\s*(?:=>|{))/);
+  }
   if (nameMatch) {
     const symbolName = nameMatch[1];
-    // Find lines with this symbol name followed by (
+    // Broader sig search: matches both `function Name(` and `const Name = (`
     const sigRegex = new RegExp(
-      `(?:function|class|struct|def|func|fn)\\s+${escapeRegex(symbolName)}\\s*\\(`,
+      `(?:function|class|struct|def|func|fn|const|let|var)\\s+${escapeRegex(symbolName)}\\s*(?:[=:]\\s*)?[\\(\\{]`,
     );
     for (let i = 0; i < Math.min(lines.length, 500); i++) {
-      if (sigRegex.test(lines[i])) {
+      if (sigRegex.test(lines[i]) || lines[i].trim().startsWith(symbolName + '=') || lines[i].trim().startsWith(symbolName + ':')) {
         // Found signature line — check if body approximately matches
         const bodyLines = searchLines.length;
         const potentialBody = lines.slice(i, i + bodyLines).join('\n');

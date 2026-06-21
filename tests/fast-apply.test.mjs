@@ -733,19 +733,53 @@ describe('suggestNearest', () => {
   });
 
   it('DMP fallback + suggestNearest when nothing matches', () => {
-    // Use content + search so different that even DMP patch_apply can't match
     const fp = tempFile('export const PI = 3.14;\nexport const E = 2.71;\n');
     const r = applySearchReplace(fp, { search: 'const z = 3;', replace: 'const a = 4;' }, { fuzzy: false });
-    // DMP patch_apply can match close text, so test with truly different text
     if (r.status === 'conflict') {
       assert.ok(r.error.includes('Cannot find search block'));
       assert.ok(r.details);
       assert.ok(r.details.length >= 1);
     } else {
-      // If DMP somehow matches, verify it was via dmp-patch
       assert.equal(r.status, 'applied');
       assert.equal(r.method, 'dmp-patch');
     }
+  });
+
+  it('DMP patch succeeds with whitespace-diff content (L7, fuzzy:false)', () => {
+    const fp = tempFile('function greet() {\n    return "hello";\n}\n');
+    const r = applySearchReplace(fp, {
+      search: 'function greet() {\n return "hello"; \n}',
+      replace: 'function greet() {\n return "hi";\n}',
+    }, { fuzzy: false });
+    assert.equal(r.status, 'applied', `Expected applied, got ${r.status}: ${r.error || ''}`);
+    assert.equal(r.method, 'dmp-patch');
+    const content = readFileSync(fp, 'utf-8');
+    assert.ok(content.includes('"hi"'));
+  });
+
+  it('validate flag does not cause issues on normal apply', () => {
+    // validate + exact match should work fine (validate only triggers for >= L3)
+    const fp = tempFile('function foo() {\n  const x = 1;\n  return x;\n}');
+    const r = applySearchReplace(fp, {
+      search: 'function foo() {\n  const x = 1;\n  return x;\n}',
+      replace: 'function foo() {\n  const x = 2;\n  return x;\n}',
+    }, { validate: true });
+    assert.equal(r.status, 'applied');
+    const content = readFileSync(fp, 'utf-8');
+    assert.ok(content.includes('x = 2'));
+  });
+
+  it('validate + fuzzy match ok with whitespace-diff (>= L3)', () => {
+    // Fuzzy: true + indentation diff triggers L4 fuzzy → validate path
+    const fp = tempFile('  const a = 1;\n  const b = 2;\n');
+    // Search without leading whitespace → fuzzy match
+    const r = applySearchReplace(fp, {
+      search: 'const a = 1;\nconst b = 2;',
+      replace: 'const x = 10;\nconst y = 20;',
+    }, { fuzzy: true, validate: true });
+    assert.equal(r.status, 'applied', `Expected applied, got ${r.status}: ${r.error || ''}`);
+    const content = readFileSync(fp, 'utf-8');
+    assert.ok(content.includes('x = 10'));
   });
 });
 

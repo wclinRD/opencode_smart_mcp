@@ -96,8 +96,7 @@ function formatFullMatch(fileResult, match, opts) {
  * @returns {Array} compressed results array
  */
 export function compressLevel(results, level, opts = {}) {
-  if (!results || results.length === 0) return results;
-  if (level === 'L2') return results; // L2 = no compression, return as-is
+  if (!results || results.length === 0) return [];
 
   const compressed = [];
 
