@@ -1,0 +1,68 @@
+# ============================================================
+# C4 Context Diagram — Smart MCP 生態系俯瞰
+# ============================================================
+# 顯示 Smart MCP 在 opencode / AI Agent 生態系中的定位
+# ============================================================
+
+direction: right
+
+# ─── 系統邊界 ───
+ecosystem: "🖥 AI Coding Ecosystem" {
+  opencode: "opencode CLI" {
+    shape: hexagon
+    style.fill: "#E8F5E9"
+    style.stroke: "#2E7D32"
+  }
+
+  smart_mcp: "🧅 Smart MCP Server" {
+    shape: rectangle
+    style.fill: "#E3F2FD"
+    style.stroke: "#1565C0"
+    style.bold: true
+  }
+
+  ai_agent: "🤖 AI Agent (LLM)" {
+    shape: person
+    style.fill: "#FFF3E0"
+    style.stroke: "#E65100"
+  }
+
+  user: "👤 Developer" {
+    shape: oval
+    style.fill: "#F3E5F5"
+    style.stroke: "#6A1B9A"
+  }
+
+  external: "🔗 External Integrations" {
+    shape: cloud
+    style.fill: "#F5F5F5"
+    style.stroke: "#616161"
+  }
+}
+
+# ─── 連線 ───
+user -> opencode: "Types request (自然語言)"
+opencode -> ai_agent: "Forwards to smart-mcp agent"
+ai_agent -> smart_mcp: "Calls MCP tools"
+smart_mcp -> opencode: "Returns tool results"
+opencode -> user: "Shows response"
+smart_mcp -> external: "smart_exa_search / crawl / github_search" {
+  style.stroke: "#9CCC65"
+}
+
+# ─── 圖例 ───
+legend: |md
+# C4 Context Diagram
+
+Smart MCP 在 AI Coding 生態系中扮演工具層角色。
+
+角色說明：
+- 👤 Developer: 開發者發出任務請求
+- 🖥 opencode CLI: 對話式 AI 程式碼編輯器
+- 🤖 AI Agent: LLM + Smart MCP Agent
+- 🧅 Smart MCP: 79 個開發工具的 MCP Server
+- 🔗 外部服務: 網路搜尋/爬蟲/GitHub
+| {
+  shape: code
+  style.font-size: 11
+}

@@ -1,0 +1,105 @@
+# ============================================================
+# Quality Gates — 推理品質閘系統
+# ============================================================
+# 展示三層品質閘的決策流程與強制規則
+# ============================================================
+
+direction: right
+
+quality: "🛡 Quality Gate System" {
+  style.stroke: "#E65100"
+
+  task_in: "📥 任務進入" {
+    shape: hexagon
+    style.fill: "#E8F5E9"
+  }
+
+  gate_red: "🟥 RED GATE\nServer-enforced 不可跳過" {
+    shape: diamond
+    style.fill: "#FFEBEE"
+    style.stroke: "#C62828"
+    style.bold: true
+  }
+
+  gate_yellow: "🟨 YELLOW GATE\nLLM discretion 建議執行" {
+    shape: diamond
+    style.fill: "#FFF8E1"
+    style.stroke: "#F57F17"
+    style.bold: true
+  }
+
+  gate_green: "🟩 GREEN GATE\nLow risk 可跳過" {
+    shape: diamond
+    style.fill: "#E8F5E9"
+    style.stroke: "#2E7D32"
+    style.bold: true
+  }
+
+  execute: "✅ 執行工具" {
+    shape: rectangle
+    style.fill: "#E8F5E9"
+    style.stroke: "#2E7D32"
+  }
+
+  # ── RED 子規則 ──
+  red_rules: "Red Rules" {
+    style.stroke: "#C62828"
+    style.fill: "#FFEBEE"
+    security_fix: "🔐 安全修復前 smart_think(mode:beam)"
+    golden_rules: "🥇 Golden Rules smart_rules 機械化執行"
+  }
+
+  # ── YELLOW 子規則 ──
+  yellow_rules: "Yellow Rules" {
+    style.stroke: "#F57F17"
+    style.fill: "#FFF8E1"
+    new_feature: "✨ 新功能 smart_think(mode:cit)"
+    tdd_cycle: "🧪 TDD 循環 RED→GREEN→REFACTOR"
+    high_risk: "⚠ 高風險 self-correction loop"
+    cross_file: "📁 跨檔案 import_graph 先行"
+    deep_analysis: "🔬 需分析 smart_deep_think"
+  }
+
+  # ── GREEN 子規則 ──
+  green_rules: "Green Rules" {
+    style.stroke: "#2E7D32"
+    style.fill: "#E8F5E9"
+    routine: "📋 例行 grep/test 簡單編輯/查詢"
+    onboarding: "🚀 新專案 smart_learn 先"
+  }
+}
+
+# ── 流程連線 ──
+task_in -> gate_red: "所有任務"
+gate_red -> gate_yellow: "通過 RED"
+gate_yellow -> gate_green: "通過 YELLOW"
+gate_green -> execute: "通過 GREEN"
+
+# ── 回饋迴路 ──
+execute -> gate_red: "self-correction 最多 1 輪" {
+  style.stroke: "#F57F17"
+  style.stroke-dash: 3
+}
+
+# ── 圖例 ──
+legend: |md
+# Quality Gates 決策流程
+
+三層閘門，層層過濾：
+
+🟥 RED — Server 端強制執行
+  - 安全修復前強制 beam search
+  - golden rules 機械化檢查
+
+🟨 YELLOW — LLM 自主判斷
+  - 新功能/高風險/跨檔案編輯
+  - 結構化分析用 deep_think
+
+🟩 GREEN — 省 token 跳過
+  - 例行任務/查詢不需檢查
+
+self-correction loop: 輸出後跑 hallucination_check
+| {
+  shape: code
+  style.font-size: 11
+}

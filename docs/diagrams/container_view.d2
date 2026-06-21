@@ -1,0 +1,98 @@
+# ============================================================
+# C4 Container Diagram — Smart MCP Server 內部容器
+# ============================================================
+# 顯示 Server 內部的 plugin 容器、CLI 執行層、Lib 函式庫
+# ============================================================
+
+direction: right
+
+smart_mcp: "🧅 Smart MCP Server" {
+  style.stroke: "#1565C0"
+
+  mcp_server: "📡 MCP JSON-RPC 2.0\nindex.mjs (3705行)" {
+    shape: rectangle
+    style.fill: "#E3F2FD"
+    style.stroke: "#1565C0"
+    style.bold: true
+  }
+
+  plugin_loader: "🔌 Plugin Loader\nloader.mjs" {
+    shape: hexagon
+    style.fill: "#E8F5E9"
+    style.stroke: "#2E7D32"
+  }
+
+  core_plugins: "⚡ Core Plugins\n15 Layer-1 tools" {
+    shape: circle
+    style.fill: "#FFF3E0"
+    style.stroke: "#E65100"
+  }
+
+  standard_plugins: "📦 Standard Plugins\n68 Layer-2 sub-tools" {
+    shape: circle
+    style.fill: "#F3E5F5"
+    style.stroke: "#6A1B9A"
+  }
+
+  cli_layer: "🛠 CLI Layer\n~30 CLI implementations" {
+    shape: parallelogram
+    style.fill: "#E0F2F1"
+    style.stroke: "#00695C"
+  }
+
+  lib_layer: "📚 Library Layer\n38 lib modules" {
+    shape: document
+    style.fill: "#FFF8E1"
+    style.stroke: "#F57F17"
+  }
+
+  agent_layer: "🧠 Agent Strategies\n5 strategy modules" {
+    shape: cylinder
+    style.fill: "#FCE4EC"
+    style.stroke: "#C62828"
+  }
+
+  memory_knowledge: "💾 Memory & Cache\nmemory-db, semantic-cache,\nprefetch-engine, embedding-cache" {
+    shape: stored_data
+    style.fill: "#EDE7F6"
+    style.stroke: "#4527A0"
+  }
+
+  config_layer: "⚙ Configuration\nagents, skills, tools,\nopencode conventions" {
+    shape: parallelogram
+    style.fill: "#E8EAF6"
+    style.stroke: "#283593"
+  }
+}
+
+# ─── Container 間關係 ───
+mcp_server -> plugin_loader: "Loads plugins at startup"
+plugin_loader -> core_plugins: "15 direct tools (core/)"
+plugin_loader -> standard_plugins: "68 sub-tools (standard/)"
+core_plugins -> cli_layer: "Dispatches to CLI"
+standard_plugins -> cli_layer: "Dispatches to CLI"
+cli_layer -> lib_layer: "Uses library modules"
+mcp_server -> agent_layer: "Injects agent strategies"
+mcp_server -> memory_knowledge: "Persists sessions & embeddings"
+mcp_server -> config_layer: "Reads configuration"
+
+# ─── 圖例 ───
+legend: |md
+# C4 Container Diagram
+
+Smart MCP Server 由 8 個主要容器組成。
+
+容器功能：
+- 📡 MCP Server: JSON-RPC 主入口 (3705行)
+- 🔌 Plugin Loader: 自動掃描載入 plugins
+- ⚡ Core Plugins: 直接工具 (15 個)
+- 📦 Standard Plugins: 路由工具 (68 個)
+- 🛠 CLI Layer: CLI 執行層 (~30 個)
+- 📚 Library Layer: 共享函式庫 (38 個)
+- 🧠 Agent Strategies: 策略引擎 (5 個)
+- 💾 Memory & Cache: 記憶/快取
+- ⚙ Configuration: 設定管理
+| {
+  shape: code
+  style.font-size: 11
+}

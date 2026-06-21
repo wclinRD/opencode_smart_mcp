@@ -1,0 +1,117 @@
+# ============================================================
+# C4 Component Diagram — Library Layer 核心元件關係
+# ============================================================
+# 顯示 Library Layer 中 38 個模組的依賴與協作關係
+# ============================================================
+
+direction: up
+
+lib_layer: "📚 Library Layer — 核心元件關係圖" {
+  style.stroke: "#F57F17"
+  style.fill: "#FFF8E1"
+
+  # ── 引擎群組 ──
+  engine_group: "⚙ Core Engines" {
+    style.fill: "#E3F2FD"
+    apply_engine: "apply-engine 編輯引擎"
+    hybrid_engine: "hybrid-engine 混合搜尋"
+    compose_engine: "compose-engine 工具組合"
+    ckg_engine: "ckg-engine 知識圖譜"
+  }
+
+  # ── 搜尋群組 ──
+  search_group: "🔍 Search & Ranking" {
+    style.fill: "#E8F5E9"
+    bm25: "bm25 BM25 排名"
+    semantic: "semantic-search 語意搜尋"
+    hybrid_search: "hybrid-search RRF 融合"
+    query_detector: "query-detector 查詢類型"
+    embedding_mod: "embedding 向量嵌入"
+    embedding_cache: "embedding-cache 嵌入快取"
+  }
+
+  # ── 記憶群組 ──
+  memory_group: "💾 Memory & Cache" {
+    style.fill: "#F3E5F5"
+    memory_db: "memory-db 記憶資料庫"
+    semantic_cache: "semantic-cache 語意快取"
+    prefetch_engine: "prefetch-engine 預取引擎"
+    cache_manager: "cache-manager 快取管理"
+  }
+
+  # ── 推理群組 ──
+  reasoning_group: "🧠 Reasoning & Safety" {
+    style.fill: "#FFF3E0"
+    auto_classifier: "auto-classifier 任務分類"
+    hallucination_judge: "hallucination-judge 幻覺檢測"
+    safe_handler: "safe-handler 安全包裝"
+    model_router: "model-router 模型路由"
+  }
+
+  # ── 基礎群組 ──
+  infra_group: "🛠 Infrastructure" {
+    style.fill: "#E0F2F1"
+    context_manager: "context-manager Session管理"
+    context_budget: "context-budget 預算控制"
+    hook_registry: "hook-registry Hook 註冊"
+    output_pipeline: "output-pipeline 輸出管線"
+    output_optimizer: "output-optimizer 輸出優化"
+    concurrency_gate: "concurrency-gate 並發閘"
+    code_verifier: "code-verifier 程式碼驗證"
+    lsp_bridge: "lsp-bridge LSP 橋接"
+    manifest_loader: "manifest-loader manifest 產生"
+    lenient_json: "lenient-json 寬鬆 JSON"
+  }
+
+  # ── 規劃群組 ──
+  planner_group: "📋 Planning & AST" {
+    style.fill: "#FCE4EC"
+    mcts_planner: "mcts-planner MCTS 規劃"
+    refactor_planner: "refactor-planner 重構規劃"
+    ast_engine: "ast-engine AST 引擎"
+    codebase_index_mod: "codebase-index 程式碼索引"
+  }
+
+  # ── 文檔群組 ──
+  document_group: "📄 Documents" {
+    style.fill: "#EDE7F6"
+    document_ingester: "document-ingester 文件攝取"
+    document_registry: "document-registry 文件註冊"
+    db_query: "db-query 資料庫查詢"
+  }
+
+  # ── 共用 ──
+  utils_mod: "utils 共用工具"
+}
+
+# ── 關鍵依賴關係 ──
+apply_engine -> ast_engine: "AST 驗證"
+hybrid_engine -> bm25: "BM25 分數"
+hybrid_engine -> semantic: "語意分數"
+hybrid_engine -> hybrid_search: "RRF 融合"
+hybrid_search -> query_detector: "查詢類型權重"
+semantic -> embedding_mod: "向量生成"
+semantic -> embedding_cache: "快取存取"
+ckg_engine -> memory_db: "持久化記憶"
+auto_classifier -> model_router: "路由決策"
+output_pipeline -> output_optimizer: "壓縮管線"
+context_manager -> context_budget: "預算檢查"
+safe_handler -> concurrency_gate: "並發控制"
+
+# ── 圖例 ──
+legend: |md
+# C4 Component Diagram
+
+Library Layer 7 大群組 38+ 模組：
+
+⚙ Core Engines: 編輯/搜尋/組合/圖譜
+🔍 Search & Ranking: BM25/語意/RRF/嵌入
+💾 Memory & Cache: 持久化/快取/預取
+🧠 Reasoning & Safety: 分類/驗證/安全
+🛠 Infrastructure: Session/預算/Hook/輸出
+📋 Planning & AST: MCTS/重構/AST/索引
+📄 Documents: 攝取/註冊/查詢
+| {
+  shape: code
+  style.font-size: 11
+}
