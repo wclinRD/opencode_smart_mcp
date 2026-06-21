@@ -494,12 +494,13 @@ Phase 22 smart_edit_ast 改為：
 
 ---
 
-## Phase 25：Tool Transition Learning — 工具轉移學習
+## Phase 25：Tool Transition Learning — 工具轉移學習 ✅
 
 > 參考：AutoTool（Learning to Route Tools）— 觀察工具呼叫序列，學習工具間的轉移模式
 > 核心洞察：LLM 使用工具有固定序列模式（如 grep→lsp hover→fast_apply→test）。
 > 目前 prefetch-engine 的 5 條規則是硬編碼的，無法適應實際使用模式。
 > Phase 25 透過 SQLite 記錄工具轉移統計，讓 prefetch 和路由建議從數據中學習。
+> **完成日期：2026-06-21**
 
 ### 設計
 
@@ -537,11 +538,12 @@ Phase 25 改為：
 
 ---
 
-## Phase 26：Tool Selection Feedback — 工具選擇回饋
+## Phase 26：Tool Selection Feedback — 工具選擇回饋 ✅
 
 > 參考：JTPRO（Just-in-Time Prompt Routing）— 根據實際使用結果回饋調整路由策略
 > 核心洞察：tool-strategy 的 12 條靜態規則永遠不會知道自己選對還是選錯。
 > Phase 26 加入回饋迴路：推薦工具 → LLM 實際選擇 → 比較 → 調整。
+> **完成日期：2026-06-21**
 
 ### 設計
 
@@ -579,11 +581,12 @@ Phase 26 改為：
 
 ---
 
-## Phase 27：Semantic Cache Routing — 語意快取路由
+## Phase 27：Semantic Cache Routing — 語意快取路由 ✅
 
 > 參考：semantic-cache（Embedding-based caching for LLM routing decisions）
 > 核心洞察：相同或類似的任務目標通常需要相同的工具鏈。
 > 現有 sqlite-vec（384-dim 向量搜尋）已可支援語意相似度比對。
+> **完成日期：2026-06-21**
 
 ### 設計
 
@@ -637,9 +640,9 @@ Phase 27 改為：
 | 🥈 | **22** | smart_edit_ast — AST 感知編輯 | 🟢 低 | 🟡 中 | ✅ 完成 |
 | 🥇 | **23** | smart_read 強化 | 🟢 低 | 🔥 高 | ✅ 完成 |
 | 🥇 | **24** | Session Cache + Explain + Project Map | 🟢 低 | 🔥 高 | ✅ 完成 |
-| 🥇 | **25** | Tool Transition Learning | 🟡 中 | 🔥 高（自適應 prefetch） | 2-3h |
-| 🥇 | **26** | Tool Selection Feedback | 🟡 中 | 🔥 高（自適應路由） | 2-3h |
-| 🥈 | **27** | Semantic Cache Routing | 🔴 高 | 🟡 中（長期累積效益） | 3-4h |
+| 🥇 | **25** | Tool Transition Learning | 🟡 中 | 🔥 高（自適應 prefetch） | ✅ 完成 (2026-06-21) |
+| 🥇 | **26** | Tool Selection Feedback | 🟡 中 | 🔥 高（自適應路由） | ✅ 完成 (2026-06-21) |
+| 🥈 | **27** | Semantic Cache Routing | 🔴 高 | 🟡 中（長期累積效益） | ✅ 完成 (2026-06-21) |
 | 🔴 | **28** | Semantic Tool Router（embedding 語意匹配） | 🟡 中 | 🔥 高（推薦準確率 +30-50%） | 3-4h |
 | 🔴 | **29** | Self-Reflection & Adaptive Learning | 🟡 中 | 🔥 高（錯誤重複率 -50%） | 4-5h |
 | 🔴 | **30** | Smart Output Management（截斷+壓縮+streaming） | 🟡 中 | 🔥 高（token -15-25%） | 3-4h |
@@ -650,8 +653,9 @@ Phase 27 改為：
 | 里程碑 | 內容 | 預計日期 |
 |--------|------|---------|
 | M1-M10 | Phase 16-24 完成 | ✅ 2026-06-13 |
-| M11 | Phase 25-27 完成 | 📅 本期 |
-| M12 | Phase 25-27 全量 regression | 📅 本期 |
+| M11 | Phase 25-27 完成 | ✅ 2026-06-21 |
+| M12 | Phase 25-27 全量 regression | ✅ 2026-06-21 |
+| ⋮ | ⋮ | ⋮ |
 | M13 | Phase 28-30 (P0：語意路由+自我反思+輸出管理) 完成 | 📅 下期 |
 | M14 | Phase 31-32 (P1：平行執行+多Agent協作) 完成 | 📅 下期 |
 | M15 | Phase 33 (P2：Skill自動生成+知識圖譜) 完成 | 📅 下下期 |

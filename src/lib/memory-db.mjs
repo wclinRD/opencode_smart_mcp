@@ -173,6 +173,56 @@ const BOULDER_SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_boulder_checkpoints_session ON boulder_checkpoints(session_id);
 `;
 
+// ── Phase 25: Tool Transition Learning ──
+const TRANSITIONS_SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS tool_transitions (
+    from_tool TEXT NOT NULL,
+    to_tool TEXT NOT NULL,
+    success_count INTEGER DEFAULT 1,
+    fail_count INTEGER DEFAULT 0,
+    avg_duration REAL,
+    last_seen TEXT DEFAULT (datetime('now')),
+    UNIQUE(from_tool, to_tool)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_tool_transitions_from ON tool_transitions(from_tool);
+`;
+
+// ── Phase 26: Tool Selection Feedback ──
+const FEEDBACK_SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS tool_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    goal_context TEXT,
+    recommended_tool TEXT NOT NULL,
+    actual_tool TEXT NOT NULL,
+    success INTEGER DEFAULT 0,
+    duration_ms INTEGER,
+    session_id TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_tool_feedback_recommended ON tool_feedback(recommended_tool);
+  CREATE INDEX IF NOT EXISTS idx_tool_feedback_created ON tool_feedback(created_at);
+`;
+
+// ── Phase 27: Semantic Cache Routing ──
+const SEMCACHE_SCHEMA_SQL = `
+  CREATE TABLE IF NOT EXISTS semantic_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    goal TEXT NOT NULL,
+    goal_hash TEXT UNIQUE NOT NULL,
+    goal_embedding BLOB,
+    tool_chain TEXT NOT NULL,
+    hit_count INTEGER DEFAULT 1,
+    success_count INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    last_seen TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_semcache_hash ON semantic_cache(goal_hash);
+  CREATE INDEX IF NOT EXISTS idx_semcache_last_seen ON semantic_cache(last_seen);
+`;
+
 // ---------------------------------------------------------------------------
 // MemoryDB class
 // ---------------------------------------------------------------------------
@@ -219,6 +269,15 @@ export class MemoryDB {
 
     // Phase 25: Boulder schema
     this.#db.exec(BOULDER_SCHEMA_SQL);
+
+    // Phase 25: Tool Transition Learning schema
+    this.#db.exec(TRANSITIONS_SCHEMA_SQL);
+
+    // Phase 26: Tool Selection Feedback schema
+    this.#db.exec(FEEDBACK_SCHEMA_SQL);
+
+    // Phase 27: Semantic Cache Routing schema
+    this.#db.exec(SEMCACHE_SCHEMA_SQL);
 
     // Migration: add miss_count column for miss tracking
     try {
@@ -1609,6 +1668,329 @@ export class MemoryDB {
    */
   completePlan(id) {
     return this.updatePlan(id, { status: 'completed' });
+  }
+
+  // -----------------------------------------------------------------------
+  // Phase 25: Tool Transition Learning
+  // -----------------------------------------------------------------------
+
+  /**
+   * Record a tool transition (from_tool → to_tool).
+   * @param {string} fromTool - The tool that was just called
+   * @param {string} toTool - The tool being called next
+   * @param {boolean} success - Whether the toTool call succeeded
+   * @param {number} duration - Duration of the fromTool call in ms
+   */
+  recordTransition(fromTool, toTool, success, duration) {
+    this.#ensureOpen();
+    const existing = this.#db.prepare(
+      'SELECT * FROM tool_transitions WHERE from_tool = ? AND to_tool = ?'
+    ).get(fromTool, toTool);
+
+    if (existing) {
+      const successField = success ? 'success_count' : 'fail_count';
+      const newAvg = existing.avg_duration
+        ? (existing.avg_duration * (existing.success_count + existing.fail_count) + duration) / (existing.success_count + existing.fail_count + 1)
+        : duration;
+      this.#db.prepare(`
+        UPDATE tool_transitions
+        SET ${successField} = ${successField} + 1,
+            avg_duration = ?,
+            last_seen = datetime('now')
+        WHERE from_tool = ? AND to_tool = ?
+      `).run(newAvg, fromTool, toTool);
+    } else {
+      this.#db.prepare(`
+        INSERT INTO tool_transitions (from_tool, to_tool, success_count, fail_count, avg_duration)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(fromTool, toTool, success ? 1 : 0, success ? 0 : 1, duration || null);
+    }
+  }
+
+  /**
+   * Get the top N most likely next tools after a given tool.
+   * @param {string} fromTool
+   * @param {number} [limit=3]
+   * @returns {Array<{toTool: string, score: number, avgDuration: number, count: number}>}
+   */
+  getTopTransitions(fromTool, limit = 3) {
+    this.#ensureOpen();
+    const rows = this.#db.prepare(`
+      SELECT from_tool, to_tool, success_count, fail_count, avg_duration
+      FROM tool_transitions
+      WHERE from_tool = ?
+      ORDER BY (success_count * 1.0 / MAX(success_count + fail_count, 1)) DESC, success_count DESC
+      LIMIT ?
+    `).all(fromTool, limit);
+
+    return rows.map(r => ({
+      fromTool: r.from_tool,
+      toTool: r.to_tool,
+      score: r.success_count / Math.max(r.success_count + r.fail_count, 1),
+      avgDuration: r.avg_duration,
+      count: r.success_count + r.fail_count,
+    }));
+  }
+
+  /**
+   * Get overall transition statistics.
+   * @returns {object}
+   */
+  getTransitionStats() {
+    this.#ensureOpen();
+    const total = this.#db.prepare('SELECT COUNT(*) as c FROM tool_transitions').get().c;
+    const topPairs = this.#db.prepare(`
+      SELECT from_tool, to_tool, success_count, fail_count
+      FROM tool_transitions
+      ORDER BY (success_count + fail_count) DESC
+      LIMIT 20
+    `).all();
+    return { total, topPairs };
+  }
+
+  /**
+   * Learn common tool chains (3+ step sequences) from transition data.
+   * @param {number} [minLength=3]
+   * @returns {Array<{chain: string[], score: number}>}
+   */
+  learnToolChain(minLength = 3) {
+    this.#ensureOpen();
+    // Get all transitions ordered by success rate
+    const rows = this.#db.prepare(`
+      SELECT from_tool, to_tool, success_count, fail_count
+      FROM tool_transitions
+      WHERE success_count > fail_count
+      ORDER BY success_count DESC
+      LIMIT 50
+    `).all();
+
+    // Build adjacency map
+    const adj = {};
+    for (const r of rows) {
+      if (!adj[r.from_tool]) adj[r.from_tool] = [];
+      adj[r.from_tool].push({
+        to: r.to_tool,
+        score: r.success_count / Math.max(r.success_count + r.fail_count, 1),
+      });
+    }
+
+    // Greedy chain extraction (depth-first up to maxSteps)
+    const chains = [];
+    const visited = new Set();
+
+    function dfs(current, path, depth) {
+      if (depth >= minLength && path.length >= minLength) {
+        chains.push({ chain: [...path], score: path.length });
+        if (chains.length >= 5) return;
+      }
+      if (!adj[current] || depth >= 6) return;
+      for (const next of adj[current].sort((a, b) => b.score - a.score).slice(0, 2)) {
+        if (!visited.has(next.to)) {
+          visited.add(next.to);
+          dfs(next.to, [...path, next.to], depth + 1);
+          visited.delete(next.to);
+        }
+      }
+    }
+
+    // Start from top tools
+    const starters = [...new Set(rows.map(r => r.from_tool))].slice(0, 5);
+    for (const start of starters) {
+      if (chains.length >= 5) break;
+      visited.clear();
+      visited.add(start);
+      dfs(start, [start], 1);
+    }
+
+    return chains.slice(0, 5);
+  }
+
+  // -----------------------------------------------------------------------
+  // Phase 26: Tool Selection Feedback
+  // -----------------------------------------------------------------------
+
+  /**
+   * Record tool selection feedback.
+   * @param {string} goalContext - Task description fragment
+   * @param {string} recommendedTool - Tool that was recommended
+   * @param {string} actualTool - Tool actually used
+   * @param {number} durationMs - Duration of the actual tool call
+   */
+  recordFeedback(goalContext, recommendedTool, actualTool, durationMs) {
+    this.#ensureOpen();
+    const success = recommendedTool === actualTool ? 1 : 0;
+    this.#db.prepare(`
+      INSERT INTO tool_feedback (goal_context, recommended_tool, actual_tool, success, duration_ms)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(goalContext || null, recommendedTool, actualTool, success, durationMs || null);
+  }
+
+  /**
+   * Get recommendation stats for a specific tool.
+   * @param {string} tool - The tool name
+   * @returns {{ total: number, success: number, fail: number, rate: number }}
+   */
+  getRecommendationStats(tool) {
+    this.#ensureOpen();
+    const rec = this.#db.prepare(`
+      SELECT COUNT(*) as total,
+             SUM(success) as successes
+      FROM tool_feedback
+      WHERE recommended_tool = ?
+    `).get(tool);
+    if (!rec || rec.total === 0) return { total: 0, success: 0, fail: 0, rate: 0 };
+    const s = rec.successes || 0;
+    return {
+      total: rec.total,
+      success: s,
+      fail: rec.total - s,
+      rate: s / rec.total,
+    };
+  }
+
+  /**
+   * Get patterns that need adjustment (high fail rate).
+   * @param {number} [minSamples=3] - Minimum samples before considering adjustment
+   * @param {number} [failThreshold=0.7] - Fail rate above which adjustment is needed
+   * @returns {Array<{tool: string, failRate: number, total: number}>}
+   */
+  getPatternAdjustments(minSamples = 3, failThreshold = 0.7) {
+    this.#ensureOpen();
+    return this.#db.prepare(`
+      SELECT recommended_tool as tool,
+             CAST(SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS REAL) / COUNT(*) as failRate,
+             COUNT(*) as total
+      FROM tool_feedback
+      GROUP BY recommended_tool
+      HAVING total >= ? AND failRate >= ?
+      ORDER BY failRate DESC
+    `).all(minSamples, failThreshold);
+  }
+
+  // -----------------------------------------------------------------------
+  // Phase 27: Semantic Cache Routing
+  // -----------------------------------------------------------------------
+
+  /**
+   * Store a goal→toolChain mapping in the semantic cache.
+   * @param {string} goal - Task description
+   * @param {string} toolChain - JSON string of tool chain array
+   * @param {Buffer|null} [embedding] - 384-dim embedding BLOB
+   */
+  cacheGoal(goal, toolChain, embedding) {
+    this.#ensureOpen();
+    const hash = crypto.createHash('sha256').update(goal).digest('hex').substring(0, 16);
+    this.#db.prepare(`
+      INSERT OR REPLACE INTO semantic_cache (goal, goal_hash, goal_embedding, tool_chain, last_seen)
+      VALUES (?, ?, ?, ?, datetime('now'))
+    `).run(goal, hash, embedding || null, toolChain);
+  }
+
+  /**
+   * Search semantic cache by exact hash or embedding similarity.
+   * @param {string} goal - Task description to look up
+   * @param {number} [threshold=0.85] - Similarity threshold (0-1)
+   * @returns {Array<{goal: string, toolChain: string[], score: number, hitCount: number}>}
+   */
+  searchCache(goal, threshold = 0.85) {
+    this.#ensureOpen();
+    const hash = crypto.createHash('sha256').update(goal).digest('hex').substring(0, 16);
+    const results = [];
+
+    // 1. Exact hash match
+    const exact = this.#db.prepare(`
+      SELECT * FROM semantic_cache WHERE goal_hash = ?
+    `).get(hash);
+    if (exact) {
+      results.push({
+        goal: exact.goal,
+        toolChain: JSON.parse(exact.tool_chain),
+        score: 1.0,
+        hitCount: exact.hit_count,
+        exact: true,
+      });
+    }
+
+    // 2. Try embedding similarity if vec available
+    try {
+      const emb = this.#hashEmbed(goal);
+      if (emb) {
+        const allCaches = this.#db.prepare(
+          'SELECT goal, goal_embedding, tool_chain, hit_count, success_count FROM semantic_cache'
+        ).all();
+        for (const row of allCaches) {
+          if (row.goal === goal) continue;
+          if (!row.goal_embedding) continue;
+          const cachedEmb = new Float32Array(row.goal_embedding);
+          const sim = this.#cosineSimilarity(emb, cachedEmb);
+          if (sim >= threshold) {
+            results.push({
+              goal: row.goal,
+              toolChain: JSON.parse(row.tool_chain),
+              score: Math.round(sim * 1000) / 1000,
+              hitCount: row.hit_count,
+              exact: false,
+            });
+          }
+        }
+      }
+    } catch {
+      // Embedding not available — skip semantic search
+    }
+
+    // Sort: exact match first, then by similarity desc
+    results.sort((a, b) => b.score - a.score);
+    return results.slice(0, 5);
+  }
+
+  /**
+   * Update semantic cache stats (hit count, success count).
+   * @param {string} goalHash
+   * @param {boolean} success
+   */
+  updateCacheStats(goalHash, success) {
+    this.#ensureOpen();
+    this.#db.prepare(`
+      UPDATE semantic_cache
+      SET hit_count = hit_count + 1,
+          success_count = success_count + ?,
+          last_seen = datetime('now')
+      WHERE goal_hash = ?
+    `).run(success ? 1 : 0, goalHash);
+  }
+
+  /**
+   * Generate a hash-based 384-dim embedding (does not require external model).
+   * Uses a deterministic hash function to produce a pseudo-embedding.
+   * @private
+   * @param {string} text
+   * @returns {Float32Array|null}
+   */
+  #hashEmbed(text) {
+    if (!text) return null;
+    const dim = 384;
+    const vec = new Float32Array(dim);
+    const chars = text.split('');
+    const seed = chars.reduce((acc, c) => acc + c.charCodeAt(0), 0);
+
+    for (let i = 0; i < dim; i++) {
+      let h = seed + i * 31;
+      for (let j = 0; j < chars.length; j++) {
+        h = ((h << 5) - h) + chars[j].charCodeAt(0);
+        h = h & h;
+      }
+      vec[i] = (h % 20001 - 10000) / 10000;
+    }
+
+    // Normalize the vector
+    let norm = 0;
+    for (let i = 0; i < dim; i++) norm += vec[i] * vec[i];
+    norm = Math.sqrt(norm);
+    if (norm > 0) {
+      for (let i = 0; i < dim; i++) vec[i] /= norm;
+    }
+
+    return vec;
   }
 }
 

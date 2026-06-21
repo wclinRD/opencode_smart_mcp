@@ -5,6 +5,8 @@
 //
 // Usage:
 //   import { recommendTools, buildToolChain } from 'smart-agent/tool-strategy';
+
+import { getMemoryDB } from '../../lib/memory-db.mjs';
 //   const rec = recommendTools('debug login error');
 //   // => { primary: 'smart_grep', alternatives: [...], reason: '...' }
 //   const chain = buildToolChain('refactor user authentication');
@@ -109,6 +111,33 @@ const TASK_PATTERNS = [
   },
 ];
 
+// Phase 26: Feedback-adjusted weights (loaded lazily)
+let _feedbackWeights = null;
+let _lastFeedbackLoad = 0;
+
+/**
+ * Load feedback weights lazily (cache for 60s).
+ */
+function _loadFeedbackWeights() {
+  const now = Date.now();
+  if (_feedbackWeights && now - _lastFeedbackLoad < 60000) return _feedbackWeights;
+  _feedbackWeights = {};
+  try {
+    const db = getMemoryDB();
+    for (const pattern of TASK_PATTERNS) {
+      const primary = pattern.primary;
+      const stats = db.getRecommendationStats(primary);
+      if (stats.total >= 3) {
+        _feedbackWeights[primary] = stats.rate;
+      }
+    }
+  } catch {
+    // Memory DB not available — use default weights
+  }
+  _lastFeedbackLoad = now;
+  return _feedbackWeights;
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -134,6 +163,19 @@ export function recommendTools(goal, context = {}) {
     };
   }
 
+  // Phase 26: Apply feedback-based weight adjustment
+  let adjustedScore = match.score;
+  try {
+    const weights = _loadFeedbackWeights();
+    const w = weights[match.primary];
+    if (w !== undefined) {
+      if (w < 0.3) adjustedScore *= 0.5;
+      else if (w > 0.8) adjustedScore *= 1.2;
+    }
+  } catch {
+    // Best-effort
+  }
+
   // Filter out recently used tools if context suggests avoiding repeats
   let chain = [...match.chain];
   if (context.recentTools && context.recentTools.length > 0) {
@@ -149,7 +191,7 @@ export function recommendTools(goal, context = {}) {
     alternatives: match.alternatives,
     chain,
     reason: match.reason,
-    matchScore: match.score,
+    matchScore: Math.min(1, adjustedScore),
   };
 }
 

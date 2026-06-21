@@ -14,12 +14,17 @@
 // Usage:
 //   import { PrefetchEngine } from './prefetch-engine.mjs';
 //   const engine = new PrefetchEngine({ toolMap });
+
+import { getMemoryDB } from './memory-db.mjs';
 //   engine.triggerAfter(toolName, args, result);  // after tool success
 //   const hit = engine.checkCache(toolName, args); // before tool execution
 
 // ---------------------------------------------------------------------------
 // Pre-fetch Rules
 // ---------------------------------------------------------------------------
+
+// Phase 25: Minimum transitions count before switching to dynamic mode
+const MIN_TRANSITIONS_FOR_DYNAMIC = 5;
 
 /**
  * Each rule: { trigger, prefetch, ttl, contextExtractor }
@@ -129,6 +134,8 @@ export class PrefetchEngine {
     this._defaultTtl = opts.defaultTtl || 5000;
     this._cache = new Map(); // key → { result, expiresAt }
     this._pending = new Set(); // keys currently being pre-fetched (dedup)
+    this._useDynamic = false;
+    this._lastTransitionCheck = 0;
     this._stats = {
       triggered: 0,
       hits: 0,
@@ -275,6 +282,69 @@ export class PrefetchEngine {
     } finally {
       this._pending.delete(key);
     }
+  }
+
+  // -----------------------------------------------------------------------
+  // Phase 25: Dynamic (learned) prefetch from transitions
+  // -----------------------------------------------------------------------
+
+  /**
+   * Check if dynamic (learned) transitions should be used.
+   * Switches to dynamic mode when enough transitions have been recorded.
+   */
+  _checkDynamicMode() {
+    if (this._useDynamic) return true;
+    // Only check every 30s to avoid DB hammering
+    if (Date.now() - this._lastTransitionCheck < 30000) return false;
+    this._lastTransitionCheck = Date.now();
+    try {
+      const db = getMemoryDB();
+      const stats = db.getTransitionStats();
+      if (stats.total >= MIN_TRANSITIONS_FOR_DYNAMIC) {
+        this._useDynamic = true;
+        return true;
+      }
+    } catch {
+      // Memory DB not available — stay in static mode
+    }
+    return false;
+  }
+
+  /**
+   * Get prefetch candidates from learned transitions.
+   * Falls back to static rules if not enough data yet.
+   * @param {string} toolName
+   * @returns {Array<{tool: string, args: object}>}
+   */
+  prefetchFromTransitions(toolName) {
+    if (!this._checkDynamicMode()) return [];
+
+    try {
+      const db = getMemoryDB();
+      const transitions = db.getTopTransitions(toolName, 3);
+      if (transitions.length === 0) return [];
+
+      return transitions.map(t => ({
+        tool: t.toTool,
+        score: t.score,
+        args: this._guessArgsForTool(t.toTool, toolName),
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Guess reasonable args for a prefetched tool (best-effort).
+   * @private
+   */
+  _guessArgsForTool(toTool, fromTool) {
+    // Provide minimal args — the cache key will be generic but acceptable
+    if (toTool === 'smart_lsp') return { operation: 'hover', file: '', line: 0, character: 0 };
+    if (toTool === 'smart_memory_store') return { command: 'search', query: '' };
+    if (toTool === 'smart_grep') return { pattern: '' };
+    if (toTool === 'smart_read') return { file: '' };
+    return {};
   }
 
   // -----------------------------------------------------------------------

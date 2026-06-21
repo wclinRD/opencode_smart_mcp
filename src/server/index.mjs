@@ -1638,6 +1638,35 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
       }
     });
   }
+  // Phase 25: Tool Transition Learning — record tool transition
+  if (success && toolName !== 'smart_memory_store' && toolName !== 'smart_context') {
+    import('./lib/memory-db.mjs').then(({ getMemoryDB }) => {
+      try {
+        const db = getMemoryDB();
+        const prevTool = global.__lastTool;
+        if (prevTool && prevTool !== toolName) {
+          db.recordTransition(prevTool, toolName, true, elapsedMs);
+        }
+        global.__lastTool = toolName;
+      } catch {
+        // Best-effort
+      }
+    }).catch(() => {});
+  }
+  // Phase 26: Record tool usage as implicit feedback
+  if (success && toolName !== 'smart_memory_store' && toolName !== 'smart_context') {
+    import('./lib/memory-db.mjs').then(({ getMemoryDB }) => {
+      try {
+        const db = getMemoryDB();
+        const goalCtx = args.thought || args.pattern || args.file || args.query || args.tool || '';
+        if (goalCtx) {
+          db.recordFeedback(goalCtx.slice(0, 200), toolName, toolName, elapsedMs);
+        }
+      } catch {
+        // Best-effort
+      }
+    }).catch(() => {});
+  }
   // Attach responsePolicy + responsePipeline for output optimization downstream
   if (def?.responsePolicy) {
     result._responsePolicy = def.responsePolicy;
