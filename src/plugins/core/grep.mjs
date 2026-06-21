@@ -22,6 +22,8 @@ export default {
       fileTypes: { type: 'string', description: 'File type filter: "all" for any file, or comma-separated extensions like ".txt,.log,.md"' },
       semantic: { type: 'boolean', description: 'Enable hybrid semantic search (BM25 + TF-IDF fusion)' },
       semanticWeight: { type: 'number', description: 'Custom semantic weight 0.0-1.0 (auto-detected from query type)' },
+      budget: { type: 'number', description: 'Token budget — greedily select top results to fit N tokens (L0/L1 compression)' },
+      compress: { type: 'string', enum: ['L0', 'L1', 'L2'], description: 'Compression level: L0=signature only, L1=+context+scope, L2=full (default)' },
     },
     required: ['pattern'],
   },
@@ -44,6 +46,8 @@ export default {
     if (a.countOnly) cli.push('--count-only');
     if (a.fileTypes) cli.push('--file-types', String(a.fileTypes));
     if (a.semanticWeight != null) cli.push('--semantic-weight', String(a.semanticWeight));
+    if (a.budget > 0) cli.push('--budget', String(a.budget));
+    if (a.compress && a.compress !== 'L2') cli.push('--compress', String(a.compress));
     cli.push('--no-color');
     return cli;
   },

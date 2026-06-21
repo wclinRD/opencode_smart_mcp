@@ -32,6 +32,7 @@ import { detectQueryType } from '../lib/query-detector.mjs';
 import { semanticSearch } from '../lib/semantic-search.mjs';
 import { hybridRank } from '../lib/hybrid-search.mjs';
 import { loadCache, saveCache, getCachedOrEmbed } from '../lib/embedding-cache.mjs';
+import { fitToBudget, compressLevel } from '../lib/token-budget.mjs';
 
 // ---------------------------------------------------------------------------
 // Scope detection — find enclosing function/class/block for a line
@@ -639,6 +640,8 @@ function parseArgs() {
     queryDetect: true,  // default: query type detection enabled
     semantic: false,    // default: semantic search disabled
     semanticWeight: undefined, // auto-detect from query type
+    budget: 0,          // token budget (0 = no limit)
+    compress: 'L2',     // compression level: L0, L1, L2 (default: no compression)
   };
   let i = 1;
 
@@ -668,6 +671,8 @@ function parseArgs() {
       case '--no-query-detect': opts.queryDetect = false; break;
       case '--semantic': opts.semantic = true; break;
       case '--semantic-weight': opts.semanticWeight = parseFloat(args[++i]); break;
+      case '--budget': opts.budget = parseInt(args[++i], 10); break;
+      case '--compress': opts.compress = args[++i]; break;
       case '--invert': opts.invert = true; break;
       case '--count-only': opts.countOnly = true; break;
       case '--file-types': opts.fileTypes = args[++i]; break;
@@ -704,8 +709,10 @@ Options:
   --with-structure      Show file symbol structure overview
   --format <fmt>        Output: text, json, markdown (default: text)
   --color               Force color output
-  --no-color            Disable color output
-  --ignore-case         Case-insensitive search
+   --budget <N>          Token budget — greedily fit top results within N tokens
+   --compress <L0|L1|L2> Compression level: L0=signature only, L1=+context+scope, L2=full (default)
+   --no-color            Disable color output
+   --ignore-case         Case-insensitive search
   --max-matches <N>     Max matches per file (default: 100)
   --files-only          Only show filenames, not matches
   --rank <mode>         Ranking mode: bm25 (default), none
@@ -838,6 +845,19 @@ if (!opts.countOnly && opts.withImports) {
       r.importedBy = graphEntry.importedBy;
     }
   }
+}
+
+// Token budget compression (before output)
+if (opts.budget > 0 && !opts.countOnly && results.length > 0) {
+  const budgeted = fitToBudget(results, opts.budget, opts.compress, { color });
+  if (opts.format === 'text') {
+    console.log(budgeted.text);
+    process.exit(0);
+  }
+} else if (opts.compress !== 'L2' && !opts.countOnly && results.length > 0 && opts.format === 'text') {
+  const compressed = compressLevel(results, opts.compress, { color });
+  console.log(compressed.join('\n'));
+  process.exit(0);
 }
 
 // Output
