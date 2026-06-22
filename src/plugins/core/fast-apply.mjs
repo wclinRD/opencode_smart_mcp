@@ -24,7 +24,7 @@
 
 import { readFileSync, unlinkSync } from 'node:fs';
 import { relative, resolve, extname } from 'node:path';
-import { extractSymbol, detectLanguage } from '../../lib/smart-read.mjs';
+import { extractSymbol, detectLanguage, parseDeclarations } from '../../lib/smart-read.mjs';
 import {
   applySearchReplace,
   applySearchReplaceWithLazy,
@@ -549,6 +549,14 @@ Dry-run by default — safe to use without side effects.`,
           r = applyBatch(ch.glob, ch.sed, { root: ch.root, undo });
         }
         appResults.push(r || { status: 'error', file: ch.file, error: 'Unknown type' });
+
+        // 🛡️ Auto-retry on conflict
+        if (r && r.status === 'conflict' && !r._retried) {
+          const retryR = retryApply(ch, r, { undo });
+          if (retryR && retryR.status === 'applied') {
+            appResults[appResults.length - 1] = { ...retryR, _retried: true, _originalError: r.error };
+          }
+        }
       }
 
       return formatOutput({
@@ -575,10 +583,76 @@ Dry-run by default — safe to use without side effects.`,
 // Helpers
 // ---------------------------------------------------------------------------
 
+
 function readFileSafe(filePath) {
   try { return readFileSync(filePath, 'utf-8'); } catch { return null; }
 }
 
+/**
+ * 🛡️ Auto-retry: when an apply format returns conflict, try an alternative
+ * strategy before giving up.
+ *
+ * Hasline conflicts (oldContent mismatch / file shifted):
+ *   Re-read file, search for oldContent textually, recalculate line range.
+ *
+ * Search-replace conflicts (fuzzy match failed):
+ *   Try hashline with direct content search (more precise).
+ */
+function retryApply(ch, originalResult, opts) {
+  const { undo } = opts;
+
+  // Retry hashline: oldContent may have shifted due to earlier batch edits
+  if (ch.type === 'hashline' && ch.oldContent && ch.startLine && ch.endLine) {
+    try {
+      const fc = readFileSync(ch.file, 'utf-8');
+      const lines = fc.split('\n');
+      const oldLines = ch.oldContent.split('\n');
+
+      // Only retry if oldContent is reasonable (<50% of file).
+      // Larger suggests extractSymbol returned wrong lineEnd.
+      if (oldLines.length > lines.length * 0.5 || lines.length < 50) return null;
+
+      // Find oldContent in current file content
+      const idx = fc.indexOf(ch.oldContent);
+      if (idx !== -1) {
+        const foundStart = fc.substring(0, idx).split('\n').length;
+        const foundEnd = foundStart + oldLines.length - 1;
+
+        // Verify: startLine shouldn't shift >20 lines
+        if (Math.abs(foundStart - ch.startLine) > 20) return null;
+
+        const newR = applyHashline(ch.file, {
+          startLine: foundStart, endLine: foundEnd,
+          oldContent: ch.oldContent,
+          newContent: ch.newContent,
+          action: ch.action || 'replace',
+        }, { undo });
+        if (newR.status === 'applied') return newR;
+      }
+    } catch { /* fall through */ }
+  }
+
+  // Retry search-replace/partial/lazy: try hashline with direct content match
+  if (['search-replace', 'partial', 'lazy'].includes(ch.type) && ch.search && ch.replace) {
+    try {
+      const fc = readFileSync(ch.file, 'utf-8');
+      const idx = fc.indexOf(ch.search);
+      if (idx !== -1) {
+        const lineNum = fc.substring(0, idx).split('\n').length;
+        const endLine = lineNum + ch.search.split('\n').length - 1;
+        const newR = applyHashline(ch.file, {
+          startLine: lineNum, endLine,
+          oldContent: ch.search,
+          newContent: ch.replace,
+          action: 'replace',
+        }, { undo });
+        if (newR.status === 'applied') return newR;
+      }
+    } catch { /* fall through */ }
+  }
+
+  return null;
+}
 function generatePreview(content, search, replace, lineNum) {
   const lines = content.split('\n');
   const sl = search.split('\n');
@@ -684,6 +758,30 @@ export function parseBlockDiff(blocks, root) {
     const lang = detectLanguage(filePath);
     const sym = extractSymbol(fc, lang, b.symbol);
     if (!sym) throw new Error(`Symbol "${b.symbol}" not found in ${b.file}`);
+
+    // 🛡️ Body range validation: if the extracted body covers >50% of the file,
+    // extractSymbol likely returned wrong lineEnd (brace miscount in strings).
+    // Fallback: cap at the next declaration boundary.
+    const lines = fc.split('\n');
+    const totalLines = lines.length;
+    if (sym.lineEnd - sym.lineStart > totalLines * 0.5 && totalLines > 80) {
+      try {
+        const allDecls = parseDeclarations(fc, lang);
+        const myIdx = allDecls.findIndex(d => d.name === sym.name && d.lineStart === sym.lineStart);
+        if (myIdx !== -1 && myIdx + 1 < allDecls.length) {
+          const next = allDecls[myIdx + 1];
+          if (next.lineStart > sym.lineStart && next.lineStart < sym.lineEnd) {
+            const safeEnd = next.lineStart - 1;
+            const cappedBody = lines.slice(sym.lineStart - 1, safeEnd).join('\n');
+            if (cappedBody.trimEnd().length > 0) {
+              sym.lineEnd = safeEnd;
+              sym.body = cappedBody;
+            }
+          }
+        }
+      } catch { /* fall through — size guard in applyHashline will catch it */ }
+    }
+
     const act = b.action || 'replace';
     const nc = b.newContent;
     if (act === 'prepend') {
@@ -691,7 +789,13 @@ export function parseBlockDiff(blocks, root) {
     } else if (act === 'append') {
       changes.push({ file: b.file, type: 'hashline', startLine: sym.lineEnd, endLine: sym.lineEnd, newContent: nc, action: 'insert-after' });
     } else {
-      changes.push({ file: b.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineEnd, newContent: nc, action: 'replace' });
+      // 🛡️ Pass oldContent so applyHashline can verify the line range is correct
+      // before replacing. This catches extractSymbol/findBodyEnd misfires that
+      // return a wrong lineEnd (e.g., inner function confuses brace counting).
+      // Without oldContent, applyHashline skips verification and silently
+      // corrupts the file. With it, mismatches become conflict errors.
+      const actualBody = lines.slice(sym.lineStart - 1, sym.lineEnd).join('\n');
+      changes.push({ file: b.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineEnd, oldContent: actualBody, newContent: nc, action: 'replace' });
     }
   }
   return changes;

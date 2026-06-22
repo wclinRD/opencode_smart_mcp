@@ -298,6 +298,10 @@ function matchL4(contentLines, searchLines) {
 function matchL6(contentLines, searchLines) {
   if (searchLines.length === 0) return -1;
 
+  // ── Fast guard: skip for large inputs ──
+  // L6 uses O(n·m) greedy subsequence matching, too slow for large files.
+  if (contentLines.length > 500 || searchLines.length > 50) return -1;
+
   // Compute fingerprints: trimmed, whitespace-normalized, non-empty meaningful lines
   const searchSig = searchLines
     .map(l => normalizeWS(l))
@@ -534,6 +538,12 @@ export function applyHashline(filePath, change, opts = {}) {
       }
   }
 
+  // 🛡️ Size sanity check before write
+  const sanity = sanitizeFileEdit(content, newContent_full, filePath, { editDesc: `hashline ${action} lines ${startLine}-${endLine}` });
+  if (!sanity.ok) {
+    return { status: 'conflict', file: filePath, error: sanity.error, details: { ratio: sanity.ratio, originalLength: content.length, newLength: newContent_full.length } };
+  }
+
   try {
     writeFileSync(filePath, newContent_full, 'utf-8');
   } catch (e) {
@@ -587,7 +597,8 @@ export function fuzzyMatch(content, search, opts = {}) {
   r = matchL3(cl, sl);                if (r !== -1) return { line: r, level: 3 };
   r = matchL4(cl, sl);                if (r !== -1) return { line: r, level: 4 };
   r = matchL5(cl, sl);                if (r !== -1) return { line: r, level: 5 };
-  r = matchL6(cl, sl);                if (r !== -1) return { line: r, level: 6 };
+  // L6 removed: O(n·m) gap-tolerant subsequence matching caused 300-3000ms latency
+  // for large files. Edits reaching L6 fall through to structural (L7) or DMP instead.
 
   // Level 7 hint: structural fallback may find it. Set level:7 to trigger retry in calling code.
   if (opts.lang) return { line: -1, level: 7, hint: 'structural fallback available', lang: opts.lang };
@@ -885,6 +896,12 @@ export function applySearchReplace(filePath, block, opts = {}) {
   const after = content.substring(actualStart + actualSearchLen);
   const newContent = before + replace + after;
 
+  // 🛡️ Size sanity check before write
+  const sanity = sanitizeFileEdit(content, newContent, filePath, { editDesc: 'search-replace' });
+  if (!sanity.ok) {
+    return { status: 'conflict', file: filePath, error: sanity.error, details: { ratio: sanity.ratio, originalLength: content.length, newLength: newContent.length } };
+  }
+
   // Create undo snapshot
   if (undo) {
     try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* best effort */ }
@@ -982,6 +999,13 @@ export function applyPartial(filePath, block, opts = {}) {
     const before = content.substring(0, exactIdx);
     const after = content.substring(exactIdx + partial.length);
     const newContent = before + replace + after;
+
+    // 🛡️ Size sanity check before write
+    const sanity = sanitizeFileEdit(content, newContent, filePath, { editDesc: 'partial replace' });
+    if (!sanity.ok) {
+      return { status: 'conflict', file: filePath, error: sanity.error, details: { ratio: sanity.ratio, originalLength: content.length, newLength: newContent.length } };
+    }
+
     if (undo) { try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* */ } }
     try { writeFileSync(filePath, newContent, 'utf-8'); } catch (e) {
       return { status: 'error', file: filePath, error: `Cannot write: ${e.message}` };
@@ -1101,6 +1125,13 @@ export function applyUnifiedDiff(filePath, hunks, opts = {}) {
   }
 
   const newContent = lines.join('\n');
+
+  // 🛡️ Size sanity check before write
+  const sanity = sanitizeFileEdit(content, newContent, filePath, { editDesc: 'unified-diff' });
+  if (!sanity.ok) {
+    return { status: 'conflict', file: filePath, error: sanity.error, details: { ratio: sanity.ratio, originalLength: content.length, newLength: newContent.length } };
+  }
+
   try { writeFileSync(filePath, newContent, 'utf-8'); } catch (e) {
     return { status: 'error', file: filePath, error: `Cannot write: ${e.message}` };
   }
@@ -1914,7 +1945,10 @@ function escapeRegex(str) {
 
 let dmpInstance = null;
 function getDMP() {
-  if (!dmpInstance) dmpInstance = new diff_match_patch();
+  if (!dmpInstance) {
+    dmpInstance = new diff_match_patch();
+    dmpInstance.Diff_Timeout = 0.5; // 500ms max (was unbounded, default 1.0s)
+  }
   return dmpInstance;
 }
 
@@ -1956,12 +1990,6 @@ export function applyByDiffMatchPatch(content, search, replace) {
   }
 }
 
-/**
- * Generate a semantic diff between oldText and newText.
- * Uses diff-match-patch for character-level diffing.
- * Returns array of { op: -1|0|1, text } patches.
- *   -1 = delete, 0 = equal, 1 = insert
- */
 export function semanticDiff(oldText, newText) {
   try {
     const dmp = getDMP();
@@ -1971,4 +1999,47 @@ export function semanticDiff(oldText, newText) {
   } catch {
     return [{ op: 0, text: oldText }];
   }
+}
+
+/**
+ * 🛡️ Pre-write sanity check: detect suspicious file size changes.
+ *
+ * Prevents data corruption when an edit accidentally replaces far more
+ * content than intended (e.g., extractSymbol returning wrong lineEnd).
+ *
+ * Thresholds are conservative — designed to catch the worst-case (file
+ * losing >80% or growing >5x) while never blocking a legitimate edit.
+ *
+ * @param {string} originalContent - File content before edit
+ * @param {string} newContent - File content after edit
+ * @param {string} filePath - For error reporting
+ * @param {object} [ctx] - Optional edit context for error messages
+ * @returns {{ ok: boolean, error?: string, ratio?: number }}
+ */
+export function sanitizeFileEdit(originalContent, newContent, filePath, ctx = {}) {
+  if (originalContent === newContent) {
+    return { ok: false, error: 'Edit produced no change — refusing no-op write', ratio: 1 };
+  }
+  const originalLen = originalContent.length;
+  const newLen = newContent.length;
+  if (originalLen === 0) return { ok: true }; // New file, can't compare
+
+  const ratio = newLen / originalLen;
+
+  if (ratio < 0.2) {
+    return {
+      ok: false,
+      ratio,
+      error: `Suspicious edit blocked: file would shrink to ${(ratio * 100).toFixed(0)}% (${originalLen} → ${newLen} bytes). ${ctx.editDesc || 'Edit range may be incorrect.'} Use whole-file write if this is intentional.`,
+    };
+  }
+  if (ratio > 5.0) {
+    return {
+      ok: false,
+      ratio,
+      error: `Suspicious edit blocked: file would grow to ${(ratio * 100).toFixed(0)}% (${originalLen} → ${newLen} bytes). ${ctx.editDesc || 'Replacement may be too large.'} Use whole-file write if this is intentional.`,
+    };
+  }
+
+  return { ok: true, ratio };
 }
