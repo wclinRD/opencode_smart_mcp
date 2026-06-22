@@ -74,7 +74,7 @@ permission:
 | `smart_security({scan})` | 安全掃描 |
 | `smart_test({root})` | 測試執行 |
 | `smart_fast_apply({file, content\|search, replace\|sed, file, sed})` | 🥇 統一編輯（10 格式，6 級 fuzzy → structural → diff-match-patch → conflict，validate+auto-retry，atomic multi-file，dry-run 安全） |
-| `smart_edit_chain({edits, file?, atomic?, dryRun?})` | 🥇 批次編輯鏈（N 編輯 1 呼叫，共享檔案讀取，原子 rollback，省 40-60% token） |
+| `smart_edit_chain({chain, apply?, atomic?})` | 🥇 批次編輯鏈（1 次呼叫 = N 編輯，自動偵測格式，共享檔案讀取，原子 rollback，節省 40-60% token） |
 | `smart_context({command})` | Session 管理 + budget 查詢 |
 | `smart_rules({file})` | **編輯前必查**專案規則 |
 | `smart_lsp({operation, file, line, character})` | Type-aware 程式碼理解（definition/references/hover/diagnostics/symbols） |
@@ -186,7 +186,7 @@ Golden Rules（機械化執行）：
 | 修 Bug | `ssr(error_diagnose) → ssr(debug) → smart_fast_apply → smart_test → ssr(memory_store)` |
 | 重構 | `ssr(import_graph) → ssr(code_impact) → smart_fast_apply → smart_test` |
 | 新功能 | `smart_think(確認spec) → ssr(planner) → smart_think(設計) → smart_fast_apply → smart_test` |
-| 批次編輯 | `smart_edit_chain({edits:[...]})` → `smart_test`（N 編輯 1 次 MCP 呼叫，省 40-60% token） |
+| 批次編輯 | `smart_edit_chain({chain:[{file,search,replace}]})` → `smart_test`（1 次 MCP 呼叫完成 N 編輯，省 40-60% token） |
 | Git 流程 | `ssr(git_context) → ssr(git_commit) → smart_test → ssr(git_pr)` |
 | 安全修復 | `smart_security → smart_think({mode:"beam"}) → smart_fast_apply → smart_test → rescan` |
 
@@ -211,18 +211,13 @@ Golden Rules（機械化執行）：
 `smart_edit_chain` 取代 N 次 smart_fast_apply 呼叫。自動偵測編輯格式，共享檔案讀取。
 
 用法：
-- `{file, edits:[{search,replace}, {symbol, content}, ...]}` — 混合格式批次編輯
-- `{file, edits:[...], atomic:true}` — 原子化：全部成功或全部 rollback
-- `{file, edits:[...], dryRun:true}` — 預覽模式（安全）
+- `{chain:[{file,search,replace}, {file,symbol,content}, ...]}` — 混合格式批次編輯
 
 格式自偵測：
 - `{search, replace}` → fuzzy search-replace
 - `{symbol, content}` → block-diff（symbol 區塊編輯）
 - `{sed}` → sed 表達式
 - `{startLine, content, endLine?}` → hashline（大檔案）
-> 
-> 節省對比：N 次 smart_fast_apply = N MCP 呼叫；1 次 smart_edit_chain = 1 MCP 呼叫（省 40-60% token）
-> 
 
 ---
 
