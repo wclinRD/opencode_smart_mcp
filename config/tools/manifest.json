@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-21T15:18:11.709Z",
+  "generatedAt": "2026-06-22T05:13:04.046Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -2884,6 +2884,93 @@
       }
     },
     {
+      "name": "smart_edit_chain",
+      "description": "[chain] Compound edit tool — batch multiple edits in ONE call.\nReduces overhead by sharing file reads and validating all edits before applying.\n\nFormat auto-detection per edit:\n  { search, replace }         → search-replace (fuzzy)\n  { symbol, content }         → block-diff (symbol-aware)\n  { sed }                     → sed expression\n  { startLine, content }      → hashline (endLine optional)\n\nKey benefits:\n  • 1 MCP call for N edits (vs N separate smart_fast_apply calls)\n  • Shared file reads: read once per file, apply N edits\n  • Atomic: all-or-nothing rollback (default: true)\n  • Dry-run by default — safe to preview\n  • Compact: short property names save tokens",
+      "category": "edit",
+      "domain": "edit",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "chain": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "file": {
+                  "type": "string",
+                  "description": "Target file path (required)"
+                },
+                "search": {
+                  "type": "string",
+                  "description": "Text to find — search-replace mode"
+                },
+                "replace": {
+                  "type": "string",
+                  "description": "Replacement text — search-replace mode"
+                },
+                "symbol": {
+                  "type": "string",
+                  "description": "Symbol name — block-diff mode (paired with content)"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "New content — block-diff/hashline mode"
+                },
+                "sed": {
+                  "type": "string",
+                  "description": "Sed expression — sed mode"
+                },
+                "startLine": {
+                  "type": "number",
+                  "description": "Start line (1-indexed) — hashline mode"
+                },
+                "endLine": {
+                  "type": "number",
+                  "description": "End line (inclusive) — hashline mode (default: startLine)"
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "replace",
+                    "prepend",
+                    "append"
+                  ],
+                  "description": "Block-diff action (default: replace)"
+                }
+              },
+              "required": [
+                "file"
+              ]
+            },
+            "description": "Array of edit operations (1-20)"
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Apply changes (default: false = dry-run)"
+          },
+          "atomic": {
+            "type": "boolean",
+            "description": "All-or-nothing rollback (default: true)"
+          }
+        },
+        "required": [
+          "chain"
+        ]
+      }
+    },
+    {
       "name": "smart_error_diagnose",
       "description": "Use when: getting an error and need root cause analysis. Cross-references against known error KB + memory store (auto-searched). Covers build/runtime/test/permission/path/network. Supports auto-store successful diagnoses for future reuse.",
       "category": "debug",
@@ -3299,72 +3386,6 @@
             "description": "Max review comments per file (default: 5)"
           }
         }
-      }
-    },
-    {
-      "name": "smart_edit",
-      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
-      "category": "standard",
-      "domain": "edit",
-      "safetyLevel": "high",
-      "routingRules": {
-        "autoRoute": true,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "file": {
-            "type": "string",
-            "description": "File path to edit (required)"
-          },
-          "oldString": {
-            "type": "string",
-            "description": "Text to find and replace (exact match by default, regex if regex=true)"
-          },
-          "newString": {
-            "type": "string",
-            "description": "Replacement text"
-          },
-          "files": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Multiple files to edit (alternative to file)"
-          },
-          "regex": {
-            "type": "boolean",
-            "description": "Use regex matching instead of exact (default: false)"
-          },
-          "apply": {
-            "type": "boolean",
-            "description": "Apply changes (default: false — dry run)"
-          },
-          "root": {
-            "type": "string",
-            "description": "Project root (default: current dir)"
-          },
-          "format": {
-            "type": "string",
-            "enum": [
-              "json",
-              "text"
-            ],
-            "description": "Output format (default: json — includes nextCommand)"
-          }
-        },
-        "required": [
-          "oldString",
-          "newString"
-        ]
       }
     },
     {
@@ -4463,6 +4484,72 @@
             "description": "Output format (default: text)"
           }
         }
+      }
+    },
+    {
+      "name": "smart_edit",
+      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
+      "category": "standard",
+      "domain": "edit",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "File path to edit (required)"
+          },
+          "oldString": {
+            "type": "string",
+            "description": "Text to find and replace (exact match by default, regex if regex=true)"
+          },
+          "newString": {
+            "type": "string",
+            "description": "Replacement text"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Multiple files to edit (alternative to file)"
+          },
+          "regex": {
+            "type": "boolean",
+            "description": "Use regex matching instead of exact (default: false)"
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Apply changes (default: false — dry run)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: current dir)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "description": "Output format (default: json — includes nextCommand)"
+          }
+        },
+        "required": [
+          "oldString",
+          "newString"
+        ]
       }
     },
     {

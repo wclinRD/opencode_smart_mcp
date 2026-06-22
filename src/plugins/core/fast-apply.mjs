@@ -759,27 +759,75 @@ export function parseBlockDiff(blocks, root) {
     const sym = extractSymbol(fc, lang, b.symbol);
     if (!sym) throw new Error(`Symbol "${b.symbol}" not found in ${b.file}`);
 
-    // 🛡️ Body range validation: if the extracted body covers >50% of the file,
-    // extractSymbol likely returned wrong lineEnd (brace miscount in strings).
-    // Fallback: cap at the next declaration boundary.
+    // 🛡️ Body range validation — P0: braces balance check.
+    // findBodyEnd can miscount braces inside strings/regexes/comments,
+    // returning wrong lineEnd. This causes silent corruption because
+    // oldContent (sliced from the same wrong range) passes verification
+    // in applyHashline. We validate BEFORE passing to applyHashline.
     const lines = fc.split('\n');
     const totalLines = lines.length;
-    if (sym.lineEnd - sym.lineStart > totalLines * 0.5 && totalLines > 80) {
+    let actualBody = lines.slice(sym.lineStart - 1, sym.lineEnd).join('\n');
+
+    // Phase 1: Braces balance check
+    const bodyOpen = (actualBody.match(/\{/g) || []).length;
+    const bodyClose = (actualBody.match(/\}/g) || []).length;
+
+    if (bodyOpen !== bodyClose) {
+      // Braces unbalanced — extractSymbol returned wrong lineEnd.
+      // Try to correct using parseDeclarations (next declaration boundary).
+      let corrected = false;
       try {
         const allDecls = parseDeclarations(fc, lang);
         const myIdx = allDecls.findIndex(d => d.name === sym.name && d.lineStart === sym.lineStart);
         if (myIdx !== -1 && myIdx + 1 < allDecls.length) {
           const next = allDecls[myIdx + 1];
-          if (next.lineStart > sym.lineStart && next.lineStart < sym.lineEnd) {
-            const safeEnd = next.lineStart - 1;
-            const cappedBody = lines.slice(sym.lineStart - 1, safeEnd).join('\n');
-            if (cappedBody.trimEnd().length > 0) {
-              sym.lineEnd = safeEnd;
-              sym.body = cappedBody;
+          if (next.lineStart > sym.lineStart) {
+            // Cap or extend to next declaration boundary
+            sym.lineEnd = next.lineStart - 1;
+            const correctedBody = lines.slice(sym.lineStart - 1, sym.lineEnd).join('\n');
+            const cOpen = (correctedBody.match(/\{/g) || []).length;
+            const cClose = (correctedBody.match(/\}/g) || []).length;
+            if (cOpen === cClose && correctedBody.trimEnd().length > 0) {
+              sym.body = correctedBody;
+              actualBody = correctedBody;
+              corrected = true;
             }
           }
         }
-      } catch { /* fall through — size guard in applyHashline will catch it */ }
+      } catch { /* fall through to error */ }
+
+      if (!corrected) {
+        throw new Error(
+          `Symbol "${b.symbol}" in ${b.file} has unbalanced braces ` +
+          `(${bodyOpen} open, ${bodyClose} close across ${actualBody.length} chars). ` +
+          `This is likely a parser miscount inside strings/comments. ` +
+          `Use search-replace or hashline format instead.`
+        );
+      }
+    }
+
+    // Phase 2: Size guard — if body still covers >50% of file, try next-declaration cap.
+    // (Catches cases where braces happen to balance but range is still wrong,
+    //  e.g. extra { and } in strings that happen to pair.)
+    if (sym.lineEnd - sym.lineStart > Math.max(5, totalLines * 0.5)) {
+      try {
+        const allDecls = parseDeclarations(fc, lang);
+        const myIdx = allDecls.findIndex(d => d.name === sym.name && d.lineStart === sym.lineStart);
+        if (myIdx !== -1 && myIdx + 1 < allDecls.length) {
+          const next = allDecls[myIdx + 1];
+          const safeEnd = Math.min(sym.lineEnd, next.lineStart - 1);
+          if (safeEnd > sym.lineStart) {
+            const cappedBody = lines.slice(sym.lineStart - 1, safeEnd).join('\n');
+            const cOpen = (cappedBody.match(/\{/g) || []).length;
+            const cClose = (cappedBody.match(/\}/g) || []).length;
+            if (cOpen === cClose && cappedBody.trimEnd().length > 0) {
+              sym.lineEnd = safeEnd;
+              sym.body = cappedBody;
+              actualBody = cappedBody;
+            }
+          }
+        }
+      } catch { /* size guard failed — applyHashline oldContent check is last resort */ }
     }
 
     const act = b.action || 'replace';
@@ -789,12 +837,10 @@ export function parseBlockDiff(blocks, root) {
     } else if (act === 'append') {
       changes.push({ file: b.file, type: 'hashline', startLine: sym.lineEnd, endLine: sym.lineEnd, newContent: nc, action: 'insert-after' });
     } else {
-      // 🛡️ Pass oldContent so applyHashline can verify the line range is correct
-      // before replacing. This catches extractSymbol/findBodyEnd misfires that
-      // return a wrong lineEnd (e.g., inner function confuses brace counting).
-      // Without oldContent, applyHashline skips verification and silently
-      // corrupts the file. With it, mismatches become conflict errors.
-      const actualBody = lines.slice(sym.lineStart - 1, sym.lineEnd).join('\n');
+      // ⚠️ NOTE: oldContent verification in applyHashline does NOT catch
+      // wrong lineEnd here because oldContent was sliced from the SAME
+      // (potentially wrong) range. Braces balance validation above is
+      // the real protection.
       changes.push({ file: b.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineEnd, oldContent: actualBody, newContent: nc, action: 'replace' });
     }
   }
