@@ -2742,19 +2742,30 @@ function autoManageContext(budget, skipRecoveryInjection = false) {
 }
 
 /**
- * 寫入 recovery text 到共享檔案，供 OpenCode plugin (compaction-fix.js) 讀取。
+ * 寫入 recovery text 到共享 + per-session 檔案，供 OpenCode plugin (compaction-fix.js) 讀取。
  * Plugin 在 onCompacting hook 中讀取此檔案，確保 Smart MCP 的 recovery context
  * 在 OpenCode native compaction 後仍能被保留在摘要中。
- * 若 recoveryText 為空，則清除檔案（避免留過期資料）。
+ * 若 recoveryText 為空，則清除所有版本（避免留過期資料）。
+ * Per-session 版本由 markSessionEnd 清理，Shared 版本向後相容。
  */
 function writeSharedRecoveryFile(recoveryText) {
   try {
-    const filePath = resolve(homedir(), '.smart', 'recent-recovery.txt');
+    const sid = contextManager?.getSessionId();
+    // Per-session file (isolated — cleaned on markSessionEnd)
+    if (sid) {
+      const sessionPath = resolve(homedir(), '.smart', `recent-recovery.${sid}.txt`);
+      if (recoveryText) {
+        writeFileSync(sessionPath, recoveryText, 'utf-8');
+      } else {
+        try { existsSync(sessionPath) && unlinkSync(sessionPath); } catch {}
+      }
+    }
+    // Shared file (backward compat for OpenCode compaction-fix.js plugin)
+    const sharedPath = resolve(homedir(), '.smart', 'recent-recovery.txt');
     if (recoveryText) {
-      writeFileSync(filePath, recoveryText, 'utf-8');
+      writeFileSync(sharedPath, recoveryText, 'utf-8');
     } else {
-      // 空值 → 清除檔案
-      try { existsSync(filePath) && unlinkSync(filePath); } catch {}
+      try { existsSync(sharedPath) && unlinkSync(sharedPath); } catch {}
     }
   } catch (err) {
     debugLog('writeSharedRecoveryFile error:', err.message);
@@ -2762,9 +2773,8 @@ function writeSharedRecoveryFile(recoveryText) {
 }
 
 /**
- * 寫入結構化 compaction status 到共享檔案，供 OpenCode plugin 讀取。
- * 讓 plugin 知道：compaction 等級、pending todos 數量、時間戳。
- * 與 writeSharedRecoveryFile 互補（文字 vs 結構化）。
+ * 寫入結構化 compaction status 到共享 + per-session 檔案。
+ * Per-session 版本由 markSessionEnd 清理，Shared 版本向後相容。
  */
 function writeCompactionStatus(level) {
   try {
@@ -2778,8 +2788,15 @@ function writeCompactionStatus(level) {
       timestamp: new Date().toISOString(),
       source: 'smart-mcp-auto-compact',
     };
-    const filePath = resolve(homedir(), '.smart', 'compaction-status.json');
-    writeFileSync(filePath, JSON.stringify(status, null, 2) + '\n', 'utf-8');
+    const sid = contextManager?.getSessionId();
+    // Per-session file (isolated — cleaned on markSessionEnd)
+    if (sid) {
+      const sessionPath = resolve(homedir(), '.smart', `compaction-status.${sid}.json`);
+      writeFileSync(sessionPath, JSON.stringify(status, null, 2) + '\n', 'utf-8');
+    }
+    // Shared file (backward compat for OpenCode compaction-fix plugin)
+    const sharedPath = resolve(homedir(), '.smart', 'compaction-status.json');
+    writeFileSync(sharedPath, JSON.stringify(status, null, 2) + '\n', 'utf-8');
   } catch (err) {
     debugLog('writeCompactionStatus error:', err.message);
   }

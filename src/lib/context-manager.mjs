@@ -16,7 +16,7 @@
 //     metadata: { createdAt, updatedAt, toolCount, errorCount }
 //   }
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, unlinkSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -28,8 +28,8 @@ import { classifyEntry, summarizeOutput, shouldPrefetchCompact } from '../plugin
 // ---------------------------------------------------------------------------
 
 const CONTEXT_DIR = resolve(homedir(), '.smart', 'context');
-const RECOVERY_FILE = resolve(homedir(), '.smart', 'recovery-context.json');
-const RECOVERY_TTL_MS = 14400000; // 4h — Gap #6 fix: 從 24h 縮短為 4h，避免過期 context 干擾新 session
+// RECOVERY_FILE removed — session isolation via _getRecoveryFilePath()
+const RECOVERY_TTL_MS = 1800000; // 30min — Gap #6 fix: 從 24h→4h→30min，避免跨 session context 干擾
 const SUBTASK_PROGRESS_FILE = resolve(homedir(), '.smart', 'subtask-progress.json');
 const MAX_HISTORY = 50;
 const MAX_FINDINGS = 100;
@@ -118,6 +118,29 @@ export class ContextManager {
     this._context = null;
   }
 
+  /** @returns {string|null} Current session ID, or null if no active session */
+  getSessionId() {
+    return this._context?.sessionId || null;
+  }
+
+  /** @returns {string} Per-session recovery context JSON file path */
+  _getRecoveryFilePath() {
+    const sid = this._context?.sessionId || 'unknown';
+    return resolve(homedir(), '.smart', `recovery-context.${sid}.json`);
+  }
+
+  /** @returns {string} Per-session recent recovery text file path */
+  _getRecentRecoveryFilePath() {
+    const sid = this._context?.sessionId || 'unknown';
+    return resolve(homedir(), '.smart', `recent-recovery.${sid}.txt`);
+  }
+
+  /** @returns {string} Per-session compaction status file path */
+  _getCompactionStatusFilePath() {
+    const sid = this._context?.sessionId || 'unknown';
+    return resolve(homedir(), '.smart', `compaction-status.${sid}.json`);
+  }
+
   // -----------------------------------------------------------------------
   // Session lifecycle
   // -----------------------------------------------------------------------
@@ -128,6 +151,9 @@ export class ContextManager {
    * @returns {object} context
    */
   init(opts = {}) {
+    // 啟動時清理過期 session 殘留檔案（>30min 的孤兒）
+    ContextManager._cleanupStaleSessionFiles();
+
     // Resume existing session
     if (opts.sessionId) {
       const loaded = this._loadFromDisk(opts.sessionId);
@@ -169,8 +195,8 @@ export class ContextManager {
     };
 
     this._save();
-    // Gap #4 fix: 跨 session 載入 active todos（從共享檔案）
-    this._syncTodosFromFile();
+    // Gap #4 fix (removed): Fresh session 不再從共享檔案繼承 todos
+    // 僅 session resume 時才恢復（line 142），避免跨 session 待辦污染
     return this._context;
   }
 
@@ -185,7 +211,45 @@ export class ContextManager {
     this._context._sessionEnded = true;
     this._context.metadata.sessionEndedAt = nowISO();
     this._save();
+    // 清除 session 專屬檔案（recovery context + recent-recovery + compaction-status）
+    this._cleanupSessionFiles();
     return true;
+  }
+
+  /** 清除目前 session 的所有專屬檔案（session 結束時呼叫） */
+  _cleanupSessionFiles() {
+    const files = [
+      this._getRecoveryFilePath(),
+      this._getRecentRecoveryFilePath(),
+      this._getCompactionStatusFilePath(),
+    ];
+    for (const f of files) {
+      try { if (existsSync(f)) unlinkSync(f); } catch {}
+    }
+  }
+
+  /** 清理過期的孤兒 session 檔案（啟動時呼叫，清除 >30min 的殘留） */
+  static _cleanupStaleSessionFiles() {
+    try {
+      const dir = resolve(homedir(), '.smart');
+      if (!existsSync(dir)) return;
+      const files = readdirSync(dir).filter(f =>
+        /^recovery-context\..+\.json$/.test(f) ||
+        /^recent-recovery\..+\.txt$/.test(f) ||
+        /^compaction-status\..+\.json$/.test(f)
+      );
+      const now = Date.now();
+      const TTL = 1800000; // 30min
+      for (const f of files) {
+        try {
+          const fp = resolve(dir, f);
+          const stat = statSync(fp);
+          if (now - stat.mtimeMs > TTL) {
+            unlinkSync(fp);
+          }
+        } catch {}
+      }
+    } catch {}
   }
 
   /**
@@ -647,7 +711,7 @@ export class ContextManager {
     if (!rc) return false;
     try {
       ensureDir(resolve(homedir(), '.smart'));
-      writeFileSync(RECOVERY_FILE, JSON.stringify(rc, null, 2), 'utf-8');
+      writeFileSync(this._getRecoveryFilePath(), JSON.stringify(rc, null, 2), 'utf-8');
       return true;
     } catch (err) {
       console.error(`[context-manager] Recovery persist failed: ${err.message}`);
@@ -663,15 +727,25 @@ export class ContextManager {
    */
   restoreRecoveryContext() {
     try {
-      if (!existsSync(RECOVERY_FILE)) return null;
-      const raw = readFileSync(RECOVERY_FILE, 'utf-8');
+      const recFile = this._getRecoveryFilePath();
+      if (!existsSync(recFile)) return null;
+      const raw = readFileSync(recFile, 'utf-8');
       const rc = JSON.parse(raw);
-      // 過期檢查：超過 24 小時的 recovery context 視為無效
+      // 過期檢查：超過 TTL 的 recovery context 視為無效
       if (rc.compactedAt) {
         const age = Date.now() - new Date(rc.compactedAt).getTime();
         if (age > RECOVERY_TTL_MS) {
           // 過期 → 清除檔案
-          try { unlinkSync(RECOVERY_FILE); } catch {}
+          try { unlinkSync(recFile); } catch {}
+          return null;
+        }
+      }
+      // Session ID 嚴格隔離：recovery context sessionId 必須完全吻合
+      // 不同 session 的 recovery context 視為不存在，不繼承任何資料
+      if (this._context && this._context.sessionId) {
+        const ctxSessionId = this._context.sessionId;
+        if (rc.sessionId && rc.sessionId !== ctxSessionId) {
+          // 不同 session → 完全丟棄（不保留任何欄位）
           return null;
         }
       }
@@ -681,7 +755,7 @@ export class ContextManager {
       return rc;
     } catch {
       // 檔案損毀 → 清除
-      try { unlinkSync(RECOVERY_FILE); } catch {}
+      try { unlinkSync(this._getRecoveryFilePath()); } catch {}
       return null;
     }
   }
@@ -1069,12 +1143,38 @@ export class ContextManager {
     // 雙向同步 strategy：file 為 ground truth（smart_todo plugin 直接寫檔），
     // in-memory 若有落後的狀態則更新。
     // 同時補入 file 中有但 in-memory 沒有的新項目。
+    // ⚠️ 自動過期：>24h 的 pending 且無 active 狀態的孤兒待辦自動取消
     try {
       const dataFile = this._todoFile;
       if (existsSync(dataFile)) {
         const raw = readFileSync(dataFile, 'utf-8');
         const fileItems = JSON.parse(raw);
         if (!Array.isArray(fileItems)) return;
+        // Auto-expire: cancel pending items >24h old (orphans from old sessions)
+        const now = Date.now();
+        let hasExpired = false;
+        for (const item of fileItems) {
+          if (item.status === 'pending') {
+            const created = new Date(item.createdAt).getTime();
+            if (now - created > 86400000) { // 24h
+              // Only expire if there's no newer active item in the same batch
+              // (Check if there are ANY in_progress or recent completed items)
+              const hasActivity = fileItems.some(t =>
+                t.status === 'in_progress' ||
+                (t.status === 'completed' &&
+                 new Date(t.updatedAt || t.createdAt).getTime() > now - 3600000)
+              );
+              if (!hasActivity) {
+                item.status = 'cancelled';
+                item.updatedAt = new Date().toISOString();
+                hasExpired = true;
+              }
+            }
+          }
+        }
+        if (hasExpired) {
+          writeFileSync(dataFile, JSON.stringify(fileItems, null, 2), 'utf-8');
+        }
         const memItems = this._context.todoItems || [];
         // 1) 雙向同步：file 的 status 優先（smart_todo plugin 直接寫檔）
         const fileMap = new Map(fileItems.map(t => [t.id, t]));
@@ -1212,7 +1312,7 @@ export class ContextManager {
     this._syncTodosFromFile();
 
     const parts = [];
-    parts.push('⛔ [INSTRUCTION] Recovery Context — 優先執行以下待辦事項');
+    parts.push('📋 Session Context — 參考：以下為先前 session 的摘要資訊');
     parts.push(''); // blank line
 
     // Summary
@@ -1287,18 +1387,17 @@ export class ContextManager {
       }
     }
 
-    // Resume directive — 強制性指令
+    // Resume directive — 參考性提示（非強制）
     if (activeTodos.length > 0) {
       parts.push('');
-      parts.push('⛔ MANDATORY: 請暫停當前操作，立即執行以下步驟：');
+      parts.push('📋 待辦事項參考（這些可能是先前 session 遺留的，請判斷是否仍適用）：');
       const continueItems = activeTodos.map((t, i) =>
-        `  Step ${i + 1}: 完成 todo #${t.id} — "${t.text}"`
+        `  ⏺ Todo #${t.id}: "${t.text}"（若無關，使用 smart_todo cancel #${t.id} 清除）`
       );
       parts.push(...continueItems);
-      parts.push('  Final: 全部完成後告知使用者。若已偏離任務，立即回到上述步驟。');
     } else {
       parts.push('');
-      parts.push('ℹ️ 目前無待辦事項。請向使用者報告狀態或等待新指令。');
+      parts.push('ℹ️ 目前無待辦事項。');
     }
 
     return parts.join('\n');

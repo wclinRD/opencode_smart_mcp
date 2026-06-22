@@ -857,7 +857,7 @@ describe('ContextManager — formatRecoveryContext', () => {
     };
     const text = cm.formatRecoveryContext();
     assert.ok(text !== null, 'should produce recovery text');
-    assert.ok(text.includes('Recovery Context'), 'should include header');
+    assert.ok(text.includes('Session Context'), 'should include header');
     assert.ok(text.includes('Fix login bug'), 'should include todo text');
     assert.ok(text.includes('Add tests'), 'should include second todo');
     assert.ok(text.includes('5 calls'), 'should include session summary');
