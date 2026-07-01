@@ -70,6 +70,7 @@ permission:
 | `smart_grep({pattern, budget?, compress?})` | 程式碼搜尋（附 scope/import/BM25；`--budget N` token 預算；`--compress L0|L1|L2` 壓縮等級） |
 | `smart_learn({root})` | 新專案 onboarding |
 | `smart_think({mode, thought, nextThoughtNeeded})` | 🥇 快思。`mode:"cit"` 預設 BN-DP 自動分支。`"beam"` 高風險多路徑。`"structured"` GOAL/STATE/ALGO/EDGE/VERIFY 省 50-70% token |
+| `smart_decompose({goal, subtasks, currentSubtaskId, thought, nextNeeded})` | 🆕 小模型專用推理 scaffold。強制任務分解 + 工具引導 + 循環檢測。模型是 3-5B 且需多步驟時使用 |
 | `smart_deep_think({topic, template})` | 慢想深度分析（10 模板含 peer_review） |
 | `smart_security({scan})` | 安全掃描 |
 | `smart_test({root})` | 測試執行 |

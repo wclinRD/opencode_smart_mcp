@@ -1,0 +1,389 @@
+# think_plan.md — smart_think v2 效率強化計畫（審查修正版）
+
+> **目標**：讓 `smart_think` 的推理 scaffold 更有效率 —
+> 減少 LLM 在搜索 context 上的額外回合（RAT）、
+> 在 token 緊張時管理 chain 長度（compression）、
+> 以及在低 budget 時自動切換省 token 模式（auto-mode）。
+>
+> **核心診斷反思**：原始計畫宣稱「LLM 在 thinking 環節完全無法使用工具」— **這是錯的**。
+> LLM 完全可以在 `smart_think` 回合之間呼叫 `smart_grep`/`smart_lsp`/`smart_exa_search`。
+> RAT 不是賦予新能力，而是**自動化**既有模式，節省 LLM 的決策 overhead 和一回合呼叫。
+>
+> **⚠️ v2 審查修正（2026-06-23）**：
+> - 原始 40-60% 準確度提升 → 下修為 15-25% → **再下修為效率提升（非準確度）**
+> - 內部一致性檢查（原 §4）因 false positive 風險 > 效益而**移除**
+> - Chain Compression 從預設開啟改為**選配（預設關閉）**
+> - 新增 RAT timing 盲點分析 + hybrid-search 限制說明
+> - 新增「真正能讓 LLM 變聰明的方向」替代原本 §4
+
+---
+
+## 🔍 現有架構分析
+
+> 以下分析基於對 `~/opencode/dev/smart/` 專案的完整探索，含 Plugin 系統、流程、關鍵發現。
+
+### 1. Plugin 系統（核心機制）
+
+```
+src/plugins/core/          ← 核心工具（直接暴露給 MCP）
+├── quick-think.mjs        ← smart_think 的 plugin 定義（216 行）
+└── thinking.mjs           ← smart_deep_think 的 plugin 定義（214 行）
+
+src/plugins/standard/      ← 標準工具（透過 router 呼叫）
+├── ... (code-impact, hybrid-router 等)
+
+src/cli/thinking.mjs       ← 核心邏輯（smart_think + smart_deep_think 共用）~1600 行
+src/lib/                   ← 共用工具函式（35+ 檔案）
+src/server/loader.mjs      ← Plugin 載入器（掃描 src/plugins/*/ 自動載入）
+```
+
+### 2. Plugin 註冊合約
+
+每個 `.mjs` 檔案 export 一個 default object：
+
+```javascript
+export default {
+  name: 'smart_think',             // 工具名稱
+  description: '...',              // MCP tool description
+  inputSchema: {                   // JSON Schema（MCP tool input schema）
+    type: 'object',
+    properties: { ... },
+    required: ['thought', 'nextThoughtNeeded'],
+  },
+  responsePolicy: { maxLevel: 0 }, // 回應優化政策
+  cli: null,                       // CLI 路徑（可選）
+  handler(args) {                  // 直接 handler（回傳 string）
+    return result.output;
+  },
+};
+```
+
+### 3. smart_think 目前實作流程
+
+```
+LLM 呼叫 smart_think({mode:"cit", thought:"...", nextThoughtNeeded:true})
+  │
+  └─ quick-think.mjs (plugin)
+      ├─ 驗證 inputSchema
+      ├─ 呼叫 quickThought(args) → { output, done, totalThoughts? }
+      └─ 附加 budget hint（若 budget < 60%）
+```
+
+### 4. 關鍵發現
+
+| 發現 | 說明 |
+|------|------|
+| **Handler 是同步的（但 server 支援 async）** | `src/server/index.mjs:268-269` 已檢查 Promise，async handler 可直接 await |
+| **核心邏輯在 `src/cli/thinking.mjs`** | `quickThought()` 函式約 550 行，純格式化無工具呼叫 |
+| **Plugin 定義在 `src/plugins/core/quick-think.mjs`** | 約 216 行 |
+| **已有 `src/lib/` 工具函式庫** | 35+ 檔案，含 hybrid-search, lsp-bridge, context-budget 等 |
+| **測試在 `tests/thinking.test.mjs`** | 808 行，用 `node --test` 執行 |
+| **無資料庫/外部依賴** | 純函式，容易測試 |
+| **檔案名是 `.mjs` 不是 `.ts`** | ESM 模塊，測試檔也用 `.test.mjs` |
+| **`quickThought()` 不認識任何 MCP tool** | 無 `smart_grep`、`smart_exa_search`、`smart_lsp` 引用 |
+
+### 5. 整合策略
+
+1. **Plugin handler 可改為 async** — server 已支援（line 268-269），無需改 loader
+2. **新功能放入 `src/lib/`**：新增 `think-rat.mjs`、`think-compress.mjs`、`think-verify.mjs`
+3. **修改 `src/cli/thinking.mjs`**：擴充 `quickThought()` 參數 + 輸出格式
+4. **修改 `src/plugins/core/quick-think.mjs`**：擴充 `inputSchema` + `handler`
+5. **新增測試**：獨立測試檔
+
+#### 工具存取策略（關鍵決策）
+
+RAT 需要呼叫檢索工具，但 MCP tool handler 不能直接呼叫其他 MCP tool。三種方案：
+
+| 方案 | 複雜度 | 說明 |
+|------|--------|------|
+| **A. 直接 import lib 函式** 🥇 | **中** | 繞過 MCP，直接用 `import { grep } from '...'` 等 lib 函式 |
+| B. 暴露 plugin registry 給 handler | 中高 | 需改 loader，讓 handler 可呼叫其他 plugin 的 handler |
+| C. subprocess 呼叫 MCP tool | 高 | 最正規但 over-engineering |
+
+**選 A**：因為 `src/lib/` 已有 hybrid-search、lsp-bridge 等底層函式，直接使用最輕量。
+
+### 6. 檔案變更總覽（v2）
+
+| 操作 | 檔案 | 行數 |
+|------|------|---------|
+| 新創 | `src/lib/think-rat.mjs` | ~150 行（含 entity extraction + RAT handler） |
+| 新創 | `src/lib/think-compress.mjs` | ~80 行 |
+| 修改 | `src/cli/thinking.mjs` | ~+80 行 |
+| 修改 | `src/plugins/core/quick-think.mjs` | ~+60 行 |
+| 新創 | `tests/think-rat.test.mjs` | ~120 行 |
+| 新創 | `tests/think-compress.test.mjs` | ~80 行 |
+| 合計 | **6 檔案異動** | **~+570 行** |
+
+---
+
+## 🏗 四大強化項目（依 ROI 排序）
+
+### 1️⃣ Code-only RAT（Retrieval-Augmented Thinking）— 🥇🥇 最高優先
+
+**概念**：LLM 寫出 `thought` 後，MCP Server 自動從 thought 中提取關鍵實體，平行呼叫 **code 檢索工具（grep + LSP）** 並注入結果。
+
+```
+// 呼叫範例
+smart_think({
+  mode:"rat",
+  thought:"這個 bug 可能是 useEffect cleanup 沒執行造成的...",
+  autoContext: true,        // 自動從 thought 取關鍵字搜尋
+  nextThoughtNeeded: true
+})
+```
+
+**Server 端行為**：
+
+```
+收到 thought →
+  1. 實體萃取（NER）→ 提取關鍵技術詞（上限 5 個）
+  2. 平行檢索（僅限 code 工具，無 EXA web search）：
+     ├─ smart_grep（透過 hybrid-search lib）→ 當前專案程式碼
+     └─ smart_lsp（透過 lsp-bridge lib）→ 類型/定義
+  3. 結果壓縮（caveman-style）→ <300 tokens
+  4. 附加到回傳結果的 contextResults[]
+```
+
+**為什麼不做 EXA search**：
+- Latency 太高（800-1500ms vs grep 50-100ms）
+- 結果非結構化，難以 compressed 到有用
+- LLM 已有 `smart_exa_search` 工具可自行搜尋，不需要在 thinking 中自動做
+
+**回傳格式強化**：
+
+```json
+{
+  "thought": "（原始回覆）",
+  "nextThoughtNeeded": true,
+  "contextResults": [
+    { "source": "smart_grep", "summary": "在 3 個檔案中發現 useEffect cleanup pattern", "relevance": 0.92, "tokens": 120 },
+    { "source": "smart_lsp", "summary": "useEffect 型別: (effect: () => void, deps?: any[]) => void", "relevance": 0.85, "tokens": 45 }
+  ]
+}
+```
+
+**API Schema 變更**：
+
+| 參數 | 類型 | 預設 | 說明 |
+|------|------|------|------|
+| `mode` | `"cit" \| "beam" \| "forest" \| "structured" \| "rat"` | `"cit"` | **新增 RAT 模式** |
+| `autoContext` | `boolean` | `false` | 啟用自動檢索增強 |
+| `contextHints` | `string[]` | `[]` | 手動指定搜尋關鍵字（覆蓋 auto） |
+| `maxContextTokens` | `number` | `300` | 檢索結果 token 預算 |
+
+**實作筆記**：
+- 使用 `src/lib/hybrid-search.mjs` 替代 `smart_grep` 的 MCP call
+- 使用 `src/lib/lsp-bridge.mjs` 替代 `smart_lsp` 的 MCP call
+- 快取：同一 session 中相同 query 不重複檢索（in-memory Map）
+- 任一工具 timeout（1s）→ 跳過該工具；全部 timeout → 降級為普通 cit
+
+---
+
+### 2️⃣ Thought Chain Compression — 🟡 中優先（選配，預設關閉）
+
+**概念**：當 thinking chain 達到 5+ step 時，可選擇壓縮前面的 thought 以釋放 context budget。
+
+**為什麼是選配**：壓縮是**有損的** — 原始 thought 中的細微差異、邊界條件、不確定性，
+壓成一行 summary 後全部丟失。LLM 讀 compressed summary 時擁有的資訊比原本少 →
+**推理品質可能下降**。尤其當 LLM 需要回頭修正 early thought 時，已壓縮的內容無法準確還原。
+
+**啟用時機**（由 LLM 自行判斷）：
+- Context budget 明顯不足（< 40%）且 chain > 5 steps
+- 或 `verify: "compress"` 手動觸發
+- **不預設自動觸發** — 避免無意中丟失推理細節
+
+**Server 端行為**：
+
+```
+quickThought() 偵測到某條件 →
+  1. 計算當前 thought 總 token 耗用
+  2. 若 chain length > 4：
+     └─ 自動對第 1 到第 (N-3) 個 thought 做摘要
+       壓縮格式：[Compressed: 原始 3 steps → 1 summary line]
+  3. 在輸出結尾附加壓縮後的 context
+```
+
+**觸發時機**：
+- 僅 `verify: "compress"` 手動觸發
+- 不影響回傳格式的 `done` 和 `nextThoughtNeeded`
+- ~~自動觸發~~（v2 移除 — 避免有損壓縮）
+
+**壓縮方式**（輕量，無需 LLM）：
+```
+壓縮前：
+Thought 1/5: 我在分析這個 useEffect bug，cleanup function 可能沒執行...
+Thought 2/5: 確認了 cleanup 在 unmount 時執行，但 deps array 有問題...
+Thought 3/5: deps 漏了某個 state variable，導致 stale closure...
+
+壓縮後：
+[Compressed: 3 steps] useEffect bug 分析過程：cleanup 未執行 → deps 漏 variable → stale closure
+下一步：確認修復方式（thought 4/5）
+```
+
+**API Schema 變更**：
+
+| 參數 | 類型 | 預設 | 說明 |
+|------|------|------|------|
+| `verify` | `boolean \| "compress"` | `true` | `"compress"` 時手動觸發壓縮 |
+
+**實作筆記**：
+- 純粹的 context 管理，不改變推理邏輯
+- 壓縮後的 summary 直接替換原始 thought 在回傳中的位置
+- LLM 看到壓縮標記後知道前面有遺失細節 → 可要求展開
+
+---
+
+### 3️⃣ Auto-Mode 簡化版 — 🟡 中優先
+
+**概念**：讓 mode 參數可省略，server 端自動推薦最佳模式。
+
+**但**：LLM 從 tool description 已經知道如何選 mode。此功能節省的是 LLM 的一次參數選擇（~5-10 tokens），ROI 有限。
+
+**簡化實作**：
+
+```
+// 唯一真的有價值的 case
+mode:"auto" + budget < 30% → 自動降級 structured
+mode:"auto" + 其他 → 保持 cit（default）
+```
+
+**不做複雜的分類器** — 純 regex 判斷不如讓 LLM 自己選。
+
+**API Schema 變更**：
+
+| 參數 | 變更 |
+|------|------|
+| `mode` | **新增 `"auto"`**，行為：budget < 30% → structured，否則 cit |
+| 回傳 | **附加 `autoSelectedMode: "cit"`** |
+
+---
+
+### 4️⃣ ❌ 內部一致性檢查 — 已移除
+
+**廢棄原因**（v2 審查）：
+- Regex-based 斷言比對在 LLM output 上太脆弱 → false positive 風險 > 效益
+- LLM 的推理語言是探索性的（「可能是 X」→「但實際上 Y」）→ 不是矛盾，是正常深化
+- 錯誤的 coherenceWarning 會打斷 LLM 推理 flow，浪費 token 去解釋不存在的問題
+
+---
+
+### ➕ 4️⃣ 真正能讓 LLM 變聰明的方向（後續 Phase，非 P1）
+
+以下方向才是真正的「讓推理更強」，而非 token 管理或自動化既有模式：
+
+#### A. Hypothesis Testing Service（LLM 驅動的假設驗證）
+
+不同於 RAT（被動檢索），Hypothesis Testing 讓 LLM **主動提出假設**，server 負責驗證：
+
+```
+LLM: smart_think({
+  mode:"hypothesis",
+  thought:"我認為這個 bug 是因為 useEffect deps 漏了 userId",
+  verifyWith: ["grep:useEffect.*deps", "lsp:UserProfile", "type:useEffect"]
+})
+Server: 平行執行驗證 →
+  - grep 找到 3 個 useEffect 有 userId 在 deps
+  - LSP 確認 UserProfile 元件已 render
+  - 型別檢查確認 userId: string | undefined
+  回傳: { thought, verification: { passed: true, evidence: [...] } }
+```
+
+這才是真正的**檢索增強推理** — 不是自動幫 LLM 搜尋，而是讓 LLM 提出可測試的假設，
+server 當裁判去驗證。
+
+#### B. Structured JSON Reasoning Graph
+
+目前 `smart_think` 回傳的是純文字（box-drawing formatted）。這讓 LLM 在後續步驟
+無法程式化地引用某個 intermediate conclusion。改用 structured JSON：
+
+```json
+{
+  "conclusion": "bug 是 stale closure due to missing userId dep",
+  "reasoning_path": [
+    { "step": 1, "claim": "useEffect cleanup 沒執行", "status": "rejected" },
+    { "step": 2, "claim": "deps 漏了 userId", "status": "confirmed", "evidence": ["grep:line 42"] }
+  ],
+  "confidence": 0.85
+}
+```
+
+LLM 可以在下一輪直接說 `based on step 2's conclusion...`，不需重新 parsing 文字。
+
+#### C. Persistent Thinking State（跨 Session 推理）
+
+目前 thinking chain 是一次 session 用完就丟。讓 `smart_think` 支援 save/load state：
+- 長推理任務可中斷後恢復
+- 跨 session 累積推理 context
+- 與 Obsidian wiki 整合（自動將推理結果寫入 knowledge base）
+
+#### D. Socratic Dialogue Mode
+
+Server 不是被動格式化，而是主動提問引導 LLM 發現盲點：
+
+```
+LLM: "我認為是 A 造成的"
+Server: "你考慮過 B 的可能性嗎？程式碼顯示 C 函式在 D 條件下會被跳過"
+```
+
+這需要 server 理解推理內容並提出建設性質疑 — 是真正的 intelligence augmentation，
+但技術難度最高（需要 semantic understanding + 程式碼分析）。
+
+---
+
+**P1 不做上述項目**，但設計時需保留擴充性（特別是 handler 改 async、回傳格式支援
+結構化欄位），讓後續 Phase 可以平滑疊加。
+
+## 🔄 整合流程圖
+
+```
+LLM 呼叫 smart_think
+  │
+  ├─ mode:"auto" ?
+  │   └─ budget < 30% → 選 structured，否則 cit
+  │
+  ├─ mode:"rat" ?
+  │   ├─ 實體萃取（或 contextHints）
+  │   ├─ 平行檢索（hybrid-search + lsp-bridge）
+  │   └─ 結果壓縮 → 注入 contextResults（供下一輪使用）
+  │
+  ├─ verify === "compress" ?
+  │   └─ 有損壓縮舊 thought（LLM 自行決定是否啟用）
+  │
+  └─ 回傳強化結果
+       包含：thought + (contextResults?) + (compressedSummary?)
+```
+
+> v2 移除：內部一致性檢查（false positive 風險）、自動 chain compression（有損壓縮問題）
+
+---
+
+## 🧪 測試計畫
+
+| 測試案例 | 預期行為 |
+|---------|---------|
+| `mode:"rat"` + 技術問題（含程式碼實體） | 回傳含 contextResults（grep + LSP） |
+| `mode:"rat"` + 非技術問題 | 實體萃取為空，graceful degrade |
+| `mode:"rat"` + `contextHints:["userId"]` | 跳過 NER，直接用 hints 搜尋 |
+| `mode:"rat"` + 全部檢索 timeout | 降級為 cit |
+| `verify: "compress"` | 強制壓縮舊 thought |
+| 短 chain（<5 steps）+ verify compress | 不壓縮（不足） |
+| `mode:"auto"` + budget < 30% | 自動選 structured |
+| `mode:"auto"` + 正常 budget | 保持 cit |
+| RAT context 注入 timing | contextResults 在回傳中，當前 thought 不變 |
+| 向後相容：舊參數 `mode:"cit"` | 行為完全不變 |
+
+---
+
+## 📐 設計決策記錄（ADR）
+
+| 決策 | 選擇 | 理由 |
+|------|------|------|
+| RAT 檢索範圍 | 僅 code（grep + LSP） | EXA 太慢、結果非結構化 |
+| 工具存取方式 | 直接 import lib 函式 | 最輕量，無需改 loader |
+| Handler 改 async | 是（server 已支援） | 需 await lib 呼叫 |
+| ~~內部一致性檢查~~ | **已移除** | Regex 太脆弱，false positive 風險 > 效益 |
+| Chain compression 觸發 | 僅手動（verify:"compress"） | 自動壓縮有損，可能降低推理品質 |
+| Auto-Mode 實作 | 簡化版（僅 budget 感知） | 複雜分類器 ROI 低 |
+| context 注入方式 | 附加在回傳物件的欄位 | 不干擾 system prompt；注意 timing |
+| Session cache | In-memory Map, per sessionId | 輕量，無需外部 storage |
+| RAT 實際效益 | Code 任務節省 1-2 回合/chain | 非準確度提升，而是效率提升 |

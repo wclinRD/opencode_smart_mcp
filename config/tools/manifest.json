@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-06-22T05:44:44.377Z",
+  "generatedAt": "2026-07-01T23:48:29.789Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -44,6 +44,124 @@
           }
         },
         "required": []
+      }
+    },
+    {
+      "name": "smart_decompose",
+      "description": "For small models (3-5B parameters): forces structured task decomposition\nwith tool suggestions, progress tracking, and cycle detection.\nUse when the task requires 2+ steps like debugging, refactoring, or multi-file changes.\nNOT for simple Q&A or single-step tasks.\n\nCore workflow:\n  goal + subtasks + thought + nextNeeded=true → server enriches →\n  progress bar + tool suggestion + cycle intervention + budget warning\n\nBenefits for small models:\n  • Prevents \"lazy reasoning\" (D-CORE): forces subtask decomposition\n  • Prevents overthinking (D-CoT): disciplined output format\n  • Suggests tools (TRICE): reduces model's tool selection burden\n  • Detects loops (TrigReason): breaks reasoning deadlocks",
+      "category": "core",
+      "domain": "workflow",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": true,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "string",
+            "description": "One-sentence task objective (required)"
+          },
+          "subtasks": {
+            "type": "array",
+            "description": "Task decomposition — at least 1, max 10 items",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "number",
+                  "description": "Unique subtask ID (1-based)"
+                },
+                "desc": {
+                  "type": "string",
+                  "description": "Subtask description (10-50 chars)"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "in_progress",
+                    "done",
+                    "blocked"
+                  ],
+                  "description": "Current status"
+                },
+                "tool": {
+                  "type": "string",
+                  "description": "Suggested MCP tool for this step (optional)"
+                },
+                "toolArgs": {
+                  "type": "object",
+                  "description": "Tool arguments (optional, JSON)"
+                },
+                "evidence": {
+                  "type": "string",
+                  "description": "Completion evidence summary (optional)"
+                }
+              },
+              "required": [
+                "id",
+                "desc",
+                "status"
+              ]
+            }
+          },
+          "currentSubtaskId": {
+            "type": "number",
+            "description": "ID of the currently active subtask"
+          },
+          "thought": {
+            "type": "string",
+            "description": "Reasoning content for the current subtask"
+          },
+          "nextNeeded": {
+            "type": "boolean",
+            "description": "Whether more reasoning steps are needed"
+          },
+          "strictness": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "description": "Guidance strictness (default: high). High=full scaffold, low=minimal"
+          },
+          "contextHints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Keywords for context retrieval (optional)"
+          },
+          "thinkingStyle": {
+            "type": "string",
+            "enum": [
+              "disciplined",
+              "free"
+            ],
+            "description": "Output style (default: disciplined). disciplined=[FACT]/[REASON]/[CONCLUSION]"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session ID for cross-turn cycle detection (optional, auto-generated)"
+          }
+        },
+        "required": [
+          "goal",
+          "subtasks",
+          "currentSubtaskId",
+          "thought",
+          "nextNeeded"
+        ]
       }
     },
     {
@@ -1130,45 +1248,6 @@
       }
     },
     {
-      "name": "smart_arch_overview",
-      "description": "Use when: need to understand project architecture in one shot. Returns structured JSON with layers, dependencies, violations, critical functions, and unused exports. LLM should call this first when entering a new codebase.",
-      "category": "analyze",
-      "domain": "analyze",
-      "safetyLevel": "low",
-      "routingRules": {
-        "autoRoute": false,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "root": {
-            "type": "string",
-            "description": "Project root directory (default: current dir)"
-          },
-          "build": {
-            "type": "boolean",
-            "description": "Force CKG build if not built yet (default: true)"
-          },
-          "format": {
-            "type": "string",
-            "enum": [
-              "json",
-              "text"
-            ],
-            "description": "Output format (default: json — LLM-friendly)"
-          }
-        }
-      }
-    },
-    {
       "name": "smart_learn",
       "description": "Use when: need to understand project structure, tech stack, deps, coding style. Runs full analysis pipeline including AST parsing. Start here when entering a new codebase. Avoid when: just searching for code (use grep instead).",
       "category": "analyze",
@@ -1867,6 +1946,45 @@
         "required": [
           "goal"
         ]
+      }
+    },
+    {
+      "name": "smart_arch_overview",
+      "description": "Use when: need to understand project architecture in one shot. Returns structured JSON with layers, dependencies, violations, critical functions, and unused exports. LLM should call this first when entering a new codebase.",
+      "category": "analyze",
+      "domain": "analyze",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: current dir)"
+          },
+          "build": {
+            "type": "boolean",
+            "description": "Force CKG build if not built yet (default: true)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "description": "Output format (default: json — LLM-friendly)"
+          }
+        }
       }
     },
     {
