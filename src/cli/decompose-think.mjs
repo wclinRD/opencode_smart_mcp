@@ -1,0 +1,281 @@
+// ── smart_decompose_think 核心邏輯 ──
+// Qwen3.5-4B 專用推理工具 — 主動 think↔tool 循環 orchestration
+
+import {
+  formatProgressBar,
+  formatGoalHeader,
+  formatSubtaskList,
+} from '../lib/think-utils.mjs';
+
+import {
+  parseThought,
+  getTemplatePrompt,
+  getTemplateLabel,
+  sanitizeP2Args,
+} from '../lib/decompose-think-analysis.mjs';
+
+import {
+  trackToolCalls,
+  buildToolResultContext,
+  activeToolSuggest,
+  detectCycleP2,
+  resetSessionStoreP2,
+} from '../lib/decompose-think-tracking.mjs';
+
+// ═══════════════════════════════════════════
+// 參數驗證（P1 驗證邏輯擴充）
+// ═══════════════════════════════════════════
+
+function validateArgs(args) {
+  const errors = [];
+  if (!args.goal || String(args.goal).trim().length === 0) {
+    errors.push('goal is required');
+  }
+  if (!Array.isArray(args.subtasks) || args.subtasks.length === 0) {
+    errors.push('subtasks must have at least 1 item');
+  }
+  if (Array.isArray(args.subtasks) && args.subtasks.length > 10) {
+    errors.push('subtasks max 10 items');
+  }
+  if (Array.isArray(args.subtasks)) {
+    for (const st of args.subtasks) {
+      if (st.id == null) errors.push('each subtask needs an id');
+      if (!st.desc) errors.push('each subtask needs a desc');
+      if (!['pending', 'in_progress', 'done', 'blocked'].includes(st.status)) {
+        errors.push(`invalid status "${st.status}" for subtask ${st.id}`);
+      }
+    }
+    const ids = new Set(args.subtasks.map(s => s.id));
+    if (!ids.has(args.currentSubtaskId)) {
+      errors.push('currentSubtaskId not found in subtasks');
+    }
+  }
+  return errors;
+}
+
+// ═══════════════════════════════════════════
+// 進度計算
+// ═══════════════════════════════════════════
+
+function computeProgress(subtasks, currentId) {
+  const total = subtasks.length;
+  const completed = subtasks.filter(s => s.status === 'done').length;
+  const blocked = subtasks.filter(s => s.status === 'blocked').length;
+  const current = subtasks.find(s => s.id === currentId);
+  return {
+    total,
+    completed,
+    blocked,
+    currentId,
+    bar: formatProgressBar(completed, total),
+    done: completed === total,
+    current: current ? current.desc : '',
+  };
+}
+
+// ═══════════════════════════════════════════
+// D3: formatThinkOutput
+// ═══════════════════════════════════════════
+
+/**
+ * P2 格式化輸出 — 整合 DAG 視覺化、confidence bar、thinkBudget
+ */
+function formatThinkOutput(args) {
+  const {
+    goal, subtasks, currentSubtaskId, thought, template,
+    templatePrompt, resultContext, toolSuggestion, intervention,
+    progress, nextNeeded, thinkingStyle, _isFirstCall,
+  } = args;
+
+  const lines = [];
+  const templateLabel = getTemplateLabel(template);
+
+  // Header
+  lines.push(`┌─ smart_decompose_think [${templateLabel}] ─────────`);
+  lines.push(`│ ${formatGoalHeader(goal)}`);
+  lines.push(`│ 📊 ${formatProgressBar(progress.completed, progress.total)}`);
+  if (_isFirstCall) {
+    lines.push('│ 🆕 首次呼叫 — 開始 think↔tool 循環');
+  }
+  lines.push('│');
+
+  // Template prompt
+  if (templatePrompt) {
+    lines.push(`│ ${'─'.repeat(35)}`);
+    for (const tLine of templatePrompt.split('\n')) {
+      lines.push(`│${tLine.startsWith('│') ? tLine : ` ${tLine}`}`);
+    }
+    lines.push(`│ ${'─'.repeat(35)}`);
+  }
+
+  // Tool result context
+  if (resultContext) {
+    lines.push('│');
+    for (const rLine of resultContext.split('\n')) {
+      lines.push(`│${rLine.startsWith('│') ? rLine : ` ${rLine}`}`);
+    }
+  }
+
+  lines.push('│');
+
+  // Subtask list
+  const taskLines = formatSubtaskList(subtasks, currentSubtaskId);
+  lines.push(`│ ${'─'.repeat(45)}`);
+  for (const tl of taskLines) lines.push(`│${tl}`);
+  lines.push(`│ ${'─'.repeat(45)}`);
+
+  // Current subtask reasoning
+  const current = subtasks.find(s => s.id === currentSubtaskId);
+  if (current) {
+    lines.push(`│ 🔍 當前步驟: ${current.desc} (${currentSubtaskId}/${progress.total})`);
+    lines.push('│ ┌─ 推理 ──────────────────────────');
+    if (thought) {
+      const indentThought = String(thought).split('\n').map(l => `│ │ ${l}`).join('\n');
+      lines.push(indentThought);
+    }
+    lines.push('│ └────────────────────────────────');
+  }
+
+  lines.push('│');
+
+  // Tool suggestion
+  if (toolSuggestion) {
+    const triggerIcons = {
+      skipped_tool: '🔴',
+      overconfidence: '⚠️',
+      uncertainty: '❓',
+      task_affinity: '🔧',
+      subtask_tool: '🔧',
+    };
+    const icon = triggerIcons[toolSuggestion.trigger] || '🔧';
+    lines.push(`│ ${icon} 建議：${toolSuggestion.reason}`);
+    if (toolSuggestion.suggestedTool) {
+      lines.push(`│    工具: ${toolSuggestion.suggestedTool}`);
+    }
+  }
+
+  // Intervention
+  if (intervention) {
+    const iIcons = { cycle: '🔄', overconfidence: '⚠️', skipped_tool: '🔴', budget_critical: '🔴' };
+    const iIcon = iIcons[intervention.type] || '⚠️';
+    lines.push(`│ ${iIcon} 干預提示：${intervention.message}`);
+    if (intervention.suggestion) {
+      lines.push(`│    建議：${intervention.suggestion}`);
+    }
+  }
+
+  // Footer / action prompt
+  if (nextNeeded) {
+    lines.push('│ → 繼續推理（nextNeeded: true）');
+  } else {
+    lines.push('│ ✓ 完成（nextNeeded: false）');
+  }
+  lines.push('└────────────────────────────────────────────');
+
+  return lines.join('\n');
+}
+
+// ═══════════════════════════════════════════
+// D1-D2: decomposeThinkHandler 主流程
+// ═══════════════════════════════════════════
+
+/**
+ * @param {object} args
+ * @param {string} args.goal
+ * @param {Array} args.subtasks
+ * @param {number} args.currentSubtaskId
+ * @param {string} args.thought
+ * @param {boolean} args.nextNeeded
+ * @param {Array} [args.toolCalls]
+ * @param {string} [args.roundType='think']
+ * @param {string} [args.template='generic']
+ * @param {string} [args.strictness='high']
+ * @param {string} [args.thinkingStyle='disciplined']
+ * @param {string} [args.sessionId]
+ * @param {object} [args._prevToolCalls]
+ * @param {object} [args._prevSuggestion]
+ * @param {Function} [args._getBudgetFn]
+ * @returns {object} { thought, progress, toolSuggestion, intervention, budget, error? }
+ */
+export function decomposeThinkHandler(args) {
+  // A6: sanitize args
+  const safe = sanitizeP2Args(args);
+
+  // 驗證
+  const errors = validateArgs(safe);
+  if (errors.length > 0) {
+    return {
+      error: errors.join('; '),
+      thought: `❌ ${errors.join('\n❌ ')}`,
+      progress: null,
+      toolSuggestion: null,
+      intervention: null,
+      budget: null,
+    };
+  }
+
+  const {
+    subtasks, currentSubtaskId, thought, nextNeeded,
+    toolCalls, roundType, template, strictness,
+    sessionId, _prevToolCalls, _prevSuggestion, _isFirstCall,
+  } = safe;
+
+  // 1. 解析 thought
+  const parsed = parseThought(thought);
+
+  // 2. 進度計算
+  const progress = computeProgress(subtasks, currentSubtaskId);
+
+  // 3. 更新 tool call 追蹤（B1）
+  const { updatedToolCalls, skippedSuggestion } = trackToolCalls(
+    toolCalls, _prevToolCalls, _prevSuggestion
+  );
+
+  // 4. 主動工具建議（B3）
+  const currentSubtask = subtasks.find(s => s.id === currentSubtaskId);
+
+  const activeTip = activeToolSuggest({
+    parsed,
+    currentSubtask,
+    template,
+    toolCalls: updatedToolCalls,
+    strictness,
+    prevSuggestion: _prevSuggestion,
+  });
+
+  // 5. 工具結果引導（B2）
+  const resultContext = roundType === 'tool_result'
+    ? buildToolResultContext(updatedToolCalls)
+    : null;
+
+  // 6. 模板 prompt（A5）
+  const templatePrompt = getTemplatePrompt(template);
+
+  // 7. 循環檢測（B4）
+  const cycle = detectCycleP2(sessionId, currentSubtaskId, thought, strictness);
+
+  // 8. 格式化輸出（D3）
+  const formatted = formatThinkOutput({
+    goal: safe.goal,
+    subtasks,
+    currentSubtaskId,
+    thought,
+    template,
+    templatePrompt,
+    resultContext,
+    toolSuggestion: activeTip,
+    intervention: cycle,
+    progress,
+    nextNeeded,
+    thinkingStyle: safe.thinkingStyle,
+    _isFirstCall,
+  });
+
+  return {
+    thought: formatted,
+    progress,
+    toolSuggestion: activeTip,
+    intervention: cycle,
+    budget: null, // P2.2 實作
+  };
+}
