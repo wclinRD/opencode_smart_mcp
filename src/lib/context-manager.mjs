@@ -510,11 +510,14 @@ export class ContextManager {
     const keepCount = Math.min(keep, total);
 
     // Phase: Auto-summary — 在清除條目前產生文字摘要
-    const removed = total > keepCount ? history.slice(0, total - keepCount) : [];
-    const summaryText = this._generateCompactSummary(removed, level);
-    if (summaryText) {
-      this._context._autoCompactSummary = summaryText;
-      this.addActivityEntry(`📦 ${summaryText}`, 'general');
+    // 只對 L2/L3（實際移除 entries）產生，L1 不清 entries 不需摘要
+    if (level >= 2) {
+      const removed = total > keepCount ? history.slice(0, total - keepCount) : [];
+      const summaryText = this._generateCompactSummary(removed, level);
+      if (summaryText) {
+        this._context._autoCompactSummary = summaryText;
+        this.addActivityEntry(`📦 ${summaryText}`, 'general');
+      }
     }
 
     // Level 2/3: 移除舊條目前先備份 (P4 自動回填)
@@ -1518,7 +1521,7 @@ export class ContextManager {
     const lastErrors = rc.lastErrors || [];
     if (lastErrors.length > 0) {
       const e = lastErrors[lastErrors.length - 1];
-      const preview = e.error.length > 200 ? e.error.slice(0, 200) + '...' : e.error;
+      const preview = e.error.length > 500 ? e.error.slice(0, 500) + '...' : e.error;
       parts.push(`❌ ${e.tool}: ${preview}`);
     }
 

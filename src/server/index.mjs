@@ -1449,6 +1449,33 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
       contextManager.addActivityEntry(`❌ 錯誤: ${toolName} — ${errMsg}`, 'error');
     }
   }
+
+  // Phase: smart_think conclusion capture — 推理完成時保存結論至 findings
+  if (success && toolName === 'smart_think' && args && args.thought && args.nextThoughtNeeded === false) {
+    const finalThought = args.thought.slice(0, 300);
+    contextManager.addFindings([{
+      source: 'smart_think',
+      finding: finalThought,
+      category: 'reasoning',
+      severity: 'high',
+    }]);
+    // 也加入 activity log（30 chars preview 即可）
+    const preview = finalThought.slice(0, 60).replace(/\n/g, ' ');
+    contextManager.addActivityEntry(`💭 ${preview}`, 'think');
+  }
+
+  // Phase: smart_deep_think — 完整結果也存 findings
+  if (success && toolName === 'smart_deep_think' && result && result.output) {
+    const snippet = result.output.slice(0, 300).replace(/\n/g, ' ').trim();
+    if (snippet.length > 20) {
+      contextManager.addFindings([{
+        source: 'smart_deep_think',
+        finding: snippet,
+        category: 'reasoning',
+        severity: 'medium',
+      }]);
+    }
+  }
   // P0 MicroCompact: auto-trigger after every tool call.
   // Keeps last 5 results as-is, replaces older ones with placeholder.
   // Skip for memory_store (noise reduction) and skip first 5 calls to allow build-up.

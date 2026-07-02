@@ -911,3 +911,133 @@ describe('ContextManager — subtask progress persistence', () => {
     rmSync(sharedDir, { recursive: true, force: true });
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// Activity log (Round 3 enhancement)
+// ---------------------------------------------------------------------------
+
+describe('ContextManager — addActivityEntry', () => {
+  afterEach(cleanup);
+
+  it('adds and retrieves activity entries', () => {
+    const cm = freshManager();
+    cm.init();
+    cm.addActivityEntry('Edited src/auth.ts', 'edit');
+    cm.addActivityEntry('Ran tests: 4 pass', 'test');
+    
+    const ctx = cm.get();
+    assert.equal(ctx.activityLog.length, 2);
+    assert.equal(ctx.activityLog[0].text, 'Edited src/auth.ts');
+    assert.equal(ctx.activityLog[0].type, 'edit');
+    assert.equal(ctx.activityLog[1].text, 'Ran tests: 4 pass');
+    assert.equal(ctx.activityLog[1].type, 'test');
+  });
+
+  it('caps at 10 entries (oldest dropped)', () => {
+    const cm = freshManager();
+    cm.init();
+    for (let i = 0; i < 12; i++) {
+      cm.addActivityEntry(`Entry ${i}`, 'general');
+    }
+    const ctx = cm.get();
+    assert.equal(ctx.activityLog.length, 10);
+    assert.equal(ctx.activityLog[0].text, 'Entry 2'); // oldest 2 dropped
+    assert.equal(ctx.activityLog[9].text, 'Entry 11');
+  });
+
+  it('rejects empty text', () => {
+    const cm = freshManager();
+    cm.init();
+    assert.equal(cm.addActivityEntry('', 'edit'), false);
+    assert.equal(cm.addActivityEntry(null, 'edit'), false);
+  });
+});
+
+describe('ContextManager — _generateCompactSummary', () => {
+  afterEach(cleanup);
+
+  it('returns null for empty entries', () => {
+    const cm = freshManager();
+    cm.init();
+    assert.equal(cm._generateCompactSummary([], 2), null);
+  });
+
+  it('summarizes edits and tests', () => {
+    const cm = freshManager();
+    cm.init();
+    const entries = [
+      { tool: 'smart_fast_apply', args: { file: 'src/auth.ts' }, ok: true },
+      { tool: 'smart_fast_apply', args: { file: 'src/token.ts' }, ok: true },
+      { tool: 'smart_test', args: {}, ok: true },
+      { tool: 'smart_grep', args: {}, ok: true },
+    ];
+    const result = cm._generateCompactSummary(entries, 2);
+    assert.ok(result.includes('2 次編輯'));
+    assert.ok(result.includes('1 次測試'));
+    assert.ok(result.includes('1 次搜尋'));
+    assert.ok(result.includes('4 次呼叫'));
+  });
+
+  it('includes error count', () => {
+    const cm = freshManager();
+    cm.init();
+    const entries = [
+      { tool: 'smart_fast_apply', args: { file: 'src/auth.ts' }, ok: true },
+      { tool: 'smart_test', args: {}, ok: false },
+    ];
+    const result = cm._generateCompactSummary(entries, 2);
+    assert.ok(result.includes('1 個錯誤'));
+    assert.ok(result.includes('smart_test'));
+  });
+});
+
+describe('ContextManager — setSessionNote / reset', () => {
+  afterEach(cleanup);
+
+  it('sets and retrieves session note', () => {
+    const cm = freshManager();
+    cm.init();
+    cm.setSessionNote('Debugging token expiry bug');
+    const ctx = cm.get();
+    assert.equal(ctx.metadata.sessionNote, 'Debugging token expiry bug');
+  });
+
+  it('reset clears session note and activityLog', () => {
+    const cm = freshManager();
+    cm.init();
+    cm.setSessionNote('Working on fix');
+    cm.addActivityEntry('Edited file.js', 'edit');
+    cm.reset();
+    const ctx = cm.get();
+    assert.equal(ctx.metadata.sessionNote, null);
+    assert.equal(ctx.activityLog.length, 0);
+  });
+});
+
+describe('ContextManager — formatRecoveryContext with findings', () => {
+  afterEach(cleanup);
+
+  it('includes findings in formatted output', () => {
+    const cm = freshManager();
+    cm.init();
+    // Simulate some findings
+    cm.addFindings([
+      { source: 'smart_think', finding: 'Bug is in token refresh logic', category: 'reasoning', severity: 'high' },
+    ]);
+    // Trigger generation + format
+    cm.generateRecoveryContext();
+    const formatted = cm.formatRecoveryContext();
+    assert.ok(formatted, 'formatted output should not be null');
+    assert.ok(formatted.includes('Bug is in token refresh logic'), 'should include finding text');
+  });
+
+  it('returns null for empty session (no useful info)', () => {
+    const cm = freshManager();
+    cm.init();
+    const formatted = cm.formatRecoveryContext();
+    // No activity, no findings, no goal, no todos → should be null
+    assert.equal(formatted, null);
+  });
+});
+
