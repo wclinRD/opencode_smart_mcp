@@ -73,6 +73,15 @@ const FINDING_PATTERNS = [
   { pattern: /(?:refactor|duplicate|redundant|complexity)/i, category: 'refactor', severity: 'medium' },
   { pattern: /(?:vulnerability|CVE|outdated|patch)/i, category: 'dependency', severity: 'high' },
   { pattern: /(?:missing dependency|module not found)/i, category: 'dependency', severity: 'high' },
+  // 🆕 擴充模式 — test/assert/validation
+  { pattern: /\d+\s*tests?\s*failing?/i, category: 'test', severity: 'high' },
+  { pattern: /(?:assertionerror|AssertionError)/i, category: 'error', severity: 'high' },
+  { pattern: /(?:Cannot find module|ERR_PACKAGE_PATH)/i, category: 'dependency', severity: 'high' },
+  { pattern: /(?:TS\d+|error\s+TS)/i, category: 'error', severity: 'high' },
+  { pattern: /(?:invalid|unexpected token|unexpected identifier)/i, category: 'error', severity: 'medium' },
+  { pattern: /(?:not a function|is not defined|is not a constructor)/i, category: 'error', severity: 'high' },
+  { pattern: /(?:schema|validation)\s+(?:error|fail)/i, category: 'error', severity: 'medium' },
+  { pattern: /(?:pending|blocked)\s*(?:task|item|step)?/i, category: 'task', severity: 'low' },
 ];
 
 function extractFindings(toolName, result) {
@@ -863,8 +872,17 @@ export class ContextManager {
   addFindings(findings) {
     if (!this._context || !Array.isArray(findings)) return;
     let changed = false;
+    // 跨次去重：累積已有文字的 normalised set
+    const existing = new Set(
+      (this._context.accumulatedFindings || [])
+        .map(f => (f.finding || '').toLowerCase().trim().slice(0, 80))
+        .filter(Boolean)
+    );
     for (const f of findings) {
       if (!f || !f.finding) continue;
+      const norm = f.finding.toLowerCase().trim().slice(0, 80);
+      if (existing.has(norm)) continue; // 跨次去重
+      existing.add(norm);
       this._context.accumulatedFindings.push({
         source: f.source || 'system',
         finding: typeof f.finding === 'string' ? f.finding.slice(0, 300) : String(f.finding).slice(0, 300),
