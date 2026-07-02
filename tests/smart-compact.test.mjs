@@ -200,8 +200,8 @@ describe('smart_compact — recovery context', () => {
       toolHistory: [makeEntry('smart_grep', true, 'found')],
       currentTodos: [{ content: 'Fix bug', status: 'in_progress' }],
     });
-    assert.equal(r.recoveryContext.todos.length, 1);
-    assert.equal(r.recoveryContext.todos[0].content, 'Fix bug');
+    assert.equal(r.recoveryContext.activeTasks.length, 1);
+    assert.equal(r.recoveryContext.activeTasks[0].content, 'Fix bug');
   });
 
   it('extracts key findings from error entries', () => {
@@ -228,13 +228,13 @@ describe('smart_compact — recovery context', () => {
     assert.ok(r.recoveryContext.openQuestions[0].includes('smart_test'));
   });
 
-  it('caps keyFindings at 5', () => {
+  it('caps keyFindings at 8', () => {
     const history = [];
     for (let i = 0; i < 10; i++) {
       history.push(makeEntry(`tool_${i}`, false, `Error: issue ${i} occurred`));
     }
     const r = call({ toolHistory: history });
-    assert.ok(r.recoveryContext.keyFindings.length <= 5);
+    assert.ok(r.recoveryContext.keyFindings.length <= 8);
   });
 
   it('caps openQuestions at 3', () => {
