@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-01T23:48:29.789Z",
+  "generatedAt": "2026-07-02T00:26:57.950Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -22,6 +22,10 @@
       "inputSchema": {
         "type": "object",
         "properties": {
+          "note": {
+            "type": "string",
+            "description": "LLM 寫的 session 摘要：目前在做什麼、進度到哪、下一步。存入 recovery context，compaction 後優先顯示。"
+          },
           "toolHistory": {
             "type": "array",
             "description": "Array of tool call entries: [{ tool, ok, result?, error?, timestamp? }]. Auto-populated from server context when auto:true."
@@ -153,6 +157,192 @@
           "sessionId": {
             "type": "string",
             "description": "Session ID for cross-turn cycle detection (optional, auto-generated)"
+          }
+        },
+        "required": [
+          "goal",
+          "subtasks",
+          "currentSubtaskId",
+          "thought",
+          "nextNeeded"
+        ]
+      }
+    },
+    {
+      "name": "smart_decompose_think",
+      "description": "For Qwen3.5-4B and small thinking models: complete think↔tool loop orchestration.\nIntegrates 15+ P2 modules covering DAG scheduling, ADAPT self-adaptation, thinking budget,\nXML tool parsing, CoE/Text-CoT dual format, semantic signal detection, bug resilience,\nFR-CoT compact reasoning, tool necessity scoring, and cross-validation.\n\nCore workflow:\n  goal + subtasks + thought + nextNeeded → server enriches →\n  budget auto-detect + FR-CoT mode + active tool suggestion +\n  tool result context + cycle detection + semantic analysis + cross-validation\n\nKey differences from smart_decompose (P1):\n  • Auto budget detection (4 levels: quick/normal/deep/research)\n  • FR-CoT compact reasoning (3 modes: brief/normal/deep)\n  • XML tool call parsing for Qwen3.5 format\n  • CoE + Text-CoT dual format switching\n  • Semantic signal detection (8 signal types)\n  • Bug resilience (7 error classifications + fallback chaining)\n  • Tool necessity scoring (pattern-based 0-10)\n  • DAG dependency visualization\n  • Cross-validation with scoring",
+      "category": "core",
+      "domain": "reasoning",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": true,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "string",
+            "description": "One-sentence task objective (required)"
+          },
+          "subtasks": {
+            "type": "array",
+            "description": "Task decomposition — at least 1, max 10 items",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "number"
+                },
+                "desc": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "in_progress",
+                    "done",
+                    "blocked"
+                  ]
+                },
+                "tool": {
+                  "type": "string",
+                  "description": "Suggested MCP tool (optional)"
+                },
+                "toolArgs": {
+                  "type": "object",
+                  "description": "Tool arguments (optional)"
+                },
+                "evidence": {
+                  "type": "string",
+                  "description": "Completion evidence (optional)"
+                }
+              },
+              "required": [
+                "id",
+                "desc",
+                "status"
+              ]
+            }
+          },
+          "currentSubtaskId": {
+            "type": "number"
+          },
+          "thought": {
+            "type": "string",
+            "description": "Reasoning content for current subtask"
+          },
+          "nextNeeded": {
+            "type": "boolean"
+          },
+          "toolCalls": {
+            "type": "array",
+            "description": "History of tool calls per subtask",
+            "items": {
+              "type": "object",
+              "properties": {
+                "subtaskId": {
+                  "type": "number"
+                },
+                "tool": {
+                  "type": "string"
+                },
+                "args": {
+                  "type": "object"
+                },
+                "result": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "done",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "roundType": {
+            "type": "string",
+            "enum": [
+              "think",
+              "tool_result"
+            ],
+            "description": "Current round type (auto-corrected if wrong)"
+          },
+          "template": {
+            "type": "string",
+            "enum": [
+              "debug",
+              "refactor",
+              "feature",
+              "research",
+              "decision",
+              "generic",
+              "fr-cot"
+            ],
+            "description": "Task template (default: generic). fr-cot uses FR-CoT compact templates."
+          },
+          "strictness": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "description": "Guidance strictness (default: high)"
+          },
+          "thinkingStyle": {
+            "type": "string",
+            "enum": [
+              "disciplined",
+              "free",
+              "fr-cot"
+            ],
+            "description": "Output style (default: disciplined). fr-cot uses compact FR-CoT format."
+          },
+          "budget": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "quick",
+              "normal",
+              "deep",
+              "research"
+            ],
+            "description": "Thinking budget level (default: auto-detect)"
+          },
+          "frcotMode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "brief",
+              "normal",
+              "deep"
+            ],
+            "description": "FR-CoT mode (default: auto-detect from context)"
+          },
+          "sessionId": {
+            "type": "string",
+            "description": "Session ID for cross-turn cycle detection"
+          },
+          "_prevToolCalls": {
+            "type": "array",
+            "description": "Previous round toolCalls (for tracking diff)"
+          },
+          "_prevSuggestion": {
+            "type": "object",
+            "description": "Previous round tool suggestion (for skip detection)"
           }
         },
         "required": [
@@ -3507,6 +3697,107 @@
       }
     },
     {
+      "name": "setup",
+      "description": "Project onboarding — detect project type and generate configuration.\nAnalyzes the project directory to determine language, framework, and conventions.\nOptionally generates a minimal opencode.json config for the project.\nUse when: entering a new project, setting up agent config for a project.",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: current working directory)"
+          },
+          "generate": {
+            "type": "boolean",
+            "description": "Actually write the setup config (default: false, preview only)"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Preview detected info without writing (default: true when generate is false)"
+          }
+        }
+      }
+    },
+    {
+      "name": "smart_edit",
+      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
+      "category": "standard",
+      "domain": "edit",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "File path to edit (required)"
+          },
+          "oldString": {
+            "type": "string",
+            "description": "Text to find and replace (exact match by default, regex if regex=true)"
+          },
+          "newString": {
+            "type": "string",
+            "description": "Replacement text"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Multiple files to edit (alternative to file)"
+          },
+          "regex": {
+            "type": "boolean",
+            "description": "Use regex matching instead of exact (default: false)"
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Apply changes (default: false — dry run)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: current dir)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "description": "Output format (default: json — includes nextCommand)"
+          }
+        },
+        "required": [
+          "oldString",
+          "newString"
+        ]
+      }
+    },
+    {
       "name": "smart_goal",
       "description": "Persistent goal tracking. Set a completion condition and auto-check progress across turns. Commands: set (new goal), check (verify condition), status (show active), clear (complete/cancel), list (history), retry (reactivate failed).",
       "category": "standard",
@@ -4605,72 +4896,6 @@
       }
     },
     {
-      "name": "smart_edit",
-      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
-      "category": "standard",
-      "domain": "edit",
-      "safetyLevel": "high",
-      "routingRules": {
-        "autoRoute": true,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "file": {
-            "type": "string",
-            "description": "File path to edit (required)"
-          },
-          "oldString": {
-            "type": "string",
-            "description": "Text to find and replace (exact match by default, regex if regex=true)"
-          },
-          "newString": {
-            "type": "string",
-            "description": "Replacement text"
-          },
-          "files": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Multiple files to edit (alternative to file)"
-          },
-          "regex": {
-            "type": "boolean",
-            "description": "Use regex matching instead of exact (default: false)"
-          },
-          "apply": {
-            "type": "boolean",
-            "description": "Apply changes (default: false — dry run)"
-          },
-          "root": {
-            "type": "string",
-            "description": "Project root (default: current dir)"
-          },
-          "format": {
-            "type": "string",
-            "enum": [
-              "json",
-              "text"
-            ],
-            "description": "Output format (default: json — includes nextCommand)"
-          }
-        },
-        "required": [
-          "oldString",
-          "newString"
-        ]
-      }
-    },
-    {
       "name": "smart_pr_review",
       "description": "Automated PR review — combines git diff, security scan, code impact, and LSP diagnostics.\nProduces structured review: Security, Impact, Code Quality, Summary.\nUse when: reviewing a PR, checking changes before merge, or analyzing branch differences.",
       "category": "standard",
@@ -5063,41 +5288,6 @@
         "required": [
           "type"
         ]
-      }
-    },
-    {
-      "name": "setup",
-      "description": "Project onboarding — detect project type and generate configuration.\nAnalyzes the project directory to determine language, framework, and conventions.\nOptionally generates a minimal opencode.json config for the project.\nUse when: entering a new project, setting up agent config for a project.",
-      "category": "standard",
-      "domain": "general",
-      "safetyLevel": "medium",
-      "routingRules": {
-        "autoRoute": true,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "root": {
-            "type": "string",
-            "description": "Project root directory (default: current working directory)"
-          },
-          "generate": {
-            "type": "boolean",
-            "description": "Actually write the setup config (default: false, preview only)"
-          },
-          "dryRun": {
-            "type": "boolean",
-            "description": "Preview detected info without writing (default: true when generate is false)"
-          }
-        }
       }
     },
     {

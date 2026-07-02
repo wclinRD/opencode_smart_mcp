@@ -501,9 +501,13 @@ export default {
   category: 'core',
   description: `[compact] Use when: need to analyze tool history and identify which outputs can be safely dropped or summarized to free context budget. Rules-based (zero LLM cost). Returns droppable indices, summarizable entries, recovery context, and estimated token savings.`,
   responsePolicy: { maxLevel: 0 },
-  inputSchema: {
+      inputSchema: {
     type: 'object',
     properties: {
+      note: {
+        type: 'string',
+        description: 'LLM 寫的 session 摘要：目前在做什麼、進度到哪、下一步。存入 recovery context，compaction 後優先顯示。',
+      },
       toolHistory: {
         type: 'array',
         description: 'Array of tool call entries: [{ tool, ok, result?, error?, timestamp? }]. Auto-populated from server context when auto:true.',

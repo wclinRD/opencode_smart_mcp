@@ -1413,6 +1413,42 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
   ensureContext();
   contextManager.capture(toolName, args, result, elapsedMs);
 
+  // Phase: Auto-capture activity log
+  // Records key events (edit/test/error/think) for recovery context display
+  // 不記錄 memory_store 減少雜訊
+  if (toolName !== 'smart_memory_store' && toolName !== 'smart_compact') {
+    if (success) {
+      const activityMap = {
+        smart_fast_apply: { icon: '✏️', type: 'edit', summary: (r, a) => {
+          const fs = a.file ? [a.file] : (a.chain || []).map(e => e.file).filter(Boolean);
+          return fs.length ? fs.slice(0, 3).join(', ') + (fs.length > 3 ? ` +${fs.length - 3}` : '') : '';
+        }},
+        smart_edit_chain: { icon: '✏️', type: 'edit', summary: (r, a) => {
+          const fs = (a.chain || []).map(e => e.file).filter(Boolean);
+          return fs.length ? fs.slice(0, 3).join(', ') + (fs.length > 3 ? ` +${fs.length - 3}` : '') : '';
+        }},
+        smart_test: { icon: '🧪', type: 'test', summary: (r) => {
+          const o = r.output || '';
+          const m = o.match(/\d+\s*(pass|fail|total)/gi);
+          return m ? m.slice(0, 3).join(', ') : '';
+        }},
+        smart_security: { icon: '🔒', type: 'search', summary: (r) => {
+          const o = (r.output || '').toLowerCase();
+          return o.includes('finding') || o.includes('issue') ? '發現問題' : '乾淨';
+        }},
+        smart_deep_think: { icon: '💭', type: 'think', summary: (r) => (r.output || '').slice(0, 60).replace(/\n/g, ' ') },
+      };
+      const def = activityMap[toolName];
+      if (def) {
+        const s = def.summary(result, args);
+        contextManager.addActivityEntry(`${def.icon} ${def.type === 'think' ? '分析' : def.type === 'test' ? '測試' : def.icon === '✏️' ? '編輯' : def.icon === '🔒' ? '安全' : ''}${s ? ': ' + s : ''}`, def.type);
+      }
+    } else {
+      // Error capture — 所有工具錯誤
+      const errMsg = (result.error || '').slice(0, 80).replace(/\n/g, ' ');
+      contextManager.addActivityEntry(`❌ 錯誤: ${toolName} — ${errMsg}`, 'error');
+    }
+  }
   // P0 MicroCompact: auto-trigger after every tool call.
   // Keeps last 5 results as-is, replaces older ones with placeholder.
   // Skip for memory_store (noise reduction) and skip first 5 calls to allow build-up.
@@ -2376,7 +2412,6 @@ async function invokeToolAsync(def, args, timeoutOverride, signal, opts = {}) {
     const elapsedMs = Number(process.hrtime.bigint() - startTime) / 1_000_000;
     return emit({ ok: false, error: `Pre-hook "${blocked.hook}" blocked execution: ${blocked.message}` }, elapsedMs);
   }
-
 
   // Handler path — keep sync (fast, in-process)
   const contextArgs = contextManager.inject(def.name, args);
@@ -3484,7 +3519,6 @@ function handleRequest(req) {
         break;
       }
 
-
       // Phase 33: Inject toolHistory for smart_compact auto mode
       if (toolName === 'smart_compact' && args.auto) {
         ensureContext();
@@ -3498,6 +3532,12 @@ function handleRequest(req) {
             timestamp: h.timestamp,
           }));
         }
+      }
+
+      // Phase 33.5: Capture session note from smart_compact
+      if (toolName === 'smart_compact' && args.note) {
+        ensureContext();
+        contextManager.setSessionNote(args.note);
       }
 
       // Native tool

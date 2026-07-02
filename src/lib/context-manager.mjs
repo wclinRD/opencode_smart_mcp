@@ -183,6 +183,7 @@ export class ContextManager {
       projectRoot: opts.projectRoot || env.PWD || env.CWD || process.cwd(),
       toolHistory: [],
       accumulatedFindings: [],
+      activityLog: [],
       todoItems: [],
       goalState: null,
       lastResult: null,
@@ -195,7 +196,6 @@ export class ContextManager {
     };
 
     this._save();
-    // Gap #4 fix (removed): Fresh session 不再從共享檔案繼承 todos
     // 僅 session resume 時才恢復（line 142），避免跨 session 待辦污染
     return this._context;
   }
@@ -336,9 +336,14 @@ export class ContextManager {
     if (!this._context) return;
     this._context.toolHistory = [];
     this._context.accumulatedFindings = [];
+    this._context.activityLog = [];
     this._context.lastResult = null;
+    this._context.metadata.sessionNote = null;
     this._context.metadata.toolCount = 0;
     this._context.metadata.errorCount = 0;
+    delete this._context._autoCompactSummary;
+    delete this._context._recoveryContext;
+    delete this._context._compactedBackups;
     this._context.metadata.updatedAt = nowISO();
     this._save();
   }
@@ -504,6 +509,14 @@ export class ContextManager {
     const total = history.length;
     const keepCount = Math.min(keep, total);
 
+    // Phase: Auto-summary — 在清除條目前產生文字摘要
+    const removed = total > keepCount ? history.slice(0, total - keepCount) : [];
+    const summaryText = this._generateCompactSummary(removed, level);
+    if (summaryText) {
+      this._context._autoCompactSummary = summaryText;
+      this.addActivityEntry(`📦 ${summaryText}`, 'general');
+    }
+
     // Level 2/3: 移除舊條目前先備份 (P4 自動回填)
     if (level >= 2) {
       // 備份被移除的條目 (只備份 KEEP 等級的)
@@ -622,6 +635,9 @@ export class ContextManager {
     const errorCount = this._context.metadata.errorCount || 0;
     const uniqueTools = new Set(history.map(e => e.tool)).size;
 
+    // Session note (LLM 自主寫入的工作摘要)
+    const sessionNote = this._context.metadata?.sessionNote || null;
+
     // 關鍵決策: 從編輯工具條目中擷取 (fast_apply + sub-tools via smart_run)
     const EDIT_TOOLS = ['fast_apply', 'apply', 'smart_run', 'cross_file_edit', 'rename_safety'];
     const keyDecisions = history
@@ -666,9 +682,11 @@ export class ContextManager {
         duration: e.duration,
         timestamp: e.timestamp,
       }));
-
     return {
       summary: { totalCalls, errorCount, uniqueTools },
+      sessionNote,
+      activityLog: this._context.activityLog || [],
+      autoCompactSummary: this._context._autoCompactSummary || null,
       findings: highFindings,
       keyDecisions,
       recentTools,
@@ -1142,67 +1160,111 @@ export class ContextManager {
   _syncTodosFromFile() {
     // 雙向同步 strategy：file 為 ground truth（smart_todo plugin 直接寫檔），
     // in-memory 若有落後的狀態則更新。
-    // 同時補入 file 中有但 in-memory 沒有的新項目。
+    // 只同步目前 session 的項目（依 sessionId 過濾），避免跨 session 污染。
     // ⚠️ 自動過期：>24h 的 pending 且無 active 狀態的孤兒待辦自動取消
     try {
       const dataFile = this._todoFile;
-      if (existsSync(dataFile)) {
-        const raw = readFileSync(dataFile, 'utf-8');
-        const fileItems = JSON.parse(raw);
-        if (!Array.isArray(fileItems)) return;
-        // Auto-expire: cancel pending items >24h old (orphans from old sessions)
-        const now = Date.now();
-        let hasExpired = false;
-        for (const item of fileItems) {
-          if (item.status === 'pending') {
-            const created = new Date(item.createdAt).getTime();
-            if (now - created > 86400000) { // 24h
-              // Only expire if there's no newer active item in the same batch
-              // (Check if there are ANY in_progress or recent completed items)
-              const hasActivity = fileItems.some(t =>
-                t.status === 'in_progress' ||
-                (t.status === 'completed' &&
-                 new Date(t.updatedAt || t.createdAt).getTime() > now - 3600000)
-              );
-              if (!hasActivity) {
-                item.status = 'cancelled';
-                item.updatedAt = new Date().toISOString();
-                hasExpired = true;
-              }
+      if (!existsSync(dataFile)) return;
+      const raw = readFileSync(dataFile, 'utf-8');
+      const fileItems = JSON.parse(raw);
+      if (!Array.isArray(fileItems)) return;
+
+      const currentSessionId = this._context?.sessionId;
+      if (!currentSessionId) {
+        // 無 session → 清空 memory（不繼承任何項目）
+        this._context.todoItems = [];
+        return;
+      }
+
+      // 只處理目前 session 的項目
+      const sessionItems = fileItems.filter(t => t.sessionId === currentSessionId);
+
+      // Auto-expire: cancel pending items >24h old (orphans from old sessions)
+      const now = Date.now();
+      let hasExpired = false;
+      for (const item of sessionItems) {
+        if (item.status === 'pending') {
+          const created = new Date(item.createdAt).getTime();
+          if (now - created > 86400000) { // 24h
+            // Only expire if there's no newer active item in the same batch
+            const hasActivity = sessionItems.some(t =>
+              t.status === 'in_progress' ||
+              (t.status === 'completed' &&
+               new Date(t.updatedAt || t.createdAt).getTime() > now - 3600000)
+            );
+            if (!hasActivity) {
+              item.status = 'cancelled';
+              item.updatedAt = new Date().toISOString();
+              hasExpired = true;
             }
           }
         }
-        if (hasExpired) {
-          writeFileSync(dataFile, JSON.stringify(fileItems, null, 2), 'utf-8');
+      }
+
+      // 有過期項目 → 合併寫回檔案（保留其他 session 資料）
+      if (hasExpired) {
+        // 在原始 fileItems 中更新過期項目
+        const sessionIdMap = new Map(sessionItems.map(t => [t.id, t]));
+        const merged = fileItems.map(fi =>
+          fi.sessionId === currentSessionId && sessionIdMap.has(fi.id)
+            ? sessionIdMap.get(fi.id)
+            : fi
+        );
+        writeFileSync(dataFile, JSON.stringify(merged, null, 2), 'utf-8');
+      }
+
+      // 雙向同步：file 的 status 優先（smart_todo plugin 直接寫檔）
+      const memItems = this._context.todoItems || [];
+      const fileMap = new Map(sessionItems.map(t => [t.id, t]));
+      for (let i = 0; i < memItems.length; i++) {
+        const fi = fileMap.get(memItems[i].id);
+        if (fi && fi.status !== memItems[i].status) {
+          memItems[i].status = fi.status;
+          memItems[i].updatedAt = fi.updatedAt || fi.createdAt;
         }
-        const memItems = this._context.todoItems || [];
-        // 1) 雙向同步：file 的 status 優先（smart_todo plugin 直接寫檔）
-        const fileMap = new Map(fileItems.map(t => [t.id, t]));
-        for (let i = 0; i < memItems.length; i++) {
-          const fi = fileMap.get(memItems[i].id);
-          if (fi && fi.status !== memItems[i].status) {
-            memItems[i].status = fi.status;
-            memItems[i].updatedAt = fi.updatedAt || fi.createdAt;
-          }
-        }
-        // 2) 補入 file 中有但 in-memory 沒有的項目
-        const memIds = new Set(memItems.map(t => t.id));
-        for (const fi of fileItems) {
-          if (!memIds.has(fi.id)) {
-            memItems.push(fi);
-          }
+      }
+
+      // 補入 file 中有但 in-memory 沒有的項目（只限目前 session）
+      const memIds = new Set(memItems.map(t => t.id));
+      for (const fi of sessionItems) {
+        if (!memIds.has(fi.id)) {
+          memItems.push(fi);
         }
       }
     } catch { /* file may not exist, ignore */ }
   }
 
   _syncTodosToFile() {
-    // 將目前 in-memory 的 todo 狀態寫入共享檔案
-    // 讓 smart_todo 等外部 plugin 能讀到最新狀態
+    // 合併寫入：保留其他 session 的 todos，只更新目前 session 的項目
+    // 每筆加上 sessionId 標記，實現 session 隔離
     if (!this._context || !this._context.todoItems) return;
     try {
       const dataFile = this._todoFile;
-      writeFileSync(dataFile, JSON.stringify(this._context.todoItems, null, 2), 'utf-8');
+      const currentSessionId = this._context.sessionId;
+
+      // 讀取現有檔案（保留其他 session 資料）
+      let existing = [];
+      if (existsSync(dataFile)) {
+        try {
+          const raw = readFileSync(dataFile, 'utf-8');
+          existing = JSON.parse(raw);
+          if (!Array.isArray(existing)) existing = [];
+        } catch { existing = []; }
+      }
+
+      // 移除目前 session 的舊項目
+      const filtered = currentSessionId
+        ? existing.filter(t => t.sessionId !== currentSessionId)
+        : existing;
+
+      // 加上 sessionId 標記後合併
+      const taggedItems = this._context.todoItems.map(t => ({
+        ...t,
+        sessionId: currentSessionId,
+      }));
+
+      const merged = [...filtered, ...taggedItems];
+      writeFileSync(dataFile, JSON.stringify(merged, null, 2), 'utf-8');
     } catch { /* ignore */ }
   }
 
@@ -1245,7 +1307,47 @@ export class ContextManager {
   }
 
   /**
-   * 將 subtask progress 寫入共享檔案，跨 session 可恢復。
+   * 設定 session note（LLM 在 compaction 前自主寫入的工作摘要）。
+   * 後續 formatRecoveryContext 會以此為最優先輸出。
+   * @param {string} text - 1-2 句話描述目前在做什麼
+   * @returns {boolean}
+   */
+  setSessionNote(text) {
+    if (!this._context) return false;
+    if (!text || typeof text !== 'string') return false;
+    this._context.metadata.sessionNote = text.slice(0, 500);
+    this._context.metadata.updatedAt = nowISO();
+    if (this._autoSave) this._save();
+    return true;
+  }
+
+  /**
+   * 記錄活動日誌（自動化，不依賴 LLM）。
+   * 在關鍵工具成功/失敗後由 server 自動呼叫。
+   * 存活在 context.metadata 中，不隨 toolHistory 被清除。
+   * 最多保留 10 筆，超過時自動移除最舊的。
+   * @param {string} text - 活動描述（如 "Edited src/file.js"）
+   * @param {string} [type] - 類型提示：'edit' | 'test' | 'error' | 'think' | 'search'
+   */
+  addActivityEntry(text, type) {
+    if (!this._context) return false;
+    if (!text || typeof text !== 'string') return false;
+    if (!this._context.activityLog) this._context.activityLog = [];
+    this._context.activityLog.push({
+      text: text.slice(0, 200),
+      type: type || 'general',
+      timestamp: nowISO(),
+    });
+    // 最多保留 10 筆
+    if (this._context.activityLog.length > 10) {
+      this._context.activityLog = this._context.activityLog.slice(-10);
+    }
+    this._context.metadata.updatedAt = nowISO();
+    if (this._autoSave) this._save();
+    return true;
+  }
+
+  /**
    * 每次 subtask 更新時自動呼叫。
    */
   _persistSubtaskProgress() {
@@ -1290,6 +1392,45 @@ export class ContextManager {
     this._persistSubtaskProgress();
   }
 
+  /**
+   * 規則式自動摘要：掃描被 compact 清除的 tool entries，產出 compact 文字摘要。
+   * 零 LLM 成本，純字串組合。
+   * @param {Array} entries - 被移除的 toolHistory entries
+   * @param {number} level - compact level (1-3)
+   * @returns {string|null}
+   */
+  _generateCompactSummary(entries, level) {
+    if (!entries || entries.length === 0) return null;
+
+    const edits = entries.filter(e => e.tool === 'smart_fast_apply' || e.tool === 'smart_edit_chain');
+    const tests = entries.filter(e => e.tool === 'smart_test');
+    const errors = entries.filter(e => !e.ok);
+    const searches = entries.filter(e => e.tool === 'smart_grep' || e.tool === 'smart_exa_search');
+    const thinks = entries.filter(e => e.tool === 'smart_think' || e.tool === 'smart_deep_think');
+
+    const parts = [];
+    if (edits.length > 0) {
+      const files = [];
+      for (const e of edits) {
+        const a = e.args || {};
+        if (a.file) files.push(a.file);
+        if (a.chain) for (const c of a.chain) { if (c.file) files.push(c.file); }
+      }
+      const uniq = [...new Set(files)];
+      parts.push(`${edits.length} 次編輯${uniq.length ? ` (${uniq.slice(0, 3).join(', ')}${uniq.length > 3 ? '...' : ''})` : ''}`);
+    }
+    if (tests.length > 0) parts.push(`${tests.length} 次測試`);
+    if (errors.length > 0) {
+      const errTools = [...new Set(errors.map(e => e.tool))];
+      parts.push(`${errors.length} 個錯誤 (${errTools.join(', ')})`);
+    }
+    if (searches.length > 0) parts.push(`${searches.length} 次搜尋`);
+    if (thinks.length > 0) parts.push(`${thinks.length} 步推理`);
+
+    const allTools = [...new Set(entries.map(e => e.tool))];
+    return `📦 ${parts.join(' · ')}（${entries.length} 次呼叫，${allTools.length} 工具）`;
+  }
+
   /** 根據 todo 文字判斷啟發式優先級 */
   _getTodoPriority(text) {
     const t = text.toLowerCase();
@@ -1308,97 +1449,81 @@ export class ContextManager {
     const rc = this.getRecoveryContext();
     if (!rc) return null;
 
-    // Sync with shared file so smart_todo plugin changes are visible
     this._syncTodosFromFile();
 
     const parts = [];
-    parts.push('📋 Session Context — 參考：以下為先前 session 的摘要資訊');
-    parts.push(''); // blank line
 
-    // Summary
-    const s = rc.summary || {};
-    parts.push(`📊 Session: ${s.totalCalls || 0} calls, ${s.errorCount || 0} errors, ${s.uniqueTools || 0} tools`);
-
-    // Active goal (from shared goals.json) — cross-reference with todos
-    const goalState = this.getActiveGoalSummary();
-    if (goalState) {
-      const statusIcon = goalState.lastCheckResult === 'met' ? '✅' : '🎯';
-      parts.push(`${statusIcon} Active Goal: ${goalState.description}`);
-      parts.push(`   Condition: ${goalState.condition}`);
-      parts.push(`   Checks: ${goalState.checkCount} | Turns: ${goalState.turnCount}`);
-      // Find linked todo if exists
-      const todos = this.listTodos();
-      const goalTodo = [...todos].reverse().find(t =>
-        (t.text.startsWith('🎯 [Goal]') || t.text.startsWith('[Goal]'))
-      );
-      if (goalTodo) {
-        const icon = goalTodo.status === 'completed' ? '✅' : goalTodo.status === 'in_progress' ? '⏳' : goalTodo.status === 'cancelled' ? '❌' : '🎯';
-        parts.push(`   → ${icon} Todo #${goalTodo.id}: ${goalTodo.status}`);
-      }
-      if (goalState && goalState.lastCheckResult !== 'met') {
-        parts.push('   → 繼續完成此 goal，直到 condition 滿足');
-      }
+    // 1) Session note (LLM 自主寫入的工作摘要) — 最優先
+    const note = rc.sessionNote;
+    if (note) {
+      parts.push(`🎯 ${note}`);
+      parts.push('');
+    }
+    // 1-b) Auto compact summary (compaction 自動摘要, 無 session note 時顯示)
+    const autoSummary = rc.autoCompactSummary;
+    if (autoSummary && !note) {
+      parts.push(autoSummary);
+      parts.push('');
     }
 
-    // Pending todos (排序：in_progress 優先 > pending 依優先級 > completed 置底)
-    const todos = this.listTodos();
-    const sortedTodos = [...todos].sort((a, b) => {
-      const order = { 'in_progress': 0, 'pending': 1, 'completed': 2, 'cancelled': 3 };
-      const aOrder = order[a.status] ?? 4;
-      const bOrder = order[b.status] ?? 4;
-      if (aOrder !== bOrder) return aOrder - bOrder;
-      return (this._getTodoPriority(b.text) - this._getTodoPriority(a.text));
-    });
-    const activeTodos = sortedTodos.filter(t => t.status === 'pending' || t.status === 'in_progress');
 
-    if (sortedTodos.length > 0) {
-      parts.push('📝 Todos:');
-      for (const t of sortedTodos) {
-        // Goal-related todos get 🎯 icon for visibility
-        const isGoal = t.text.startsWith('🎯 [Goal]') || t.text.startsWith('[Goal]');
-        const icon = isGoal ? '🎯'
-          : t.status === 'completed' ? '✅'
-          : t.status === 'in_progress' ? '⏳'
-          : t.status === 'cancelled' ? '❌' : '☐';
-        parts.push(`  ${icon} ${t.id}. ${t.text}`);
+    // 2) Activity log（自動記錄的活動日誌，不隨 toolHistory 清除）
+    const activityLog = rc.activityLog || [];
+    if (activityLog.length > 0) {
+      // 取最後 5 筆，從舊到新排列
+      const recent = activityLog.slice(-5);
+      const icons = { edit: '✏️', test: '🧪', error: '❌', think: '💭', search: '🔍', general: '•' };
+      for (const entry of recent) {
+        const icon = icons[entry.type] || '•';
+        parts.push(`${icon} ${entry.text}`);
       }
+      parts.push('');
     }
-
-    // Recent edits
-    const edits = rc.keyDecisions || [];
-    if (edits.length > 0) {
-      const files = [...new Set(edits.map(e => e.file))];
-      parts.push(`📂 Recent files: ${files.join(', ')}`);
-    }
-
-    // Active findings
+    // 2-b) Key findings (存活於 compaction 的發現, 最多 2 筆)
     const findings = rc.findings || [];
     if (findings.length > 0) {
-      parts.push(`🔍 Open issues: ${findings.map(f => f.severity + ':' + f.category).join(', ')}`);
+      for (const f of findings.slice(-2)) {
+        if (!f || !f.finding) continue;
+        const text = f.finding.length > 120 ? f.finding.slice(0, 120) + '...' : f.finding;
+        parts.push(`🔍 ${text}`);
+      }
+      parts.push('');
     }
 
-    // Last errors — 原始錯誤訊息（非 pattern 摘要）
-    const lastErrors = rc.lastErrors || [];
-    if (lastErrors.length > 0) {
-      parts.push('❌ Recent errors:');
-      for (const e of lastErrors) {
-        const errPreview = e.error.length > 120 ? e.error.slice(0, 120) + '...' : e.error;
-        parts.push(`  [${e.tool}] ${errPreview}`);
+    // 3) Active goal (未完成的)
+    const goalState = rc.goalState || this.getActiveGoalSummary();
+    if (goalState && goalState.lastCheckResult !== 'met') {
+      parts.push(`🎯 Goal: ${goalState.description}`);
+      parts.push('');
+    }
+
+    // 4) Recent files (last 3 unique)
+    const edits = rc.keyDecisions || [];
+    if (edits.length > 0) {
+      const files = [...new Set(edits.map(e => e.file))].slice(0, 3);
+      parts.push(`📂 ${files.join(', ')}`);
+    }
+
+    // 5) Active todos (pending/in_progress, 最多 3 筆)
+    const todos = this.listTodos();
+    const activeTodos = todos.filter(t => t.status === 'pending' || t.status === 'in_progress');
+    if (activeTodos.length > 0) {
+      for (const t of activeTodos.slice(0, 3)) {
+        const icon = t.status === 'in_progress' ? '⏳' : '☐';
+        parts.push(`📝 ${icon} #${t.id}: ${t.text}`);
       }
     }
 
-    // Resume directive — 參考性提示（非強制）
-    if (activeTodos.length > 0) {
-      parts.push('');
-      parts.push('📋 待辦事項參考（這些可能是先前 session 遺留的，請判斷是否仍適用）：');
-      const continueItems = activeTodos.map((t, i) =>
-        `  ⏺ Todo #${t.id}: "${t.text}"（若無關，使用 smart_todo cancel #${t.id} 清除）`
-      );
-      parts.push(...continueItems);
-    } else {
-      parts.push('');
-      parts.push('ℹ️ 目前無待辦事項。');
+    // 6) Last error (if any, 最多 1 筆)
+    const lastErrors = rc.lastErrors || [];
+    if (lastErrors.length > 0) {
+      const e = lastErrors[lastErrors.length - 1];
+      const preview = e.error.length > 200 ? e.error.slice(0, 200) + '...' : e.error;
+      parts.push(`❌ ${e.tool}: ${preview}`);
     }
+
+    // 沒有任何有用資訊 → 不回傳
+    if (parts.length === 0) return null;
 
     return parts.join('\n');
   }

@@ -41,3 +41,11 @@ config/
 - **Loader 自動註冊**：新增 .mjs 到 plugins/ 目錄即可，重啟後自動生效
 - **manifest.json 唯讀**：由 Loader 自動產生，勿手動編輯
 - **smart-mcp.md 雙同步**：`config/agents/smart-mcp.md` ↔ `~/.config/opencode/agents/smart-mcp.md`
+
+## 🧠 Session Note（compaction 前必寫）
+
+Compaction 前（或 context 快滿時），寫一行 note 描述你在做什麼：
+```
+smart_compact({note: "在做什麼、進度到哪、下一步", auto: true})
+```
+這行 note 會以 🎯 優先顯示在 recovery context 最上方。

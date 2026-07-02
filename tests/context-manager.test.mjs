@@ -857,12 +857,12 @@ describe('ContextManager — formatRecoveryContext', () => {
     };
     const text = cm.formatRecoveryContext();
     assert.ok(text !== null, 'should produce recovery text');
-    assert.ok(text.includes('Session Context'), 'should include header');
-    assert.ok(text.includes('Fix login bug'), 'should include todo text');
-    assert.ok(text.includes('Add tests'), 'should include second todo');
-    assert.ok(text.includes('5 calls'), 'should include session summary');
     assert.ok(text.includes('auth.ts'), 'should include recent files');
+    assert.ok(text.includes('Fix login bug'), 'should include active todo text');
     assert.ok(text.includes('smart_test'), 'should include recent errors');
+    // Should NOT include old verbose format
+    assert.ok(!text.includes('Session Context'), 'should not include old header');
+    assert.ok(!text.includes('5 calls'), 'should not include call stats');
     cleanup();
   });
 
@@ -870,17 +870,16 @@ describe('ContextManager — formatRecoveryContext', () => {
     const cm = freshManager({ autoSave: false });
     const ctx = cm.init();
     cm.addTodo(['Setup CI']);
-    cm.addTodo(['Fix crash bug']);  // higher priority (crash), but pending
-    cm.addTodo(['Write docs']);  // lowest priority
-    cm.updateTodoStatus(2, 'in_progress'); // Fix crash bug first
+    cm.addTodo(['Fix crash bug']);
+    cm.addTodo(['Write docs']);
+    cm.updateTodoStatus(2, 'in_progress');
     ctx._recoveryContext = {
       summary: { totalCalls: 3, errorCount: 0, uniqueTools: 2 },
     };
     const text = cm.formatRecoveryContext();
-    // in_progress should appear before pending
-    const crashIdx = text.indexOf('Fix crash bug');
-    const ciIdx = text.indexOf('Setup CI');
-    assert.ok(crashIdx < ciIdx, 'in_progress should sort before pending');
+    assert.ok(text !== null, 'should produce recovery text');
+    assert.ok(text.includes('Fix crash bug'), 'should include in_progress todo');
+    assert.ok(text.includes('#2'), 'should show todo id 2 (in_progress)');
     cleanup();
   });
 });
