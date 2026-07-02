@@ -1354,9 +1354,21 @@ export class ContextManager {
     if (!this._context) return false;
     if (!text || typeof text !== 'string') return false;
     if (!this._context.activityLog) this._context.activityLog = [];
+
+    // Collapse adjacent duplicates: same type + same text → 更新 count
+    const last = this._context.activityLog[this._context.activityLog.length - 1];
+    if (last && last.type === type && last.text === text) {
+      last.count = (last.count || 1) + 1;
+      last.timestamp = nowISO();
+      this._context.metadata.updatedAt = nowISO();
+      if (this._autoSave) this._save();
+      return true;
+    }
+
     this._context.activityLog.push({
       text: text.slice(0, 200),
       type: type || 'general',
+      count: 1,
       timestamp: nowISO(),
     });
     // 最多保留 10 筆
@@ -1496,7 +1508,8 @@ export class ContextManager {
       const icons = { edit: '✏️', test: '🧪', error: '❌', think: '💭', search: '🔍', general: '•' };
       for (const entry of recent) {
         const icon = icons[entry.type] || '•';
-        parts.push(`${icon} ${entry.text}`);
+        const suffix = entry.count && entry.count > 1 ? ` (${entry.count}x)` : '';
+        parts.push(`${icon} ${entry.text}${suffix}`);
       }
       parts.push('');
     }

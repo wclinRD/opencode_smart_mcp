@@ -1039,5 +1039,60 @@ describe('ContextManager — formatRecoveryContext with findings', () => {
     // No activity, no findings, no goal, no todos → should be null
     assert.equal(formatted, null);
   });
+
+
+// ---------------------------------------------------------------------------
+// Activity log collapse (Round 4)
+// ---------------------------------------------------------------------------
+
+describe('ContextManager — addActivityEntry collapse', () => {
+  afterEach(cleanup);
+
+  it('collapses adjacent same-type+same-text entries', () => {
+    const cm = freshManager();
+    cm.init();
+    cm.addActivityEntry('Edited src/auth.ts', 'edit');
+    cm.addActivityEntry('Edited src/auth.ts', 'edit');
+    cm.addActivityEntry('Edited src/auth.ts', 'edit');
+    const ctx = cm.get();
+    assert.equal(ctx.activityLog.length, 1);
+    assert.equal(ctx.activityLog[0].count, 3);
+    assert.equal(ctx.activityLog[0].text, 'Edited src/auth.ts');
+  });
+
+  it('does not collapse non-adjacent entries', () => {
+    const cm = freshManager();
+    cm.init();
+    cm.addActivityEntry('Edited src/auth.ts', 'edit');
+    cm.addActivityEntry('Ran tests', 'test');
+    cm.addActivityEntry('Edited src/auth.ts', 'edit');
+    const ctx = cm.get();
+    assert.equal(ctx.activityLog.length, 3);
+  });
+
+  it('does not collapse different types even with same text', () => {
+    const cm = freshManager();
+    cm.init();
+    cm.addActivityEntry('same text', 'edit');
+    cm.addActivityEntry('same text', 'error');
+    const ctx = cm.get();
+    assert.equal(ctx.activityLog.length, 2);
+  });
+
+  it('collapse only counts adjacent runs', () => {
+    const cm = freshManager();
+    cm.init();
+    cm.addActivityEntry('A', 'edit');
+    cm.addActivityEntry('A', 'edit');
+    cm.addActivityEntry('B', 'test');
+    cm.addActivityEntry('A', 'edit');
+    cm.addActivityEntry('A', 'edit');
+    const ctx = cm.get();
+    assert.equal(ctx.activityLog.length, 3);
+    assert.equal(ctx.activityLog[0].count, 2);
+    assert.equal(ctx.activityLog[2].count, 2);
+  });
+});
+
 });
 

@@ -1445,7 +1445,7 @@ function captureAndReturn(toolName, args, result, elapsedMs, def) {
       }
     } else {
       // Error capture — 所有工具錯誤
-      const errMsg = (result.error || '').slice(0, 80).replace(/\n/g, ' ');
+      const errMsg = (result.error || '').slice(0, 200).replace(/\n/g, ' ');
       contextManager.addActivityEntry(`❌ 錯誤: ${toolName} — ${errMsg}`, 'error');
     }
   }
