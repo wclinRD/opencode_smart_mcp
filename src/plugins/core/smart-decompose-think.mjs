@@ -1,27 +1,33 @@
 // ── smart_decompose_think plugin ──
-// Qwen3.5-4B 專用推理工具 — 主動 think↔tool 循環 orchestration
+// Qwen3.5-4B 專用推理工具 — 完整 think↔tool 循環 orchestration
+// 整合 P2.1-P2.5 所有元件：DAG/ADAPT/Budget/XML/Dual/Semantic/Resilience/FR-CoT/Necessity/CrossVal
 
 import { decomposeThinkHandler } from '../../cli/decompose-think.mjs';
 
 export default {
   name: 'smart_decompose_think',
-  responsePolicy: { maxLevel: 0 }, // keep raw format
+  responsePolicy: { maxLevel: 0 },
 
-  description: `For Qwen3.5-4B and similar thinking models: active think↔tool loop orchestration.
-Goes beyond smart_decompose by actively suggesting tools based on thought analysis,
-tracking tool call cycles, and providing task-specific templates.
+  description: `For Qwen3.5-4B and small thinking models: complete think↔tool loop orchestration.
+Integrates 15+ P2 modules covering DAG scheduling, ADAPT self-adaptation, thinking budget,
+XML tool parsing, CoE/Text-CoT dual format, semantic signal detection, bug resilience,
+FR-CoT compact reasoning, tool necessity scoring, and cross-validation.
 
 Core workflow:
-  goal + subtasks + thought + toolCalls + nextNeeded → server enriches →
-  active tool suggestion + tool result guidance + cycle detection
+  goal + subtasks + thought + nextNeeded → server enriches →
+  budget auto-detect + FR-CoT mode + active tool suggestion +
+  tool result context + cycle detection + semantic analysis + cross-validation
 
-Key differences from smart_decompose:
-  • Active tool suggestion (not just reading subtask.tool field)
-  • Tool call cycle tracking (suggested → called → result → next)
-  • Thought uncertainty/confidence parsing
-  • Task templates (debug/refactor/search/generic)
-  • First-call and boundary handling`,
-
+Key differences from smart_decompose (P1):
+  • Auto budget detection (4 levels: quick/normal/deep/research)
+  • FR-CoT compact reasoning (3 modes: brief/normal/deep)
+  • XML tool call parsing for Qwen3.5 format
+  • CoE + Text-CoT dual format switching
+  • Semantic signal detection (8 signal types)
+  • Bug resilience (7 error classifications + fallback chaining)
+  • Tool necessity scoring (pattern-based 0-10)
+  • DAG dependency visualization
+  • Cross-validation with scoring`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -61,10 +67,7 @@ Key differences from smart_decompose:
             tool: { type: 'string' },
             args: { type: 'object' },
             result: { type: 'string' },
-            status: {
-              type: 'string',
-              enum: ['pending', 'done', 'error'],
-            },
+            status: { type: 'string', enum: ['pending', 'done', 'error'] },
           },
         },
       },
@@ -75,8 +78,8 @@ Key differences from smart_decompose:
       },
       template: {
         type: 'string',
-        enum: ['debug', 'refactor', 'search', 'generic', 'fr-cot'],
-        description: 'Task template (default: generic)',
+        enum: ['debug', 'refactor', 'feature', 'research', 'decision', 'generic', 'fr-cot'],
+        description: 'Task template (default: generic). fr-cot uses FR-CoT compact templates.',
       },
       strictness: {
         type: 'string',
@@ -85,8 +88,18 @@ Key differences from smart_decompose:
       },
       thinkingStyle: {
         type: 'string',
-        enum: ['disciplined', 'free'],
-        description: 'Output style (default: disciplined)',
+        enum: ['disciplined', 'free', 'fr-cot'],
+        description: 'Output style (default: disciplined). fr-cot uses compact FR-CoT format.',
+      },
+      budget: {
+        type: 'string',
+        enum: ['auto', 'quick', 'normal', 'deep', 'research'],
+        description: 'Thinking budget level (default: auto-detect)',
+      },
+      frcotMode: {
+        type: 'string',
+        enum: ['auto', 'brief', 'normal', 'deep'],
+        description: 'FR-CoT mode (default: auto-detect from context)',
       },
       sessionId: {
         type: 'string',
@@ -118,6 +131,8 @@ Key differences from smart_decompose:
       template: args.template || 'generic',
       strictness: args.strictness || 'high',
       thinkingStyle: args.thinkingStyle || 'disciplined',
+      budget: args.budget || 'auto',
+      frcotMode: args.frcotMode || 'auto',
       sessionId: args.sessionId ? String(args.sessionId) : '_auto',
       _prevToolCalls: Array.isArray(args._prevToolCalls) ? args._prevToolCalls : [],
       _prevSuggestion: args._prevSuggestion || null,

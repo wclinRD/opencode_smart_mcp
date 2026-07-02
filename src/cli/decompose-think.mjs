@@ -1,5 +1,6 @@
 // ── smart_decompose_think 核心邏輯 ──
-// Qwen3.5-4B 專用推理工具 — 主動 think↔tool 循環 orchestration
+// Qwen3.5-4B 專用推理工具 — 完整 think↔tool 循環 orchestration
+// 整合 P2.1-P2.5：DAG/ADAPT/Budget/XML/Dual/Semantic/Resilience/FR-CoT/Necessity/CrossVal
 
 import {
   formatProgressBar,
@@ -21,6 +22,18 @@ import {
   detectCycleP2,
   resetSessionStoreP2,
 } from '../lib/decompose-think-tracking.mjs';
+
+// P2.2
+import { autoDetectBudget, formatBudgetIndicator, budgetDecision, contextPressure } from '../lib/decompose-budget.mjs';
+
+// P2.3
+import { detectSemanticSignals, semanticAnalysis } from '../lib/decompose-semantic.mjs';
+import { chooseDualMode, summarizeCoE } from '../lib/decompose-dual.mjs';
+
+// P2.4
+import { frcotRecommend, frcotClassify, frcotFormat, frcotPrompt } from '../lib/decompose-frcot.mjs';
+import { calcToolNecessity, calcBatchNecessity } from '../lib/decompose-necessity.mjs';
+import { crossValidate, detectConflicts, validationReport } from '../lib/decompose-crossval.mjs';
 
 // ═══════════════════════════════════════════
 // 參數驗證（P1 驗證邏輯擴充）
@@ -63,10 +76,7 @@ function computeProgress(subtasks, currentId) {
   const blocked = subtasks.filter(s => s.status === 'blocked').length;
   const current = subtasks.find(s => s.id === currentId);
   return {
-    total,
-    completed,
-    blocked,
-    currentId,
+    total, completed, blocked, currentId,
     bar: formatProgressBar(completed, total),
     done: completed === total,
     current: current ? current.desc : '',
@@ -74,29 +84,32 @@ function computeProgress(subtasks, currentId) {
 }
 
 // ═══════════════════════════════════════════
-// D3: formatThinkOutput
+// D3: formatThinkOutput (P2.5 擴充版)
 // ═══════════════════════════════════════════
 
-/**
- * P2 格式化輸出 — 整合 DAG 視覺化、confidence bar、thinkBudget
- */
 function formatThinkOutput(args) {
   const {
     goal, subtasks, currentSubtaskId, thought, template,
     templatePrompt, resultContext, toolSuggestion, intervention,
     progress, nextNeeded, thinkingStyle, _isFirstCall,
+    budget, frcot, necessity, signals, crossval,
   } = args;
 
   const lines = [];
   const templateLabel = getTemplateLabel(template);
 
-  // Header
   lines.push(`┌─ smart_decompose_think [${templateLabel}] ─────────`);
   lines.push(`│ ${formatGoalHeader(goal)}`);
   lines.push(`│ 📊 ${formatProgressBar(progress.completed, progress.total)}`);
-  if (_isFirstCall) {
-    lines.push('│ 🆕 首次呼叫 — 開始 think↔tool 循環');
+
+  // Budget + FR-CoT info
+  if (budget) {
+    lines.push(`│ 💰 Budget: ${budget.budget} | Max steps: ${budget.params?.maxSteps || '?'}`);
   }
+  if (frcot && frcot.mode !== 'normal') {
+    lines.push(`│ ⚡ FR-CoT: ${frcot.mode}`);
+  }
+  if (_isFirstCall) lines.push('│ 🆕 首次呼叫 — 開始 think↔tool 循環');
   lines.push('│');
 
   // Template prompt
@@ -105,6 +118,13 @@ function formatThinkOutput(args) {
     for (const tLine of templatePrompt.split('\n')) {
       lines.push(`│${tLine.startsWith('│') ? tLine : ` ${tLine}`}`);
     }
+    lines.push(`│ ${'─'.repeat(35)}`);
+  }
+
+  // FR-CoT formatted thought (if in fr-cot mode)
+  if (frcot && frcot.formatted && frcot.mode === 'brief') {
+    lines.push(`│ ${'─'.repeat(35)}`);
+    lines.push(`│ ${frcot.formatted}`);
     lines.push(`│ ${'─'.repeat(35)}`);
   }
 
@@ -141,11 +161,8 @@ function formatThinkOutput(args) {
   // Tool suggestion
   if (toolSuggestion) {
     const triggerIcons = {
-      skipped_tool: '🔴',
-      overconfidence: '⚠️',
-      uncertainty: '❓',
-      task_affinity: '🔧',
-      subtask_tool: '🔧',
+      skipped_tool: '🔴', overconfidence: '⚠️',
+      uncertainty: '❓', task_affinity: '🔧', subtask_tool: '🔧',
     };
     const icon = triggerIcons[toolSuggestion.trigger] || '🔧';
     lines.push(`│ ${icon} 建議：${toolSuggestion.reason}`);
@@ -154,17 +171,30 @@ function formatThinkOutput(args) {
     }
   }
 
+  // Tool necessity
+  if (necessity && necessity.score > 0) {
+    lines.push(`│ 📐 Tool 必要性: ${necessity.score}/10${necessity.suggestedTool ? ` (${necessity.suggestedTool})` : ''}`);
+  }
+
+  // Semantic signals
+  if (signals && signals.topSignal) {
+    lines.push(`│ 📡 語意訊號: ${signals.topSignal.type} (${signals.topSignal.confidence}%)`);
+  }
+
   // Intervention
   if (intervention) {
     const iIcons = { cycle: '🔄', overconfidence: '⚠️', skipped_tool: '🔴', budget_critical: '🔴' };
     const iIcon = iIcons[intervention.type] || '⚠️';
     lines.push(`│ ${iIcon} 干預提示：${intervention.message}`);
-    if (intervention.suggestion) {
-      lines.push(`│    建議：${intervention.suggestion}`);
-    }
+    if (intervention.suggestion) lines.push(`│    建議：${intervention.suggestion}`);
   }
 
-  // Footer / action prompt
+  // Cross-validation score
+  if (crossval && crossval.total > 0) {
+    const xvIcon = crossval.score >= 80 ? '✅' : crossval.score >= 50 ? '⚠️' : '❌';
+    lines.push(`│ ${xvIcon} CrossVal: ${crossval.score}/100 (${crossval.passed}/${crossval.total})`);
+  }
+
   if (nextNeeded) {
     lines.push('│ → 繼續推理（nextNeeded: true）');
   } else {
@@ -179,38 +209,17 @@ function formatThinkOutput(args) {
 // D1-D2: decomposeThinkHandler 主流程
 // ═══════════════════════════════════════════
 
-/**
- * @param {object} args
- * @param {string} args.goal
- * @param {Array} args.subtasks
- * @param {number} args.currentSubtaskId
- * @param {string} args.thought
- * @param {boolean} args.nextNeeded
- * @param {Array} [args.toolCalls]
- * @param {string} [args.roundType='think']
- * @param {string} [args.template='generic']
- * @param {string} [args.strictness='high']
- * @param {string} [args.thinkingStyle='disciplined']
- * @param {string} [args.sessionId]
- * @param {object} [args._prevToolCalls]
- * @param {object} [args._prevSuggestion]
- * @param {Function} [args._getBudgetFn]
- * @returns {object} { thought, progress, toolSuggestion, intervention, budget, error? }
- */
 export function decomposeThinkHandler(args) {
   // A6: sanitize args
   const safe = sanitizeP2Args(args);
 
-  // 驗證
   const errors = validateArgs(safe);
   if (errors.length > 0) {
     return {
       error: errors.join('; '),
       thought: `❌ ${errors.join('\n❌ ')}`,
-      progress: null,
-      toolSuggestion: null,
-      intervention: null,
-      budget: null,
+      progress: null, toolSuggestion: null,
+      intervention: null, budget: null,
     };
   }
 
@@ -226,14 +235,40 @@ export function decomposeThinkHandler(args) {
   // 2. 進度計算
   const progress = computeProgress(subtasks, currentSubtaskId);
 
+  // 2b. Budget 自動偵測（P2.2）
+  const budget = autoDetectBudget(safe.goal, {
+    thought,
+    confidence: parsed.isConfident ? 8 : 4,
+    complexity: subtasks.length > 5 ? 4 : subtasks.length > 3 ? 3 : 2,
+  });
+
+  // 2c. FR-CoT 模式選擇（P2.4）
+  const frcotMode = safe.frcotMode === 'auto'
+    ? frcotRecommend({
+        tokenCount: thought.length,
+        confidence: parsed.isConfident ? 8 : 4,
+        roundCount: _prevToolCalls?.length || 0,
+        complexity: subtasks.length > 5 ? 5 : subtasks.length > 3 ? 3 : 1,
+      })
+    : safe.frcotMode;
+
+  const frcot = {
+    mode: frcotMode,
+    formatted: frcotMode === 'brief'
+      ? frcotFormat(currentSubtaskId ? subtasks.find(s => s.id === currentSubtaskId)?.desc : '', thought, null, { mode: 'brief' })
+      : null,
+  };
+
   // 3. 更新 tool call 追蹤（B1）
   const { updatedToolCalls, skippedSuggestion } = trackToolCalls(
     toolCalls, _prevToolCalls, _prevSuggestion
   );
 
-  // 4. 主動工具建議（B3）
+  // 3b. Tool 必要性評分（P2.4）
   const currentSubtask = subtasks.find(s => s.id === currentSubtaskId);
+  const necessity = currentSubtask ? calcToolNecessity(currentSubtask) : { score: 0, reason: '', suggestedTool: null };
 
+  // 4. 主動工具建議（B3）
   const activeTip = activeToolSuggest({
     parsed,
     currentSubtask,
@@ -248,27 +283,33 @@ export function decomposeThinkHandler(args) {
     ? buildToolResultContext(updatedToolCalls)
     : null;
 
-  // 6. 模板 prompt（A5）
-  const templatePrompt = getTemplatePrompt(template);
+  // 6. 模板 prompt（A5）— FR-CoT 模式使用 frcotPrompt
+  const templatePrompt = frcotMode === 'brief'
+    ? frcotPrompt(template, 'brief')
+    : getTemplatePrompt(template);
 
   // 7. 循環檢測（B4）
   const cycle = detectCycleP2(sessionId, currentSubtaskId, thought, strictness);
 
-  // 8. 格式化輸出（D3）
+  // 7b. 語意訊號分析（P2.3）— detectSemanticSignals 回傳 { signals, summary, topSignal }
+  const semanticResult = thought ? detectSemanticSignals(thought) : null;
+  const signalTop = semanticResult && semanticResult.signals.length > 0 ? {
+    topSignal: semanticResult.signals[0],
+    count: semanticResult.signals.length,
+  } : null;
+
+  // 8. Cross-Validation（P2.4）— 只在有足夠 subtasks 時執行
+  const crossval = subtasks.length >= 2
+    ? crossValidate(subtasks, { tools: {} })
+    : null;
+
+  // 9. 格式化輸出（D3）
   const formatted = formatThinkOutput({
-    goal: safe.goal,
-    subtasks,
-    currentSubtaskId,
-    thought,
-    template,
-    templatePrompt,
-    resultContext,
-    toolSuggestion: activeTip,
-    intervention: cycle,
-    progress,
-    nextNeeded,
-    thinkingStyle: safe.thinkingStyle,
-    _isFirstCall,
+    goal: safe.goal, subtasks, currentSubtaskId, thought,
+    template, templatePrompt, resultContext,
+    toolSuggestion: activeTip, intervention: cycle,
+    progress, nextNeeded, thinkingStyle: safe.thinkingStyle, _isFirstCall,
+    budget, frcot, necessity, signals: signalTop, crossval,
   });
 
   return {
@@ -276,6 +317,8 @@ export function decomposeThinkHandler(args) {
     progress,
     toolSuggestion: activeTip,
     intervention: cycle,
-    budget: null, // P2.2 實作
+    budget,
+    frcot,
+    crossval,
   };
 }
