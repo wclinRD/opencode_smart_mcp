@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-15T15:15:46.418Z",
+  "generatedAt": "2026-07-15T15:41:59.077Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -352,6 +352,84 @@
           "thought",
           "nextNeeded"
         ]
+      }
+    },
+    {
+      "name": "smart_medical_search",
+      "description": "免費醫學文獻與臨床證據查詢（增強版 v2）。完全免費，不需要任何 API 金鑰。\n\n支援 6 大資料來源：\n  • OpenEvidence — 臨床證據問答，IP rate-limited\n  • PubMed — 3700 萬+ 醫學文獻，含 abstract + MeSH terms\n  • OpenAlex — 2.5 億+ 學術作品，含引用數據 + abstract\n  • Semantic Scholar — 2 億+ 論文，TLDR 摘要 + 引用圖譜 + OA 連結\n  • PMC 全文閱讀 — 開放取用文章的完整全文（XML 格式）\n  • Unpaywall — 查 DOI 對應的合法 OA 全文連結\n\n支援動作：\n  action=auto/ask：自動模式（預設，先試 OpenEvidence 再降級）\n  action=oe/openevidence：強制 OpenEvidence\n  action=search/pubmed：PubMed 文獻搜尋（含 abstract + MeSH + PMC 全文連結）\n  action=openalex/academic：OpenAlex 學術搜尋\n  action=scholar/semantic：Semantic Scholar 搜尋（含 TLDR）\n  action=fulltext/pmc：PMC 全文閱讀（需提供 PMC ID）\n  action=abstract：PubMed abstract 閱讀（需提供 PMID）\n  action=oa-check/oa：OA 全文連結查詢（需提供 DOI）\n  action=all/comprehensive：綜合查詢（多來源 + 跨來源去重）\n\n支援日期範圍過濾（dateFrom/dateTo，格式：YYYY 或 YYYY/MM/DD）。\n完全免費，無需註冊或 API 金鑰。",
+      "category": "core",
+      "domain": "search",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": true,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "ask",
+              "oe",
+              "openevidence",
+              "search",
+              "pubmed",
+              "openalex",
+              "academic",
+              "scholar",
+              "semantic",
+              "fulltext",
+              "pmc",
+              "abstract",
+              "oa-check",
+              "oa",
+              "all",
+              "comprehensive"
+            ],
+            "description": "查詢動作。auto=自動，search=PubMed，openalex=OpenAlex，scholar=Semantic Scholar，fulltext=PMC全文，abstract=PubMed摘要，oa-check=OA連結查詢，all=綜合"
+          },
+          "question": {
+            "type": "string",
+            "description": "醫學問題或關鍵字（例如：\"What is the recommended treatment for acute migraine?\"）"
+          },
+          "query": {
+            "type": "string",
+            "description": "查詢字串（question 的別名，兩者擇一提供）"
+          },
+          "maxResults": {
+            "type": "number",
+            "description": "最大結果數量（預設 10）"
+          },
+          "dateFrom": {
+            "type": "string",
+            "description": "起始日期（格式：YYYY 或 YYYY/MM/DD），僅 PubMed 和 OpenAlex 支援"
+          },
+          "dateTo": {
+            "type": "string",
+            "description": "結束日期（格式：YYYY 或 YYYY/MM/DD），僅 PubMed 和 OpenAlex 支援"
+          },
+          "pmid": {
+            "type": "string",
+            "description": "PubMed PMID（action=abstract 時使用）"
+          },
+          "pmcId": {
+            "type": "string",
+            "description": "PubMed Central PMC ID（action=fulltext/pmc 時使用，例如：PMC123456）"
+          },
+          "doi": {
+            "type": "string",
+            "description": "DOI（action=oa-check 時使用）"
+          }
+        }
       }
     },
     {
@@ -4416,57 +4494,6 @@
         "required": [
           "goal"
         ]
-      }
-    },
-    {
-      "name": "smart_medical_search",
-      "description": "免費醫學文獻與臨床證據查詢。完全免費，不需要任何 API 金鑰。\n\n支援多種資料來源，自動降級：\n  • OpenEvidence（公開端點）— 臨床證據問答，免金鑰，IP rate-limited\n  • PubMed API（NCBI E-utilities）— 3300 萬+ 醫學文獻\n  • OpenAlex — 2.5 億+ 學術作品，含引用數據\n\n支援動作：\n  action=auto（預設）/ ask：自動模式，先試 OpenEvidence，失敗降級到 PubMed\n  action=oe / openevidence：強制使用 OpenEvidence\n  action=search / pubmed：PubMed 文獻搜尋\n  action=openalex / academic：OpenAlex 學術搜尋\n  action=all / comprehensive：綜合查詢\n\n完全免費，無需註冊或 API 金鑰。",
-      "category": "standard",
-      "domain": "search",
-      "safetyLevel": "low",
-      "routingRules": {
-        "autoRoute": true,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "action": {
-            "type": "string",
-            "enum": [
-              "auto",
-              "ask",
-              "oe",
-              "openevidence",
-              "search",
-              "pubmed",
-              "openalex",
-              "academic",
-              "all",
-              "comprehensive"
-            ],
-            "description": "查詢動作。auto/ask=自動模式（預設，先試 OpenEvidence 再降級），oe/openevidence=強制 OpenEvidence，search/pubmed=PubMed，openalex/academic=OpenAlex，all/comprehensive=綜合查詢"
-          },
-          "question": {
-            "type": "string",
-            "description": "醫學問題或關鍵字（例如：\"What is the recommended treatment for acute migraine in adults?\"）"
-          },
-          "query": {
-            "type": "string",
-            "description": "查詢字串（question 的別名，兩者擇一提供）"
-          },
-          "maxResults": {
-            "type": "number",
-            "description": "最大結果數量（預設 10）"
-          }
-        }
       }
     },
     {

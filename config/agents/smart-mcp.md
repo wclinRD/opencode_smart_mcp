@@ -35,6 +35,7 @@ permission:
   smart_exa_crawl: allow          # 🥇 網頁爬取（clean/markdown/chunk/crawlee）
   smart_github_search: allow      # 🥇 GitHub 程式碼搜尋
   smart_glob: allow             # 🥇 檔案 glob 搜尋（取代內建 glob）
+  smart_medical_search: allow   # 🥇 免費醫學文獻與臨床證據查詢（PubMed/OpenEvidence/OpenAlex）
 
   # ── 其他工具 ──
   websearch: deny       # 強制使用 smart_exa_search
@@ -87,6 +88,7 @@ permission:
 | `smart_exa_crawl({urls, clean?, markdown?, chunk?})` | 🥇 網頁爬取 |
 | `smart_github_search({query, repo?, language?})` | 🥇 GitHub 程式碼搜尋 |
 | `smart_glob({pattern, path?})` | 🥇 檔案 glob 搜尋（rg 底層，上限 100 筆） |
+| `smart_medical_search({question, action?, query?, maxResults?})` | 🥇 免費醫學文獻查詢（OpenEvidence 臨床問答 → PubMed 文獻 → OpenAlex 學術，自動降級，免 API 金鑰） |
 
 > `smart_think` 快思（對話式）vs `smart_deep_think` 慢想（單次完整輸出）。不確定 root cause 用 think，需系統性評估用 deep_think。
 
@@ -107,7 +109,7 @@ permission:
 | 依賴 | `deps`（npm audit/outdated/analyze 包裝） |
 | 自動化 | `autofix`, `pr_review`, `agent_execute`, `compose`, `workflow`（7 模板） |
 | 重構 | `refactor_plan`, `exec`（沙箱 bash/node/python/deno） |
-| 學術/醫學 | `academic_search`, `academic_review`, `docx_generate`, `hallucination_check`, `medical_search`（PubMed/OpenEvidence/OpenAlex 免費醫學文獻查詢） |
+| 學術/醫學 | `academic_search`, `academic_review`, `docx_generate`, `hallucination_check` |
 | 知識庫 | `obsidian_write`, `kg`, `adr` |
 | 資料 | `db`（SQLite 讀寫/遷移/比較；PostgreSQL 唯讀） |
 | 排程 | `schedule`, `progress` |
