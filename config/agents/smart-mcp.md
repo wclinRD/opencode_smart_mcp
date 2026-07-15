@@ -35,7 +35,7 @@ permission:
   smart_exa_crawl: allow          # 🥇 網頁爬取（clean/markdown/chunk/crawlee）
   smart_github_search: allow      # 🥇 GitHub 程式碼搜尋
   smart_glob: allow             # 🥇 檔案 glob 搜尋（取代內建 glob）
-  smart_medical_search: allow   # 🥇 免費醫學文獻與臨床證據查詢（PubMed/OpenEvidence/OpenAlex）
+  smart_medical_search: allow   # 🥇 免費醫學文獻與臨床證據查詢（PubMed/OpenEvidence/OpenAlex/Semantic Scholar/PMC/Unpaywall）
 
   # ── 其他工具 ──
   websearch: deny       # 強制使用 smart_exa_search
@@ -88,7 +88,7 @@ permission:
 | `smart_exa_crawl({urls, clean?, markdown?, chunk?})` | 🥇 網頁爬取 |
 | `smart_github_search({query, repo?, language?})` | 🥇 GitHub 程式碼搜尋 |
 | `smart_glob({pattern, path?})` | 🥇 檔案 glob 搜尋（rg 底層，上限 100 筆） |
-| `smart_medical_search({question, action?, query?, maxResults?})` | 🥇 免費醫學文獻查詢（OpenEvidence 臨床問答 → PubMed 文獻 → OpenAlex 學術，自動降級，免 API 金鑰） |
+| `smart_medical_search({question, action?, query?, maxResults?, dateFrom?, dateTo?})` | 🥇 免費醫學文獻與臨床證據查詢（OpenEvidence 臨床問答 → PubMed 文獻 → OpenAlex 學術 → Semantic Scholar → PMC 全文 → Unpaywall OA，自動降級，免 API 金鑰）。9 種 action：auto/ask（自動降級）、oe/openevidence（臨床問答）、search/pubmed（文獻搜尋）、openalex/academic（學術搜尋）、scholar/semantic（TLDR 摘要）、abstract（摘要閱讀）、oa-check/oa（OA 連結查詢）、fulltext/pmc（全文閱讀）、all/comprehensive（多源去重） |
 
 > `smart_think` 快思（對話式）vs `smart_deep_think` 慢想（單次完整輸出）。不確定 root cause 用 think，需系統性評估用 deep_think。
 
