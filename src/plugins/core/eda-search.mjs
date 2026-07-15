@@ -503,6 +503,599 @@ const EDA_TOOL_INDEX = {
   },
 };
 
+// ── 常見 Tool Issue FAQ 索引 ─────────────────────────────────────────────────
+// 常見錯誤模式 + 解決方案 + 廠商 Q&A 搜尋 URL
+const TOOL_FAQ_INDEX = {
+  'dc': {
+    tool: 'Synopsys Design Compiler',
+    vendor: 'synopsys',
+    faqs: [
+      {
+        pattern: /can't resolve reference|unresolved reference/i,
+        error: "Error: can't resolve reference to...",
+        cause: 'link 階段找不到 cell/module 定義，通常是 library 路徑或 module 名稱錯誤',
+        solution: '1) 檢查 set_app_var target_library 路徑\n2) 確認 link_library 包含所有使用的 cell\n3) 執行 check_design 確認 design integrity',
+        solvnet: 'https://solvnet.synopsys.com/solve/qa?search=unresolved+reference+DC',
+      },
+      {
+        pattern: /no such design|design .* not found/i,
+        error: 'Error: No such design or design not found',
+        cause: 'analyze 後的 elaborate 名稱不正確，或 analyze 時有語法錯誤',
+        solution: '1) 確認 analyze 的 file 中 module 名稱\n2) 檢查 analyze 輸出是否有 error/warning\n3) 用 check_design 確認',
+        solvnet: 'https://solvnet.synopsys.com/solve/qa?search=no+such+design+DC',
+      },
+      {
+        pattern: /timing violation|setup violation|hold violation/i,
+        error: 'Timing violation: setup/hold slack < 0',
+        cause: '合成後時序無法收斂',
+        solution: '1) report_timing -max_paths 10 找最差路徑\n2) compile_ultra -timing_high_effort_script\n3) 加 set_max_transition / set_max_capacitance\n4) 考慮 clock gating 或 pipeline',
+        solvnet: 'https://solvnet.synopsys.com/solve/qa?search=timing+violation+synthesis',
+      },
+      {
+        pattern: /area .* exceeded|design area .* too large/i,
+        error: 'Design area exceeds constraint',
+        cause: '面積超過 set_max_area 設定',
+        solution: '1) report_area -hierarchy 找面積大户\n2) set_max_area 0 讓工具全力優化\n3) 檢查是否有未最佳化的邏輯\n4) 考慮邏輯共享或 resource sharing',
+        solvnet: 'https://solvnet.synopsys.com/solve/qa?search=area+exceeded+DC',
+      },
+      {
+        pattern: /cannot find module|module .* not defined/i,
+        error: "Error: Cannot find module...",
+        cause: '缺少 module 定義或未加入 analyze 清單',
+        solution: '1) 確認所有 RTL 檔案都在 analyze 清單中\n2) 檢查 search_path 設定\n3) 用 read_file -verilog <file> 補充',
+        solvnet: 'https://solvnet.synopsys.com/solve/qa?search=cannot+find+module+DC',
+      },
+    ],
+  },
+  'innovus': {
+    tool: 'Cadence Innovus',
+    vendor: 'cadence',
+    faqs: [
+      {
+        pattern: /cannot find|can't find|file not found/i,
+        error: 'Error: Cannot find file / cannot find library',
+        cause: 'LEF/Liberty/Verilog 路徑設定錯誤',
+        solution: '1) 檢查 set init_verilog / set init_lef_file 路徑\n2) 確認 init_design 前所有檔案路徑正確\n3) 用 file_exists 確認檔案存在',
+        solvnet: 'https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution',
+      },
+      {
+        pattern: /design has unroutable|congestion|too much congestion/i,
+        error: 'Design has unroutable nets / high congestion',
+        cause: 'placement 後 routing congestion 過高',
+        solution: '1) reportCongestion -hotSpot 找 hotspot\n2) setPlaceMode -congEffort high\n3) 降低 utilization 或調整 pin 位置\n4) setNanoRouteMode -routeWithTimingDriven true',
+        solvnet: 'https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution',
+      },
+      {
+        pattern: /timing .* not met|setup .* violation|hold .* violation/i,
+        error: 'Timing not met after route',
+        cause: 'Post-route timing violation',
+        solution: '1) timeDesign -postRoute 檢查 violation\n2) optDesign -postRoute 優化\n3) 檢查 clock tree skew\n4) setAnalysisMode -analysisType onChipVariation',
+        solvnet: 'https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution',
+      },
+      {
+        pattern: /DRC violation|design rule violation/i,
+        error: 'DRC violations detected',
+        cause: 'Routing 或 placement 造成 DRC 違規',
+        solution: '1) verify_drc 檢查詳細 violation\n2) ecoRoute -fix_drc 修復\n3) 檢查 LEF 設定是否正確\n4) 確認 technology LEF 包含所有 routing layer',
+        solvnet: 'https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution',
+      },
+      {
+        pattern: /mmmc.*not found|constraint.*error/i,
+        error: 'MMMC / constraint file error',
+        cause: 'MMMC 檔案路徑或內容錯誤',
+        solution: '1) 確認 set init_mmmc_file 路徑正確\n2) 檢查 MMMC 中的 scenario 定義\n3) 確認 liberty/SDC 路徑在 MMMC 中正確',
+        solvnet: 'https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution',
+      },
+    ],
+  },
+  'primetime': {
+    tool: 'Synopsys PrimeTime',
+    vendor: 'synopsys',
+    faqs: [
+      {
+        pattern: /cannot read|no such file|file not found/i,
+        error: 'Error: Cannot read file...',
+        cause: ' Liberty/Verilog/SPEF/SDC 檔案路徑錯誤',
+        solution: '1) 確認 read_liberty/read_verilog/read_spef 路徑\n2) 檢查 current_design 是否正確設定\n3) 用 which 確認檔案存在',
+        solvnet: 'https://solvnet.synopsys.com/solve/qa?search=cannot+read+PrimeTime',
+      },
+      {
+        pattern: /no clocks|clock .* not found/i,
+        error: 'Warning: No clocks found',
+        cause: 'SDC 中未定義 clock，或 get_clocks 名稱不匹配',
+        solution: '1) 確認 create_clock 定義正確\n2) 檢查 clock port 名稱\n3) report_clock 確認時脈網路',
+        solvnet: 'https://solvnet.synopsys.com/solve/qa?search=no+clocks+PrimeTime',
+      },
+      {
+        pattern: /unconstrained|unconstrained pin/i,
+        error: 'Warning: Pin is unconstrained',
+        cause: '某些 pin 沒有 timing constraint',
+        solution: '1) report_constraint -all_violators 找 unconstrained pins\n2) 補 set_input_delay / set_output_delay\n3) 設定 set_false_path 或 set_multicycle_path',
+        solvnet: 'https://solvnet.synopsys.com/solve/qa?search=unconstrained+PrimeTime',
+      },
+      {
+        pattern: /SPEF.*mismatch|parasitic.*mismatch/i,
+        error: 'Warning: SPEF/net name mismatch',
+        cause: 'SPEF 中的 net 名稱與 design 不匹配',
+        solution: '1) 確認 SPEF 是從同一個 design 產生\n2) 檢查 net name mapping\n3) 重新 extract RC（用 StarRC/Quantus）',
+        solvnet: 'https://solvnet.synopsys.com/solve/qa?search=SPEF+mismatch+PrimeTime',
+      },
+    ],
+  },
+  'calibre': {
+    tool: 'Siemens Calibre',
+    vendor: 'siemens',
+    faqs: [
+      {
+        pattern: /DRC error|design rule check/i,
+        error: 'Calibre DRC errors detected',
+        cause: 'Layout 違反 design rule',
+        solution: '1) 檢查 RVE 中的 error 詳細位置\n2) 確認 DRC runset 與 PDK 版本匹配\n3) 常見：spacing/width/enclosure violation\n4) 用 KLayout 或 Magic 做初步 DRC',
+        solvnet: 'https://eda.com/support/calibre',
+      },
+      {
+        pattern: /LVS.*mismatch|schematic.*mismatch/i,
+        error: 'Calibre LVS: Net/Device mismatch',
+        cause: 'Layout 與 schematic 不一致',
+        solution: '1) 檢查 LVS report 中的 mismatch 詳情\n2) 確認 net name matching 設定\n3) 常見：missing net, wrong device count\n4) 用 XRC extraction 確認連接性',
+        solvnet: 'https://eda.com/support/calibre',
+      },
+      {
+        pattern: /antenna|antenna rule/i,
+        error: 'Calibre: Antenna rule violation',
+        cause: 'Metal layer 面積過大造成加工時 charge 損壞',
+        solution: '1) 加 antenna diode 或 jumper\n2) 在 Innovus 中 setNanoRouteMode -routeWithAntenna true\n3) 檢查 LEF 中的 antenna 規則定義',
+        solvnet: 'https://eda.com/support/calibre',
+      },
+    ],
+  },
+  'vivado': {
+    tool: 'Xilinx Vivado',
+    vendor: 'xilinx',
+    faqs: [
+      {
+        pattern: /timing.*not met|setup.*violation|hold.*violation/i,
+        error: 'Timing constraint not met',
+        cause: 'FPGA 設計時序無法收斂',
+        solution: '1) report_timing_summary 找 violation\n2) 調整 clock constraint（set_clock_groups / set_false_path）\n3) 考慮 pipelining 或 restructure\n4) 檢查 clock domain crossing',
+        solvnet: 'https://support.xilinx.com/s/article/65498',
+      },
+      {
+        pattern: /utilization.*exceeded|too many/i,
+        error: 'Device utilization exceeded',
+        cause: 'FPGA 資源不足',
+        solution: '1) report_utilization 檢查各資源使用量\n2) 考慮更大型號 FPGA\n3) 優化 RTL 減少 LUT/FF 使用\n4) 用 synthesis 的 -flatten_hierarchy 優化',
+        solvnet: 'https://support.xilinx.com/s/article/65498',
+      },
+      {
+        pattern: /bitstream.*error|implementation.*failed/i,
+        error: 'Bitstream generation failed',
+        cause: 'Implementation 階段失敗',
+        solution: '1) 檢查 implementation log 中的 error\n2) 確認 constraint 語法正確\n3) 跑 opt_design -retarget -propagate -sweep\n4) 用 report_drc 檢查 design rule',
+        solvnet: 'https://support.xilinx.com/s/article/65498',
+      },
+    ],
+  },
+  'quartus': {
+    tool: 'Intel Quartus Prime',
+    vendor: 'intel',
+    faqs: [
+      {
+        pattern: /timing.*violation|setup.*error|fmax/i,
+        error: 'Timing violations / Fmax not met',
+        cause: '時序無法收斂到目標頻率',
+        solution: '1) TimeQuest 檢查 critical path\n2) 加 set_false_path / set_multicycle_path\n3) 調 synthesis 設定（-effort_high）\n4) 考慮 pipeline 寄存器',
+        solvnet: 'https://www.intel.com/content/www/us/en/support/programmable/support.html',
+      },
+      {
+        pattern: /resource.*exceeded|too many logic elements/i,
+        error: 'Logic elements / resources exceeded',
+        cause: 'FPGA 資源不足',
+        solution: '1) Compilation Report 檢查 resource usage\n2) 考慮更大型號\n3) 優化 RTL 減少邏輯使用\n4) 用 Hyperflex 或 F- registros 優化',
+        solvnet: 'https://www.intel.com/content/www/us/en/support/programmable/support.html',
+      },
+    ],
+  },
+  'vcs': {
+    tool: 'Synopsys VCS',
+    vendor: 'synopsys',
+    faqs: [
+      {
+        pattern: /syntax error|parse error/i,
+        error: 'Syntax/parse error during compilation',
+        cause: 'SystemVerilog 語法不相容或缺少 library',
+        solution: '1) 加 -sverilog 啟用 SV 支援\n2) 檢查 file list 是否完整\n3) 用 -lint_only 做預檢\n4) 確認 VCS 版本支援你的 SV feature',
+        solvnet: 'https://solvnet.synopsys.com/solve/qa?search=syntax+error+VCS',
+      },
+      {
+        pattern: /module already defined|duplicate module/i,
+        error: 'Module already defined',
+        cause: '同一個 module 被 include 多次',
+        solution: '1) 檢查 file list 是否有重複\n2) 用 `ifndef guard 保護 header\n3) -sverilog +incdir+ 檢查 include 路徑',
+        solvnet: 'https://solvnet.synopsys.com/solve/qa?search=module+already+defined+VCS',
+      },
+    ],
+  },
+  'xcelium': {
+    tool: 'Cadence Xcelium',
+    vendor: 'cadence',
+    faqs: [
+      {
+        pattern: /syntax error|parse error/i,
+        error: 'Syntax error during compilation',
+        cause: '語法不相容或缺少 library mapping',
+        solution: '1) 確認 -sv 啟用 SystemVerilog\n2) 檢查 cdslck 文件\n3) 用 -liccheck 確認 license\n4) xmvlog -help 確認支援的 feature',
+        solvnet: 'https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution',
+      },
+    ],
+  },
+  'lec': {
+    tool: 'Cadence Conformal LEC',
+    vendor: 'cadence',
+    faqs: [
+      {
+        pattern: /LEC.*fail|equivalence.*fail|not equivalent/i,
+        error: 'LEC verification failed', cause: 'Golden 與 implementation 網表功能不等價',
+        solution: '1) report failed -detail 找非等價點\n2) 確認 constant pin 設定正確\n3) 檢查 naming style 是否一致\n4) 用手動 mapping 修復',
+        solvnet: 'https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution',
+      },
+    ],
+  },
+  'formality': {
+    tool: 'Synopsys Formality',
+    vendor: 'synopsys',
+    faqs: [
+      {
+        pattern: /match.*fail|verify.*fail|not equivalent/i,
+        error: 'Formality verification failed',
+        cause: 'Reference 與 implementation 不等價',
+        solution: '1) report_failing 找失敗的 pin\n2) 確認 set_top 名稱正確\n3) 檢查 constant 設定\n4) 用 match -successful 找成功比對',
+        solvnet: 'https://solvnet.synopsys.com/solve/qa?search=formality+verification+fail',
+      },
+    ],
+  },
+};
+
+// ── 廠商文件 URL 索引 ─────────────────────────────────────────────────────────
+// 開源工具：GitHub raw URL（可直接爬取）
+// 商業工具：常見 topic 的文件段落 + SolvNet 搜尋 URL
+const VENDOR_DOCS = {
+  // ── 開源工具（可直接爬取 README / wiki）──
+  'yosys': {
+    name: 'Yosys',
+    type: 'open-source',
+    docs: [
+      { topic: 'overview', url: 'https://raw.githubusercontent.com/YosysHQ/yosys/main/README.md' },
+      { topic: 'commands', url: 'https://raw.githubusercontent.com/YosysHQ/yosys/main/README.md' },
+      { topic: 'synthesis', url: 'https://raw.githubusercontent.com/YosysHQ/yosys/main/README.md' },
+      { topic: 'abc', url: 'https://raw.githubusercontent.com/YosysHQ/yosys/main/README.md' },
+    ],
+    github: 'YosysHQ/yosys',
+  },
+  'openroad': {
+    name: 'OpenROAD',
+    type: 'open-source',
+    docs: [
+      { topic: 'overview', url: 'https://raw.githubusercontent.com/The-OpenROAD-Project/OpenROAD/master/README.md' },
+      { topic: 'flow', url: 'https://openroad.readthedocs.io/en/latest/' },
+      { topic: 'placement', url: 'https://openroad.readthedocs.io/en/latest/' },
+      { topic: 'cts', url: 'https://openroad.readthedocs.io/en/latest/' },
+      { topic: 'routing', url: 'https://openroad.readthedocs.io/en/latest/' },
+    ],
+    github: 'The-OpenROAD-Project/OpenROAD',
+  },
+  'verilator': {
+    name: 'Verilator',
+    type: 'open-source',
+    docs: [
+      { topic: 'overview', url: 'https://raw.githubusercontent.com/verilator/verilator/master/README.md' },
+      { topic: 'usage', url: 'https://verilator.org/guide/latest/' },
+      { topic: 'options', url: 'https://verilator.org/guide/latest/verilator.html' },
+    ],
+    github: 'verilator/verilator',
+  },
+  'klayout': {
+    name: 'KLayout',
+    type: 'open-source',
+    docs: [
+      { topic: 'overview', url: 'https://raw.githubusercontent.com/KLayout/klayout/master/README.md' },
+      { topic: 'drc', url: 'https://www.klayout.de/doc-quantum/programming/index.html' },
+      { topic: 'lvs', url: 'https://www.klayout.de/doc-quantum/programming/index.html' },
+    ],
+    github: 'KLayout/klayout',
+  },
+  'openlane': {
+    name: 'OpenLane',
+    type: 'open-source',
+    docs: [
+      { topic: 'overview', url: 'https://raw.githubusercontent.com/The-OpenROAD-Project/OpenLane/master/README.md' },
+      { topic: 'flow', url: 'https://openlane.readthedocs.io/en/latest/' },
+      { topic: 'configuration', url: 'https://openlane.readthedocs.io/en/latest/' },
+    ],
+    github: 'The-OpenROAD-Project/OpenLane',
+  },
+  'openSTA': {
+    name: 'OpenSTA',
+    type: 'open-source',
+    docs: [
+      { topic: 'overview', url: 'https://raw.githubusercontent.com/The-OpenROAD-Project/OpenSTA/master/README.md' },
+      { topic: 'commands', url: 'https://raw.githubusercontent.com/The-OpenROAD-Project/OpenSTA/master/README.md' },
+    ],
+    github: 'The-OpenROAD-Project/OpenSTA',
+  },
+  'openRCX': {
+    name: 'OpenRCX',
+    type: 'open-source',
+    docs: [
+      { topic: 'overview', url: 'https://raw.githubusercontent.com/The-OpenROAD-Project/OpenRCX/master/README.md' },
+    ],
+    github: 'The-OpenROAD-Project/OpenRCX',
+  },
+  'openDB': {
+    name: 'OpenDB',
+    type: 'open-source',
+    docs: [
+      { topic: 'overview', url: 'https://raw.githubusercontent.com/The-OpenROAD-Project/OpenDB/master/README.md' },
+    ],
+    github: 'The-OpenROAD-Project/OpenDB',
+  },
+  'magic': {
+    name: 'Magic VLSI',
+    type: 'open-source',
+    docs: [
+      { topic: 'overview', url: 'https://raw.githubusercontent.com/RTimothyEdwards/magic/master/README' },
+      { topic: 'drc', url: 'http://opencircuitdesign.com/magic/' },
+    ],
+    github: 'RTimothyEdwards/magic',
+  },
+  'netgen': {
+    name: 'Netgen',
+    type: 'open-source',
+    docs: [
+      { topic: 'overview', url: 'https://raw.githubusercontent.com/RTimothyEdwards/netgen/master/README' },
+    ],
+    github: 'RTimothyEdwards/netgen',
+  },
+  'ngspice': {
+    name: 'ngspice',
+    type: 'open-source',
+    docs: [
+      { topic: 'overview', url: 'https://ngspice.sourceforge.io/' },
+      { topic: 'manual', url: 'https://ngspice.sourceforge.io/doc/manual.html' },
+    ],
+    github: 'ngspice/ngspice',
+  },
+  'qflow': {
+    name: 'Qflow',
+    type: 'open-source',
+    docs: [
+      { topic: 'overview', url: 'http://opencircuitdesign.com/qflow/' },
+    ],
+  },
+
+  // ── 商業工具（常見 topic 文件段落索引）──
+  'dc': {
+    name: 'Design Compiler',
+    type: 'commercial',
+    vendor: 'synopsys',
+    docs: [
+      { topic: 'overview', excerpt: 'Design Compiler (DC) 是 Synopsys 的 RTL synthesis 工具。主要指令：analyze + elaborate + compile_ultra。支援 SDC constraint、UPF power intent。' },
+      { topic: 'analyze', excerpt: 'analyze -format verilog {file.v} — 分析 RTL 語法。analyze -format sverilog {file.sv} — SystemVerilog。analyze -format vhdl {file.vhd} — VHDL。' },
+      { topic: 'elaborate', excerpt: 'elaborate <module> — 展開 design hierarchy。elaborate <module> -parameters "WIDTH=8" — 帶參數。' },
+      { topic: 'compile', excerpt: 'compile_ultra — 全自動 synthesis。compile_ultra -gate_clock — 加 clock gating。compile_ultra -timing_high_effort_script — 高 effort timing。compile_ultra -area_high_effort_script — 高 effort area。' },
+      { topic: 'link', excerpt: "link — 連結 design 到 library。常見錯誤：'can't resolve reference' 通常是 library 路徑問題。set_app_var target_library [get_db libs .lib_name]。set_app_var link_library $target_library。" },
+      { topic: 'timing', excerpt: 'report_timing -max_paths 10 — 檢查最差路徑。report_timing -delay_type max — setup check。report_timing -delay_type min — hold check。set_max_transition 0.5 [current_design]。' },
+      { topic: 'area', excerpt: 'report_area — 回報面積。report_area -hierarchy — 階層式面積。set_max_area 0 — 不限面積。' },
+      { topic: 'power', excerpt: 'report_power — 回報功耗。set_max_dynamic_power 0 — 不限動態功耗。set_max_leakage_power 0 — 不限漏電功耗。' },
+      { topic: 'constraints', excerpt: 'create_clock -period 10 [get_ports clk] — 建立時脈。set_input_delay 2 -clock clk [get_ports in*] — 輸入延遲。set_output_delay 2 -clock clk [get_ports out*] — 輸出延遲。set_false_path -from [get_clocks clkA] -to [get_clocks clkB] — 跨時鐘域。' },
+      { topic: 'output', excerpt: 'write -format ddc -hierarchy -output design.ddc — 寫 DDC。write -format verilog -hierarchy -output gate.v — 寫門級網表。write_sdc design.sdc — 寫 SDC。write_sdf design.sdf — 寫 SDF。' },
+    ],
+  },
+  'innovus': {
+    name: 'Innovus',
+    type: 'commercial',
+    vendor: 'cadence',
+    docs: [
+      { topic: 'overview', excerpt: 'Innovus 是 Cadence 的 P&R (Place & Route) 工具。主要流程：init_design → place_design → ccopt_design → route_design → optDesign。支援 MMMC timing、NanoRoute。' },
+      { topic: 'init', excerpt: 'set init_verilog gate.v — 設定門級網表。set init_top_cell top — 設定頂層模組。set init_lef_file tech.lef std.lef — 設定 LEF。set init_mmmc_file MMMC.tcl — 設定 timing constraint。set init_cpf power.cpf — 設定 power。init_design — 初始化 design。' },
+      { topic: 'placement', excerpt: 'place_design — placement。setPlaceMode -congEffort high — 高 effort placement。setPlaceMode -place_detail_legalization_inst_gap 1 — detail placement。place_detail — 微調 placement。' },
+      { topic: 'cts', excerpt: 'ccopt_design — Clock Tree Synthesis (CCOpt)。set_ccopt_property -target_max_trans 0.15 — 設定 max transition。set_ccopt_property -target_skew 0.05 — 設定 target skew。ccopt_check_and_set_clock_trees — 檢查 clock tree。' },
+      { topic: 'route', excerpt: 'route_design — routing。setNanoRouteMode -routeWithTimingDriven true — timing-driven routing。setNanoRouteMode -routeWithSiDriven true — SI-driven routing。routeDetail — detail routing。' },
+      { topic: 'opt', excerpt: 'optDesign -preCTS — CTS 前優化。optDesign -postCTS — CTS 後優化。optDesign -postRoute — route 後優化。optDesign -postRoute -holdFix — hold 修復。' },
+      { topic: 'timing', excerpt: 'timeDesign -preCTS — CTS 前 timing report。timeDesign -postCTS — CTS 後 timing。timeDesign -postRoute — route 後 timing。report_timing -max_paths 10 — 最差路徑。' },
+      { topic: 'drc', excerpt: 'verify_drc — DRC 檢查。ecoRoute -fix_drc — 修復 DRC violation。verify_connectivity — 連接性檢查。' },
+      { topic: 'power', excerpt: 'set_power_rail_analysis_strategy -method static — 靜態 IR drop。report_power — 功耗報告。set_pg_library_mode -celltype tech -extraction_tech_file tech.capTbl — PG 分析。' },
+      { topic: 'output', excerpt: 'write_design -innovus -gzip -timing_merge_clock_gates -remove_clock_ports -overwrite — 寫出 design。write_parasitics -spef_file design.spef — 寫 SPEF。write_sdc -expand_pg -output design.sdc — 寫 SDC。' },
+    ],
+  },
+  'primetime': {
+    name: 'PrimeTime',
+    type: 'commercial',
+    vendor: 'synopsys',
+    docs: [
+      { topic: 'overview', excerpt: 'PrimeTime (PT) 是 Synopsys 的 sign-off STA 工具。讀取 gate-level netlist + liberty + SPEF + SDC，做精確 timing 分析。支援 OCV (On-Chip Variation)、CPPR。' },
+      { topic: 'setup', excerpt: 'read_verilog gate.v — 讀取網表。read_liberty lib.db — 讀取 liberty。read_spef design.spef — 讀取 SPEF。read_sdc design.sdc — 讀取 SDC。current_design top — 設定 top design。' },
+      { topic: 'timing', excerpt: 'report_timing — 預設 worst path。report_timing -max_paths 10 — 最差 10 條路徑。report_timing -delay_type max — setup check。report_timing -delay_type min — hold check。report_timing -from [get_clocks clkA] -to [get_clocks clkB] — 跨時鐘域。' },
+      { topic: 'clock', excerpt: 'report_clock — 時脈資訊。report_clock_qors — clock QoR。report_clock -skew — clock skew。report_clock -latency — clock latency。' },
+      { topic: 'constraints', excerpt: 'report_constraint -all_violators — 所有 constraint violation。report_constraint -max_transition — max transition。report_constraint -max_capacitance — max capacitance。report_constraint -min_period — min period。' },
+      { topic: 'ocv', excerpt: 'set_timing_derate -late 1.05 [all_clocks] — OCV derate。set_timing_derate -early 0.95 [all_clocks] — early derate。report_analysis_coverage — coverage 報告。set_case_analysis 0 [get_ports scan_en] — 固定 scan signal。' },
+      { topic: 'output', excerpt: 'report_timing > timing.rpt — 輸出 timing report。report_qor > qor.rpt — 輸出 QoR。write_sdf -version 2.1 design.sdf — 寫 SDF。write_sdc design.sdc — 寫 SDC。' },
+    ],
+  },
+  'vcs': {
+    name: 'VCS',
+    type: 'commercial',
+    vendor: 'synopsys',
+    docs: [
+      { topic: 'overview', excerpt: 'VCS 是 Synopsys 的 Verilog/SystemVerilog 模擬器。支援 UVM、SCOV coverage、FSM debug。vcs -sverilog +incdir+. — 編譯。./simv — 執行。' },
+      { topic: 'compile', excerpt: 'vcs -sverilog -full64 file.sv — 編譯 SV。vcs +incdir+. -debug_access+all -kdb — 含 debug。vcs -sverilog -lca — LCA features。vcs -sverilog -timescale=1ns/1ps — 設定 timeunit。' },
+      { topic: 'simulate', excerpt: './simv +fsdb+regions=0 — 執行。./simv +UVM_TESTNAME=test1 — UVM test。./simv -gui — DVE GUI。verdi -ssf waveform.fsdb — Verdi 看波形。' },
+      { topic: 'debug', excerpt: '-debug_access+all — 全 debug。-kdb — KDB 資料庫（Verdi 用）。+vcs+flush+all — flush。+memcbk — memory callback。+fsdb+dumparray — array dump。' },
+      { topic: 'coverage', excerpt: 'vcs -sverilog -cm cov — coverage。urg -dir simv.vdb — coverage report。+cover=bcefst — branch/condition/FSM/toggle。-cm_dir ./cov — coverage 目錄。' },
+    ],
+  },
+  'xcelium': {
+    name: 'Xcelium',
+    type: 'commercial',
+    vendor: 'cadence',
+    docs: [
+      { topic: 'overview', excerpt: 'Xcelium (原 IUS/NCSim) 是 Cadence 的多語言模擬器。支援 SystemVerilog、VHDL、UVM。xmvlog -sv file.sv — 編譯。xmsim simv — 執行。' },
+      { topic: 'compile', excerpt: 'xmvlog -sv file.sv — 編譯 SV。xmvlog -sv -64bit — 64-bit。xmelab -sv work.top — elaboration。xmsim -a simv — 執行。' },
+      { topic: 'debug', excerpt: 'xmsim -gui — SimVision GUI。xmsim -access +rwc — read/write/cont。xmsim -sv_lib mylib — 外部 SV library。+access+rw — 權限。' },
+    ],
+  },
+  'vivado': {
+    name: 'Vivado',
+    type: 'commercial',
+    vendor: 'xilinx',
+    docs: [
+      { topic: 'overview', excerpt: 'Vivado 是 AMD/Xilinx 的 FPGA 設計工具。支援 RTL synthesis、implementation、bitstream 生成。Vivado -mode batch -source script.tcl — batch 模式。' },
+      { topic: 'synthesis', excerpt: 'synth_design -top top -part xc7a100tcsg324-1 — synthesis。synth_design -flatten_hierarchy rebuilt — flatten。report_utilization — 資源使用量。report_timing_summary — timing summary。' },
+      { topic: 'implementation', excerpt: 'opt_design — optimization。place_design — placement。route_design — routing。report_timing_summary -delay_type min_max — full timing。' },
+      { topic: 'constraints', excerpt: 'create_clock -period 10.000 -name clk [get_ports clk] — 時脈。set_false_path -from [get_clocks clkA] -to [get_clocks clkB] — 跨時鐘域。set_multicycle_path -setup 2 -from [get_pins reg/C] — multicycle。' },
+      { topic: 'debug', excerpt: 'ILA (Integrated Logic Analyzer)：insert_debug_probes — 插入 debug。VIO (Virtual I/O)：create_debug_core — 虛擬 I/O。' },
+      { topic: 'power', excerpt: 'report_power — 功耗報告。set_power_opt_design — power optimization。report_power -hierarchy — 階層式功耗。' },
+    ],
+  },
+  'calibre': {
+    name: 'Calibre',
+    type: 'commercial',
+    vendor: 'siemens',
+    docs: [
+      { topic: 'overview', excerpt: 'Calibre 是 Siemens EDA 的 sign-off 驗證工具。包含 DRC (Design Rule Check)、LVS (Layout vs. Schematic)、PEX (Parasitic Extraction)。' },
+      { topic: 'drc', excerpt: 'calibre -drc rules.svrf — 執行 DRC。rules.svrf 是 DRC rule deck。RVE (Results Viewing Environment) 檢查結果。常見：spacing/width/enclosure/area violation。' },
+      { topic: 'lvs', excerpt: 'calibre -lvs rules.svrf — 執行 LVS。比對 layout vs schematic netlist。常見 mismatch：missing net、wrong device count、wrong connectivity。' },
+      { topic: 'pex', excerpt: 'calibre -xrc rules.svrf — parasitic extraction。生成 SPEF/SDF/SPICE。calibre -xrc -spice rules.svrf — SPICE extraction。' },
+    ],
+  },
+  'icc2': {
+    name: 'IC Compiler II',
+    type: 'commercial',
+    vendor: 'synopsys',
+    docs: [
+      { topic: 'overview', excerpt: 'ICC2 (IC Compiler II) 是 Synopsys 的 P&R 工具。讀取 .ddc/.vg/.sdc/.lib。主要流程：read_design → place_opt → cts_opt → route_opt。' },
+      { topic: 'setup', excerpt: 'read_verilog gate.v — 讀取網表。read_lib lib.db — 讀取 liberty。read_sdc design.sdc — 讀取 SDC。read_physical -lef tech.lef — 讀取 LEF。' },
+      { topic: 'place', excerpt: 'place_opt — placement + optimization。set_app_options -name place.coarse.max_density -value 0.8 — density 控制。place_detail — detail placement。' },
+      { topic: 'cts', excerpt: 'clock_opt — CTS + optimization。set_app_options -name cts.compile.target_max_trans -value 0.15 — max transition。set_app_options -name cts.compile.target_skew -value 0.05 — target skew。' },
+      { topic: 'route', excerpt: 'route_opt — routing + optimization。set_app_options -name route.global.timing_effort -value high — timing-driven。set_app_options -name route.detail.antenna_fix -value true — antenna fix。' },
+    ],
+  },
+  'genus': {
+    name: 'Genus',
+    type: 'commercial',
+    vendor: 'cadence',
+    docs: [
+      { topic: 'overview', excerpt: 'Genus 是 Cadence 的 RTL synthesis 工具。支援 Conformal equivalence checking、temporal partitioning。read_file -sv file.sv — 讀取。elaborate top — 展開。synthesize -map_effort high — synthesis。' },
+      { topic: 'synthesis', excerpt: 'synthesize -map_effort high — synthesis。set_db syn_generic_effort high — generic effort。set_db syn_map_effort high — map effort。write -format verilog -hierarchy -output gate.v — 輸出。' },
+    ],
+  },
+  'tempus': {
+    name: 'Tempus',
+    type: 'commercial',
+    vendor: 'cadence',
+    docs: [
+      { topic: 'overview', excerpt: 'Tempus 是 Cadence 的 sign-off STA 工具。讀取 gate-level netlist + liberty + SPEF + SDC。支援 SI analysis、OCV。read_verilog gate.v — 讀取網表。read_liberty lib.lib — 讀取 liberty。' },
+      { topic: 'timing', excerpt: 'report_timing — worst path。report_timing -max_paths 10 — top 10。report_timing -early — hold check。report_timing -late — setup check。report_constraint -all_violators — constraint violations。' },
+    ],
+  },
+  'starrc': {
+    name: 'StarRC',
+    type: 'commercial',
+    vendor: 'synopsys',
+    docs: [
+      { topic: 'overview', excerpt: 'StarRC 是 Synopsys 的 parasitic extraction 工具。從 layout 提取 RC parasitics。輸出 SPEF/SDF。' },
+      { topic: 'extraction', excerpt: '星際大战 extraction 指令：STARXT -65 *.gds *.spice tech.tluplus — extraction。SPEF output: *.spef。SDF output: *.sdf。' },
+    ],
+  },
+  'quantus': {
+    name: 'Quantus',
+    type: 'commercial',
+    vendor: 'cadence',
+    docs: [
+      { topic: 'overview', excerpt: 'Quantus 是 Cadence 的 parasitic extraction 工具。支援 QRC extraction。從 LEF/DEF + tech file 提取 RC。' },
+    ],
+  },
+  'spyglass': {
+    name: 'SpyGlass',
+    type: 'commercial',
+    vendor: 'synopsys',
+    docs: [
+      { topic: 'overview', excerpt: 'SpyGlass 是 Synopsys 的 RTL lint/CDC/RDC 檢查工具。spyglass -interactive — 互動模式。read_file -sv file.sv — 讀取。current_fileset — 設定 current fileset。' },
+      { topic: 'lint', excerpt: 'SpyGlass-Lint: set_option enableSV yes — 啟用 SV。set_option stop_on_error yes — error 時停止。run_goal lint/lint_rtl — 執行 lint。' },
+      { topic: 'cdc', excerpt: 'SpyGlass-CDC: run_goal cdc/cdc_verify — CDC 檢查。set_option enableCDC yes — 啟用 CDC。set_option cdc_strobe true — strobe mode。' },
+    ],
+  },
+  'formality': {
+    name: 'Formality',
+    type: 'commercial',
+    vendor: 'synopsys',
+    docs: [
+      { topic: 'overview', excerpt: 'Formality 是 Synopsys 的 LEC (Logic Equivalence Check) 工具。比對 golden (RTL) vs implementation (gate-level)。set_svf design.svf — 設定 SVF。read_verilog -r golden.v — reference。read_verilog -i impl.v — implementation。' },
+      { topic: 'verify', excerpt: 'match — 比對 gate。verify — 驗證等價。report_failing — 失敗報告。report_statistics — 統計。set_constant r:/top/scan_en 0 — 固定 constant。' },
+    ],
+  },
+  'lec': {
+    name: 'Conformal LEC',
+    type: 'commercial',
+    vendor: 'cadence',
+    docs: [
+      { topic: 'overview', excerpt: 'Conformal LEC 是 Cadence 的 Logic Equivalence Check 工具。比對 golden vs implementation。read design -golden golden.v -revised impl.v — 讀取。set_system mode setup — 設定模式。' },
+      { topic: 'verify', excerpt: 'set_system mode setup — 設定。read design -golden golden.v — reference。read design -revised impl.v — implementation。set_constant r:top/scan_en 0 — constant。verify — 執行。report failed -detail — 失敗報告。' },
+    ],
+  },
+  'questa': {
+    name: 'Questa',
+    type: 'commercial',
+    vendor: 'siemens',
+    docs: [
+      { topic: 'overview', excerpt: 'Questa (原 ModelSim) 是 Siemens EDA 的模擬器。支援 SystemVerilog、UVM、Coverage。vlog -sv file.sv — 編譯。vsim top — 執行。' },
+      { topic: 'compile', excerpt: 'vlog -sv file.sv — 編譯 SV。vlog +acc — access。vlog -timescale \"1ns/1ps\" — timeunit。vopt +acc top — 優化。' },
+      { topic: 'simulate', excerpt: 'vsim -c top — command-line。vsim -gui top — GUI。vsim -coverage top — coverage。run 1000 — 執行 1000 time units。run -all — 執行到結束。' },
+    ],
+  },
+  'modelsim': {
+    name: 'ModelSim',
+    type: 'commercial',
+    vendor: 'siemens',
+    docs: [
+      { topic: 'overview', excerpt: 'ModelSim 是 Siemens EDA (Mentor) 的 VHDL/Verilog 模擬器。vcom file.vhd — VHDL。vlog file.v — Verilog。vsim -voptargs=+acc top — 模擬。' },
+    ],
+  },
+  'jaspergold': {
+    name: 'JasperGold',
+    type: 'commercial',
+    vendor: 'cadence',
+    docs: [
+      { topic: 'overview', excerpt: 'JasperGold 是 Cadence 的 formal verification 工具。支援 formal property verification、formal equivalence、CDC verification。read_verilog file.sv — 讀取。set_property FILE <file> [find -expression <expr>] — 設定。' },
+    ],
+  },
+  'vc_formal': {
+    name: 'VC Formal',
+    type: 'commercial',
+    vendor: 'synopsys',
+    docs: [
+      { topic: 'overview', excerpt: 'VC Formal 是 Synopsys 的 formal verification 工具。支援 FPV、APP、ABD。read_verilog -sv file.sv — 讀取。set_options -kinduction true — induction。 prove -show_constraints — prove。' },
+    ],
+  },
+  'modus': {
+    name: 'Modus',
+    type: 'commercial',
+    vendor: 'cadence',
+    docs: [
+      { topic: 'overview', excerpt: 'Modus 是 Cadence 的 DFT (Design-for-Test) 工具。自動 ATPG pattern 生成、BIST、compression。read_design -netlist gate.v — 讀取。set_context -scan — 設定 scan。' },
+    ],
+  },
+  'dft_compiler': {
+    name: 'DFT Compiler',
+    type: 'commercial',
+    vendor: 'synopsys',
+    docs: [
+      { topic: 'overview', excerpt: 'DFT Compiler 是 Synopsys 的 DFT insertion 工具。scan chain insertion、BIST、OPCG。set_scan_path — 設定 scan chain。insert_dft — 執行 DFT insertion。' },
+      { topic: 'scan', excerpt: 'set_scan_style -mixed_flow scan — scan style。set_scan_enable_signal scan_en — scan enable。insert_dft — 插入 scan chain。' },
+    ],
+  },
+};
+
 // ── PDK 快速索引 ─────────────────────────────────────────────────────────────
 const PDK_INDEX = {
   'sky130': {
@@ -1357,6 +1950,234 @@ async function searchGitHubEDA(query, maxResults = 10) {
   }));
 }
 
+// ── 文件爬取（開源工具 GitHub raw）─────────────────────────────────────────────
+async function fetchDocContent(toolKey, topic) {
+  const docInfo = VENDOR_DOCS[toolKey];
+  if (!docInfo) return null;
+
+  // 開源工具：從 GitHub raw URL 爬取
+  if (docInfo.type === 'open-source') {
+    const doc = docInfo.docs.find(d => d.topic === topic) || docInfo.docs[0];
+    if (!doc || !doc.url) return null;
+    try {
+      // 用 text fetch（非 JSON）
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000);
+      const resp = await fetch(doc.url, {
+        headers: { 'User-Agent': USER_AGENT },
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const content = await resp.text();
+      // 截取前 3000 字元（避免太長）
+      const truncated = content.length > 3000 ? content.slice(0, 3000) + '\n\n... (內容已截斷)' : content;
+      return {
+        tool: docInfo.name,
+        topic: doc.topic,
+        source: doc.url,
+        type: 'fetched',
+        content: truncated,
+      };
+    } catch (err) {
+      return { tool: docInfo.name, topic, source: doc.url, type: 'error', error: err.message };
+    }
+  }
+
+  // 商業工具：返回索引的 excerpt
+  if (docInfo.type === 'commercial') {
+    const docs = topic
+      ? docInfo.docs.filter(d => d.topic === topic || d.topic === 'overview')
+      : docInfo.docs.slice(0, 3); // 預設返回前 3 個 topic
+    if (docs.length === 0) return null;
+    return {
+      tool: docInfo.name,
+      topic: topic || 'overview',
+      type: 'indexed',
+      vendor: docInfo.vendor,
+      excerpts: docs.map(d => ({ topic: d.topic, content: d.excerpt })),
+      solvnet: docInfo.vendor === 'synopsys'
+        ? `https://solvnet.synopsys.com/solve/qa?search=${encodeURIComponent(docInfo.name + ' ' + (topic || ''))}`
+        : docInfo.vendor === 'cadence'
+        ? `https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution`
+        : null,
+    };
+  }
+
+  return null;
+}
+
+// 偵測 query 中的 topic 關鍵字
+function detectDocTopic(query) {
+  const q = query.toLowerCase();
+  const topicMap = [
+    ['overview', /overview|introduction|what is|介紹|概觀|概述/i],
+    ['analyze', /analyze|analysis|分析/i],
+    ['elaborate', /elaborate|展開/i],
+    ['compile', /compile|synthesis|合成|編譯/i],
+    ['link', /link|連結|連接/i],
+    ['timing', /timing|時序|時脈|STA|setup|hold/i],
+    ['area', /area|面積/i],
+    ['power', /power|功耗|漏電/i],
+    ['constraints', /constraint|SDC|constraint|set_clock|set_input|set_output/i],
+    ['output', /output|write|write_sdc|write_sdf|輸出/i],
+    ['placement', /place|placement|配置/i],
+    ['cts', /cts|clock tree|時脈樹/i],
+    ['route', /route|routing|繞線/i],
+    ['opt', /opt|optimize|優化/i],
+    ['drc', /DRC|design rule/i],
+    ['lvs', /LVS|layout vs schematic/i],
+    ['pex', /PEX|parasitic extraction|寄生/i],
+    ['setup', /setup|initial|init|初始化/i],
+    ['simulate', /simulate|simulation|模擬/i],
+    ['debug', /debug|除錯|調試/i],
+    ['coverage', /coverage|覆蓋率/i],
+    ['lint', /lint|語法/i],
+    ['cdc', /CDC|clock domain crossing/i],
+    ['verify', /verify|verification| equivalence|等價/i],
+    ['scan', /scan chain|scan insertion/i],
+    ['ocv', /OCV|on-chip variation/i],
+    ['clock', /clock|skew|latency/i],
+    ['extraction', /extraction|提取/i],
+  ];
+  for (const [topic, pattern] of topicMap) {
+    if (pattern.test(q)) return topic;
+  }
+  return null;
+}
+
+// ── 廠商 Q&A 搜尋 ─────────────────────────────────────────────────────────
+// 偵測 tool 問題時，自動生成 SolvNet / Cadence Support 搜尋 URL
+function generateVendorSearchURL(toolName, query) {
+  const toolLower = toolName.toLowerCase();
+  const searchQuery = encodeURIComponent(`${query} ${toolName}`);
+  const urls = [];
+
+  // Synopsys 工具 → SolvNet
+  if (['design compiler', 'dc', 'vcs', 'primetime', 'pt', 'formality', 'fmod', 'icc2', 'dc explorer', 'spyglass'].some(t => toolLower.includes(t))) {
+    urls.push({
+      vendor: 'Synopsys SolvNet',
+      url: `https://solvnet.synopsys.com/solve/qa?search=${searchQuery}`,
+      note: 'Synopsys 官方 Q&A 知識庫',
+    });
+  }
+
+  // Cadence 工具 → Cadence Support
+  if (['innovus', 'xcelium', 'conformal', 'lec', 'virtuoso', 'tempus', 'voltus', 'genus', ' JasperGold', 'Stratus'].some(t => toolLower.includes(t))) {
+    urls.push({
+      vendor: 'Cadence Online Support',
+      url: `https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution&q=${searchQuery}`,
+      note: 'Cadence 官方技術支援',
+    });
+  }
+
+  // Siemens (Calibre) → Siemens EDA Support
+  if (toolLower.includes('calibre') || toolLower.includes('siemens') || toolLower.includes('icv') || toolLower.includes('mGCAR')) {
+    urls.push({
+      vendor: 'Siemens EDA Support',
+      url: `https://eda.com/support/calibre`,
+      note: 'Siemens EDA (Calibre) 支援中心',
+    });
+  }
+
+  // Xilinx/AMD → Xilinx Support
+  if (toolLower.includes('vivado') || toolLower.includes('xilinx') || toolLower.includes('quartus')) {
+    urls.push({
+      vendor: 'AMD/Xilinx Support',
+      url: `https://support.xilinx.com/s/global-search/${searchQuery}`,
+      note: 'AMD/Xilinx 官方支援中心',
+    });
+  }
+
+  // Intel → Intel Support
+  if (toolLower.includes('quartus') || toolLower.includes('intel') || toolLower.includes('altera')) {
+    urls.push({
+      vendor: 'Intel Support',
+      url: `https://www.intel.com/content/www/us/en/search.html?#q=${searchQuery}&t=All`,
+      note: 'Intel FPGA 支援中心',
+    });
+  }
+
+  // 通用搜尋 fallback
+  if (urls.length === 0) {
+    urls.push({
+      vendor: 'Google',
+      url: `https://www.google.com/search?q=${searchQuery}+error+solution+site:solvnet.synopsys.com+OR+site:support.cadence.com`,
+      note: '通用 EDA 問題搜尋',
+    });
+  }
+
+  return urls;
+}
+
+// 從 TOOL_FAQ_INDEX 搜尋匹配的 FAQ
+function searchToolFAQ(query, toolFilter) {
+  const q = query.toLowerCase();
+  const results = [];
+
+  for (const [toolId, toolData] of Object.entries(TOOL_FAQ_INDEX)) {
+    // 如果有 tool filter，只搜尋指定工具
+    if (toolFilter && !toolId.includes(toolFilter.toLowerCase()) && !toolData.tool.toLowerCase().includes(toolFilter.toLowerCase())) {
+      continue;
+    }
+
+    for (const faq of toolData.faqs) {
+      // 用 regex pattern 匹配錯誤訊息
+      if (faq.pattern.test(query)) {
+        results.push({
+          tool: toolData.tool,
+          error: faq.error,
+          cause: faq.cause,
+          solution: faq.solution,
+          solvnet: faq.solvnet,
+        });
+      }
+    }
+  }
+
+  // 如果 regex 沒匹配，用 word overlap 做 fuzzy 搜尋
+  if (results.length === 0) {
+    const words = q.split(/\s+/).filter(w => w.length > 2);
+    for (const [toolId, toolData] of Object.entries(TOOL_FAQ_INDEX)) {
+      if (toolFilter && !toolId.includes(toolFilter.toLowerCase()) && !toolData.tool.toLowerCase().includes(toolFilter.toLowerCase())) {
+        continue;
+      }
+
+      for (const faq of toolData.faqs) {
+        const faqText = `${faq.error} ${faq.cause} ${faq.solution}`.toLowerCase();
+        const overlap = words.filter(w => faqText.includes(w));
+        if (overlap.length >= Math.ceil(words.length * 0.4) || overlap.length >= 2) {
+          results.push({
+            tool: toolData.tool,
+            error: faq.error,
+            cause: faq.cause,
+            solution: faq.solution,
+            solvnet: faq.solvnet,
+            matchScore: overlap.length / words.length,
+          });
+        }
+      }
+    }
+    // 按 matchScore 排序
+    results.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
+  }
+
+  return results.slice(0, 5);
+}
+
+// ── auto 模式：偵測 tool 問題查詢 ──────────────────────────────────────────────
+const TOOL_ISSUE_PATTERNS = [
+  /error/i, /issue/i, /problem/i, /fail/i, /not found/i,
+  /cannot/i, /can't/i, /unable/i, /missing/i, /undefined/i,
+  /violation/i, /mismatch/i, /conflict/i, /exception/i,
+  /bug/i, /crash/i, /hang/i, /stuck/i, /timeout/i,
+  /help/i, /fix/i, /solve/i, /debug/i, /troubleshoot/i,
+];
+
+function isToolIssueQuery(query) {
+  return TOOL_ISSUE_PATTERNS.some(p => p.test(query));
+}
+
 async function searchGitHubCode(query, maxResults = 5) {
   const q = encodeURIComponent(query);
   const url = `${GITHUB_API}/search/code?q=${q}&per_page=${maxResults}`;
@@ -1592,24 +2413,7 @@ async function edaSearch(args = {}) {
       case 'auto': {
         const q = searchQuery.toLowerCase();
 
-        // PDK 相關查詢
-        if (q.includes('pdk') || q.includes('sky') || q.includes('asap') || q.includes('cell lib')
-          || q.includes('130nm') || q.includes('7nm') || q.includes('45nm') || q.includes('180nm')
-          || q.includes('finfet') || q.includes('gf180') || q.includes('nangate')) {
-          const localPDK = searchLocalPDK(searchQuery);
-          let output = '';
-          if (localPDK.length > 0) {
-            output += formatPDKResults(localPDK) + '\n';
-          }
-          // 補充 GitHub 搜尋
-          try {
-            const ghResults = await searchGitHubPDK(searchQuery, 5);
-            output += formatGitHubResults(ghResults, 'GitHub 相關 PDK 專案');
-          } catch { /* ignore */ }
-          return { ok: true, output: output || '🔍 自動搜尋：未找到 PDK 相關結果' };
-        }
-
-        // EDA 工具查詢
+        // EDA 工具查詢（優先：tool 問題偵測需要先判斷）
         if (q.includes('tool') || q.includes('工具') || q.includes('synthesis') || q.includes('synth')
           || q.includes(' STA') || q.includes('timing') || q.includes('place') || q.includes('route')
           || q.includes('verilat') || q.includes('iverilog') || q.includes('yosys') || q.includes('openroad')
@@ -1631,7 +2435,47 @@ async function edaSearch(args = {}) {
             const ghResults = await searchGitHubEDA(searchQuery, 5);
             output += formatGitHubResults(ghResults, 'GitHub 相關 EDA 工具');
           } catch { /* ignore */ }
+
+          // 偵測 tool 問題 → 自動補充 FAQ + 廠商 URL
+          if (isToolIssueQuery(searchQuery)) {
+            const detectedTool = localTools.length > 0 ? localTools[0].key : null;
+            const faqResults = searchToolFAQ(searchQuery, detectedTool);
+            if (faqResults.length > 0) {
+              output += `\n## 🔧 偵測到 Tool 問題，自動補充 FAQ：\n\n`;
+              for (const faq of faqResults.slice(0, 3)) {
+                output += `### 🔴 ${faq.error}\n`;
+                output += `**原因**：${faq.cause}\n\n`;
+                output += `**解決方案**：\n\n${faq.solution}\n\n`;
+                if (faq.solvnet) output += `📎 [廠商 Q&A](${faq.solvnet})\n\n`;
+              }
+              const toolName = detectedTool ? EDA_TOOL_INDEX[detectedTool]?.name : searchQuery;
+              const vendorURLs = generateVendorSearchURL(toolName, searchQuery);
+              if (vendorURLs.length > 0) {
+                output += `## 🔗 廠商支援資源\n\n`;
+                for (const vu of vendorURLs) {
+                  output += `- [${vu.vendor}](${vu.url}) — ${vu.note}\n`;
+                }
+              }
+            }
+          }
+
           return { ok: true, output: output || '🔍 自動搜尋：未找到 EDA 工具相關結果' };
+        }
+
+        // PDK 相關查詢
+        if (q.includes('pdk') || q.includes('sky') || q.includes('asap') || q.includes('cell lib')
+          || q.includes('130nm') || q.includes('7nm') || q.includes('45nm') || q.includes('180nm')
+          || q.includes('finfet') || q.includes('gf180') || q.includes('nangate')) {
+          const localPDK = searchLocalPDK(searchQuery);
+          let output = '';
+          if (localPDK.length > 0) {
+            output += formatPDKResults(localPDK) + '\n';
+          }
+          try {
+            const ghResults = await searchGitHubPDK(searchQuery, 5);
+            output += formatGitHubResults(ghResults, 'GitHub 相關 PDK 專案');
+          } catch { /* ignore */ }
+          return { ok: true, output: output || '🔍 自動搜尋：未找到 PDK 相關結果' };
         }
 
         // 學術論文（預設 fallback）
@@ -1643,23 +2487,25 @@ async function edaSearch(args = {}) {
             output += formatSemanticScholarResults(scholarResult.data) + '\n';
           }
         } catch { /* ignore */ }
+
+        // OpenAlex
         try {
           const articles = await searchOpenAlex(enhancedQuery, Math.min(maxResults, 5));
           output += formatOpenAlexResults(articles);
-        } catch { /* ignore */ }
-        return { ok: true, output: output || '🔍 自動搜尋：未找到相關論文' };
-      }
+        } catch (err) {
+          output += `⚠️ OpenAlex：${err.message}\n`;
+        }
 
-      // ── PDK / Cell Library 查詢 ──
-      case 'pdk': {
-        const localPDK = searchLocalPDK(searchQuery);
-        let output = formatPDKResults(localPDK);
-        // 補充 GitHub
-        try {
-          const ghResults = await searchGitHubPDK(searchQuery, maxResults);
-          output += '\n' + formatGitHubResults(ghResults, 'GitHub PDK 相關專案');
-        } catch { /* ignore */ }
-        return { ok: true, output };
+        // 偵測是否提到特定會議
+        const conf = detectConference(searchQuery);
+        if (conf) {
+          output += `\n💡 偵測到會議 **${conf}**，建議搜尋：\n`;
+          output += `  • [ACM Digital Library](https://dl.acm.org/doi/proceedings/${conf})\n`;
+          output += `  • [IEEE Xplore](https://ieeexplore.ieee.org/search/searchresult.jsp?queryText=${conf}%20EDA)\n`;
+          output += `  • [dblp](https://dblp.org/search?q=${conf})\n`;
+        }
+
+        return { ok: true, output: output || '📚 學術論文：無結果' };
       }
 
       // ── EDA 學術論文搜尋 ──
@@ -1907,8 +2753,106 @@ async function edaSearch(args = {}) {
         return { ok: true, output: out };
       }
 
+      // ── Tool Troubleshooting（FAQ + 廠商搜尋 URL）──
+      case 'troubleshoot': {
+        let output = `🔧 **EDA Tool Troubleshooting**\n\n`;
+        const qLower = searchQuery.toLowerCase();
+
+        // 1. 偵測提到的工具名稱
+        const toolNames = Object.keys(EDA_TOOL_INDEX).filter(k => qLower.includes(k));
+        const detectedTool = toolNames.length > 0 ? toolNames[0] : null;
+
+        // 2. 從 FAQ 索引搜尋
+        const faqResults = searchToolFAQ(searchQuery, detectedTool);
+        if (faqResults.length > 0) {
+          output += `## 📋 常見問題解答（FAQ）\n\n`;
+          for (const faq of faqResults) {
+            output += `### 🔴 ${faq.error}\n`;
+            output += `**工具**：${faq.tool}\n\n`;
+            output += `**原因**：${faq.cause}\n\n`;
+            output += `**解決方案**：\n\n${faq.solution}\n\n`;
+            if (faq.solvnet) output += `📎 [廠商 Q&A](${faq.solvnet})\n\n`;
+          }
+        }
+
+        // 3. 廠商搜尋 URL
+        const toolName = detectedTool ? EDA_TOOL_INDEX[detectedTool]?.name : searchQuery;
+        const vendorURLs = generateVendorSearchURL(toolName, searchQuery);
+        if (vendorURLs.length > 0) {
+          output += `## 🔗 廠商支援資源\n\n`;
+          for (const vu of vendorURLs) {
+            output += `- [${vu.vendor}](${vu.url}) — ${vu.note}\n`;
+          }
+          output += '\n';
+        }
+
+        // 4. 補充建議
+        if (faqResults.length === 0 && vendorURLs.length === 0) {
+          output += `⚠️ 未找到本地 FAQ 匹配。建議\n`;
+          output += `1. 用 \`action=troubleshoot\` 加上具體錯誤訊息\n`;
+          output += `2. 用 \`action=paper\` 搜尋相關學術論文\n`;
+          output += `3. 用 \`action=github\` 搜尋 GitHub 上的討論\n`;
+        }
+
+        return { ok: true, output: output || '🔍 Troubleshooting：請提供具體錯誤訊息' };
+      }
+
+      // ── Tool 文件查詢（爬取 user guide / excerpt）──
+      case 'docs': {
+        const qLower = searchQuery.toLowerCase();
+        // 偵測提到的工具
+        const docToolKeys = Object.keys(VENDOR_DOCS).filter(k => qLower.includes(k));
+        if (docToolKeys.length === 0) {
+          // 嘗試用 EDA_TOOL_INDEX 找
+          const toolKeys = Object.keys(EDA_TOOL_INDEX).filter(k => qLower.includes(k));
+          if (toolKeys.length > 0 && VENDOR_DOCS[toolKeys[0]]) {
+            docToolKeys.push(toolKeys[0]);
+          }
+        }
+        if (docToolKeys.length === 0) {
+          let out = `📖 **EDA Tool 文件**\n\n`;
+          out += `⚠️ 未找到工具。請指定工具名稱，例如：\n`;
+          out += `- \`action=docs question="DC synthesis 範例"\`\n`;
+          out += `- \`action=docs question="Innovus placement 指令"\`\n`;
+          out += `- \`action=docs question="Yosys overview"\`\n`;
+          out += `\n可用工具：${Object.keys(VENDOR_DOCS).join(', ')}\n`;
+          return { ok: true, output: out };
+        }
+
+        const toolKey = docToolKeys[0];
+        const topic = detectDocTopic(searchQuery);
+        const result = await fetchDocContent(toolKey, topic);
+
+        if (!result) {
+          return { ok: true, output: `📖 未找到 ${toolKey} 的相關文件` };
+        }
+
+        let out = `📖 **${result.tool}** 文件`;
+        if (topic) out += `（${topic}）`;
+        out += '\n\n';
+
+        if (result.type === 'fetched') {
+          out += `📄 **來源**：[${result.source}](${result.source})\n\n`;
+          out += '```\n' + result.content + '\n```\n';
+        } else if (result.type === 'indexed') {
+          out += `🏢 **廠商**：${result.vendor}\n\n`;
+          for (const ex of result.excerpts) {
+            out += `### ${ex.topic}\n`;
+            out += ex.content + '\n\n';
+          }
+          if (result.solvnet) {
+            out += `📎 [更多文件](${result.solvnet})\n`;
+          }
+        } else if (result.type === 'error') {
+          out += `⚠️ 爬取失敗：${result.error}\n`;
+          out += `📎 [原始文件](${result.source})\n`;
+        }
+
+        return { ok: true, output: out };
+      }
+
       default:
-        return { ok: false, error: `未知 action: ${action}. 可用: auto, pdk, paper, tool, github, code, all, list-tools, list-pdk, list-conferences, flow, dft, lec, eco, fpga` };
+        return { ok: false, error: `未知 action: ${action}. 可用: auto, pdk, paper, tool, github, code, all, list-tools, list-pdk, list-conferences, flow, dft, lec, eco, fpga, troubleshoot, docs` };
     }
   } catch (err) {
     return { ok: false, error: `EDA 搜尋錯誤: ${err.message}` };
@@ -1924,9 +2868,9 @@ export default {
   description:
     '[search] EDA 領域智慧知識引擎。查詢 IC design、cell-based flow、EDA tool、PDK、學術論文。'
     + '完全免費，不需要 API 金鑰。'
-    + '支援 11 種 action：auto（自動判斷）、pdk（PDK/cell library）、paper（學術論文）、tool（EDA 工具）、github（GitHub 專案）、code（程式碼搜尋）、all（綜合）、list-tools、list-pdk、list-conferences。'
+    + '支援 18 種 action：auto（自動判斷）、pdk（PDK/cell library）、paper（學術論文）、tool（EDA 工具）、github（GitHub 專案）、code（程式碼搜尋）、all（綜合）、list-tools、list-pdk、list-conferences、flow、dft、lec、eco、fpga、troubleshoot（Tool 問題診斷含 FAQ+廠商 Q&A）。'
     + '資料來源：GitHub API + OpenAlex + Semantic Scholar。'
-    + '內建 48+ EDA 工具索引（含 30+ 商業工具）、10+ PDK 索引、11 個 cell flow stages、9 大 EDA 會議。',
+    + '內建 55+ EDA 工具索引（含 30+ 商業工具）、10+ PDK 索引、11 個 cell flow stages、10 個 tool FAQ 索引（DC/Innovus/PrimeTime/Calibre/Vivado/VCS/Xcelium/LEC/Formality）、9 大 EDA 會議。',
   inputSchema: {
     type: 'object',
     properties: {
@@ -1938,8 +2882,9 @@ export default {
           'all', 'comprehensive',
           'list-tools', 'list-pdk', 'list-conferences',
           'flow', 'dft', 'lec', 'eco', 'fpga',
+          'troubleshoot', 'docs',
         ],
-        description: '查詢動作。auto=自動判斷類型，pdk=PDK/cell library，paper=學術論文，tool=EDA工具，github=GitHub專案，code=程式碼搜尋，all=綜合，list-tools=列出已知工具，list-pdk=列出已知PDK，list-conferences=列出EDA會議，flow=cell flow stages，dft=Design-for-Test，lec=Logic Equivalence Check，eco=Engineering Change Order，fpga=FPGA Design Flow',
+        description: '查詢動作。auto=自動判斷類型，pdk=PDK/cell library，paper=學術論文，tool=EDA工具，github=GitHub專案，code=程式碼搜尋，all=綜合，list-tools=列出已知工具，list-pdk=列出已知PDK，list-conferences=列出EDA會議，flow=cell flow stages，dft=Design-for-Test，lec=Logic Equivalence Check，eco=Engineering Change Order，fpga=FPGA Design Flow，troubleshoot=Tool 問題診斷（FAQ+廠商Q&A），docs=爬取工具 user guide / 文件',
       },
       question: {
         type: 'string',
