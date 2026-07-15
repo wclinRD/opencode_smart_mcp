@@ -107,7 +107,7 @@ permission:
 | 依賴 | `deps`（npm audit/outdated/analyze 包裝） |
 | 自動化 | `autofix`, `pr_review`, `agent_execute`, `compose`, `workflow`（7 模板） |
 | 重構 | `refactor_plan`, `exec`（沙箱 bash/node/python/deno） |
-| 學術 | `academic_search`, `academic_review`, `docx_generate`, `hallucination_check` |
+| 學術/醫學 | `academic_search`, `academic_review`, `docx_generate`, `hallucination_check`, `medical_search`（PubMed/OpenEvidence/OpenAlex 免費醫學文獻查詢） |
 | 知識庫 | `obsidian_write`, `kg`, `adr` |
 | 資料 | `db`（SQLite 讀寫/遷移/比較；PostgreSQL 唯讀） |
 | 排程 | `schedule`, `progress` |

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-02T00:54:03.096Z",
+  "generatedAt": "2026-07-15T15:15:46.418Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -4419,6 +4419,57 @@
       }
     },
     {
+      "name": "smart_medical_search",
+      "description": "免費醫學文獻與臨床證據查詢。完全免費，不需要任何 API 金鑰。\n\n支援多種資料來源，自動降級：\n  • OpenEvidence（公開端點）— 臨床證據問答，免金鑰，IP rate-limited\n  • PubMed API（NCBI E-utilities）— 3300 萬+ 醫學文獻\n  • OpenAlex — 2.5 億+ 學術作品，含引用數據\n\n支援動作：\n  action=auto（預設）/ ask：自動模式，先試 OpenEvidence，失敗降級到 PubMed\n  action=oe / openevidence：強制使用 OpenEvidence\n  action=search / pubmed：PubMed 文獻搜尋\n  action=openalex / academic：OpenAlex 學術搜尋\n  action=all / comprehensive：綜合查詢\n\n完全免費，無需註冊或 API 金鑰。",
+      "category": "standard",
+      "domain": "search",
+      "safetyLevel": "low",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "ask",
+              "oe",
+              "openevidence",
+              "search",
+              "pubmed",
+              "openalex",
+              "academic",
+              "all",
+              "comprehensive"
+            ],
+            "description": "查詢動作。auto/ask=自動模式（預設，先試 OpenEvidence 再降級），oe/openevidence=強制 OpenEvidence，search/pubmed=PubMed，openalex/academic=OpenAlex，all/comprehensive=綜合查詢"
+          },
+          "question": {
+            "type": "string",
+            "description": "醫學問題或關鍵字（例如：\"What is the recommended treatment for acute migraine in adults?\"）"
+          },
+          "query": {
+            "type": "string",
+            "description": "查詢字串（question 的別名，兩者擇一提供）"
+          },
+          "maxResults": {
+            "type": "number",
+            "description": "最大結果數量（預設 10）"
+          }
+        }
+      }
+    },
+    {
       "name": "smart_memory_store",
       "description": "Use when: need to store or retrieve past error resolutions, patterns, and learnings across sessions. Supports fuzzy matching + vector search (TF-IDF hybrid) — use vector=true for semantic matching across similar error messages. Use search first, add if not found. Also supports type:\"skill_patch\" for storing reusable behavior patterns (trigger_conditions + behavior_change + target_skill).",
       "category": "plan",
@@ -4987,7 +5038,7 @@
     },
     {
       "name": "smart_pw_browser",
-      "description": "Control a web browser — navigate, click, fill forms, screenshot, execute JavaScript.\n\nCommands:\n  navigate(url):   Browse to a URL\n  snapshot():      Get page text + links\n  click(selector): Click element (text or CSS selector)\n  fill(selector, value): Fill a form field\n  screenshot():    Capture page as PNG (base64)\n  run_code(code):  Execute JavaScript in the page\n\nNOT for: reading article content (use smart_exa_crawl with --clean).\nNOT for: searching the web (use smart_exa_search).",
+      "description": "Control a web browser with full Playwright automation — navigate, interact, form-fill, screenshots, tabs, keyboard, drag, file upload, and JavaScript execution.\n\nCommands:\n  navigate(url):                 Browse to a URL\n  snapshot():                    Get page text + links\n  click(selector):               Click element (text or CSS selector)\n  fill(selector, value):         Fill a form field\n  select(selector, value/label): Select dropdown option\n  hover(selector):               Hover over element\n  drag(from, to):                Drag element from one selector to another\n  keyboard(action, key/text):    Press key (Control+a, Enter) or type text\n  scroll(direction, pixels):     Scroll up/down/left/right/top/bottom or to selector\n  wait_for(selector, state):     Wait for element (visible/hidden/attached/detached)\n  tabs(action):                  Manage tabs (list/new/close/switch)\n  upload(selector, filePath):    Upload file to input element\n  screenshot():                  Capture page as PNG (base64)\n  run_code(code):                Execute JavaScript in the page\n\nNOT for: reading article content (use smart_exa_crawl with --clean).\nNOT for: searching the web (use smart_exa_search).",
       "category": "standard",
       "domain": "browser",
       "safetyLevel": "medium",
@@ -5012,6 +5063,14 @@
               "snapshot",
               "click",
               "fill",
+              "select",
+              "hover",
+              "drag",
+              "keyboard",
+              "scroll",
+              "wait_for",
+              "tabs",
+              "upload",
               "screenshot",
               "run_code"
             ],
@@ -5019,19 +5078,81 @@
           },
           "url": {
             "type": "string",
-            "description": "URL to navigate to (required for navigate)"
+            "description": "URL to navigate to (navigate, tabs new)"
           },
           "selector": {
             "type": "string",
-            "description": "CSS selector or text content for click/fill"
+            "description": "CSS selector or text content for element interaction"
           },
           "value": {
             "type": "string",
-            "description": "Value to fill in form field (required for fill)"
+            "description": "Value for fill/select"
+          },
+          "label": {
+            "type": "string",
+            "description": "Label for select dropdown option"
+          },
+          "index": {
+            "type": "number",
+            "description": "Index for select or tab operations"
+          },
+          "text": {
+            "type": "string",
+            "description": "Text for click-by-text or keyboard type"
+          },
+          "from": {
+            "type": "string",
+            "description": "Source selector for drag"
+          },
+          "to": {
+            "type": "string",
+            "description": "Target selector for drag"
+          },
+          "key": {
+            "type": "string",
+            "description": "Key for keyboard press (e.g. Enter, Tab, Control+a, Escape)"
+          },
+          "action": {
+            "type": "string",
+            "description": "Sub-action: keyboard (press/type), scroll direction, tabs (list/new/close/switch), wait_for state"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down",
+              "left",
+              "right",
+              "top",
+              "bottom"
+            ],
+            "description": "Scroll direction (default: down)"
+          },
+          "pixels": {
+            "type": "number",
+            "description": "Pixels to scroll (default: 500)"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "visible",
+              "hidden",
+              "attached",
+              "detached"
+            ],
+            "description": "Element state to wait for (default: visible)"
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Timeout in ms for wait_for (default: 10000)"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "File path for upload"
           },
           "code": {
             "type": "string",
-            "description": "JavaScript code to execute in page context (required for run_code)"
+            "description": "JavaScript code to execute in page context (run_code)"
           },
           "fullPage": {
             "type": "boolean",
