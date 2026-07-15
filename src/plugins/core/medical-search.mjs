@@ -8,6 +8,9 @@
  *   4. Semantic Scholar — 2 億+ 論文，TLDR 摘要 + 引用圖譜 + OA 連結
  *   5. PMC 全文閱讀 — 開放取用文章的完整 XML 全文
  *   6. Unpaywall — 查 DOI 對應的合法 OA 全文連結
+ *   7. DailyMed (NIH/NLM) — FDA 藥品仿單（適應症、劑量、副作用、禁忌）
+ *   8. OpenFDA — FDA 藥品標籤 + 不良反應報告 (FAERS)
+ *   9. RxNorm (NIH/NLM) — 藥品名稱標準化 + 藥品交互作用
  *
  * 所有端點均不需要 API 金鑰。
  * PubMed 無 key 限制 3 req/sec，Semantic Scholar 限制 100 req/5min（共用）。
@@ -504,6 +507,293 @@ async function checkUnpaywall(doi) {
 }
 
 // ---------------------------------------------------------------------------
+// 7. DailyMed — FDA 藥品仿單（免費，NIH/NLM 端點）
+// ---------------------------------------------------------------------------
+
+async function searchDailyMed(drugName) {
+  const url = `https://dailymed.nlm.nih.gov/dailymed/services/v2/drugnames.json?drug_name=${encodeURIComponent(drugName)}`;
+  const res = await fetch(url, {
+    headers: { 'User-Agent': USER_AGENT },
+    signal: AbortSignal.timeout(DEFAULT_TIMEOUT),
+  });
+  if (!res.ok) throw new Error(`DailyMed API ${res.status}`);
+  const data = await res.json();
+  return data?.data?.drugnames || [];
+}
+
+async function fetchDailyMedSPL(setId) {
+  const url = `https://dailymed.nlm.nih.gov/dailymed/services/v2/spls/${setId}.json`;
+  const res = await fetch(url, {
+    headers: { 'User-Agent': USER_AGENT },
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!res.ok) throw new Error(`DailyMed SPL fetch failed: ${res.status}`);
+  return await res.json();
+}
+
+function extractSection(spl, sectionCode) {
+  if (!spl?.data?.sections) return '';
+  for (const sec of spl.data.sections) {
+    if (sec.section_code === sectionCode) {
+      return (sec.text || '').replace(/<[^>]+>/g, '').trim().slice(0, 2000);
+    }
+  }
+  return '';
+}
+
+function formatDailyMedResult(drugName, drugList, splData) {
+  const lines = [`=== 💊 DailyMed 藥品仿單查詢 ===`, `查詢藥品：${drugName}`, ''];
+
+  if (splData) {
+    const title = splData.data?.title || '';
+    if (title) lines.push(`📌 藥品名稱：${title}`, '');
+
+    // 適應症
+    const indications = extractSection(splData, '34000-2');
+    if (indications) lines.push('🎯 適應症：', indications, '');
+
+    // 用法用量
+    const usage = extractSection(splData, '34001-6');
+    if (usage) lines.push('💊 用法用量：', usage, '');
+
+    // 禁忌
+    const contraindications = extractSection(splData, '34002-0');
+    if (contraindications) lines.push('🚫 禁忌：', contraindications, '');
+
+    // 警告與注意事項
+    const warnings = extractSection(splData, '34003-8');
+    if (warnings) lines.push('⚠️ 警告與注意事項：', warnings.slice(0, 1500), '');
+
+    // 副作用
+    const adverseReactions = extractSection(splData, '34004-6');
+    if (adverseReactions) lines.push('🤢 副作用：', adverseReactions.slice(0, 1500), '');
+
+    // 藥物交互作用
+    const interactions = extractSection(splData, '34005-3');
+    if (interactions) lines.push('💊 藥物交互作用：', interactions.slice(0, 1500), '');
+
+    // 藥理學
+    const pharmacology = extractSection(splData, '34010-3');
+    if (pharmacology) lines.push('🔬 藥理學/作用機轉：', pharmacology.slice(0, 1000), '');
+
+    // 藥代動力學
+    const pk = extractSection(splData, '34011-1');
+    if (pk) lines.push('📊 藥代動力學：', pk.slice(0, 1000), '');
+  }
+
+  // 如果沒有 SPL 資料，顯示搜尋結果
+  if (!splData && drugList.length > 0) {
+    lines.push('📋 找到以下藥品（傳入 set_id 可取得完整仿單）：', '');
+    drugList.slice(0, 10).forEach((d, i) => {
+      lines.push(`  [${i + 1}] ${d.name}`);
+      if (d.setid) lines.push(`      SetID：${d.setid}`);
+      if (d.tenant) lines.push(`      製造商：${d.tenant}`);
+      lines.push('');
+    });
+  }
+
+  lines.push('📌 資料來源：DailyMed / NIH/NLM（FDA 官方仿單）');
+  lines.push('⚠️ 本工具僅供參考，不構成醫療建議。請諮詢專業醫療人員。');
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// 8. OpenFDA — 藥品標籤 + 不良反應報告（免費，FDA 官方）
+// ---------------------------------------------------------------------------
+
+async function searchOpenFDALabels(drugName, maxResults = 5) {
+  const url = `https://api.fda.gov/drug/label.json?search=openfda.brand_name:${encodeURIComponent(drugName)}+openfda.generic_name:${encodeURIComponent(drugName)}&limit=${maxResults}`;
+  const res = await fetch(url, {
+    headers: { 'User-Agent': USER_AGENT },
+    signal: AbortSignal.timeout(DEFAULT_TIMEOUT),
+  });
+  if (res.status === 404) return []; // 無結果不算錯
+  if (!res.ok) throw new Error(`OpenFDA label API ${res.status}`);
+  const data = await res.json();
+  return data?.results || [];
+}
+
+async function searchOpenFDAEvents(drugName, maxResults = 5) {
+  const url = `https://api.fda.gov/drug/event.json?search=patient.drug.openfda.brand_name:${encodeURIComponent(drugName)}+patient.drug.openfda.generic_name:${encodeURIComponent(drugName)}&limit=${maxResults}&sort=date:desc`;
+  const res = await fetch(url, {
+    headers: { 'User-Agent': USER_AGENT },
+    signal: AbortSignal.timeout(DEFAULT_TIMEOUT),
+  });
+  if (res.status === 404) return [];
+  if (!res.ok) throw new Error(`OpenFDA event API ${res.status}`);
+  const data = await res.json();
+  return data?.results || [];
+}
+
+function formatOpenFDAResult(drugName, labels, events) {
+  const lines = [`=== 🏥 OpenFDA 藥品資訊查詢 ===`, `查詢藥品：${drugName}`, ''];
+
+  if (labels.length > 0) {
+    lines.push('📋 藥品標籤（FDA Label）：', '');
+    labels.forEach((label, i) => {
+      const brand = label.openfda?.brand_name?.[0] || '';
+      const generic = label.openfda?.generic_name?.[0] || '';
+      const manufacturer = label.openfda?.manufacturer_name?.[0] || '';
+      if (brand || generic) lines.push(`  [${i + 1}] ${brand} (${generic})`);
+      if (manufacturer) lines.push(`      製造商：${manufacturer}`);
+
+      // 摘要化各欄位
+      for (const [field, emoji] of [
+        ['indications_and_usage', '🎯 適應症'],
+        ['dosage_and_administration', '💊 劑量'],
+        ['contraindications', '🚫 禁忌'],
+        ['warnings', '⚠️ 警告'],
+        ['adverse_reactions', '🤢 副作用'],
+        ['drug_interactions', '💊 藥物交互作用'],
+        ['clinical_pharmacology', '🔬 臨床藥理學'],
+      ]) {
+        const val = label[field];
+        if (val) {
+          const text = Array.isArray(val) ? val.join(' ') : String(val);
+          lines.push(`      ${emoji}：${text.replace(/<[^>]+>/g, '').trim().slice(0, 500)}`);
+        }
+      }
+      lines.push('');
+    });
+  }
+
+  if (events.length > 0) {
+    lines.push('📋 不良反應報告（FAERS）：', '');
+    // 統計反應
+    const reactions = {};
+    events.forEach(e => {
+      for (const r of (e.patient?.reaction || [])) {
+        const name = r.reactionmeddrapt || '';
+        reactions[name] = (reactions[name] || 0) + 1;
+      }
+    });
+    const sorted = Object.entries(reactions).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    if (sorted.length > 0) {
+      lines.push('  常見不良反應統計：');
+      sorted.forEach(([name, count]) => {
+        lines.push(`    • ${name}：${count} 例`);
+      });
+    }
+  }
+
+  if (labels.length === 0 && events.length === 0) {
+    lines.push('⚠️ OpenFDA 未找到此藥品的資料，請嘗試其他名稱（品牌名/學名）');
+  }
+
+  lines.push('', '📌 資料來源：OpenFDA / FDA 官方');
+  lines.push('⚠️ 本工具僅供參考，不構成醫療建議。請諮詢專業醫療人員。');
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// 9. RxNorm — 藥品名稱標準化 + 藥品交互作用（免費，NIH/NLM 端點）
+// ---------------------------------------------------------------------------
+
+async function searchRxNorm(drugName) {
+  const url = `https://rxnav.nlm.nih.gov/REST/drugs.json?name=${encodeURIComponent(drugName)}`;
+  const res = await fetch(url, {
+    headers: { 'User-Agent': USER_AGENT },
+    signal: AbortSignal.timeout(DEFAULT_TIMEOUT),
+  });
+  if (!res.ok) throw new Error(`RxNorm API ${res.status}`);
+  const data = await res.json();
+  return data?.drugGroup?.conceptGroup || [];
+}
+
+async function fetchRxNormProperties(rxcui) {
+  const url = `https://rxnav.nlm.nih.gov/REST/rxcui/${rxcui}/properties.json`;
+  const res = await fetch(url, {
+    headers: { 'User-Agent': USER_AGENT },
+    signal: AbortSignal.timeout(DEFAULT_TIMEOUT),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data?.properties || null;
+}
+
+async function fetchDrugInteractions(rxcui) {
+  const url = `https://rxnav.nlm.nih.gov/REST/interaction/interaction.json?rxcui=${rxcui}`;
+  const res = await fetch(url, {
+    headers: { 'User-Agent': USER_AGENT },
+    signal: AbortSignal.timeout(DEFAULT_TIMEOUT),
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  const interactions = data?.interactionTypeGroup?.[0]?.interactionType || [];
+  const results = [];
+  for (const it of interactions) {
+    for (const pair of (it.interactionPair || [])) {
+      results.push({
+        severity: it.severity || 'unknown',
+        description: pair.description || '',
+        drug1: pair.interactionConcept?.[0]?.minConceptItem?.name || '',
+        drug2: pair.interactionConcept?.[1]?.minConceptItem?.name || '',
+      });
+    }
+  }
+  return results;
+}
+
+function formatRxNormResult(drugName, conceptGroups) {
+  const lines = [`=== 💊 RxNorm 藥品名稱查詢 ===`, `查詢藥品：${drugName}`, ''];
+
+  let foundAny = false;
+  for (const group of conceptGroups) {
+    const concepts = group.conceptProperties || [];
+    if (concepts.length === 0) continue;
+    foundAny = true;
+
+    const tty = group.tty || '';
+    const ttyLabel = {
+      'IN': '🔬 學名 (Ingredient)',
+      'PIN': '🔬 生藥學名 (Precise Ingredient)',
+      'BN': '💊 品牌名 (Brand Name)',
+      'SBD': '💊 成分+劑型+品牌 (Semantic Branded Drug)',
+      'SCD': '💊 成分+劑型+通用名 (Semantic Clinical Drug)',
+      'GPCK': '📦 成分+劑型+品牌組合',
+      'DF': '💉 劑型 (Dose Form)',
+      'SYN': '🔗 別名 (Synonym)',
+    };
+    lines.push(ttyLabel[tty] || `📌 ${tty}：`);
+    concepts.slice(0, 5).forEach((c, i) => {
+      lines.push(`  [${i + 1}] ${c.name} (RxCUI: ${c.rxcui})`);
+    });
+    lines.push('');
+  }
+
+  if (!foundAny) {
+    lines.push('⚠️ RxNorm 未找到此藥品名稱');
+  }
+
+  lines.push('📌 資料來源：RxNorm / NIH/NLM（藥品名稱標準化）');
+  lines.push('⚠️ 本工具僅供參考，不構成醫療建議。請諮詢專業醫療人員。');
+  return lines.join('\n');
+}
+
+function formatDrugInteractions(drugName, interactions) {
+  const lines = [`=== 💥 藥品交互作用查詢 ===`, `查詢藥品：${drugName}`, ''];
+
+  if (interactions.length === 0) {
+    lines.push('✅ RxNorm 未記錄此藥品的已知交互作用');
+    lines.push('（不代表無交互作用，請仍諮詢藥師或醫師）');
+  } else {
+    lines.push(`⚠️ 找到 ${interactions.length} 筆交互作用：`, '');
+    const severityEmoji = { 'major': '🔴 嚴重', 'moderate': '🟡 中等', 'minor': '🟢 輕微', 'unknown': '⚪ 未知' };
+    interactions.forEach((inter, i) => {
+      const sev = severityEmoji[inter.severity] || inter.severity;
+      lines.push(`  [${i + 1}] ${inter.drug1} ↔ ${inter.drug2}`);
+      lines.push(`      嚴重度：${sev}`);
+      if (inter.description) lines.push(`      說明：${inter.description}`);
+      lines.push('');
+    });
+  }
+
+  lines.push('📌 資料來源：RxNorm Interaction API / NIH/NLM');
+  lines.push('⚠️ 本工具僅供參考，不構成醫療建議。實際交互作用請諮詢藥師或醫師。');
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // 格式化輸出
 // ---------------------------------------------------------------------------
 
@@ -749,6 +1039,59 @@ async function medicalSearch(args = {}) {
         return { ok: true, output: formatOACheckResult(doi, result) };
       }
 
+      // ── DailyMed 藥品仿單查詢 ──
+      case 'drug':
+      case 'dailymed': {
+        if (!searchQuery) return { ok: false, error: '需要提供藥品名稱（question 或 query）' };
+        const drugList = await searchDailyMed(searchQuery).catch(() => []);
+        if (drugList.length === 0) {
+          return { ok: true, output: `⚠️ DailyMed 未找到「${searchQuery}」的藥品資料\n💡 建議：嘗試使用學名或品牌名稱` };
+        }
+        // 嘗試取得第一個藥品的完整仿單
+        let splData = null;
+        const firstSetId = drugList[0]?.setid;
+        if (firstSetId) {
+          splData = await fetchDailyMedSPL(firstSetId).catch(() => null);
+        }
+        return { ok: true, output: formatDailyMedResult(searchQuery, drugList, splData) };
+      }
+
+      // ── OpenFDA 藥品標籤 + 不良反應 ──
+      case 'fda':
+      case 'openfda': {
+        if (!searchQuery) return { ok: false, error: '需要提供藥品名稱（question 或 query）' };
+        const [labels, events] = await Promise.all([
+          searchOpenFDALabels(searchQuery, Math.min(maxResults, 5)).catch(() => []),
+          searchOpenFDAEvents(searchQuery, Math.min(maxResults, 10)).catch(() => []),
+        ]);
+        return { ok: true, output: formatOpenFDAResult(searchQuery, labels, events) };
+      }
+
+      // ── RxNorm 藥品名稱 + 交互作用 ──
+      case 'interact':
+      case 'rxnorm': {
+        if (!searchQuery) return { ok: false, error: '需要提供藥品名稱（question 或 query）' };
+        const groups = await searchRxNorm(searchQuery).catch(() => []);
+        // 取得第一個 IN (ingredient) 的 RxCUI 查交互作用
+        let rxcui = '';
+        for (const g of groups) {
+          if (g.tty === 'IN' && g.conceptProperties?.[0]) {
+            rxcui = g.conceptProperties[0].rxcui;
+            break;
+          }
+        }
+        let interactions = [];
+        if (rxcui) {
+          interactions = await fetchDrugInteractions(rxcui).catch(() => []);
+        }
+        // 組合輸出：先顯示名稱查詢結果，再顯示交互作用
+        let output = formatRxNormResult(searchQuery, groups);
+        if (rxcui) {
+          output += '\n' + formatDrugInteractions(searchQuery, interactions);
+        }
+        return { ok: true, output };
+      }
+
       // ── 綜合查詢（去重 + 多來源） ──
       case 'all':
       case 'comprehensive': {
@@ -777,7 +1120,8 @@ async function medicalSearch(args = {}) {
           ok: false,
           error: `未知的 action：${action}。`
             + `支援：auto/ask, oe/openevidence, search/pubmed, openalex/academic, `
-            + `scholar/semantic, fulltext/pmc, abstract, oa-check/oa, all/comprehensive`,
+            + `scholar/semantic, fulltext/pmc, abstract, oa-check/oa, all/comprehensive, `
+              + `drug/dailymed, fda/openfda, interact/rxnorm`,
         };
     }
   } catch (err) {
@@ -809,7 +1153,10 @@ export default {
     + '  action=fulltext/pmc：PMC 全文閱讀（需提供 PMC ID）\n'
     + '  action=abstract：PubMed abstract 閱讀（需提供 PMID）\n'
     + '  action=oa-check/oa：OA 全文連結查詢（需提供 DOI）\n'
-    + '  action=all/comprehensive：綜合查詢（多來源 + 跨來源去重）\n\n'
+    + '  action=all/comprehensive：綜合查詢（多來源 + 跨來源去重）\n'
+    + '  action=drug/dailymed：DailyMed 藥品仿單查詢（適應症、劑量、副作用、禁忌）\n'
+    + '  action=fda/openfda：OpenFDA 藥品標籤 + 不良反應報告（FAERS）\n'
+    + '  action=interact/rxnorm：RxNorm 藥品名稱 + 藥品交互作用查詢\n\n'
     + '支援日期範圍過濾（dateFrom/dateTo，格式：YYYY 或 YYYY/MM/DD）。\n'
     + '完全免費，無需註冊或 API 金鑰。',
   inputSchema: {
@@ -823,8 +1170,10 @@ export default {
           'scholar', 'semantic', 'fulltext', 'pmc',
           'abstract', 'oa-check', 'oa',
           'all', 'comprehensive',
+          'drug', 'dailymed', 'fda', 'openfda',
+          'interact', 'rxnorm',
         ],
-        description: '查詢動作。auto=自動，search=PubMed，openalex=OpenAlex，scholar=Semantic Scholar，fulltext=PMC全文，abstract=PubMed摘要，oa-check=OA連結查詢，all=綜合',
+        description: '查詢動作。auto=自動，search=PubMed，openalex=OpenAlex，scholar=Semantic Scholar，fulltext=PMC全文，abstract=PubMed摘要，oa-check=OA連結查詢，all=綜合，drug/dailymed=DailyMed仿單，fda/openfda=OpenFDA標籤，interact/rxnorm=RxNorm交互作用',
       },
       question: {
         type: 'string',
