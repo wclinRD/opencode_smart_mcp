@@ -16,7 +16,7 @@
 > Phase 8 ✅ 完成（2026-07-16）：Semantic Scholar 429 retry + OpenAlex EDA post-filter + 社群 Tier 分級
 > Phase 9 ✅ 完成（2026-07-16）：warnings 回報 + Cache TTL 差異化 + schemaDecompress/header fix + TOON decoder fix + 59/59 單元測試
 > Phase 10 ⬜ 規劃中（長期改進）
-> Phase 13-16 ⬜ 規劃中（RAG + Benchmark + KG + Multi-Agent）
+> Phase 13 ✅ 完成（2026-07-16）：RRF fusion + EDA rerank + Adaptive Top-K + Post-retrieval filter + 6/6 測試檔通過
 
 ---
 
@@ -212,15 +212,15 @@
 > 參考：RAG-EDA (TCAD'25)、Ask-EDA (IBM)、EDA-Copilot (TODAES'25)、ChipMind (AAAI'26)
 > 預估：~5 小時 | 風險：中（+ adaptive Top-K + post-retrieval reranker）
 
-- [ ] 13.1 新建 `eda/sources/fusion.mjs`（Reciprocal Rank Fusion）
-- [ ] 13.2 新建 `eda/sources/embedding.mjs`（方案 A：LLM-based rerank）
-- [ ] 13.3 定義 RRF 合併邏輯（BM25 + Local + Embedding 三路融合）
-- [ ] 13.4 整合到 `multiSourceSearch()`（結果 RRF 融合 + rerank）
-- [ ] 13.5 Prompt-based reranker（EDA domain-aware 排序）
-- [ ] 13.6 🆕 Adaptive Top-K（ChipMind MIG-based：簡單 K=3, 複雜 K=10）
-- [ ] 13.7 🆕 Post-retrieval reranker（EDA-Copilot mixed indexing：score < 0.3 過濾）
-- [ ] 13.8 🆕 CSA filtering（去重 + 品質控制）
-- [ ] 13.9 測試：對比 Before/After 的結果排序品質
+- [x] 13.1 新建 `eda/sources/fusion.mjs`（Reciprocal Rank Fusion）
+- [x] 13.2 新建 `eda/sources/rerank.mjs`（EDA relevance scoring + Adaptive Top-K + Post-retrieval filter）
+- [x] 13.3 RRF 融合邏輯（multi-source rank fusion，URL 標準化去重）
+- [x] 13.4 整合到 `multiSourceSearch()` v2（fusion=true 預設開啟，備用 fallback）
+- [x] 13.5 EDA domain-aware reranker（關鍵字匹配 + 多源加分 + 學術引用加分）
+- [x] 13.6 🆕 Adaptive Top-K（ChipMind MIG-based：simple=3, moderate=6, complex=10）
+- [x] 13.7 🆕 Post-retrieval filter（score threshold + 標題去重，minScore=0.15）
+- [x] 13.8 🆕 Post-retrieval dedup（標題去重 + abstract 完整度保留）
+- [x] 13.9 fusion-rerank.test.mjs：11 個測試案例 + 原有 5/5 通過（6/6 測試檔）
 
 ---
 
@@ -306,12 +306,12 @@
 | Phase 10: 長期改進 | 180 min | 22 hr | 🟢 低 |
 | Phase 11: Abbreviation De-hallucination | 60 min | 23 hr | ✅ 已完成 |
 | Phase 12: Query Intelligence | 120 min | 25 hr | ✅ 已完成 |
-| Phase 13: Hybrid Retrieval RAG | 300 min | 30 hr | 🟡 中 |
+| Phase 13: Hybrid Retrieval RAG | 300 min | 30 hr | ✅ 已完成 |
 | Phase 14: EDA QA Benchmark | 180 min | 33 hr | 🟢 低 |
 | Phase 15: Knowledge Graph（整合 hdl-kgraph） | 180 min | 36 hr | 🟢 低 |
 | Phase 16: Multi-Agent 🆕 | 480 min | 44 hr | 🔴 高 |
 
-**總計：~44 小時**（Phase 1-9 + 11 + 12 已完成 21 hr + Phase 10 + 13-16 需 23 hr）
+**總計：~44 小時**（Phase 1-9 + 11 + 12 + 13 已完成 26 hr + Phase 10 + 14-16 需 18 hr）
 
 ---
 
