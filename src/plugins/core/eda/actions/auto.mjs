@@ -105,7 +105,8 @@ registerAction('auto', async (args) => {
   // 多源並行廣搜（使用統一入口）
   const compress = args.compress || 'none';
   const searchMaxResults = classification.weights.maxResults || maxResults;
-  let output = await multiSourceSearch(searchQuery, searchMaxResults, { compress });
+  const { output: searchOutput } = await multiSourceSearch(searchQuery, searchMaxResults, { compress });
+  let output = searchOutput;
 
   // 顯示分類資訊（當信心度 > 0.5 時）
   if (confidence > 0.5 && queryType !== QUERY_TYPES.GENERAL) {

@@ -432,6 +432,8 @@ export function schemaCompress(data, columns) {
 export function schemaDecompress(compressed, columns) {
   if (!compressed || !columns) return [];
   const lines = compressed.split('\n').filter(l => l && !l.match(/^-+$/));
+  // Skip header row (first line is column names)
+  if (lines.length > 0 && lines[0].split(' | ').every((v, i) => v === columns[i])) lines.shift();
   return lines.map(line => {
     const values = line.split(' | ');
     const obj = {};

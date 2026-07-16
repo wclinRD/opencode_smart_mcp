@@ -14,7 +14,8 @@
 > Phase 11 ✅ 完成（2026-07-16）：EDA_ABBREV_DICT 250+ 組 + expandAbbreviations + 整合 enhanceQueryForEDA + auto
 > Phase 12 ✅ 完成（2026-07-16）：6類 Query Intelligence 分類器 + CATEGORY_SOURCE_WEIGHTS + 整合 auto
 > Phase 8 ✅ 完成（2026-07-16）：Semantic Scholar 429 retry + OpenAlex EDA post-filter + 社群 Tier 分級
-> Phase 9-10 ⬜ 規劃中（可靠性 + 長期改進）
+> Phase 9 ✅ 完成（2026-07-16）：warnings 回報 + Cache TTL 差異化 + schemaDecompress/header fix + TOON decoder fix + 59/59 單元測試
+> Phase 10 ⬜ 規劃中（長期改進）
 > Phase 13-16 ⬜ 規劃中（RAG + Benchmark + KG + Multi-Agent）
 
 ---
@@ -161,9 +162,9 @@
 > 目標：解決 B4 + C1 + C3，提升可觀測性和可測試性
 > 預估：~4 小時 | 風險：低
 
-- [ ] 9.1 錯誤處理加入 warning 回報（multiSourceSearch 回傳 warnings array）
-- [ ] 9.2 Cache TTL 差異化（按 hostname 設定不同 TTL）
-- [ ] 9.3 單元測試建立（tests/eda/ 目錄，mock httpsGet）
+- [x] 9.1 錯誤處理加入 warning 回報（multiSourceSearch 回傳 `{ output, warnings }`）
+- [x] 9.2 Cache TTL 差異化（按 hostname：Scholar 15min / GitHub 10min / DDG 3min）
+- [x] 9.3 單元測試建立（tests/eda/ 5 個測試檔，59/59 通過）
 
 ---
 
@@ -301,7 +302,7 @@
 | Phase 7: Token 效率 + Caveman | 180 min | 9.5 hr | ✅ 已完成 |
 | Phase 7B: Tool-Level Token 🆕 | 180 min | 12.5 hr | ✅ 已完成 |
 | Phase 8: 搜尋品質 | 150 min | 15 hr | ✅ 已完成 |
-| Phase 9: 可靠性 | 240 min | 19 hr | 🟢 低 |
+| Phase 9: 可靠性 | 240 min | 19 hr | ✅ 已完成 |
 | Phase 10: 長期改進 | 180 min | 22 hr | 🟢 低 |
 | Phase 11: Abbreviation De-hallucination | 60 min | 23 hr | ✅ 已完成 |
 | Phase 12: Query Intelligence | 120 min | 25 hr | ✅ 已完成 |
@@ -310,7 +311,7 @@
 | Phase 15: Knowledge Graph（整合 hdl-kgraph） | 180 min | 36 hr | 🟢 低 |
 | Phase 16: Multi-Agent 🆕 | 480 min | 44 hr | 🔴 高 |
 
-**總計：~44 小時**（Phase 1-8 + 11 + 12 已完成 17 hr + Phase 9-10 + 13-16 需 27 hr）
+**總計：~44 小時**（Phase 1-9 + 11 + 12 已完成 21 hr + Phase 10 + 13-16 需 23 hr）
 
 ---
 

@@ -122,7 +122,7 @@ export function decodeToon(toon) {
     }
 
     const obj = {};
-    keys.forEach((k, i) => { obj[k] = values[i]; });
+    keys.forEach((k, i) => { obj[k] = parseToonValue(values[i]); });
     return obj;
   }
 
@@ -178,6 +178,8 @@ function extractNextArray(s) {
 }
 
 function extractNextValue(s) {
+  // Skip leading delimiter (comma, pipe)
+  if (s && (s[0] === ',' || s[0] === '|')) s = s.slice(1);
   // 找到下一個 , 或 < 或 [ 或結尾
   let inQuote = false;
   for (let i = 0; i < s.length; i++) {
