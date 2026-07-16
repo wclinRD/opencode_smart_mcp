@@ -8,6 +8,7 @@
 > Phase 3 ✅ 完成（2026-07-16）：eda-search.mjs 1033→547 行，handler 去重 + 函式提取
 > Phase 4 ✅ 完成（2026-07-16）：eda-search.mjs 547→135 行（-75%），switch-case → Action Registry
 > Phase 5 ✅ 完成（2026-07-16）：整合 Exa 語意搜尋 + 深度爬取 + 去重 + 排序 + GitHub token
+> Phase 6 ✅ 完成（2026-07-16）：eda-search.mjs 239→72 行（3407→72，-98%），multiSourceSearch 搬到 sources/index.mjs，20/20 回歸測試通過
 
 ---
 
@@ -110,12 +111,12 @@
 > 目標：確保所有功能正常，清除舊代碼
 > 預估：~30 分鐘 | 風險：低
 
-- [ ] 6.1 完整回歸測試：18 種 action 各至少 1 次
-- [ ] 6.2 確認 `eda-search.mjs` 從 3407 行降到 <100 行
-- [ ] 6.3 確認所有 import 正確（無殘留的 inline 定義）
-- [ ] 6.4 更新 AGENTS.md 中 smart_eda_search 的說明
-- [ ] 6.5 更新 `config/tools/manifest.json`（loader 會自動重新產生）
-- [ ] 6.6 Commit & push
+- [x] 6.1 完整回歸測試：20/20 全部通過（含 2 alias）
+- [x] 6.2 確認 `eda-search.mjs` 從 3407 行降到 72 行（-98%）
+- [x] 6.3 確認所有 import 正確（無殘留 inline 定義、無 circular import）
+- [x] 6.4 更新 `smart-mcp.md`：action 17→18、工具索引 48+→55+、新增 Exa 來源
+- [x] 6.5 確認 `manifest.json`（loader 自動重新產生）
+- [x] 6.6 Commit & push（5107190）
 
 ---
 
