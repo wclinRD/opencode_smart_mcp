@@ -9,7 +9,7 @@ import { isToolIssueQuery } from '../query/detect.mjs';
 import { searchToolFAQ } from '../lib/vendor.mjs';
 import { generateVendorSearchURL } from '../lib/vendor.mjs';
 import { detectConference } from '../query/enhance.mjs';
-import { multiSourceSearch } from '../../eda-search.mjs';
+import { multiSourceSearch } from '../sources/index.mjs';
 
 registerAction('auto', async (args) => {
   const searchQuery = String(args.question || args.query || '').trim();

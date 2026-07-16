@@ -3,7 +3,7 @@
  */
 import { registerAction } from './registry.mjs';
 import { searchLocalPDK, formatPDKResults, searchLocalTools, formatToolResults } from '../format/local.mjs';
-import { multiSourceSearch } from '../../eda-search.mjs';
+import { multiSourceSearch } from '../sources/index.mjs';
 
 registerAction('all', async (args) => {
   const searchQuery = String(args.question || args.query || '').trim();
