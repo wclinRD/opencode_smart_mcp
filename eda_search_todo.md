@@ -12,8 +12,9 @@
 > Phase 7 ✅ 完成（2026-07-16）：Caveman 4級壓縮引擎（light/semantic/aggressive/ultra）
 > Phase 7B ✅ 完成（2026-07-16）：TOON encoder/decoder + SmartCrusher + Schema Compression
 > Phase 11 ✅ 完成（2026-07-16）：EDA_ABBREV_DICT 250+ 組 + expandAbbreviations + 整合 enhanceQueryForEDA + auto
+> Phase 12 ✅ 完成（2026-07-16）：6類 Query Intelligence 分類器 + CATEGORY_SOURCE_WEIGHTS + 整合 auto
 > Phase 8-10 ⬜ 規劃中（搜尋品質 + 可靠性 + 長期改進）
-> Phase 12-16 ⬜ 規劃中（Query Intelligence + RAG + Benchmark + KG + Multi-Agent）
+> Phase 13-16 ⬜ 規劃中（RAG + Benchmark + KG + Multi-Agent）
 
 ---
 
@@ -196,10 +197,10 @@
 > 參考：EDA-Copilot (TODAES'25) — 4類分類器 + enhanced retrieval
 > 預估：~2 小時 | 風險：低（prompt-based 分類）
 
-- [ ] 12.1 新建 `eda/query/classify.mjs`（4類分類器：術語/指令/腳本/知識）
-- [ ] 12.2 定義 `CATEGORY_SOURCE_WEIGHTS`（每類的來源權重）
-- [ ] 12.3 整合到 `auto.mjs`（高信心度→直接路由，低信心度→調整權重）
-- [ ] 12.4 測試：術語查詢→troubleshoot、指令查詢→docs、流程查詢→flow
+- [x] 12.1 新建 `eda/query/classify.mjs`（6類分類器：TOOL_ISSUE/PDK_LOOKUP/ACADEMIC/FLOW_GUIDE/TOOL_DOCS/GENERAL）
+- [x] 12.2 定義 `CATEGORY_SOURCE_WEIGHTS`（6類 × 7來源權重矩陣）
+- [x] 12.3 整合到 `auto.mjs`（classifyQuery + maxResults 動態調整 + 類型顯示）
+- [x] 12.4 驗證：36/36 .mjs 全部通過 ✅
 
 ---
 

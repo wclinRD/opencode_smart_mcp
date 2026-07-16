@@ -11,6 +11,7 @@ import { searchToolFAQ } from '../lib/vendor.mjs';
 import { generateVendorSearchURL } from '../lib/vendor.mjs';
 import { detectConference } from '../query/enhance.mjs';
 import { multiSourceSearch } from '../sources/index.mjs';
+import { classifyQuery, QUERY_TYPES } from '../query/classify.mjs';
 
 registerAction('auto', async (args) => {
   const searchQuery = String(args.question || args.query || '').trim();
@@ -26,6 +27,10 @@ registerAction('auto', async (args) => {
     return match ? match.full.toLowerCase() : w;
   });
   const qExpanded = expandedTerms.join(' ');
+
+  // Phase 12: Query Intelligence — 分類查詢類型
+  const classification = classifyQuery(searchQuery);
+  const { type: queryType, confidence } = classification;
 
   // EDA 工具查詢（優先：tool 問題偵測需要先判斷）
   // 使用展開後的 qExpanded 匹配，解決縮寫誤判（如 hal/diamond/netgen）
@@ -99,7 +104,21 @@ registerAction('auto', async (args) => {
 
   // 多源並行廣搜（使用統一入口）
   const compress = args.compress || 'none';
-  let output = await multiSourceSearch(searchQuery, maxResults, { compress });
+  const searchMaxResults = classification.weights.maxResults || maxResults;
+  let output = await multiSourceSearch(searchQuery, searchMaxResults, { compress });
+
+  // 顯示分類資訊（當信心度 > 0.5 時）
+  if (confidence > 0.5 && queryType !== QUERY_TYPES.GENERAL) {
+    const typeLabels = {
+      tool_issue: '🔧 工具問題診斷',
+      pdk_lookup: '📦 PDK/Cell Library',
+      academic: '📚 學術論文',
+      flow_guide: '🔄 Flow 流程指引',
+      tool_docs: '📖 工具文件/指令',
+      general: '🔍 一般查詢',
+    };
+    output = `> 偵測查詢類型：**${typeLabels[queryType] || queryType}** (信心度: ${(confidence * 100).toFixed(0)}%)\n\n` + output;
+  }
 
   // 偵測是否提到特定會議
   const conf = detectConference(searchQuery);
