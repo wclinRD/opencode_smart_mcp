@@ -39,7 +39,7 @@ export async function detectHdlKgraph(cwd = process.cwd()) {
     await execFileAsync(KGRAPH_CMD, ['--version'], { timeout: 5000 });
   } catch {
     _available = false;
-    return { available: false };
+    return { available: false, reason: 'not_installed' };
   }
 
   // 檢查 graph.db 是否存在（多個候選路徑）
@@ -57,7 +57,7 @@ export async function detectHdlKgraph(cwd = process.cwd()) {
 
   // CLI 可用但無 graph.db
   _available = true;
-  return { available: true };
+  return { available: true, reason: 'no_graph_db' };
 }
 
 /**
@@ -277,6 +277,42 @@ export function formatKgResult(data, tool) {
   }
 
   return out;
+}
+
+/**
+ * 產生 KG 提示訊息（根據偵測結果）
+ * @param {{available: boolean, reason?: string}} detection — detectHdlKgraph 結果
+ * @returns {string} 提示訊息（空字串表示無需提示）
+ */
+export function getKgHint(detection) {
+  if (detection.available && detection.graphDb) return '';
+
+  if (detection.reason === 'not_installed') {
+    return [
+      '💡 **Knowledge Graph 未安裝**：偵測到 HDL design 結構查詢需求，但 `hdl-kgraph` 未安裝。',
+      '安裝後可查詢 design hierarchy、module connections、CDC、UVM topology 等。',
+      '',
+      '```bash',
+      'pip install \'hdl-kgraph[mcp]\'\n',
+      '# 在 HDL 專案目錄執行：',
+      'hdl-kgraph build',
+      '```',
+    ].join('\n');
+  }
+
+  if (detection.reason === 'no_graph_db') {
+    return [
+      '💡 **Knowledge Graph 尚未建立**：`hdl-kgraph` 已安裝，但未找到 `graph.db`。',
+      '在 HDL 專案目錄執行以下指令後，即可查詢 design 結構：',
+      '',
+      '```bash',
+      'cd /path/to/your/hdl/project',
+      'hdl-kgraph build',
+      '```',
+    ].join('\n');
+  }
+
+  return '';
 }
 
 /**

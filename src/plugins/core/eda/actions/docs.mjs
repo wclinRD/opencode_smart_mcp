@@ -6,7 +6,7 @@ import { EDA_TOOL_INDEX } from '../data/tools.mjs';
 import { VENDOR_DOCS } from '../data/docs.mjs';
 import { detectDocTopic } from '../query/detect.mjs';
 import { fetchDocContent } from '../lib/doc-fetch.mjs';
-import { detectHdlKgraph, matchKgTool, queryKGraph, formatKgResult } from '../lib/hdl-kgraph.mjs';
+import { detectHdlKgraph, matchKgTool, queryKGraph, formatKgResult, getKgHint } from '../lib/hdl-kgraph.mjs';
 
 registerAction('docs', async (args) => {
   const searchQuery = String(args.question || args.query || '').trim();
@@ -61,11 +61,11 @@ registerAction('docs', async (args) => {
   }
 
   // Knowledge Graph 補充（design 結構查詢）
-  try {
-    const kg = await detectHdlKgraph();
-    if (kg.available && kg.graphDb) {
-      const kgMatch = matchKgTool(searchQuery);
-      if (kgMatch) {
+  const kgMatch = matchKgTool(searchQuery);
+  if (kgMatch) {
+    try {
+      const kg = await detectHdlKgraph();
+      if (kg.available && kg.graphDb) {
         const kgResult = await queryKGraph(kgMatch.tool, kgMatch.args, { db: kg.graphDb });
         if (kgResult.ok) {
           const kgOutput = formatKgResult(kgResult.data, kgMatch.tool);
@@ -74,9 +74,12 @@ registerAction('docs', async (args) => {
             out += kgOutput + '\n';
           }
         }
+      } else {
+        const hint = getKgHint(kg);
+        if (hint) out += '\n---\n\n' + hint + '\n';
       }
-    }
-  } catch { /* KG 非必要 */ }
+    } catch { /* KG 非必要 */ }
+  }
 
   return { ok: true, output: out };
 });

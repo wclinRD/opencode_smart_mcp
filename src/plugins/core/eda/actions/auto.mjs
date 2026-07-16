@@ -104,11 +104,13 @@ registerAction('auto', async (args) => {
   }
 
   // HDL Design 結構查詢（Knowledge Graph）
-  try {
-    const kg = await detectHdlKgraph();
-    if (kg.available && kg.graphDb) {
-      const kgMatch = matchKgTool(searchQuery);
-      if (kgMatch) {
+  // 僅當查詢匹配 design 結構關鍵字時才偵測 KG
+  let kgHint = '';
+  const kgMatch = matchKgTool(searchQuery);
+  if (kgMatch) {
+    try {
+      const kg = await detectHdlKgraph();
+      if (kg.available && kg.graphDb) {
         const kgResult = await queryKGraph(kgMatch.tool, kgMatch.args, { db: kg.graphDb });
         if (kgResult.ok) {
           const kgOutput = formatKgResult(kgResult.data, kgMatch.tool);
@@ -118,9 +120,11 @@ registerAction('auto', async (args) => {
             return { ok: true, output };
           }
         }
+      } else {
+        kgHint = getKgHint(kg);
       }
-    }
-  } catch { /* KG 非必要，忽略錯誤 */ }
+    } catch { /* KG 非必要，忽略錯誤 */ }
+  }
 
   // 多源並行廣搜（使用統一入口）
   const compress = args.compress || 'none';
@@ -153,6 +157,11 @@ registerAction('auto', async (args) => {
   if (!output || output.length < 100) {
     output += `\n💡 如需更深入搜尋，可用 \`smart_exa_search\` 查詢：\n`;
     output += `  \`smart_exa_search({command:"search", query:"${searchQuery}", numResults:10})\`\n`;
+  }
+
+  // 附加 KG 提示（當查詢匹配 design 結構但 KG 未就緒）
+  if (kgHint) {
+    output += `\n---\n\n` + kgHint;
   }
 
   return { ok: true, output: output || '🔍 自動搜尋：無結果' };

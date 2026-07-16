@@ -5,7 +5,7 @@ import { registerAction } from './registry.mjs';
 import { EDA_TOOL_INDEX } from '../data/tools.mjs';
 import { searchToolFAQ, generateVendorSearchURL } from '../lib/vendor.mjs';
 import { compressOutput } from '../lib/caveman.mjs';
-import { detectHdlKgraph, matchKgTool, queryKGraph, formatKgResult } from '../lib/hdl-kgraph.mjs';
+import { detectHdlKgraph, matchKgTool, queryKGraph, formatKgResult, getKgHint } from '../lib/hdl-kgraph.mjs';
 
 registerAction('troubleshoot', async (args) => {
   const searchQuery = String(args.question || args.query || '').trim();
@@ -41,11 +41,11 @@ registerAction('troubleshoot', async (args) => {
   }
 
   // 4. Knowledge Graph 查詢（若有本地 design）
-  try {
-    const kg = await detectHdlKgraph();
-    if (kg.available && kg.graphDb) {
-      const kgMatch = matchKgTool(searchQuery);
-      if (kgMatch) {
+  const kgMatch = matchKgTool(searchQuery);
+  if (kgMatch) {
+    try {
+      const kg = await detectHdlKgraph();
+      if (kg.available && kg.graphDb) {
         const kgResult = await queryKGraph(kgMatch.tool, kgMatch.args, { db: kg.graphDb });
         if (kgResult.ok) {
           const kgOutput = formatKgResult(kgResult.data, kgMatch.tool);
@@ -54,9 +54,12 @@ registerAction('troubleshoot', async (args) => {
             output += kgOutput + '\n';
           }
         }
+      } else {
+        const hint = getKgHint(kg);
+        if (hint) output += '\n---\n\n' + hint + '\n';
       }
-    }
-  } catch { /* KG 非必要，忽略錯誤 */ }
+    } catch { /* KG 非必要，忽略錯誤 */ }
+  }
 
   // 5. 補充建議
   if (faqResults.length === 0 && vendorURLs.length === 0) {
