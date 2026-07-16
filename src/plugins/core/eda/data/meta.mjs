@@ -1,0 +1,62 @@
+/**
+ * EDA 元資料：會議、社群、格式、指令索引
+ */
+
+// ── EDA 關鍵會議 ─────────────────────────────────────────────────────────────
+export const EDA_CONFERENCES = [
+  'DAC',           // Design Automation Conference
+  'ICCAD',         // International Conference on Computer-Aided Design
+  'ISPD',          // International Symposium on Physical Design
+  'DATE',          // Design, Automation & Test in Europe
+  'ASP-DAC',       // Asia and South Pacific Design Automation Conference
+  'VLSI Symposium',// IEEE Symposium on VLSI Technology and Circuits
+  'ISSCC',         // International Solid-State Circuits Conference
+  'IEDM',          // International Electron Devices Meeting
+  'TCAD',          // IEEE Transactions on Computer-Aided Design
+];
+
+// ── EDA Community 索引 ───────────────────────────────────────────────────────
+export const EDA_COMMUNITIES = [
+  { name: 'Cadence Community', domain: 'community.cadence.com', queryTemplate: (q) => `site:community.cadence.com ${q}` },
+  { name: 'Synopsys SolvNet', domain: 'solvnet.synopsys.com', queryTemplate: (q) => `site:solvnet.synopsys.com ${q}` },
+  { name: 'EE Times', domain: 'eetimes.com', queryTemplate: (q) => `site:eetimes.com EDA ASIC ${q}` },
+  { name: 'Reddit r/ASIC', domain: 'reddit.com/r/ASIC', queryTemplate: (q) => `site:reddit.com/r/ASIC ${q}` },
+  { name: 'Reddit r/FPGA', domain: 'reddit.com/r/FPGA', queryTemplate: (q) => `site:reddit.com/r/FPGA ${q}` },
+  { name: 'EDAboard', domain: 'edaboard.com', queryTemplate: (q) => `site:edaboard.com ${q}` },
+  { name: 'ChipVerify', domain: 'chipverify.com', queryTemplate: (q) => `site:chipverify.com ${q}` },
+  { name: 'Verification Academy', domain: 'verificationacademy.com', queryTemplate: (q) => `site:verificationacademy.com ${q}` },
+];
+
+// ── EDA 常用檔案格式 ─────────────────────────────────────────────────────────
+export const EDA_FORMATS = {
+  '.lib': { full: 'Liberty', desc: 'Cell timing/power 模型（NLDM/CCS）', usedBy: 'Synthesis, STA, P&R' },
+  '.lef': { full: 'Library Exchange Format', desc: 'Cell abstract layout（pin location, blockage, metal）', usedBy: 'P&R, DRC' },
+  '.def': { full: 'Design Exchange Format', desc: '設計物理資訊（placement, routing, floorplan）', usedBy: 'P&R, Sign-off' },
+  '.gds': { full: 'GDSII Stream', desc: '完整 layout 圖形格式（foundry 提交格式）', usedBy: 'Layout, DRC, LVS' },
+  '.oas': { full: 'OASIS', desc: 'GDSII 替代格式（更小的檔案大小）', usedBy: 'Layout, DRC' },
+  '.v': { full: 'Verilog Netlist', desc: '閘級網表（ synthesis 後）', usedBy: 'P&R, STA' },
+  '.spef': { full: 'Standard Parasitic Exchange Format', desc: 'RC parasitic model', usedBy: 'STA, Post-route' },
+  '.sdf': { full: 'Standard Delay Format', desc: 'Timing delay data', usedBy: 'Simulation, STA' },
+  '.sdc': { full: 'Synopsys Design Constraints', desc: 'Timing constraints（clock, I/O delay）', usedBy: 'Synthesis, P&R, STA' },
+  '.sby': { full: 'SymbiYosys config', desc: 'Formal verification task file', usedBy: 'Formal verification' },
+  '.blif': { full: 'Berkeley Logic Interchange Format', desc: 'Logic network format', usedBy: 'Synthesis, ABC' },
+  '.aig': { full: 'And-Inverter Graph', desc: 'Logic representation format', usedBy: 'ABC, Logic synthesis' },
+  '.vcd': { full: 'Value Change Dump', desc: 'Waveform data', usedBy: 'Simulation, Debug' },
+  '.fsdb': { full: 'Fast Signal Database', desc: 'Synopsys waveform format', usedBy: 'Verdi, Debug' },
+  '.spice': { full: 'SPICE', desc: 'Circuit simulation netlist', usedBy: 'Analog simulation' },
+  '.tdb': { full: 'Timing Database', desc: 'StarRC extraction database', usedBy: 'RC extraction' },
+  '.sirf': { full: 'SiRF', desc: 'StarRC intermediate file', usedBy: 'RC extraction' },
+};
+
+// ── Auto 模式：偵測 tool 問題查詢的 pattern ──────────────────────────────────
+export const TOOL_ISSUE_PATTERNS = [
+  /error/i, /issue/i, /problem/i, /fail/i, /not found/i,
+  /cannot/i, /can't/i, /unable/i, /missing/i, /undefined/i,
+  /violation/i, /mismatch/i, /conflict/i, /exception/i,
+  /bug/i, /crash/i, /hang/i, /stuck/i, /timeout/i,
+  /help/i, /fix/i, /solve/i, /debug/i, /troubleshoot/i,
+  /warning/i, /not met/i, /critical/i, /concern/i,
+  /improve/i, /optimize/i, /degraded/i, /slow/i,
+  /incorrect/i, /wrong/i, /unexpected/i, /strange/i,
+  /refuse/i, /reject/i, /ignore/i, /skip/i,
+];
