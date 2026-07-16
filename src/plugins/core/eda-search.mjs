@@ -2611,7 +2611,156 @@ function enhanceQueryForEDA(query) {
   return `${query} VLSI EDA IC design`;
 }
 
-// 為不同搜尋來源生成最佳化查詢
+// ═══════════════════════════════════════════════════════════════════════════════
+// 查詢展開：模式規則 + 縮寫展開 + 多變體生成
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// EDA 領域常見縮寫 → 全名（自動展開）
+const EDA_ABBREVIATIONS = {
+  'sta': 'static timing analysis',
+  'pnr': 'place and route',
+  'drc': 'design rule check',
+  'lvs': 'layout vs schematic',
+  'erc': 'electrical rule check',
+  'dft': 'design for test',
+  'bist': 'built-in self test',
+  'scan': 'scan chain',
+  'atpg': 'automatic test pattern generation',
+  'sdf': 'standard delay format',
+  'spef': 'standard parasitic exchange format',
+  'sdc': 'synopsys design constraints',
+  'lef': 'library exchange format',
+  'def': 'design exchange format',
+  'gdsii': 'graphic data stream',
+  'oa': 'openaccess',
+  'upf': 'unified power format',
+  'cpf': 'common power format',
+  'ilp': 'integer linear programming',
+  'lp': 'linear programming',
+  'dp': 'dynamic programming',
+  'fft': 'fast fourier transform',
+  'dsp': 'digital signal processing',
+  'adc': 'analog to digital converter',
+  'dac': 'digital to analog converter',
+  'pll': 'phase locked loop',
+  'dll': 'delay locked loop',
+  'serdes': 'serializer deserializer',
+  'phy': 'physical layer',
+  'pcie': 'pci express',
+  'ddr': 'double data rate',
+  'sram': 'static random access memory',
+  'dram': 'dynamic random access memory',
+  'rom': 'read only memory',
+  'otp': 'one time programmable',
+  'flash': 'flash memory',
+  'rf': 'radio frequency',
+  'mmic': 'monolithic microwave ic',
+  'asic': 'application specific integrated circuit',
+  'fpga': 'field programmable gate array',
+  'cpld': 'complex programmable logic device',
+  'soc': 'system on chip',
+  'noc': 'network on chip',
+  'bus': 'bus architecture',
+  'apb': 'advanced peripheral bus',
+  'ahb': 'advanced high performance bus',
+  'axi': 'advanced extensible interface',
+  'amba': 'advanced microcontroller bus architecture',
+};
+
+// 模式規則：自動展開常見詞綴變化
+const PATTERN_RULES = [
+  // mux → multiplexer
+  { pattern: /\bmux\b/gi, expand: 'multiplexer' },
+  { pattern: /\bdemux\b/gi, expand: 'demultiplexer' },
+  // reg → register
+  { pattern: /\breg\b/gi, expand: 'register' },
+  { pattern: /\bregs\b/gi, expand: 'registers' },
+  // flop → flip flop
+  { pattern: /\bflop\b/gi, expand: 'flip flop' },
+  { pattern: /\bflops\b/gi, expand: 'flip flops' },
+  // clk → clock
+  { pattern: /\bclk\b/gi, expand: 'clock' },
+  // rst → reset
+  { pattern: /\brst\b/gi, expand: 'reset' },
+  // en → enable
+  { pattern: /\ben\b(?!\w)/gi, expand: 'enable' },
+  // sel → select
+  { pattern: /\bsel\b(?!\w)/gi, expand: 'select' },
+  // lat → latch
+  { pattern: /\blat\b/gi, expand: 'latch' },
+  // dec → decoder
+  { pattern: /\bdec\b/gi, expand: 'decoder' },
+  // enc → encoder
+  { pattern: /\benc\b/gi, expand: 'encoder' },
+  // mux → multiplexer (already covered)
+  // arb → arbiter
+  { pattern: /\barb\b/gi, expand: 'arbiter' },
+  // ctrl → controller
+  { pattern: /\bctrl\b/gi, expand: 'controller' },
+  // gen → generator
+  { pattern: /\bgen\b/gi, expand: 'generator' },
+  // sync → synchronizer
+  { pattern: /\bsync\b/gi, expand: 'synchronizer' },
+  // async → asynchronous
+  { pattern: /\basync\b/gi, expand: 'asynchronous' },
+  // comb → combinational
+  { pattern: /\bcomb\b/gi, expand: 'combinational' },
+  // seq → sequential
+  { pattern: /\bseq\b/gi, expand: 'sequential' },
+  // buf → buffer
+  { pattern: /\bbuf\b/gi, expand: 'buffer' },
+  // inv → inverter
+  { pattern: /\binv\b/gi, expand: 'inverter' },
+  // nand, nor, xor, xnor → 全名
+  { pattern: /\bnand\b/gi, expand: 'nand gate' },
+  { pattern: /\bnor\b/gi, expand: 'nor gate' },
+  { pattern: /\bxor\b/gi, expand: 'xor gate' },
+  { pattern: /\bxnor\b/gi, expand: 'xnor gate' },
+];
+
+// 為查詢生成多個搜尋變體
+function generateQueryVariants(originalQuery, maxVariants = 3) {
+  const variants = [originalQuery]; // 原始查詢 always 第一個
+  const q = originalQuery.toLowerCase();
+  
+  // 1. 縮寫展開
+  const words = q.split(/\s+/);
+  const expandedWords = words.map(w => {
+    const clean = w.replace(/[^a-zA-Z]/g, '');
+    return EDA_ABBREVIATIONS[clean] || w;
+  });
+  const expanded = expandedWords.join(' ');
+  if (expanded !== q) variants.push(originalQuery.replace(new RegExp(words.join('|'), 'gi'), (m) => EDA_ABBREVIATIONS[m.toLowerCase()] || m));
+  
+  // 2. 模式規則展開
+  let patternExpanded = originalQuery;
+  let hasPattern = false;
+  for (const rule of PATTERN_RULES) {
+    if (rule.pattern.test(patternExpanded)) {
+      patternExpanded = patternExpanded.replace(rule.pattern, rule.expand);
+      hasPattern = true;
+      rule.pattern.lastIndex = 0; // reset regex
+    }
+  }
+  if (hasPattern && patternExpanded !== originalQuery) {
+    variants.push(patternExpanded);
+  }
+  
+  // 3. 常見相關詞（根據查詢內容自動判斷）
+  if (q.includes('mux') || q.includes('clock')) {
+    variants.push(`${originalQuery} glitch-free`);
+  }
+  if (q.includes('setup') || q.includes('hold')) {
+    variants.push(`${originalQuery} timing violation`);
+  }
+  if (q.includes('liberty') || q.includes('.lib')) {
+    variants.push(`${originalQuery} characterization NLDM`);
+  }
+  
+  return [...new Set(variants)].slice(0, maxVariants);
+}
+
+// 為不同搜尋來源生成最佳化查詢（增強版）
 function generateSearchQueries(originalQuery, context = 'general') {
   const q = originalQuery.toLowerCase();
   const queries = { web: '', community: '', academic: '', github: '' };
@@ -2619,23 +2768,38 @@ function generateSearchQueries(originalQuery, context = 'general') {
   // 基礎查詢
   const base = originalQuery;
   
-  // Web 搜尋：加入 troubleshoot / solution / how to
-  if (q.includes('error') || q.includes('fail') || q.includes('問題') || q.includes('fix')) {
+  // Web 搜尋：根據問題類型加入 troubleshooting/methodology
+  if (q.includes('error') || q.includes('fail') || q.includes('問題') || q.includes('fix')
+    || q.includes('violation') || q.includes('warning')) {
     queries.web = `${base} EDA solution fix troubleshooting`;
   } else if (q.includes('how to') || q.includes('怎么') || q.includes('如何') || q.includes('方法')) {
     queries.web = `${base} EDA methodology best practice`;
+  } else if (q.includes('what is') || q.includes('是什麼') || q.includes('概念')) {
+    queries.web = `${base} EDA explanation tutorial`;
   } else {
     queries.web = `${base} EDA ASIC IC design`;
   }
   
-  // Community 搜尋：加入 forum / discussion / experience
-  queries.community = `${base} site:community.cadence.com OR site:solvnet.synopsys.com OR site:reddit.com/r/ASIC OR site:edaboard.com`;
+  // Community 搜尋：用 site-specific（由 searchEDACommunities 處理）
+  queries.community = base;
   
-  // Academic 搜尋：加入 paper / survey / analysis
-  queries.academic = `${base} VLSI ASIC survey analysis`;
+  // Academic 搜尋：加入 paper/survey/analysis
+  if (q.includes('theory') || q.includes('原理') || q.includes('algorithm')) {
+    queries.academic = `${base} VLSI ASIC theoretical analysis`;
+  } else if (q.includes('compare') || q.includes('比較') || q.includes('vs')) {
+    queries.academic = `${base} VLSI ASIC comparison survey`;
+  } else {
+    queries.academic = `${base} VLSI ASIC survey analysis`;
+  }
   
-  // GitHub 搜尋：加入 script / tool / flow / example
-  queries.github = `${base} liberty script tool flow example`;
+  // GitHub 搜尋：根據查詢類型調整
+  if (q.includes('script') || q.includes('flow') || q.includes('script')) {
+    queries.github = `${base} script automation`;
+  } else if (q.includes('liberty') || q.includes('.lib') || q.includes('timing')) {
+    queries.github = `${base} liberty characterization script`;
+  } else {
+    queries.github = `${base} tool flow example`;
+  }
   
   return queries;
 }
