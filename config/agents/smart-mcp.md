@@ -21,21 +21,22 @@ permission:
   smart_learn: allow        # 專案 onboarding
   smart_deep_think: allow   # 深度分析
   smart_think: allow        # 快速推理
+  smart_decompose: allow    # 小模型任務分解 scaffold
+  smart_decompose_think: allow  # 小模型 think↔tool 迴圈
   smart_security: allow     # 安全掃描
   smart_test: allow         # 測試執行
   smart_lsp: allow          # LSP 程式碼理解
   smart_read: allow         # 🥇 漸進式檔案讀取，11 種模式。Session cache 零重複磁碟 I/O
   smart_rules: allow        # 專案規則查詢
-  smart_hallucination_check: allow  # 幻覺檢測
-  smart_academic_search: allow     # 學術文獻搜尋
-  smart_academic_review: allow     # 同儕審查
-  smart_docx_generate: allow       # DOCX 生成
   smart_edit_chain: allow         # 🥇 批次編輯鏈（N 編輯 1 次 MCP 呼叫）
+  smart_eda_search: allow         # 🥇 EDA 領域智慧知識引擎（IC design/cell flow/EDA tool/PDK/學術論文，18 種 action）
   smart_exa_search: allow         # 🥇 網路搜尋（取代 websearch/webfetch）
   smart_exa_crawl: allow          # 🥇 網頁爬取（clean/markdown/chunk/crawlee）
   smart_github_search: allow      # 🥇 GitHub 程式碼搜尋
   smart_glob: allow             # 🥇 檔案 glob 搜尋（取代內建 glob）
   smart_medical_search: allow   # 🥇 免費醫學文獻與臨床證據查詢 + 藥典（DailyMed仿單/OpenFDA標籤/RxNorm交互作用，共9來源）
+  smart_compact: allow          # 零成本 context 壓縮
+  smart_config: allow           # Runtime 設定（modelSize/mode/debug/timeoutMs）
 
   # ── 其他工具 ──
   websearch: deny       # 強制使用 smart_exa_search
@@ -72,6 +73,7 @@ permission:
 | `smart_learn({root})` | 新專案 onboarding |
 | `smart_think({mode, thought, nextThoughtNeeded})` | 🥇 快思。`mode:"cit"` 預設 BN-DP 自動分支。`"beam"` 高風險多路徑。`"structured"` GOAL/STATE/ALGO/EDGE/VERIFY 省 50-70% token |
 | `smart_decompose({goal, subtasks, currentSubtaskId, thought, nextNeeded})` | 🆕 小模型專用推理 scaffold。強制任務分解 + 工具引導 + 循環檢測。模型是 3-5B 且需多步驟時使用 |
+| `smart_decompose_think({goal, subtasks, ...})` | 🆕 小模型 think↔tool 迴圈（FR-CoT + budget auto-detect + XML parsing） |
 | `smart_deep_think({topic, template})` | 慢想深度分析（10 模板含 peer_review） |
 | `smart_security({scan})` | 安全掃描 |
 | `smart_test({root})` | 測試執行 |
@@ -82,14 +84,13 @@ permission:
 | `smart_lsp({operation, file, line, character})` | Type-aware 程式碼理解（definition/references/hover/diagnostics/symbols） |
 | `smart_read({file, mode?, symbol?, ...})` | 🥇 取代 raw read。11 種模式（auto/outline/signatures/symbol/explain/range/full/batch/project/image/目錄）。Session cache |
 | `smart_compact({toolHistory})` | 零成本 context 壓縮 |
-| `smart_codebase_index({command})` | 持久化程式碼索引（build/update/query/map/stats） |
-| `smart_hallucination_check({output, context?})` | 輸出真實性驗證（含 DOI 驗證） |
+| `smart_config({set?})` | Runtime 設定（modelSize/mode/debug/timeoutMs） |
 | `smart_exa_search({command, query, numResults?})` | 🥇 網路搜尋（取代 websearch/webfetch） |
 | `smart_exa_crawl({urls, clean?, markdown?, chunk?})` | 🥇 網頁爬取 |
 | `smart_github_search({query, repo?, language?})` | 🥇 GitHub 程式碼搜尋 |
 | `smart_glob({pattern, path?})` | 🥇 檔案 glob 搜尋（rg 底層，上限 100 筆） |
 | `smart_medical_search({question, action?, query?, maxResults?, dateFrom?, dateTo?})` | 🥇 免費醫學文獻與臨床證據查詢 + 藥典（9 來源，免 API 金鑰）。12 種 action：auto/ask（自動降級）、oe/openevidence（臨床問答）、search/pubmed（文獻搜尋）、openalex/academic（學術搜尋）、scholar/semantic（TLDR 摘要）、abstract（摘要閱讀）、oa-check/oa（OA 連結查詢）、fulltext/pmc（全文閱讀）、all/comprehensive（多源去重）、drug/dailymed（FDA 藥品仿單）、fda/openfda（FDA 標籤+不良反應）、interact/rxnorm（藥品交互作用） |
-| `smart_eda_search({question, action?, query?, maxResults?})` | 🥇 EDA 領域智慧知識引擎。IC design、cell-based flow、EDA tool、PDK、學術論文查詢。48+ 工具索引（含 30+ 商業工具）、11 個 cell flow stages。**多源並行廣搜**：DuckDuckGo 網路搜尋 + EDA 社群（Cadence Community/SolvNet/Reddit/EE Times/EDAboard）+ Semantic Scholar + OpenAlex + GitHub code/repo。17 種 action：auto（自動判斷→多源並行）、pdk（PDK/cell library）、paper（學術論文）、tool（EDA 工具）、github（GitHub 專案）、code（程式碼）、all/comprehensive（全源並行）、list-tools/pdk/conferences、flow（cell flow stages）、dft、lec、eco、fpga、troubleshoot（FAQ+廠商URL）、docs（工具文件）。💡 auto 結果不足時，自動提示可用 `smart_exa_search` 做更深入搜尋 |
+| `smart_eda_search({question, action?, query?, maxResults?})` | 🥇 EDA 領域智慧知識引擎。IC design、cell-based flow、EDA tool、PDK、學術論文查詢。55+ 工具索引（含 30+ 商業工具）、11 個 cell flow stages。**多源並行廣搜**：DuckDuckGo 網路搜尋 + EDA 社群（Cadence Community/SolvNet/Reddit/EE Times/EDAboard）+ Semantic Scholar + OpenAlex + GitHub code/repo + Exa（可選）。18 種 action：auto（自動判斷→多源並行）、pdk（PDK/cell library）、paper（學術論文）、tool（EDA 工具）、github（GitHub 專案）、code（程式碼）、all/comprehensive（全源並行）、list-tools/pdk/conferences、flow（cell flow stages）、dft、lec、eco、fpga、troubleshoot（FAQ+廠商URL）、docs（工具文件）。💡 auto 結果不足時，自動提示可用 `smart_exa_search` 做更深入搜尋 |
 
 > `smart_think` 快思（對話式）vs `smart_deep_think` 慢想（單次完整輸出）。不確定 root cause 用 think，需系統性評估用 deep_think。
 
