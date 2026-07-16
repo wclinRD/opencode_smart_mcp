@@ -33,7 +33,29 @@ export function searchToolFAQ(query, toolFilter) {
   for (const [toolId, toolData] of Object.entries(TOOL_FAQ_INDEX)) {
     if (toolFilter && !toolId.includes(toolFilter.toLowerCase()) && !toolData.tool.toLowerCase().includes(toolFilter.toLowerCase())) continue;
     for (const faq of toolData.faqs) {
-      if (faq.pattern.test(query)) {
+      // 處理 pattern：可能是 RegExp、字串或物件
+      let matched = false;
+      if (faq.pattern instanceof RegExp) {
+        matched = faq.pattern.test(query);
+      } else if (typeof faq.pattern === 'string') {
+        // 字串格式的正規表達式（如 "error1|error2"）
+        try {
+          const regex = new RegExp(faq.pattern, 'i');
+          matched = regex.test(query);
+        } catch {
+          // 如果不是有效的正規表達式，使用字串包含檢查
+          matched = query.toLowerCase().includes(faq.pattern.toLowerCase());
+        }
+      } else if (faq.pattern && typeof faq.pattern === 'object') {
+        // 物件格式（可能是 JSON 序列化後的正規表達式），嘗試從 error 欄位匹配
+        const errorText = faq.error.toLowerCase();
+        const queryLower = query.toLowerCase();
+        // 簡單的字串包含檢查
+        matched = queryLower.includes(errorText.split(':')[0].trim()) ||
+                  errorText.split(' ').some(word => word.length > 3 && queryLower.includes(word));
+      }
+      
+      if (matched) {
         results.push({ tool: toolData.tool, error: faq.error, cause: faq.cause, solution: faq.solution, solvnet: faq.solvnet });
       }
     }

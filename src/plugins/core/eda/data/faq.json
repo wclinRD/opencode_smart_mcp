@@ -4,35 +4,35 @@
     "vendor": "synopsys",
     "faqs": [
       {
-        "pattern": {},
+        "pattern": "can't resolve reference|unresolved reference",
         "error": "Error: can't resolve reference to...",
         "cause": "link 階段找不到 cell/module 定義，通常是 library 路徑或 module 名稱錯誤",
         "solution": "1) 檢查 set_app_var target_library 路徑\n2) 確認 link_library 包含所有使用的 cell\n3) 執行 check_design 確認 design integrity",
         "solvnet": "https://solvnet.synopsys.com/solve/qa?search=unresolved+reference+DC"
       },
       {
-        "pattern": {},
+        "pattern": "no such design|design .* not found",
         "error": "Error: No such design or design not found",
         "cause": "analyze 後的 elaborate 名稱不正確，或 analyze 時有語法錯誤",
         "solution": "1) 確認 analyze 的 file 中 module 名稱\n2) 檢查 analyze 輸出是否有 error/warning\n3) 用 check_design 確認",
         "solvnet": "https://solvnet.synopsys.com/solve/qa?search=no+such+design+DC"
       },
       {
-        "pattern": {},
+        "pattern": "timing violation|setup violation|hold violation",
         "error": "Timing violation: setup/hold slack < 0",
         "cause": "合成後時序無法收斂",
         "solution": "1) report_timing -max_paths 10 找最差路徑\n2) compile_ultra -timing_high_effort_script\n3) 加 set_max_transition / set_max_capacitance\n4) 考慮 clock gating 或 pipeline",
         "solvnet": "https://solvnet.synopsys.com/solve/qa?search=timing+violation+synthesis"
       },
       {
-        "pattern": {},
+        "pattern": "area .* exceeded|design area .* too large",
         "error": "Design area exceeds constraint",
         "cause": "面積超過 set_max_area 設定",
         "solution": "1) report_area -hierarchy 找面積大户\n2) set_max_area 0 讓工具全力優化\n3) 檢查是否有未最佳化的邏輯\n4) 考慮邏輯共享或 resource sharing",
         "solvnet": "https://solvnet.synopsys.com/solve/qa?search=area+exceeded+DC"
       },
       {
-        "pattern": {},
+        "pattern": "cannot find module|module .* not defined",
         "error": "Error: Cannot find module...",
         "cause": "缺少 module 定義或未加入 analyze 清單",
         "solution": "1) 確認所有 RTL 檔案都在 analyze 清單中\n2) 檢查 search_path 設定\n3) 用 read_file -verilog <file> 補充",
@@ -45,35 +45,35 @@
     "vendor": "cadence",
     "faqs": [
       {
-        "pattern": {},
+        "pattern": "cannot find|can't find|file not found",
         "error": "Error: Cannot find file / cannot find library",
         "cause": "LEF/Liberty/Verilog 路徑設定錯誤",
         "solution": "1) 檢查 set init_verilog / set init_lef_file 路徑\n2) 確認 init_design 前所有檔案路徑正確\n3) 用 file_exists 確認檔案存在",
         "solvnet": "https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution"
       },
       {
-        "pattern": {},
+        "pattern": "design has unroutable|congestion|too much congestion",
         "error": "Design has unroutable nets / high congestion",
         "cause": "placement 後 routing congestion 過高",
         "solution": "1) reportCongestion -hotSpot 找 hotspot\n2) setPlaceMode -congEffort high\n3) 降低 utilization 或調整 pin 位置\n4) setNanoRouteMode -routeWithTimingDriven true",
         "solvnet": "https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution"
       },
       {
-        "pattern": {},
+        "pattern": "timing .* not met|setup .* violation|hold .* violation",
         "error": "Timing not met after route",
         "cause": "Post-route timing violation",
         "solution": "1) timeDesign -postRoute 檢查 violation\n2) optDesign -postRoute 優化\n3) 檢查 clock tree skew\n4) setAnalysisMode -analysisType onChipVariation",
         "solvnet": "https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution"
       },
       {
-        "pattern": {},
+        "pattern": "DRC violation|design rule violation",
         "error": "DRC violations detected",
         "cause": "Routing 或 placement 造成 DRC 違規",
         "solution": "1) verify_drc 檢查詳細 violation\n2) ecoRoute -fix_drc 修復\n3) 檢查 LEF 設定是否正確\n4) 確認 technology LEF 包含所有 routing layer",
         "solvnet": "https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution"
       },
       {
-        "pattern": {},
+        "pattern": "mmmc.*not found|constraint.*error",
         "error": "MMMC / constraint file error",
         "cause": "MMMC 檔案路徑或內容錯誤",
         "solution": "1) 確認 set init_mmmc_file 路徑正確\n2) 檢查 MMMC 中的 scenario 定義\n3) 確認 liberty/SDC 路徑在 MMMC 中正確",
@@ -86,35 +86,35 @@
     "vendor": "synopsys",
     "faqs": [
       {
-        "pattern": {},
+        "pattern": "cannot read|no such file|file not found",
         "error": "Error: Cannot read file...",
         "cause": " Liberty/Verilog/SPEF/SDC 檔案路徑錯誤",
         "solution": "1) 確認 read_liberty/read_verilog/read_spef 路徑\n2) 檢查 current_design 是否正確設定\n3) 用 which 確認檔案存在",
         "solvnet": "https://solvnet.synopsys.com/solve/qa?search=cannot+read+PrimeTime"
       },
       {
-        "pattern": {},
+        "pattern": "no clocks|clock .* not found",
         "error": "Warning: No clocks found",
         "cause": "SDC 中未定義 clock，或 get_clocks 名稱不匹配",
         "solution": "1) 確認 create_clock 定義正確\n2) 檢查 clock port 名稱\n3) report_clock 確認時脈網路",
         "solvnet": "https://solvnet.synopsys.com/solve/qa?search=no+clocks+PrimeTime"
       },
       {
-        "pattern": {},
+        "pattern": "unconstrained|unconstrained pin",
         "error": "Warning: Pin is unconstrained",
         "cause": "某些 pin 沒有 timing constraint",
         "solution": "1) report_constraint -all_violators 找 unconstrained pins\n2) 補 set_input_delay / set_output_delay\n3) 設定 set_false_path 或 set_multicycle_path",
         "solvnet": "https://solvnet.synopsys.com/solve/qa?search=unconstrained+PrimeTime"
       },
       {
-        "pattern": {},
+        "pattern": "SPEF.*mismatch|parasitic.*mismatch",
         "error": "Warning: SPEF/net name mismatch",
         "cause": "SPEF 中的 net 名稱與 design 不匹配",
         "solution": "1) 確認 SPEF 是從同一個 design 產生\n2) 檢查 net name mapping\n3) 重新 extract RC（用 StarRC/Quantus）",
         "solvnet": "https://solvnet.synopsys.com/solve/qa?search=SPEF+mismatch+PrimeTime"
       },
       {
-        "pattern": {},
+        "pattern": "timing.*not met|setup.*violation|hold.*violation|slack",
         "error": "Timing violation: setup/hold slack < 0",
         "cause": "Post-route 或 sign-off timing violation",
         "solution": "1) report_timing -max_paths 10 找最差路徑\n2) report_constraint -all_violators 找所有 violation\n3) 檢查 clock uncertainty 和 OCV 設定\n4) 考慮 multi-corner/multi-mode 分析",
@@ -127,21 +127,21 @@
     "vendor": "siemens",
     "faqs": [
       {
-        "pattern": {},
+        "pattern": "DRC error|design rule check",
         "error": "Calibre DRC errors detected",
         "cause": "Layout 違反 design rule",
         "solution": "1) 檢查 RVE 中的 error 詳細位置\n2) 確認 DRC runset 與 PDK 版本匹配\n3) 常見：spacing/width/enclosure violation\n4) 用 KLayout 或 Magic 做初步 DRC",
         "solvnet": "https://eda.com/support/calibre"
       },
       {
-        "pattern": {},
+        "pattern": "LVS.*mismatch|schematic.*mismatch",
         "error": "Calibre LVS: Net/Device mismatch",
         "cause": "Layout 與 schematic 不一致",
         "solution": "1) 檢查 LVS report 中的 mismatch 詳情\n2) 確認 net name matching 設定\n3) 常見：missing net, wrong device count\n4) 用 XRC extraction 確認連接性",
         "solvnet": "https://eda.com/support/calibre"
       },
       {
-        "pattern": {},
+        "pattern": "antenna|antenna rule",
         "error": "Calibre: Antenna rule violation",
         "cause": "Metal layer 面積過大造成加工時 charge 損壞",
         "solution": "1) 加 antenna diode 或 jumper\n2) 在 Innovus 中 setNanoRouteMode -routeWithAntenna true\n3) 檢查 LEF 中的 antenna 規則定義",
@@ -154,28 +154,28 @@
     "vendor": "xilinx",
     "faqs": [
       {
-        "pattern": {},
+        "pattern": "timing.*not met|setup.*violation|hold.*violation",
         "error": "Timing constraint not met",
         "cause": "FPGA 設計時序無法收斂",
         "solution": "1) report_timing_summary 找 violation\n2) 調整 clock constraint（set_clock_groups / set_false_path）\n3) 考慮 pipelining 或 restructure\n4) 檢查 clock domain crossing",
         "solvnet": "https://support.xilinx.com/s/article/65498"
       },
       {
-        "pattern": {},
+        "pattern": "utilization.*exceeded|too many",
         "error": "Device utilization exceeded",
         "cause": "FPGA 資源不足",
         "solution": "1) report_utilization 檢查各資源使用量\n2) 考慮更大型號 FPGA\n3) 優化 RTL 減少 LUT/FF 使用\n4) 用 synthesis 的 -flatten_hierarchy 優化",
         "solvnet": "https://support.xilinx.com/s/article/65498"
       },
       {
-        "pattern": {},
+        "pattern": "bitstream.*error|implementation.*failed",
         "error": "Bitstream generation failed",
         "cause": "Implementation 階段失敗",
         "solution": "1) 檢查 implementation log 中的 error\n2) 確認 constraint 語法正確\n3) 跑 opt_design -retarget -propagate -sweep\n4) 用 report_drc 檢查 design rule",
         "solvnet": "https://support.xilinx.com/s/article/65498"
       },
       {
-        "pattern": {},
+        "pattern": "warning.*critical|critical.*warning|warning",
         "error": "Critical warnings during synthesis/implementation",
         "cause": "Constraint 警告或 design 問題",
         "solution": "1) report_property -file 檢查所有 warning\n2) 常見：未連接 port、multiple driver、latch inference\n3) 用 set_property -dict 修復 constraint\n4) 檢查 XDC 語法是否正確",
@@ -188,14 +188,14 @@
     "vendor": "intel",
     "faqs": [
       {
-        "pattern": {},
+        "pattern": "timing.*violation|setup.*error|fmax",
         "error": "Timing violations / Fmax not met",
         "cause": "時序無法收斂到目標頻率",
         "solution": "1) TimeQuest 檢查 critical path\n2) 加 set_false_path / set_multicycle_path\n3) 調 synthesis 設定（-effort_high）\n4) 考慮 pipeline 寄存器",
         "solvnet": "https://www.intel.com/content/www/us/en/support/programmable/support.html"
       },
       {
-        "pattern": {},
+        "pattern": "resource.*exceeded|too many logic elements",
         "error": "Logic elements / resources exceeded",
         "cause": "FPGA 資源不足",
         "solution": "1) Compilation Report 檢查 resource usage\n2) 考慮更大型號\n3) 優化 RTL 減少邏輯使用\n4) 用 Hyperflex 或 F- registros 優化",
@@ -208,21 +208,21 @@
     "vendor": "synopsys",
     "faqs": [
       {
-        "pattern": {},
+        "pattern": "syntax error|parse error",
         "error": "Syntax/parse error during compilation",
         "cause": "SystemVerilog 語法不相容或缺少 library",
         "solution": "1) 加 -sverilog 啟用 SV 支援\n2) 檢查 file list 是否完整\n3) 用 -lint_only 做預檢\n4) 確認 VCS 版本支援你的 SV feature",
         "solvnet": "https://solvnet.synopsys.com/solve/qa?search=syntax+error+VCS"
       },
       {
-        "pattern": {},
+        "pattern": "module already defined|duplicate module",
         "error": "Module already defined",
         "cause": "同一個 module 被 include 多次",
         "solution": "1) 檢查 file list 是否有重複\n2) 用 `ifndef guard 保護 header\n3) -sverilog +incdir+ 檢查 include 路徑",
         "solvnet": "https://solvnet.synopsys.com/solve/qa?search=module+already+defined+VCS"
       },
       {
-        "pattern": {},
+        "pattern": "crash|core dump|segfault|internal error",
         "error": "VCS crash / core dump",
         "cause": "VCS compiler/runtime 內部錯誤",
         "solution": "1) 確認 VCS 版本與 design 複雜度匹配\n2) 加 -debug_access+all 重現問題\n3) 檢查系統記憶體是否足夠\n4) 嘗試 -kdb 生成 debug 資料",
@@ -235,7 +235,7 @@
     "vendor": "cadence",
     "faqs": [
       {
-        "pattern": {},
+        "pattern": "syntax error|parse error",
         "error": "Syntax error during compilation",
         "cause": "語法不相容或缺少 library mapping",
         "solution": "1) 確認 -sv 啟用 SystemVerilog\n2) 檢查 cdslck 文件\n3) 用 -liccheck 確認 license\n4) xmvlog -help 確認支援的 feature",
@@ -248,7 +248,7 @@
     "vendor": "cadence",
     "faqs": [
       {
-        "pattern": {},
+        "pattern": "LEC.*fail|equivalence.*fail|not equivalent",
         "error": "LEC verification failed",
         "cause": "Golden 與 implementation 網表功能不等價",
         "solution": "1) report failed -detail 找非等價點\n2) 確認 constant pin 設定正確\n3) 檢查 naming style 是否一致\n4) 用手動 mapping 修復",
@@ -261,7 +261,7 @@
     "vendor": "synopsys",
     "faqs": [
       {
-        "pattern": {},
+        "pattern": "match.*fail|verify.*fail|not equivalent",
         "error": "Formality verification failed",
         "cause": "Reference 與 implementation 不等價",
         "solution": "1) report_failing 找失敗的 pin\n2) 確認 set_top 名稱正確\n3) 檢查 constant 設定\n4) 用 match -successful 找成功比對",
@@ -274,49 +274,49 @@
     "vendor": "cadence",
     "faqs": [
       {
-        "pattern": {},
+        "pattern": "can't elaborate|elaborate.*fail|elaborate.*error",
         "error": "Error: Can't elaborate design",
         "cause": "RTL module 定義找不到或名稱不對",
         "solution": "1) 確認 read_file 包含所有 RTL 檔案\n2) 檢查 module 名稱是否與 elaborate 一致\n3) 用 elaborate -list 確認 available modules\n4) 檢查 search_path 設定",
         "solvnet": "https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution"
       },
       {
-        "pattern": {},
+        "pattern": "synthesize.*fail|synthesis.*error|generic.*fail",
         "error": "Synthesis failed / generic error",
         "cause": "RTL 語法不支援或 design 結構問題",
         "solution": "1) 檢查 elaboration 輸出是否有 warning/error\n2) 確認 RTL 用 synthesizable subset\n3) 用 read_file -sv 確認 SV 支援\n4) 設定 syn_generic_effort high",
         "solvnet": "https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution"
       },
       {
-        "pattern": {},
+        "pattern": "timing.*violation|setup.*fail|hold.*fail",
         "error": "Timing violation after synthesis",
         "cause": "合成後時序無法收斂",
         "solution": "1) report_timing 找最差路徑\n2) set_db syn_map_effort high\n3) 設定 set_max_transition / set_max_capacitance\n4) 考慮 clock gating 或 pipeline",
         "solvnet": "https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution"
       },
       {
-        "pattern": {},
+        "pattern": "area.*exceeded|design.*too large",
         "error": "Design area exceeds constraint",
         "cause": "面積超過限制",
         "solution": "1) report_area -hierarchy 找面積大戶\n2) set_max_area 0 放寬限制\n3) 檢查 resource sharing\n4) 考慮邏輯共享",
         "solvnet": "https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution"
       },
       {
-        "pattern": {},
+        "pattern": "conformal.*fail|equivalent.*fail|lec.*fail",
         "error": "Conformal equivalence check failed",
         "cause": "RTL 與 gate-level netlist 不等價",
         "solution": "1) 確認 write_design 沒有改變功能\n2) 檢查 constant pin 設定\n3) 用 set_constant 修復 scan signal\n4) 用 Conformal LEC 做獨立驗證",
         "solvnet": "https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution"
       },
       {
-        "pattern": {},
+        "pattern": "cannot find|file not found|no such file",
         "error": "Error: Cannot find file / module",
         "cause": "RTL/Liberty/LEF 檔案路徑錯誤",
         "solution": "1) 確認 read_file 路徑正確\n2) 檢查 search_path 設定\n3) 用 which 確認檔案存在\n4) 確認 filelist 格式正確",
         "solvnet": "https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution"
       },
       {
-        "pattern": {},
+        "pattern": "unexpected|weird|incorrect|wrong result",
         "error": "Unexpected behavior / incorrect results",
         "cause": "Genus 工具 bug 或 constraint 設定錯誤",
         "solution": "1) 檢查 synthesis log 中的 warning\n2) 確認 SDC constraint 語法正確\n3) 用 set_db 確認工具版本\n4) 到 Cadence Support 提交 SR",
