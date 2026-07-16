@@ -5,6 +5,7 @@ import { registerAction } from './registry.mjs';
 import { enhanceQueryForEDA, detectConference } from '../query/enhance.mjs';
 import { searchSemanticScholar, formatSemanticScholarResults } from '../sources/semantic-scholar.mjs';
 import { searchOpenAlex, formatOpenAlexResults } from '../sources/openalex.mjs';
+import { compressOutput } from '../lib/caveman.mjs';
 
 registerAction('paper', async (args) => {
   const searchQuery = String(args.question || args.query || '').trim();
@@ -39,6 +40,15 @@ registerAction('paper', async (args) => {
     output += `  • [ACM Digital Library](https://dl.acm.org/doi/proceedings/${conf})\n`;
     output += `  • [IEEE Xplore](https://ieeexplore.ieee.org/search/searchresult.jsp?queryText=${conf}%20EDA)\n`;
     output += `  • [dblp](https://dblp.org/search?q=${conf})\n`;
+  }
+
+  // Caveman 壓縮
+  const compress = args.compress || 'none';
+  console.log(`[EDA] compress=${compress}, output.length=${output.length}`);
+  if (compress !== 'none') {
+    const before = output.length;
+    output = compressOutput(output, compress);
+    console.log(`[EDA] compressed: ${before} → ${output.length} chars`);
   }
 
   return { ok: true, output: output || '📚 學術論文：無結果' };

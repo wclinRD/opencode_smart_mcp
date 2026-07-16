@@ -7,6 +7,7 @@ import { searchEDACommunities, crawlForumPages, formatCommunityResults } from '.
 import { searchOpenAlex, reconstructAbstract, formatOpenAlexResults } from './openalex.mjs';
 import { searchSemanticScholar, formatSemanticScholarResults } from './semantic-scholar.mjs';
 import { searchExa, exaGetContents, isExaAvailable } from './exa.mjs';
+import { compressResults, compressOutput } from '../lib/caveman.mjs';
 
 export { httpsGet, GITHUB_API, OPENALEX_API, SCHOLAR_API, USER_AGENT, DEFAULT_TIMEOUT };
 export { searchGitHubPDK, searchGitHubEDA, searchGitHubCode, formatGitHubResults };
@@ -63,7 +64,7 @@ export function sortByRelevance(items) {
 import { enhanceQueryForEDA, generateSearchQueries } from '../query/enhance.mjs';
 
 export async function multiSourceSearch(searchQuery, maxResults = 10, options = {}) {
-  const { depth = 'shallow' } = options;
+  const { depth = 'shallow', compress = 'none' } = options;
   const searchQueries = generateSearchQueries(searchQuery);
   const enhancedQuery = enhanceQueryForEDA(searchQuery);
 
@@ -135,6 +136,10 @@ export async function multiSourceSearch(searchQuery, maxResults = 10, options = 
         }
       } catch { /* ignore */ }
     }
+  }
+
+  if (compress !== 'none') {
+    output = compressOutput(output, compress);
   }
 
   return output;

@@ -14,6 +14,7 @@ const ACTIONS_NO_QUERY = ['list-tools', 'list-pdk', 'list-conferences', 'flow', 
 async function edaSearch(args = {}) {
   const action = String(args.action || 'auto').toLowerCase();
   const searchQuery = String(args.question || args.query || '').trim();
+  const compress = args.compress || 'none';
 
   // 預驗證：部分 action 不需要 query
   if (!searchQuery && !ACTIONS_NO_QUERY.includes(action)) {
@@ -21,7 +22,7 @@ async function edaSearch(args = {}) {
   }
 
   try {
-    return await dispatch(action, args);
+    return await dispatch(action, { ...args, query: searchQuery, compress });
   } catch (err) {
     return { ok: false, error: `EDA 搜尋錯誤: ${err.message}` };
   }
@@ -65,6 +66,11 @@ export default {
       maxResults: {
         type: 'number',
         description: '最大結果數量（預設 10）',
+      },
+      compress: {
+        type: 'string',
+        enum: ['none', 'light', 'semantic', 'aggressive', 'ultra'],
+        description: 'Caveman 文字壓縮等級（節省 token）。none=不壓縮（預設），light=去 stop words（~15%），semantic=去 filler phrases（~30%），aggressive=詞形簡化（~45%），ultra=縮寫+箭頭（~60%）',
       },
     },
   },

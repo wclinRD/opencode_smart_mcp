@@ -83,7 +83,8 @@ registerAction('auto', async (args) => {
   }
 
   // 多源並行廣搜（使用統一入口）
-  let output = await multiSourceSearch(searchQuery, maxResults);
+  const compress = args.compress || 'none';
+  let output = await multiSourceSearch(searchQuery, maxResults, { compress });
 
   // 偵測是否提到特定會議
   const conf = detectConference(searchQuery);

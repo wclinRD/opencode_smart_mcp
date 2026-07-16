@@ -4,6 +4,7 @@
 import { registerAction } from './registry.mjs';
 import { EDA_TOOL_INDEX } from '../data/tools.mjs';
 import { searchToolFAQ, generateVendorSearchURL } from '../lib/vendor.mjs';
+import { compressOutput } from '../lib/caveman.mjs';
 
 registerAction('troubleshoot', async (args) => {
   const searchQuery = String(args.question || args.query || '').trim();
@@ -44,6 +45,12 @@ registerAction('troubleshoot', async (args) => {
     output += `1. 用 \`action=troubleshoot\` 加上具體錯誤訊息\n`;
     output += `2. 用 \`action=paper\` 搜尋相關學術論文\n`;
     output += `3. 用 \`action=github\` 搜尋 GitHub 上的討論\n`;
+  }
+
+  // Caveman 壓縮
+  const compress = args.compress || 'none';
+  if (compress !== 'none') {
+    output = compressOutput(output, compress);
   }
 
   return { ok: true, output: output || '🔍 Troubleshooting：請提供具體錯誤訊息' };

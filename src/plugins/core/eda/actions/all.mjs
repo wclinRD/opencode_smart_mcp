@@ -15,6 +15,7 @@ registerAction('all', async (args) => {
   const localTools = searchLocalTools(searchQuery);
   if (localTools.length > 0) output += formatToolResults(localTools);
   // 多源並行搜尋
-  output += await multiSourceSearch(searchQuery, maxResults);
+  const compress = args.compress || 'none';
+  output += await multiSourceSearch(searchQuery, maxResults, { compress });
   return { ok: true, output: output || '🔍 綜合搜尋：未找到結果' };
 }, ['comprehensive']);
