@@ -620,6 +620,13 @@ const TOOL_FAQ_INDEX = {
         solution: '1) 確認 SPEF 是從同一個 design 產生\n2) 檢查 net name mapping\n3) 重新 extract RC（用 StarRC/Quantus）',
         solvnet: 'https://solvnet.synopsys.com/solve/qa?search=SPEF+mismatch+PrimeTime',
       },
+      {
+        pattern: /timing.*not met|setup.*violation|hold.*violation|slack/i,
+        error: 'Timing violation: setup/hold slack < 0',
+        cause: 'Post-route 或 sign-off timing violation',
+        solution: '1) report_timing -max_paths 10 找最差路徑\n2) report_constraint -all_violators 找所有 violation\n3) 檢查 clock uncertainty 和 OCV 設定\n4) 考慮 multi-corner/multi-mode 分析',
+        solvnet: 'https://solvnet.synopsys.com/solve/qa?search=timing+violation+PrimeTime',
+      },
     ],
   },
   'calibre': {
@@ -674,6 +681,13 @@ const TOOL_FAQ_INDEX = {
         solution: '1) 檢查 implementation log 中的 error\n2) 確認 constraint 語法正確\n3) 跑 opt_design -retarget -propagate -sweep\n4) 用 report_drc 檢查 design rule',
         solvnet: 'https://support.xilinx.com/s/article/65498',
       },
+      {
+        pattern: /warning.*critical|critical.*warning|warning/i,
+        error: 'Critical warnings during synthesis/implementation',
+        cause: 'Constraint 警告或 design 問題',
+        solution: '1) report_property -file 檢查所有 warning\n2) 常見：未連接 port、multiple driver、latch inference\n3) 用 set_property -dict 修復 constraint\n4) 檢查 XDC 語法是否正確',
+        solvnet: 'https://support.xilinx.com/s/article/65498',
+      },
     ],
   },
   'quartus': {
@@ -714,6 +728,13 @@ const TOOL_FAQ_INDEX = {
         solution: '1) 檢查 file list 是否有重複\n2) 用 `ifndef guard 保護 header\n3) -sverilog +incdir+ 檢查 include 路徑',
         solvnet: 'https://solvnet.synopsys.com/solve/qa?search=module+already+defined+VCS',
       },
+      {
+        pattern: /crash|core dump|segfault|internal error/i,
+        error: 'VCS crash / core dump',
+        cause: 'VCS compiler/runtime 內部錯誤',
+        solution: '1) 確認 VCS 版本與 design 複雜度匹配\n2) 加 -debug_access+all 重現問題\n3) 檢查系統記憶體是否足夠\n4) 嘗試 -kdb 生成 debug 資料',
+        solvnet: 'https://solvnet.synopsys.com/solve/qa?search=crash+VCS',
+      },
     ],
   },
   'xcelium': {
@@ -751,6 +772,61 @@ const TOOL_FAQ_INDEX = {
         cause: 'Reference 與 implementation 不等價',
         solution: '1) report_failing 找失敗的 pin\n2) 確認 set_top 名稱正確\n3) 檢查 constant 設定\n4) 用 match -successful 找成功比對',
         solvnet: 'https://solvnet.synopsys.com/solve/qa?search=formality+verification+fail',
+      },
+    ],
+  },
+  'genus': {
+    tool: 'Cadence Genus Synthesis',
+    vendor: 'cadence',
+    faqs: [
+      {
+        pattern: /can't elaborate|elaborate.*fail|elaborate.*error/i,
+        error: "Error: Can't elaborate design",
+        cause: 'RTL module 定義找不到或名稱不對',
+        solution: '1) 確認 read_file 包含所有 RTL 檔案\n2) 檢查 module 名稱是否與 elaborate 一致\n3) 用 elaborate -list 確認 available modules\n4) 檢查 search_path 設定',
+        solvnet: 'https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution',
+      },
+      {
+        pattern: /synthesize.*fail|synthesis.*error|generic.*fail/i,
+        error: 'Synthesis failed / generic error',
+        cause: 'RTL 語法不支援或 design 結構問題',
+        solution: '1) 檢查 elaboration 輸出是否有 warning/error\n2) 確認 RTL 用 synthesizable subset\n3) 用 read_file -sv 確認 SV 支援\n4) 設定 syn_generic_effort high',
+        solvnet: 'https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution',
+      },
+      {
+        pattern: /timing.*violation|setup.*fail|hold.*fail/i,
+        error: 'Timing violation after synthesis',
+        cause: '合成後時序無法收斂',
+        solution: '1) report_timing 找最差路徑\n2) set_db syn_map_effort high\n3) 設定 set_max_transition / set_max_capacitance\n4) 考慮 clock gating 或 pipeline',
+        solvnet: 'https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution',
+      },
+      {
+        pattern: /area.*exceeded|design.*too large/i,
+        error: 'Design area exceeds constraint',
+        cause: '面積超過限制',
+        solution: '1) report_area -hierarchy 找面積大戶\n2) set_max_area 0 放寬限制\n3) 檢查 resource sharing\n4) 考慮邏輯共享',
+        solvnet: 'https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution',
+      },
+      {
+        pattern: /conformal.*fail|equivalent.*fail|lec.*fail/i,
+        error: 'Conformal equivalence check failed',
+        cause: 'RTL 與 gate-level netlist 不等價',
+        solution: '1) 確認 write_design 沒有改變功能\n2) 檢查 constant pin 設定\n3) 用 set_constant 修復 scan signal\n4) 用 Conformal LEC 做獨立驗證',
+        solvnet: 'https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution',
+      },
+      {
+        pattern: /cannot find|file not found|no such file/i,
+        error: "Error: Cannot find file / module",
+        cause: 'RTL/Liberty/LEF 檔案路徑錯誤',
+        solution: '1) 確認 read_file 路徑正確\n2) 檢查 search_path 設定\n3) 用 which 確認檔案存在\n4) 確認 filelist 格式正確',
+        solvnet: 'https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution',
+      },
+      {
+        pattern: /unexpected|weird|incorrect|wrong result/i,
+        error: 'Unexpected behavior / incorrect results',
+        cause: 'Genus 工具 bug 或 constraint 設定錯誤',
+        solution: '1) 檢查 synthesis log 中的 warning\n2) 確認 SDC constraint 語法正確\n3) 用 set_db 確認工具版本\n4) 到 Cadence Support 提交 SR',
+        solvnet: 'https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution',
       },
     ],
   },
@@ -2172,6 +2248,10 @@ const TOOL_ISSUE_PATTERNS = [
   /violation/i, /mismatch/i, /conflict/i, /exception/i,
   /bug/i, /crash/i, /hang/i, /stuck/i, /timeout/i,
   /help/i, /fix/i, /solve/i, /debug/i, /troubleshoot/i,
+  /warning/i, /not met/i, /critical/i, /concern/i,
+  /improve/i, /optimize/i, /degraded/i, /slow/i,
+  /incorrect/i, /wrong/i, /unexpected/i, /strange/i,
+  /refuse/i, /reject/i, /ignore/i, /skip/i,
 ];
 
 function isToolIssueQuery(query) {
@@ -2438,8 +2518,11 @@ async function edaSearch(args = {}) {
 
           // 偵測 tool 問題 → 自動補充 FAQ + 廠商 URL
           if (isToolIssueQuery(searchQuery)) {
-            const detectedTool = localTools.length > 0 ? localTools[0].key : null;
+            // 找出 query 中明確提到的 tool（取最精確匹配）
+            const toolKeys = Object.keys(EDA_TOOL_INDEX).filter(k => q.includes(k));
+            const detectedTool = toolKeys.length > 0 ? toolKeys[0] : null;
             const faqResults = searchToolFAQ(searchQuery, detectedTool);
+            console.log('[DEBUG auto-faq] q:', q, 'toolKeys:', toolKeys, 'detectedTool:', detectedTool, 'faqCount:', faqResults.length);
             if (faqResults.length > 0) {
               output += `\n## 🔧 偵測到 Tool 問題，自動補充 FAQ：\n\n`;
               for (const faq of faqResults.slice(0, 3)) {
@@ -2506,6 +2589,18 @@ async function edaSearch(args = {}) {
         }
 
         return { ok: true, output: output || '📚 學術論文：無結果' };
+      }
+
+      // ── PDK / Cell Library 查詢 ──
+      case 'pdk': {
+        const localPDK = searchLocalPDK(searchQuery);
+        let output = formatPDKResults(localPDK);
+        // 補充 GitHub
+        try {
+          const ghResults = await searchGitHubPDK(searchQuery, maxResults);
+          output += '\n' + formatGitHubResults(ghResults, 'GitHub PDK 相關專案');
+        } catch { /* ignore */ }
+        return { ok: true, output };
       }
 
       // ── EDA 學術論文搜尋 ──
