@@ -1,0 +1,477 @@
+{
+  "yosys": {
+    "name": "Yosys Open Synthesis Suite",
+    "repo": "YosysHQ/yosys",
+    "docs": "https://yosyshq.readthedocs.io/projects/yosys/en/latest/",
+    "category": "synthesis",
+    "desc": "Extensible Verilog RTL synthesis suite. Synthesizes Verilog to gate-level netlists for FPGA/ASIC.",
+    "alt": "Synopsys Design Compiler"
+  },
+  "dc": {
+    "name": "Synopsys Design Compiler",
+    "repo": "",
+    "docs": "https://www.synopsys.com/glossary/what-is-design-compiler.html",
+    "category": "synthesis",
+    "desc": "Industry-standard RTL synthesis tool. Transforms RTL to gate-level netlist with timing/area/power optimization.",
+    "alt": "Cadence Genus",
+    "commercial": true
+  },
+  "genus": {
+    "name": "Cadence Genus Synthesis",
+    "repo": "",
+    "docs": "https://www.cadence.com/en_US/home/tools/digital-signoff-and-synthesis/genus-synthesis-solution.html",
+    "category": "synthesis",
+    "desc": "High-performance RTL synthesis with starrc-based topographical mode.",
+    "alt": "Synopsys Design Compiler",
+    "commercial": true
+  },
+  "openroad": {
+    "name": "OpenROAD",
+    "repo": "The-OpenROAD-Project/OpenROAD",
+    "docs": "https://openroad.readthedocs.io/en/latest/",
+    "category": "physical-design",
+    "desc": "Autonomous RTL-to-GDSII flow. Floorplan, placement, CTS, routing, STA.",
+    "alt": "Cadence Innovus"
+  },
+  "openlane": {
+    "name": "OpenLane",
+    "repo": "The-OpenROAD-Project/OpenLane",
+    "docs": "https://openlane.readthedocs.io/en/latest/",
+    "category": "asic-flow",
+    "desc": "Automated ASIC design flow from RTL to GDSII. Wraps Yosys + OpenROAD + KLayout.",
+    "alt": "Commercial ASIC flow"
+  },
+  "librelane": {
+    "name": "LibreLane",
+    "repo": "librelane/librelane",
+    "docs": "https://librelane.readthedocs.io/en/latest/",
+    "category": "asic-flow",
+    "desc": "Successor to OpenLane. Modular ASIC implementation flow infrastructure.",
+    "alt": "Commercial ASIC flow"
+  },
+  "innovus": {
+    "name": "Cadence Innovus",
+    "repo": "",
+    "docs": "https://www.cadence.com/en_US/home/tools/digital-signoff-and-synthesis/innovus-implementation-system.html",
+    "category": "physical-design",
+    "desc": "Industry-standard P&R tool. Global/detailed placement, CTS (CCOpt), NanoRoute, timing optimization.",
+    "alt": "Synopsys IC Compiler II",
+    "commercial": true
+  },
+  "icc2": {
+    "name": "Synopsys IC Compiler II",
+    "repo": "",
+    "docs": "https://www.synopsys.com/glossary/what-is-ic-compiler.html",
+    "category": "physical-design",
+    "desc": "Next-gen physical design tool. Galaxy Place & Route, CTS, timing-driven optimisation.",
+    "alt": "Cadence Innovus",
+    "commercial": true
+  },
+  "opensta": {
+    "name": "OpenSTA",
+    "repo": "The-OpenROAD-Project/OpenSTA",
+    "docs": "https://opensta.readthedocs.io/en/latest/",
+    "category": "timing",
+    "desc": "Gate-level static timing analysis engine. Reads Liberty, Verilog, SPEF, SDC.",
+    "alt": "Synopsys PrimeTime"
+  },
+  "opentimer": {
+    "name": "OpenTimer",
+    "repo": "OpenTimer/OpenTimer",
+    "docs": "https://github.com/OpenTimer/OpenTimer",
+    "category": "timing",
+    "desc": "High-performance timing analysis tool. Path-based and graph-based analysis.",
+    "alt": "Synopsys PrimeTime"
+  },
+  "primetime": {
+    "name": "Synopsys PrimeTime",
+    "repo": "",
+    "docs": "https://www.synopsys.com/glossary/what-is-prime-time.html",
+    "category": "timing",
+    "desc": "Industry sign-off STA. Multi-corner/multi-mode (OCV/AOCV/SOCV), timing sign-off, power analysis.",
+    "alt": "Cadence Tempus",
+    "commercial": true
+  },
+  "tempus": {
+    "name": "Cadence Tempus Timing",
+    "repo": "",
+    "docs": "https://www.cadence.com/en_US/home/tools/digital-signoff-and-synthesis/tempus-timing-signoff-solution.html",
+    "category": "timing",
+    "desc": "Sign-off timing analysis. ECOpt-based timing closure, path-based analysis.",
+    "alt": "Synopsys PrimeTime",
+    "commercial": true
+  },
+  "verilator": {
+    "name": "Verilator",
+    "repo": "verilator/verilator",
+    "docs": "https://www.veripool.org/verilator/",
+    "category": "simulation",
+    "desc": "Fastest Verilog/SystemVerilog simulator. 2-state cycle-accurate.",
+    "alt": "Synopsys VCS"
+  },
+  "vcs": {
+    "name": "Synopsys VCS",
+    "repo": "",
+    "docs": "https://www.synopsys.com/verification/simulation/vcs.html",
+    "category": "simulation",
+    "desc": "Industry-leading Verilog/SystemVerilog/VHDL simulator. Full 4-state, UVM, coverage.",
+    "alt": "Cadence Xcelium",
+    "commercial": true
+  },
+  "xcelium": {
+    "name": "Cadence Xcelium",
+    "repo": "",
+    "docs": "https://www.cadence.com/en_US/home/tools/logical-simulation-platforms/xcelium-parallel-simulator.html",
+    "category": "simulation",
+    "desc": "Multi-language simulator. Native SystemVerilog, VHDL, Verilog-AMS.",
+    "alt": "Synopsys VCS",
+    "commercial": true
+  },
+  "iverilog": {
+    "name": "Icarus Verilog",
+    "repo": "steveicarus/iverilog",
+    "docs": "https://steveicarus.github.io/iverilog/",
+    "category": "simulation",
+    "desc": "Lightweight Verilog simulator and synthesizer.",
+    "alt": "Siemens Questa"
+  },
+  "klayout": {
+    "name": "KLayout",
+    "repo": "KLayout/klayout",
+    "docs": "https://www.klayout.de/doc/",
+    "category": "layout",
+    "desc": "GDSII/OASIS layout viewer and editor. DRC/LVS via runsets.",
+    "alt": "Cadence Virtuoso"
+  },
+  "magic": {
+    "name": "Magic VLSI",
+    "repo": "RTimothyEdwards/magic",
+    "docs": "http://opencircuitdesign.com/magic/",
+    "category": "layout",
+    "desc": "Interactive layout editor with DRC extraction.",
+    "alt": "Cadence Virtuoso"
+  },
+  "calibre": {
+    "name": "Siemens Calibre",
+    "repo": "",
+    "docs": "https://eda.com/products/calibre.html",
+    "category": "verification",
+    "desc": "Industry sign-off DRC/LVS/xRC. Metal fill, antenna, density checks.",
+    "alt": "Synopsys IC Validator",
+    "commercial": true
+  },
+  "icv": {
+    "name": "Synopsys IC Validator",
+    "repo": "",
+    "docs": "https://www.synopsys.com/glossary/what-is-ic-validator.html",
+    "category": "verification",
+    "desc": "DRC/LVS/ERC sign-off tool. StarRC integration for parasitic extraction.",
+    "alt": "Siemens Calibre",
+    "commercial": true
+  },
+  "netgen": {
+    "name": "Netgen",
+    "repo": "RTimothyEdwards/netgen",
+    "docs": "http://opencircuitdesign.com/netgen/",
+    "category": "verification",
+    "desc": "LVS (Layout Versus Schematic) verification tool.",
+    "alt": "Siemens Calibre LVS"
+  },
+  "abc": {
+    "name": "ABC",
+    "repo": "berkeley-abc/abc",
+    "docs": "https://people.eecs.berkeley.edu/~alanmi/abc/",
+    "category": "synthesis",
+    "desc": "Logic synthesis and verification system. Boolean rewriting and mapping.",
+    "alt": "Synopsys Design Compiler"
+  },
+  "lec": {
+    "name": "Cadence Conformal LEC",
+    "repo": "",
+    "docs": "https://www.cadence.com/en_US/home/tools/digital-signoff-and-synthesis/conformal-logic-equivalence-checking.html",
+    "category": "equivalence",
+    "desc": "Logic equivalence checking. Compares RTL vs gate-level vs physical netlist. Formally proves functional equivalence.",
+    "alt": "Synopsys Formality",
+    "commercial": true
+  },
+  "formality": {
+    "name": "Synopsys Formality",
+    "repo": "",
+    "docs": "https://www.synopsys.com/glossary/what-is-formality.html",
+    "category": "equivalence",
+    "desc": "Formal logic equivalence verification. Compares golden vs implementation netlists.",
+    "alt": "Cadence Conformal LEC",
+    "commercial": true
+  },
+  "conformal-eco": {
+    "name": "Cadence Conformal ECO",
+    "repo": "",
+    "docs": "https://www.cadence.com/en_US/home/tools/digital-signoff-and-synthesis/conformal-ec.html",
+    "category": "eco",
+    "desc": "Functional ECO implementation. Incremental netlist changes without full re-synthesis. Supports both functional and timing-driven ECO.",
+    "alt": "Synopsys EC Synthesis",
+    "commercial": true
+  },
+  "vivado": {
+    "name": "Xilinx Vivado",
+    "repo": "",
+    "docs": "https://www.xilinx.com/products/design-tools/vivado.html",
+    "category": "fpga",
+    "desc": "Xilinx/AMD FPGA synthesis, P&R, timing analysis, bitstream generation. Supports 7-series, UltraScale, Versal.",
+    "alt": "Intel Quartus",
+    "commercial": true
+  },
+  "quartus": {
+    "name": "Intel Quartus Prime",
+    "repo": "",
+    "docs": "https://www.intel.com/content/www/us/en/products/details/fpga/development-tools/quartus-prime.html",
+    "category": "fpga",
+    "desc": "Intel/Altera FPGA synthesis, P&R, timing analysis. Supports Stratix, Cyclone, MAX.",
+    "alt": "Xilinx Vivado",
+    "commercial": true
+  },
+  "nextpnr": {
+    "name": "nextpnr",
+    "repo": "YosysHQ/nextpnr",
+    "docs": "https://github.com/YosysHQ/nextpnr",
+    "category": "fpga-pnr",
+    "desc": "Portable FPGA place-and-route tool.",
+    "alt": "Xilinx Vivado"
+  },
+  "vtr": {
+    "name": "VTR (Verilog-to-Routing)",
+    "repo": "verilog-to-routing/vtr-verilog-to-routing",
+    "docs": "https://verilog-to-routing.readthedocs.io/en/latest/",
+    "category": "fpga-cad",
+    "desc": "Academic FPGA CAD flow. Architecture exploration + place & route.",
+    "alt": "Vendor FPGA tools"
+  },
+  "cocotb": {
+    "name": "cocotb",
+    "repo": "cocotb/cocotb",
+    "docs": "https://cocotb.readthedocs.io/en/latest/",
+    "category": "verification",
+    "desc": "Coroutine-based cosimulation library for writing VHDL/Verilog testbenches in Python.",
+    "alt": "UVM"
+  },
+  "symbiyosys": {
+    "name": "SymbiYosys",
+    "repo": "YosysHQ/SymbiYosys",
+    "docs": "https://symbiyosys.readthedocs.io/en/latest/",
+    "category": "formal",
+    "desc": "Front-end for Yosys-based formal verification flows.",
+    "alt": "Synopsys VC Formal"
+  },
+  "ghdl": {
+    "name": "GHDL",
+    "repo": "ghdl/ghdl",
+    "docs": "https://ghdl.readthedocs.io/en/latest/",
+    "category": "simulation",
+    "desc": "VHDL simulator with full IEEE library support.",
+    "alt": "Siemens Questa"
+  },
+  "questa": {
+    "name": "Siemens Questa",
+    "repo": "",
+    "docs": "https://eda.sw.siemens.com/en-US/ic/questa/",
+    "category": "simulation",
+    "desc": "Advanced functional verification platform. Multi-language (SV/VHDL/Verilog/UVM), formal+simulation integrated.",
+    "alt": "Synopsys VCS",
+    "commercial": true
+  },
+  "modelsim": {
+    "name": "Intel ModelSim",
+    "repo": "",
+    "docs": "https://www.intel.com/content/www/us/en/software-kit/750368/modelsim-intel-fpgas-standard-edition-software-version-18-1.html",
+    "category": "simulation",
+    "desc": "HDL simulation tool for functional verification. VHDL/Verilog/SystemVerilog.",
+    "alt": "Siemens Questa",
+    "commercial": true
+  },
+  "vc-formal": {
+    "name": "Synopsys VC Formal",
+    "repo": "",
+    "docs": "https://www.synopsys.com/verification/formal/vc-formal.html",
+    "category": "formal",
+    "desc": "Formal property verification. FPV, equivalence checking, formal-based connectivity.",
+    "alt": "Cadence JasperGold",
+    "commercial": true
+  },
+  "jaspergold": {
+    "name": "Cadence JasperGold",
+    "repo": "",
+    "docs": "https://www.cadence.com/en_US/home/tools/system-design-and-verification/formal-and-static-verification/jaspergold-verification-system.html",
+    "category": "formal",
+    "desc": "Formal verification platform. Property checking, equivalence checking, connectivity verification.",
+    "alt": "Synopsys VC Formal",
+    "commercial": true
+  },
+  "virtuoso": {
+    "name": "Cadence Virtuoso",
+    "repo": "",
+    "docs": "https://www.cadence.com/en_US/home/tools/custom-ic-analog-rf-design/virtuoso-custom-design-platform.html",
+    "category": "analog-layout",
+    "desc": "Full-custom IC design platform. Schematic entry, simulation (Spectre), layout (XL/GXL), DRC/LVS.",
+    "alt": "Synopsys Custom Compiler",
+    "commercial": true
+  },
+  "custom-compiler": {
+    "name": "Synopsys Custom Compiler",
+    "repo": "",
+    "docs": "https://www.synopsys.com/customic/custom-compiler.html",
+    "category": "analog-layout",
+    "desc": "Custom/analogue layout design environment. Schematic-driven layout, auto routing.",
+    "alt": "Cadence Virtuoso",
+    "commercial": true
+  },
+  "spyglass": {
+    "name": "Synopsys SpyGlass",
+    "repo": "",
+    "docs": "https://www.synopsys.com/verification/lint/spyglass.html",
+    "category": "lint",
+    "desc": "RTL lint/CDC/RDC analysis. Design rule checking, clock domain crossing, reset domain crossing.",
+    "alt": "Cadence HAL",
+    "commercial": true
+  },
+  "dft-compiler": {
+    "name": "Synopsys DFT Compiler",
+    "repo": "",
+    "docs": "https://www.synopsys.com/dft/dft-compiler.html",
+    "category": "dft",
+    "desc": "Design-for-Test insertion. Scan chain, ATPG, BIST, boundary scan (IEEE 1149.1).",
+    "alt": "Cadence Modus",
+    "commercial": true
+  },
+  "modus": {
+    "name": "Cadence Modus DFT",
+    "repo": "",
+    "docs": "https://www.cadence.com/en_US/home/tools/digital-signoff-and-synthesis/modus-dft-solution.html",
+    "category": "dft",
+    "desc": "DFT insertion and test. Scan synthesis, ATPG, compression, BIST.",
+    "alt": "Synopsys DFT Compiler",
+    "commercial": true
+  },
+  "synplify": {
+    "name": "Synopsys Synplify",
+    "repo": "",
+    "docs": "https://www.synopsys.com/fpga/synplify.html",
+    "category": "fpga-synthesis",
+    "desc": "FPGA synthesis tool. Supports Xilinx, Intel/Altera, Lattice, Microchip FPGAs.",
+    "alt": "Vendor FPGA synthesis",
+    "commercial": true
+  },
+  "diamond": {
+    "name": "Lattice Diamond",
+    "repo": "",
+    "docs": "https://www.latticesemi.com/products/designsoftwareandip/tools2/fpgadesignsoftware/diamond",
+    "category": "fpga",
+    "desc": "Lattice FPGA design suite. Synthesis, P&R, timing analysis for ECP5, Nexus, CertusPro.",
+    "alt": "Xilinx Vivado",
+    "commercial": true
+  },
+  "redhawk": {
+    "name": "ANSYS RedHawk",
+    "repo": "",
+    "docs": "https://www.ansys.com/products/semiconductors/ansys-redhawk",
+    "category": "power-integrity",
+    "desc": "Power integrity and EM/ESD analysis. On-chip power grid, IR drop, electromigration.",
+    "alt": "Synopsys Totem",
+    "commercial": true
+  },
+  "totem": {
+    "name": "Synopsys Totem",
+    "repo": "",
+    "docs": "https://www.synopsys.com/implementation-solution/power-analysis/totem.html",
+    "category": "power-integrity",
+    "desc": "Full-chip power integrity. IR drop, EM, ESD, thermal analysis for custom/digital designs.",
+    "alt": "ANSYS RedHawk",
+    "commercial": true
+  },
+  "prime-time-si": {
+    "name": "Synopsys PrimeTime SI",
+    "repo": "",
+    "docs": "https://www.synopsys.com/glossary/what-is-prime-time.html",
+    "category": "signal-integrity",
+    "desc": "Signal integrity analysis. Crosstalk-induced delay, noise, glitches. Sign-off SI.",
+    "alt": "Cadence Tempus SI",
+    "commercial": true
+  },
+  "tempus-si": {
+    "name": "Cadence Tempus SI",
+    "repo": "",
+    "docs": "https://www.cadence.com/en_US/home/tools/digital-signoff-and-synthesis/tempus-timing-signoff-solution.html",
+    "category": "signal-integrity",
+    "desc": "Sign-off signal integrity. Crosstalk analysis, noise budget, SI-driven optimisation.",
+    "alt": "Synopsys PrimeTime SI",
+    "commercial": true
+  },
+  "hal": {
+    "name": "Cadence HAL",
+    "repo": "",
+    "docs": "https://www.cadence.com/en_US/home/tools/system-design-and-verification/systemc-and-tlm-tools/hal.html",
+    "category": "lint",
+    "desc": "RTL lint and CDC analysis. Design rule checks, semantic checks, clock domain crossing.",
+    "alt": "Synopsys SpyGlass",
+    "commercial": true
+  },
+  "ieee-1149": {
+    "name": "IEEE 1149.1 (JTAG)",
+    "repo": "",
+    "docs": "",
+    "category": "test",
+    "desc": "Standard for boundary scan test access. Used by DFT tools (DFT Compiler, Modus) for chip-level test.",
+    "alt": "IEEE 1500"
+  },
+  "ieee-1500": {
+    "name": "IEEE 1500 (WIF)",
+    "repo": "",
+    "docs": "",
+    "category": "test",
+    "desc": "Standard for embedded core test. Wrapper serial/parallel interface for IP core test.",
+    "alt": "IEEE 1149.1"
+  },
+  "ieda": {
+    "name": "iEDA",
+    "repo": "1016667086/iEDA",
+    "docs": "https://ieda.oscc.cc/en/",
+    "category": "physical-design",
+    "desc": "Open-source EDA infrastructure and tools from Netlist to GDS.",
+    "alt": "Commercial EDA suite"
+  },
+  "starrc": {
+    "name": "Synopsys StarRC",
+    "repo": "",
+    "docs": "https://www.synopsys.com/glossary/what-is-star-rc.html",
+    "category": "extraction",
+    "desc": "Parasitic extraction tool. Extracts RC parasitics from layout for sign-off STA.",
+    "alt": "Cadence Quantus",
+    "commercial": true
+  },
+  "quantus": {
+    "name": "Cadence Quantus QRC",
+    "repo": "",
+    "docs": "https://www.cadence.com/en_US/home/tools/digital-signoff-and-synthesis/quantus-extraction-solution.html",
+    "category": "extraction",
+    "desc": "Parasitic extraction. QRC technology for accurate RC modelling.",
+    "alt": "Synopsys StarRC",
+    "commercial": true
+  },
+  "voltus": {
+    "name": "Cadence Voltus",
+    "repo": "",
+    "docs": "https://www.cadence.com/en_US/home/tools/digital-signoff-and-synthesis/voltus-ic-power-signoff-solution.html",
+    "category": "power",
+    "desc": "Power sign-off. IR drop analysis, EM/ESD checks, dynamic/static power.",
+    "alt": "Synopsys PrimePower",
+    "commercial": true
+  },
+  "primepower": {
+    "name": "Synopsys PrimePower",
+    "repo": "",
+    "docs": "https://www.synopsys.com/glossary/what-is-primepower.html",
+    "category": "power",
+    "desc": "Gate-level power analysis. Vector-based and vectorless power estimation.",
+    "alt": "Cadence Voltus",
+    "commercial": true
+  }
+}

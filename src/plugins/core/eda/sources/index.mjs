@@ -120,7 +120,8 @@ import { enhanceQueryForEDA, generateSearchQueries } from '../query/enhance.mjs'
  * 4. 格式化輸出
  */
 export async function multiSourceSearch(searchQuery, maxResults = 10, options = {}) {
-  const { depth = 'shallow', compress = 'none', fusion = true } = options;
+  const { depth = 'shallow', compress = 'none', fusion = true, offset = 0 } = options;
+  const fetchLimit = maxResults + offset;
   const searchQueries = generateSearchQueries(searchQuery);
   const enhancedQuery = enhanceQueryForEDA(searchQuery);
   const classification = classifyQuery(searchQuery);
@@ -142,7 +143,7 @@ export async function multiSourceSearch(searchQuery, maxResults = 10, options = 
     searchGitHubCode(searchQueries.github, 5),
     searchGitHubEDA(searchQuery, 5),
   ];
-  if (isExaAvailable()) searches.push(searchExa(searchQuery, Math.min(maxResults, 5)));
+  searches.push(searchExa(searchQuery, Math.min(maxResults, 5)));
 
   const sources = await Promise.allSettled(searches);
   const warnings = [];
@@ -162,7 +163,7 @@ export async function multiSourceSearch(searchQuery, maxResults = 10, options = 
   const articles = sources[4].status === 'fulfilled' ? sources[4].value : [];
   const ghCode = sources[5].status === 'fulfilled' ? sources[5].value : [];
   const ghRepos = sources[6].status === 'fulfilled' ? sources[6].value : [];
-  const exaData = isExaAvailable() && sources[7]?.status === 'fulfilled' ? sources[7].value : [];
+  const exaData = sources[7]?.status === 'fulfilled' ? sources[7].value : [];
 
   // ── Step 3: RRF Fusion ─────────────────────────────────────────────
   let output = '';
@@ -180,10 +181,12 @@ export async function multiSourceSearch(searchQuery, maxResults = 10, options = 
     ].filter(Boolean);
 
     if (sourceResults.length > 0) {
-      // RRF 融合
-      const rrfResults = reciprocalRankFusion(sourceResults, { maxResults: maxResults * 2 });
+      // RRF 融合（多取 offset 個以便分頁裁切）
+      const rrfResults = reciprocalRankFusion(sourceResults, { maxResults: fetchLimit * 2 });
       // EDA rerank + adaptive Top-K + post-filter
-      fusedResults = rerankPipeline(rrfResults, searchQuery, classification, { maxResults });
+      fusedResults = rerankPipeline(rrfResults, searchQuery, classification, { maxResults: fetchLimit });
+      // 分頁裁切
+      fusedResults = fusedResults.slice(offset, offset + maxResults);
       output = formatFusedResults(fusedResults);
     }
   }
@@ -217,7 +220,7 @@ export async function multiSourceSearch(searchQuery, maxResults = 10, options = 
   }
 
   // ── Step 4: 深度爬取 ──────────────────────────────────────────────
-  if (depth === 'deep' && isExaAvailable()) {
+  if (depth === 'deep') {
     // 優先爬 RRF 融合後的高分 URL
     const urlsToCrawl = fusedResults.length > 0
       ? fusedResults.slice(0, 4).map(r => r.url)

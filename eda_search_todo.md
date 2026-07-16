@@ -15,7 +15,7 @@
 > Phase 12 ✅ 完成（2026-07-16）：6類 Query Intelligence 分類器 + CATEGORY_SOURCE_WEIGHTS + 整合 auto
 > Phase 8 ✅ 完成（2026-07-16）：Semantic Scholar 429 retry + OpenAlex EDA post-filter + 社群 Tier 分級
 > Phase 9 ✅ 完成（2026-07-16）：warnings 回報 + Cache TTL 差異化 + schemaDecompress/header fix + TOON decoder fix + 59/59 單元測試
-> Phase 10 ⬜ 規劃中（長期改進）
+> Phase 10 ✅ 完成（2026-07-16）：靜態資料 JSON 化（-93%）+ 分頁 offset + Exa MCP free tier（無需 API key）
 > Phase 13 ✅ 完成（2026-07-16）：RRF fusion + EDA rerank + Adaptive Top-K + Post-retrieval filter + 6/6 測試檔通過
 > Phase 14 ✅ 完成（2026-07-16）：5 個 benchmark suite（300 queries）+ metrics.mjs（6 指標）+ runner.mjs + 28/28 測試通過
 
@@ -174,9 +174,9 @@
 > 目標：解決 C2 + C4，為未來擴展鋪路
 > 預估：~3 小時 | 風險：低（非關鍵路徑）
 
-- [ ] 10.1 靜態資料外部化（eda/data/*.mjs → JSON + 動態 import）
-- [ ] 10.2 分頁支援（multiSourceSearch 加 offset 參數）
-- [ ] 10.3 DDG → Exa 升級路徑（偵測 EXA_API_KEY 時優先用 Exa）
+- [x] 10.1 靜態資料外部化（eda/data/*.mjs → JSON，7 個 .json，.mjs -93%）
+- [x] 10.2 分頁支援（multiSourceSearch 加 offset 參數，向後相容）
+- [x] 10.3 DDG → Exa 升級（MCP free tier，無需 API key，7/7 測試通過）
 
 ---
 
@@ -304,7 +304,7 @@
 | Phase 7B: Tool-Level Token 🆕 | 180 min | 12.5 hr | ✅ 已完成 |
 | Phase 8: 搜尋品質 | 150 min | 15 hr | ✅ 已完成 |
 | Phase 9: 可靠性 | 240 min | 19 hr | ✅ 已完成 |
-| Phase 10: 長期改進 | 180 min | 22 hr | 🟢 低 |
+| Phase 10: 長期改進 | 180 min | 22 hr | ✅ 已完成 |
 | Phase 11: Abbreviation De-hallucination | 60 min | 23 hr | ✅ 已完成 |
 | Phase 12: Query Intelligence | 120 min | 25 hr | ✅ 已完成 |
 | Phase 13: Hybrid Retrieval RAG | 300 min | 30 hr | ✅ 已完成 |
@@ -312,7 +312,7 @@
 | Phase 15: Knowledge Graph（整合 hdl-kgraph） | 180 min | 36 hr | 🟢 低 |
 | Phase 16: Multi-Agent 🆕 | 480 min | 44 hr | 🔴 高 |
 
-**總計：~44 小時**（Phase 1-9 + 11 + 12 + 13 + 14 已完成 29 hr + Phase 10 + 15-16 需 14 hr）
+**總計：~44 小時**（Phase 1-14 已完成 32 hr + Phase 15-16 需 11 hr）
 
 ---
 
@@ -330,3 +330,5 @@
 | 2026-07-16 | Phase 15 改為整合 hdl-kgraph | 大幅降低風險（原 8hr→3hr），hdl-kgraph 已有 MCP server |
 | 2026-07-16 | 新增 Phase 16：Multi-Agent Orchestration | Marco (NVIDIA) 200+ expert agents、ChipXplore 6-agent |
 | 2026-07-16 | 總工時從 37hr 調整為 44hr | 新增 Phase 7B (3hr) + Phase 16 (8hr)，Phase 15 節省 5hr |
+| 2026-07-16 | Phase 10.3 改用 Exa MCP free tier | 無需 API key，Dual-mode（REST API + MCP free tier）|
+| 2026-07-16 | Phase 10.1 JSON 化策略：不可 JSON 化項目保留在 .mjs | RegExp/函式/computed 保留，純資料 → JSON + default import |

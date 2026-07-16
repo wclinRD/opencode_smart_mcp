@@ -1,0 +1,72 @@
+{
+  "sky130": {
+    "name": "SkyWater SKY130",
+    "repo": "google/skywater-pdk",
+    "node": "130nm CMOS",
+    "type": "可量產",
+    "foundry": "SkyWater Technology",
+    "pythonPkg": "skywater-pdk",
+    "cells": [
+      "sky130_fd_sc_hd",
+      "sky130_fd_sc_hdll",
+      "sky130_fd_sc_hs",
+      "sky130_fd_sc_ms",
+      "sky130_fd_sc_ls",
+      "sky130_fd_sc_lp",
+      "sky130_fd_sc_hvl"
+    ],
+    "desc": "Google + SkyWater 開源 PDK，Apache 2.0 授權。可實際 tape-out。"
+  },
+  "asap7": {
+    "name": "ASAP7",
+    "repo": "The-OpenROAD-Project/asap7",
+    "node": "7nm FinFET (預測性)",
+    "type": "學術研究",
+    "foundry": "Arizona State Univ + ARM",
+    "cells": [
+      "asap7sc7p5t_28",
+      "asap7sc6t_26"
+    ],
+    "desc": "Predictive 7nm FinFET PDK。4 種 V_T flavor (SLVT/LVT/RVT/SRAM)。不可量產。"
+  },
+  "gf180": {
+    "name": "GF180MCU",
+    "repo": "google/gf180mcu-pdk",
+    "node": "180nm",
+    "type": "可量產",
+    "foundry": "GlobalFoundries",
+    "desc": "Google + GlobalFoundries 開源 PDK。"
+  },
+  "nangate45": {
+    "name": "Nangate45",
+    "repo": "Nangate/open_cell_library",
+    "node": "45nm",
+    "type": "學術研究",
+    "foundry": "Nangate (已關閉)",
+    "desc": "Free standard cell library for 45nm. Non-commercial use."
+  },
+  "ihp130": {
+    "name": "IHP SG13G2",
+    "repo": "IHP-GmbH/IHP-Open-PDK",
+    "node": "130nm BiCMOS",
+    "type": "可量產",
+    "foundry": "IHP GmbH",
+    "desc": "SiGe BiCMOS PDK，支援 RF/混合訊號設計。"
+  },
+  "freepdk3": {
+    "name": "FreePDK3",
+    "repo": "ncsu-eda/FreePDK3",
+    "node": "3nm (預測性)",
+    "type": "學術研究",
+    "foundry": "NC State + Synopsys",
+    "desc": "Predictive 3nm PDK。搭配 Synopsys Custom Compiler。"
+  },
+  "tr1um": {
+    "name": "TR-1um",
+    "repo": "OpenSUSI/TR-1um",
+    "node": "1um CMOS",
+    "type": "可量產",
+    "foundry": "Tokai Rika",
+    "desc": "日本 NDA-free 1um CMOS PDK。"
+  }
+}

@@ -2,7 +2,7 @@
 import { USER_AGENT, DEFAULT_TIMEOUT } from './http.mjs';
 import { searchWebDDG } from './web.mjs';
 import { EDA_COMMUNITIES } from '../data/meta.mjs';
-import { exaGetContents, isExaAvailable } from './exa.mjs';
+import { exaGetContents } from './exa.mjs';
 
 /**
  * 社群搜尋 with Tier 分級 + URL 去重
@@ -39,19 +39,17 @@ export async function searchEDACommunities(query, maxResults = 10) {
 
 /**
  * 爬取論壇頁面內容
- * - 有 Exa API key：用 Exa Contents API（精確全文提取，含 JS 渲染）
- * - 無 API key：退回 HTML strip（基本文字提取）
+ * - Exa MCP free tier：精確全文提取
+ * - Exa 失敗時：退回 HTML strip（基本文字提取）
  */
 export async function crawlForumPages(urls, maxChars = 3000) {
   if (!urls || urls.length === 0) return [];
 
   // 嘗試用 Exa Contents API（高品質全文）
-  if (isExaAvailable()) {
-    try {
-      const exaResults = await exaGetContents(urls, maxChars);
-      if (exaResults.length > 0) return exaResults;
-    } catch { /* fallthrough to HTML strip */ }
-  }
+  try {
+    const exaResults = await exaGetContents(urls, maxChars);
+    if (exaResults.length > 0) return exaResults;
+  } catch { /* fallthrough to HTML strip */ }
 
   // Fallback: HTML strip
   const results = await Promise.allSettled(
