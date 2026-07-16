@@ -21,6 +21,21 @@ const MCP_TOOLS = {
 
 // ── MCP free tier helpers ─────────────────────────────────────────────
 
+// 並發控制：同時最多 2 個 MCP 請求，避免 429
+let _inflight = 0;
+const MAX_INFLIGHT = 2;
+
+/** 等待並發槽位釋放 */
+function waitForSlot() {
+  if (_inflight < MAX_INFLIGHT) { _inflight++; return Promise.resolve(); }
+  return new Promise(resolve => {
+    const check = () => { if (_inflight < MAX_INFLIGHT) { _inflight++; resolve(); } else { setTimeout(check, 200); } };
+    check();
+  });
+}
+
+function releaseSlot() { _inflight = Math.max(0, _inflight - 1); }
+
 /** Parse SSE (Server-Sent Events) response */
 function parseSseResponse(text) {
   const lines = text.split('\n');
@@ -44,51 +59,71 @@ function parseSseResponse(text) {
   return events;
 }
 
-/** Call Exa MCP server via JSON-RPC (free tier, no API key needed) */
+/** Call Exa MCP server via JSON-RPC (free tier, no API key needed)
+ *  自動 retry 429（exponential backoff）+ 並發控制 */
 async function mcpToolCall(tool, args) {
-  const resp = await fetch(MCP_BASE, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json, text/event-stream',
-      'User-Agent': USER_AGENT,
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: '1',
-      method: 'tools/call',
-      params: { name: tool, arguments: args },
-    }),
-    signal: AbortSignal.timeout(20000),
-  });
-  if (!resp.ok) {
-    const text = await resp.text();
-    if (resp.status === 429) {
-      throw new Error('Exa free tier rate limit exceeded.');
+  const MAX_RETRIES = 2;
+  const BASE_DELAY = 1500;
+
+  await waitForSlot();
+  try {
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        const delay = BASE_DELAY * Math.pow(2, attempt - 1);
+        console.log(`[Exa] 429 retry ${attempt}/${MAX_RETRIES}, waiting ${delay}ms...`);
+        await new Promise(r => setTimeout(r, delay));
+      }
+      try {
+        const resp = await fetch(MCP_BASE, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json, text/event-stream',
+            'User-Agent': USER_AGENT,
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: '1',
+            method: 'tools/call',
+            params: { name: tool, arguments: args },
+          }),
+          signal: AbortSignal.timeout(20000),
+        });
+        if (resp.status === 429) {
+          continue;
+        }
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(`Exa MCP error (${resp.status}): ${text}`);
+        }
+        const contentType = resp.headers.get('content-type') || '';
+        const rawText = await resp.text();
+        let data;
+        if (contentType.includes('text/event-stream')) {
+          const events = parseSseResponse(rawText);
+          data = events.find(e => e.id === '1') || events[0] || {};
+        } else {
+          try { data = JSON.parse(rawText); } catch {
+            throw new Error(`Exa MCP error: unexpected response format.`);
+          }
+        }
+        if (data.error) {
+          throw new Error(`Exa MCP error: ${data.error.message || JSON.stringify(data.error)}`);
+        }
+        const result = data.result || {};
+        return (result.content || [])
+          .filter(c => c.type === 'text')
+          .map(c => c.text)
+          .join('\n');
+      } catch (e) {
+        if (attempt < MAX_RETRIES && e.name === 'AbortError') continue;
+        throw e;
+      }
     }
-    throw new Error(`Exa MCP error (${resp.status}): ${text}`);
+    throw new Error('Exa free tier rate limit exceeded after retries.');
+  } finally {
+    releaseSlot();
   }
-  const contentType = resp.headers.get('content-type') || '';
-  const rawText = await resp.text();
-  let data;
-  if (contentType.includes('text/event-stream')) {
-    const events = parseSseResponse(rawText);
-    data = events.find(e => e.id === '1') || events[0] || {};
-  } else {
-    try {
-      data = JSON.parse(rawText);
-    } catch {
-      throw new Error(`Exa MCP error: unexpected response format.`);
-    }
-  }
-  if (data.error) {
-    throw new Error(`Exa MCP error: ${data.error.message || JSON.stringify(data.error)}`);
-  }
-  const result = data.result || {};
-  return (result.content || [])
-    .filter(c => c.type === 'text')
-    .map(c => c.text)
-    .join('\n');
 }
 
 // ── Exa 語意搜尋 ───────────────────────────────────────────────────
