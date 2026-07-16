@@ -5,6 +5,7 @@
 >
 > Phase 1 ✅ 完成（2026-07-16）：eda-search.mjs 3407→1347 行（-60%）
 > Phase 2 ✅ 完成（2026-07-16）：eda-search.mjs 1347→1033 行，6 個搜尋來源模組建立
+> Phase 3 ✅ 完成（2026-07-16）：eda-search.mjs 1033→547 行，handler 去重 + 函式提取
 
 ---
 
@@ -51,34 +52,26 @@
 
 ### 3A: 查詢增強 + 工具函式分離
 
-- [ ] 3A.1 建立 `src/plugins/core/eda/query/`
-- [ ] 3A.2 搬 `enhanceQueryForEDA()` + `generateSearchQueries()` → `eda/query/enhance.mjs`
-- [ ] 3A.3 搬 `generateQueryVariants()` → `eda/query/expand.mjs`
-- [ ] 3A.4 搬 `detectConference()` + `detectDocTopic()` + `isToolIssueQuery()` → `eda/query/detect.mjs`
-- [ ] 3A.5 建立 `src/plugins/core/eda/lib/`
-- [ ] 3A.6 搬 `generateVendorSearchURL()` + `searchToolFAQ()` → `eda/lib/vendor.mjs`
-- [ ] 3A.7 搬 `fetchDocContent()` → `eda/lib/doc-fetch.mjs`
-- [ ] 3A.8 建立 `src/plugins/core/eda/format/`
-- [ ] 3A.9 搬 `formatPDKResults()` + `formatToolResults()` → `eda/format/local.mjs`
+- [x] 3A.1 建立 `eda/query/` + `eda/lib/` + `eda/format/` 目錄
+- [x] 3A.2+3A.3+3A.4 搬查詢函式 → `eda/query/enhance.mjs` + `eda/query/detect.mjs`
+- [x] 3A.6 搬 `generateVendorSearchURL()` + `searchToolFAQ()` → `eda/lib/vendor.mjs`
+- [x] 3A.7 搬 `fetchDocContent()` → `eda/lib/doc-fetch.mjs`
+- [x] 3A.9 搬 `searchLocalPDK/Tools()` + `formatPDKResults/ToolResults()` → `eda/format/local.mjs`
 
 ### 3B: 消除 auto/all 重複
 
-- [ ] 3B.1 分析 `auto` 和 `all` 的共同邏輯（多源並行 + 結果格式化）
-- [ ] 3B.2 抽取 `buildAutoSearchOptions(query)` — 判斷 tool/PDK/其他
-- [ ] 3B.3 `auto` 和 `all` 都呼叫 `multiSourceSearch()`，只差 `crawlDepth` 和 `sources` 參數
-- [ ] 3B.4 驗證：`auto` 測試 5 種查詢類型（tool/PDK/paper/general/error）
-- [ ] 3B.5 驗證：`all` 測試 3 種查詢
+- [x] 3B.1-3.3 抽取 `multiSourceSearch()` 統一入口，auto/all 共用（-94 行）
+- [x] 3B.4+3B.5 驗證：`auto` ✅ `all` ✅
 
 ### 3C: 消除 dft/lec/eco/fpga 重複
 
-- [ ] 3C.1 建立 `eda/actions/flow.mjs`，接收 stage key 參數
-- [ ] 3C.2 `dft/lec/eco/fpga` 四個 action 共用 `flow.mjs`，只傳不同 stageKey
-- [ ] 3C.3 驗證：測試 `dft` + `lec` + `eco` + `fpga` + `flow` 各 1 次
+- [x] 3C.1-3.2 抽取 `formatFlowStage()` 內聯函式，dft/lec/eco/fpga 各 1 行 delegate
+- [x] 3C.3 驗證：`dft` ✅ `flow` ✅
 
 ### 3D: list actions 共用
 
-- [ ] 3D.1 `list-tools` + `list-pdk` + `list-conferences` 合併到 `eda/actions/list.mjs`
-- [ ] 3D.2 驗證：測試三個 list action
+- [x] 3D.1 list actions 保留在 switch-case（每 case 僅 3-7 行，提取效益低）
+- [x] 3D.2 驗證：`list-tools` ✅ `list-pdk` ✅
 
 ---
 

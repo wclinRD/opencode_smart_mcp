@@ -29,406 +29,78 @@ import { searchEDACommunities, crawlForumPages, formatCommunityResults } from '.
 import { searchOpenAlex, reconstructAbstract, formatOpenAlexResults } from './eda/sources/openalex.mjs';
 import { searchSemanticScholar, formatSemanticScholarResults } from './eda/sources/semantic-scholar.mjs';
 
-// ── 文件爬取（開源工具 GitHub raw）─────────────────────────────────────────────
-async function fetchDocContent(toolKey, topic) {
-  const docInfo = VENDOR_DOCS[toolKey];
-  if (!docInfo) return null;
-
-  // 開源工具：從 GitHub raw URL 爬取
-  if (docInfo.type === 'open-source') {
-    const doc = docInfo.docs.find(d => d.topic === topic) || docInfo.docs[0];
-    if (!doc || !doc.url) return null;
-    try {
-      // 用 text fetch（非 JSON）
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 15000);
-      const resp = await fetch(doc.url, {
-        headers: { 'User-Agent': USER_AGENT },
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const content = await resp.text();
-      // 截取前 3000 字元（避免太長）
-      const truncated = content.length > 3000 ? content.slice(0, 3000) + '\n\n... (內容已截斷)' : content;
-      return {
-        tool: docInfo.name,
-        topic: doc.topic,
-        source: doc.url,
-        type: 'fetched',
-        content: truncated,
-      };
-    } catch (err) {
-      return { tool: docInfo.name, topic, source: doc.url, type: 'error', error: err.message };
-    }
-  }
-
-  // 商業工具：返回索引的 excerpt
-  if (docInfo.type === 'commercial') {
-    const docs = topic
-      ? docInfo.docs.filter(d => d.topic === topic || d.topic === 'overview')
-      : docInfo.docs.slice(0, 3); // 預設返回前 3 個 topic
-    if (docs.length === 0) return null;
-    return {
-      tool: docInfo.name,
-      topic: topic || 'overview',
-      type: 'indexed',
-      vendor: docInfo.vendor,
-      excerpts: docs.map(d => ({ topic: d.topic, content: d.excerpt })),
-      solvnet: docInfo.vendor === 'synopsys'
-        ? `https://solvnet.synopsys.com/solve/qa?search=${encodeURIComponent(docInfo.name + ' ' + (topic || ''))}`
-        : docInfo.vendor === 'cadence'
-        ? `https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution`
-        : null,
-    };
-  }
-
-  return null;
-}
-
-// 偵測 query 中的 topic 關鍵字
-function detectDocTopic(query) {
-  const q = query.toLowerCase();
-  const topicMap = [
-    ['overview', /overview|introduction|what is|介紹|概觀|概述/i],
-    ['analyze', /analyze|analysis|分析/i],
-    ['elaborate', /elaborate|展開/i],
-    ['compile', /compile|synthesis|合成|編譯/i],
-    ['link', /link|連結|連接/i],
-    ['timing', /timing|時序|時脈|STA|setup|hold/i],
-    ['area', /area|面積/i],
-    ['power', /power|功耗|漏電/i],
-    ['constraints', /constraint|SDC|constraint|set_clock|set_input|set_output/i],
-    ['output', /output|write|write_sdc|write_sdf|輸出/i],
-    ['placement', /place|placement|配置/i],
-    ['cts', /cts|clock tree|時脈樹/i],
-    ['route', /route|routing|繞線/i],
-    ['opt', /opt|optimize|優化/i],
-    ['drc', /DRC|design rule/i],
-    ['lvs', /LVS|layout vs schematic/i],
-    ['pex', /PEX|parasitic extraction|寄生/i],
-    ['setup', /setup|initial|init|初始化/i],
-    ['simulate', /simulate|simulation|模擬/i],
-    ['debug', /debug|除錯|調試/i],
-    ['coverage', /coverage|覆蓋率/i],
-    ['lint', /lint|語法/i],
-    ['cdc', /CDC|clock domain crossing/i],
-    ['verify', /verify|verification| equivalence|等價/i],
-    ['scan', /scan chain|scan insertion/i],
-    ['ocv', /OCV|on-chip variation/i],
-    ['clock', /clock|skew|latency/i],
-    ['extraction', /extraction|提取/i],
-  ];
-  for (const [topic, pattern] of topicMap) {
-    if (pattern.test(q)) return topic;
-  }
-  return null;
-}
-
-// ── 廠商 Q&A 搜尋 ─────────────────────────────────────────────────────────
-// 偵測 tool 問題時，自動生成 SolvNet / Cadence Support 搜尋 URL
-function generateVendorSearchURL(toolName, query) {
-  const toolLower = toolName.toLowerCase();
-  const searchQuery = encodeURIComponent(`${query} ${toolName}`);
-  const urls = [];
-
-  // Synopsys 工具 → SolvNet
-  if (['design compiler', 'dc', 'vcs', 'primetime', 'pt', 'formality', 'fmod', 'icc2', 'dc explorer', 'spyglass'].some(t => toolLower.includes(t))) {
-    urls.push({
-      vendor: 'Synopsys SolvNet',
-      url: `https://solvnet.synopsys.com/solve/qa?search=${searchQuery}`,
-      note: 'Synopsys 官方 Q&A 知識庫',
-    });
-  }
-
-  // Cadence 工具 → Cadence Support
-  if (['innovus', 'xcelium', 'conformal', 'lec', 'virtuoso', 'tempus', 'voltus', 'genus', ' JasperGold', 'Stratus'].some(t => toolLower.includes(t))) {
-    urls.push({
-      vendor: 'Cadence Online Support',
-      url: `https://support.cadence.com/apex/ArticleAttachmentPortal?id=a1O3w000009lpPjEAI&pageName=ArticleContentView&pub=solution&q=${searchQuery}`,
-      note: 'Cadence 官方技術支援',
-    });
-  }
-
-  // Siemens (Calibre) → Siemens EDA Support
-  if (toolLower.includes('calibre') || toolLower.includes('siemens') || toolLower.includes('icv') || toolLower.includes('mGCAR')) {
-    urls.push({
-      vendor: 'Siemens EDA Support',
-      url: `https://eda.com/support/calibre`,
-      note: 'Siemens EDA (Calibre) 支援中心',
-    });
-  }
-
-  // Xilinx/AMD → Xilinx Support
-  if (toolLower.includes('vivado') || toolLower.includes('xilinx') || toolLower.includes('quartus')) {
-    urls.push({
-      vendor: 'AMD/Xilinx Support',
-      url: `https://support.xilinx.com/s/global-search/${searchQuery}`,
-      note: 'AMD/Xilinx 官方支援中心',
-    });
-  }
-
-  // Intel → Intel Support
-  if (toolLower.includes('quartus') || toolLower.includes('intel') || toolLower.includes('altera')) {
-    urls.push({
-      vendor: 'Intel Support',
-      url: `https://www.intel.com/content/www/us/en/search.html?#q=${searchQuery}&t=All`,
-      note: 'Intel FPGA 支援中心',
-    });
-  }
-
-  // 通用搜尋 fallback
-  if (urls.length === 0) {
-    urls.push({
-      vendor: 'Google',
-      url: `https://www.google.com/search?q=${searchQuery}+error+solution+site:solvnet.synopsys.com+OR+site:support.cadence.com`,
-      note: '通用 EDA 問題搜尋',
-    });
-  }
-
-  return urls;
-}
-
-// 從 TOOL_FAQ_INDEX 搜尋匹配的 FAQ
-function searchToolFAQ(query, toolFilter) {
-  const q = query.toLowerCase();
-  const results = [];
-
-  for (const [toolId, toolData] of Object.entries(TOOL_FAQ_INDEX)) {
-    // 如果有 tool filter，只搜尋指定工具
-    if (toolFilter && !toolId.includes(toolFilter.toLowerCase()) && !toolData.tool.toLowerCase().includes(toolFilter.toLowerCase())) {
-      continue;
-    }
-
-    for (const faq of toolData.faqs) {
-      // 用 regex pattern 匹配錯誤訊息
-      if (faq.pattern.test(query)) {
-        results.push({
-          tool: toolData.tool,
-          error: faq.error,
-          cause: faq.cause,
-          solution: faq.solution,
-          solvnet: faq.solvnet,
-        });
-      }
-    }
-  }
-
-  // 如果 regex 沒匹配，用 word overlap 做 fuzzy 搜尋
-  if (results.length === 0) {
-    const words = q.split(/\s+/).filter(w => w.length > 2);
-    for (const [toolId, toolData] of Object.entries(TOOL_FAQ_INDEX)) {
-      if (toolFilter && !toolId.includes(toolFilter.toLowerCase()) && !toolData.tool.toLowerCase().includes(toolFilter.toLowerCase())) {
-        continue;
-      }
-
-      for (const faq of toolData.faqs) {
-        const faqText = `${faq.error} ${faq.cause} ${faq.solution}`.toLowerCase();
-        const overlap = words.filter(w => faqText.includes(w));
-        if (overlap.length >= Math.ceil(words.length * 0.4) || overlap.length >= 2) {
-          results.push({
-            tool: toolData.tool,
-            error: faq.error,
-            cause: faq.cause,
-            solution: faq.solution,
-            solvnet: faq.solvnet,
-            matchScore: overlap.length / words.length,
-          });
-        }
-      }
-    }
-    // 按 matchScore 排序
-    results.sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0));
-  }
-
-  return results.slice(0, 5);
-}
-
-function isToolIssueQuery(query) {
-  return TOOL_ISSUE_PATTERNS.some(p => p.test(query));
-}
+// ── 查詢處理（從 eda/query/ 匯入）────────────────────────────────────────
+import { enhanceQueryForEDA, generateSearchQueries, generateQueryVariants, detectConference } from './eda/query/enhance.mjs';
+import { detectDocTopic, isToolIssueQuery } from './eda/query/detect.mjs';
+// ── 工具函式（從 eda/lib/ 匯入）──────────────────────────────────────────
+import { generateVendorSearchURL, searchToolFAQ } from './eda/lib/vendor.mjs';
+import { fetchDocContent } from './eda/lib/doc-fetch.mjs';
+// ── 格式化（從 eda/format/ 匯入）────────────────────────────────────────
+import { searchLocalPDK, formatPDKResults, searchLocalTools, formatToolResults } from './eda/format/local.mjs';
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 4. PDK 快速查詢（本地索引 + GitHub API 補充）
-// ═══════════════════════════════════════════════════════════════════════════════
+// ── 多源並行搜尋統一入口 ────────────────────────────────────────────────
+async function multiSourceSearch(searchQuery, maxResults = 10) {
+  const searchQueries = generateSearchQueries(searchQuery);
+  const enhancedQuery = enhanceQueryForEDA(searchQuery);
+  const sources = await Promise.allSettled([
+    searchWebDDG(searchQueries.web, maxResults),
+    searchEDACommunities(searchQuery, maxResults),
+    searchSemanticScholar(searchQueries.academic || enhancedQuery, maxResults).then(r => r.ok ? r.data : []),
+    searchOpenAlex(searchQueries.academic || enhancedQuery, Math.min(maxResults, 5)),
+    searchGitHubCode(searchQueries.github, 5),
+    searchGitHubEDA(searchQuery, 5),
+  ]);
 
-function searchLocalPDK(query) {
-  const words = query.toLowerCase().split(/\s+/).filter(w => w.length >= 2);
-  if (words.length === 0) return [];
-  const results = [];
-  for (const [key, pdk] of Object.entries(PDK_INDEX)) {
-    const searchable = `${key} ${pdk.name} ${pdk.node} ${pdk.foundry} ${(pdk.cells || []).join(' ')}`.toLowerCase();
-    // OR logic: any word matches = hit
-    if (words.some(w => searchable.includes(w))) {
-      results.push({ key, ...pdk });
+  let output = '';
+
+  const webResults = sources[0].status === 'fulfilled' ? sources[0].value : [];
+  if (webResults.length > 0) output += formatWebResults(webResults);
+
+  const communityResults = sources[1].status === 'fulfilled' ? sources[1].value : [];
+  if (communityResults.length > 0) {
+    const topUrls = communityResults.slice(0, 3).map(r => r.url);
+    let crawledPages = [];
+    try { crawledPages = await crawlForumPages(topUrls); } catch { /* ignore */ }
+    output += formatCommunityResults(communityResults, crawledPages);
+  }
+
+  const scholarData = sources[2].status === 'fulfilled' ? sources[2].value : [];
+  if (scholarData.length > 0) output += formatSemanticScholarResults(scholarData);
+
+  const articles = sources[3].status === 'fulfilled' ? sources[3].value : [];
+  if (articles.length > 0) output += formatOpenAlexResults(articles);
+
+  const ghCode = sources[4].status === 'fulfilled' ? sources[4].value : [];
+  if (ghCode.length > 0) {
+    output += `💻 **GitHub 程式碼**（相關 script / tool flow）\n\n`;
+    for (const r of ghCode) output += `- [${r.name}](${r.url}) — *${r.repo}*\n`;
+    output += '\n';
+  }
+
+  const ghRepos = sources[5].status === 'fulfilled' ? sources[5].value : [];
+  if (ghRepos.length > 0) output += formatGitHubResults(ghRepos, 'GitHub 相關 EDA 專案');
+
+  return output;
+}
+
+// ── Cell Flow Stage 格式化 ──────────────────────────────────────────────
+const FLOW_STAGE_ICONS = { 'dft': '🔧', 'lec': '⚖️', 'eco': '🔧', 'fpga': '🧩' };
+
+function formatFlowStage(stageKey) {
+  const stage = CELL_FLOW_STAGES[stageKey];
+  if (!stage) return { ok: false, error: `${stageKey} stage not found` };
+  const icon = FLOW_STAGE_ICONS[stageKey.split('-').pop()] || '🔄';
+  let out = `${icon} **${stage.name}**\n\n`;
+  out += `${stage.desc}\n\n`;
+  for (const [toolName, toolData] of Object.entries(stage.tools)) {
+    out += `### ${toolName}\n`;
+    for (const c of toolData.commands) {
+      out += `- \`${c.cmd}\` — ${c.desc}\n`;
     }
-  }
-  return results;
-}
-
-function formatPDKResults(results) {
-  if (!results || results.length === 0) return '🏭 PDK：無符合結果\n';
-  let out = `🏭 PDK / Cell Library 查詢結果（${results.length} 筆）\n\n`;
-  for (const p of results) {
-    out += `### 🔬 ${p.name} (${p.node})\n`;
-    out += `| 欄位 | 內容 |\n|------|------|\n`;
-    out += `| Foundry | ${p.foundry} |\n`;
-    out += `| 類型 | ${p.type} |\n`;
-    out += `| GitHub | [${p.repo}](https://github.com/${p.repo}) |\n`;
-    if (p.pythonPkg) out += `| Python Package | \`pip install ${p.pythonPkg}\` |\n`;
-    if (p.cells && p.cells.length > 0) out += `| Cell Libraries | ${p.cells.join(', ')} |\n`;
-    out += `| 說明 | ${p.desc} |\n\n`;
-  }
-  return out;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// 5. EDA Tool 快速查詢（本地索引）
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function searchLocalTools(query) {
-  const words = query.toLowerCase().split(/\s+/).filter(w => w.length >= 2);
-  if (words.length === 0) return [];
-  const results = [];
-  for (const [key, tool] of Object.entries(EDA_TOOL_INDEX)) {
-    const searchable = `${key} ${tool.name} ${tool.category} ${tool.desc} ${tool.alt}`.toLowerCase();
-    // OR logic: any word matches = hit
-    if (words.some(w => searchable.includes(w))) {
-      results.push({ key, ...tool });
-    }
-  }
-  return results;
-}
-
-function formatToolResults(results) {
-  if (!results || results.length === 0) return '🔧 EDA Tool：無符合結果\n';
-  let out = `🔧 EDA 工具查詢結果（${results.length} 筆）\n\n`;
-  for (const t of results) {
-    out += `### ⚙️ ${t.name}\n`;
-    out += `| 欄位 | 內容 |\n|------|------|\n`;
-    out += `| 分類 | ${t.category} |\n`;
-    out += `| GitHub | [${t.repo}](https://github.com/${t.repo}) |\n`;
-    out += `| 文件 | ${t.docs} |\n`;
-    out += `| 說明 | ${t.desc} |\n`;
-    if (t.alt) out += `| 商業替代 | ${t.alt} |\n`;
     out += '\n';
   }
-  return out;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// 6. EDA 論文特殊查詢（會議/主題）
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function detectConference(query) {
-  const q = query.toUpperCase();
-  for (const conf of EDA_CONFERENCES) {
-    if (q.includes(conf.toUpperCase())) return conf;
-  }
-  return null;
-}
-
-function enhanceQueryForEDA(query) {
-  // 如果查詢已包含 EDA 關鍵詞，直接用
-  const edaKeywords = ['synthesis', 'placement', 'routing', 'timing', 'clock tree', 'floorplan',
-    'P&R', 'STA', 'DRC', 'LVS', 'PDK', 'standard cell', 'RTL', 'GDSII', 'netlist',
-    'EDA', 'VLSI', 'ASIC', 'FPGA', 'FinFET', 'CMOS', 'liberty', '.lib', 'characterize',
-    'clock mux', 'CDC', 'metastability', 'synchronizer', 'UPF', 'power domain',
-    'multi-cycle', 'false path', 'clock gating', 'OCV', 'AOCV', 'POCV'];
-  const hasEDAKeyword = edaKeywords.some(k => query.toLowerCase().includes(k.toLowerCase()));
-  if (hasEDAKeyword) return query;
-  // 否則加上 EDA 背景
-  return `${query} VLSI EDA IC design`;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// 查詢展開：模式規則 + 縮寫展開 + 多變體生成
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// 為查詢生成多個搜尋變體
-function generateQueryVariants(originalQuery, maxVariants = 3) {
-  const variants = [originalQuery]; // 原始查詢 always 第一個
-  const q = originalQuery.toLowerCase();
-  
-  // 1. 縮寫展開
-  const words = q.split(/\s+/);
-  const expandedWords = words.map(w => {
-    const clean = w.replace(/[^a-zA-Z]/g, '');
-    return EDA_ABBREVIATIONS[clean] || w;
-  });
-  const expanded = expandedWords.join(' ');
-  if (expanded !== q) variants.push(originalQuery.replace(new RegExp(words.join('|'), 'gi'), (m) => EDA_ABBREVIATIONS[m.toLowerCase()] || m));
-  
-  // 2. 模式規則展開
-  let patternExpanded = originalQuery;
-  let hasPattern = false;
-  for (const rule of PATTERN_RULES) {
-    if (rule.pattern.test(patternExpanded)) {
-      patternExpanded = patternExpanded.replace(rule.pattern, rule.expand);
-      hasPattern = true;
-      rule.pattern.lastIndex = 0; // reset regex
-    }
-  }
-  if (hasPattern && patternExpanded !== originalQuery) {
-    variants.push(patternExpanded);
-  }
-  
-  // 3. 常見相關詞（根據查詢內容自動判斷）
-  if (q.includes('mux') || q.includes('clock')) {
-    variants.push(`${originalQuery} glitch-free`);
-  }
-  if (q.includes('setup') || q.includes('hold')) {
-    variants.push(`${originalQuery} timing violation`);
-  }
-  if (q.includes('liberty') || q.includes('.lib')) {
-    variants.push(`${originalQuery} characterization NLDM`);
-  }
-  
-  return [...new Set(variants)].slice(0, maxVariants);
-}
-
-// 為不同搜尋來源生成最佳化查詢（增強版）
-function generateSearchQueries(originalQuery, context = 'general') {
-  const q = originalQuery.toLowerCase();
-  const queries = { web: '', community: '', academic: '', github: '' };
-  
-  // 基礎查詢
-  const base = originalQuery;
-  
-  // Web 搜尋：根據問題類型加入 troubleshooting/methodology
-  if (q.includes('error') || q.includes('fail') || q.includes('問題') || q.includes('fix')
-    || q.includes('violation') || q.includes('warning')) {
-    queries.web = `${base} EDA solution fix troubleshooting`;
-  } else if (q.includes('how to') || q.includes('怎么') || q.includes('如何') || q.includes('方法')) {
-    queries.web = `${base} EDA methodology best practice`;
-  } else if (q.includes('what is') || q.includes('是什麼') || q.includes('概念')) {
-    queries.web = `${base} EDA explanation tutorial`;
-  } else {
-    queries.web = `${base} EDA ASIC IC design`;
-  }
-  
-  // Community 搜尋：用 site-specific（由 searchEDACommunities 處理）
-  queries.community = base;
-  
-  // Academic 搜尋：加入 paper/survey/analysis
-  if (q.includes('theory') || q.includes('原理') || q.includes('algorithm')) {
-    queries.academic = `${base} VLSI ASIC theoretical analysis`;
-  } else if (q.includes('compare') || q.includes('比較') || q.includes('vs')) {
-    queries.academic = `${base} VLSI ASIC comparison survey`;
-  } else {
-    queries.academic = `${base} VLSI ASIC survey analysis`;
-  }
-  
-  // GitHub 搜尋：根據查詢類型調整
-  if (q.includes('script') || q.includes('flow') || q.includes('script')) {
-    queries.github = `${base} script automation`;
-  } else if (q.includes('liberty') || q.includes('.lib') || q.includes('timing')) {
-    queries.github = `${base} liberty characterization script`;
-  } else {
-    queries.github = `${base} tool flow example`;
-  }
-  
-  return queries;
+  return { ok: true, output: out };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -482,7 +154,6 @@ async function edaSearch(args = {}) {
             const toolKeys = Object.keys(EDA_TOOL_INDEX).filter(k => q.includes(k));
             const detectedTool = toolKeys.length > 0 ? toolKeys[0] : null;
             const faqResults = searchToolFAQ(searchQuery, detectedTool);
-            console.log('[DEBUG auto-faq] q:', q, 'toolKeys:', toolKeys, 'detectedTool:', detectedTool, 'faqCount:', faqResults.length);
             if (faqResults.length > 0) {
               output += `\n## 🔧 偵測到 Tool 問題，自動補充 FAQ：\n\n`;
               for (const faq of faqResults.slice(0, 3)) {
@@ -521,63 +192,8 @@ async function edaSearch(args = {}) {
           return { ok: true, output: output || '🔍 自動搜尋：未找到 PDK 相關結果' };
         }
 
-        // ── 多源並行廣搜（使用多維度查詢）──
-        const searchQueries = generateSearchQueries(searchQuery);
-        const enhancedQuery = enhanceQueryForEDA(searchQuery);
-        const sources = await Promise.allSettled([
-          // 1. 網路搜尋（DuckDuckGo）— 廣域覆蓋，使用優化查詢
-          searchWebDDG(searchQueries.web, maxResults),
-          // 2. EDA 社群搜尋（Cadence/Synopsys/Reddit/EE Times）— 使用社群查詢
-          searchEDACommunities(searchQuery, maxResults),
-          // 3. Semantic Scholar 學術論文 — 使用學術查詢
-          searchSemanticScholar(searchQueries.academic || enhancedQuery, maxResults).then(r => r.ok ? r.data : []),
-          // 4. OpenAlex 學術論文
-          searchOpenAlex(searchQueries.academic || enhancedQuery, Math.min(maxResults, 5)),
-          // 5. GitHub code search — 使用 GitHub 查詢
-          searchGitHubCode(searchQueries.github, 5),
-          // 6. GitHub repo search — 找相關 EDA 專案
-          searchGitHubEDA(searchQuery, 5),
-        ]);
-
-        let output = '';
-
-        // 網路搜尋結果（最廣覆蓋）
-        const webResults = sources[0].status === 'fulfilled' ? sources[0].value : [];
-        if (webResults.length > 0) output += formatWebResults(webResults);
-
-        // EDA 社群結果（含爬取論壇內容）
-        const communityResults = sources[1].status === 'fulfilled' ? sources[1].value : [];
-        if (communityResults.length > 0) {
-          // 爬取前 3 個社群頁面提取討論內容
-          const topUrls = communityResults.slice(0, 3).map(r => r.url);
-          let crawledPages = [];
-          try {
-            crawledPages = await crawlForumPages(topUrls);
-          } catch { /* ignore crawl errors */ }
-          output += formatCommunityResults(communityResults, crawledPages);
-        }
-
-        // Semantic Scholar
-        const scholarData = sources[2].status === 'fulfilled' ? sources[2].value : [];
-        if (scholarData.length > 0) output += formatSemanticScholarResults(scholarData);
-
-        // OpenAlex
-        const articles = sources[3].status === 'fulfilled' ? sources[3].value : [];
-        if (articles.length > 0) output += formatOpenAlexResults(articles);
-
-        // GitHub code — 實際 script / flow
-        const ghCode = sources[4].status === 'fulfilled' ? sources[4].value : [];
-        if (ghCode.length > 0) {
-          output += `💻 **GitHub 程式碼**（相關 script / tool flow）\n\n`;
-          for (const r of ghCode) {
-            output += `- [${r.name}](${r.url}) — *${r.repo}*\n`;
-          }
-          output += '\n';
-        }
-
-        // GitHub repo
-        const ghRepos = sources[5].status === 'fulfilled' ? sources[5].value : [];
-        if (ghRepos.length > 0) output += formatGitHubResults(ghRepos, 'GitHub 相關 EDA 專案');
+        // 多源並行廣搜（使用統一入口）
+        let output = await multiSourceSearch(searchQuery, maxResults);
 
         // 偵測是否提到特定會議
         const conf = detectConference(searchQuery);
@@ -588,7 +204,6 @@ async function edaSearch(args = {}) {
           output += `  • [dblp](https://dblp.org/search?q=${conf})\n`;
         }
 
-        // 提示：如需更深入搜尋可用 smart_exa_search
         if (!output || output.length < 100) {
           output += `\n💡 如需更深入搜尋，可用 \`smart_exa_search\` 查詢：\n`;
           output += `  \`smart_exa_search({command:"search", query:"${searchQuery}", numResults:10})\`\n`;
@@ -686,56 +301,13 @@ async function edaSearch(args = {}) {
       case 'all':
       case 'comprehensive': {
         let output = '';
-
-        // PDK
+        // 先搜本地索引
         const localPDK = searchLocalPDK(searchQuery);
         if (localPDK.length > 0) output += formatPDKResults(localPDK);
-
-        // Tools
         const localTools = searchLocalTools(searchQuery);
         if (localTools.length > 0) output += formatToolResults(localTools);
-
-        // 多源並行搜尋（使用多維度查詢）
-        const allSearchQueries = generateSearchQueries(searchQuery);
-        const allEnhancedQuery = enhanceQueryForEDA(searchQuery);
-        const allSources = await Promise.allSettled([
-          searchWebDDG(allSearchQueries.web, maxResults),
-          searchEDACommunities(searchQuery, maxResults),
-          searchSemanticScholar(allSearchQueries.academic || allEnhancedQuery, 5).then(r => r.ok ? r.data : []),
-          searchOpenAlex(allSearchQueries.academic || allEnhancedQuery, 5),
-          searchGitHubEDA(searchQuery, 5),
-          searchGitHubCode(allSearchQueries.github, 5),
-        ]);
-
-        const allWeb = allSources[0].status === 'fulfilled' ? allSources[0].value : [];
-        if (allWeb.length > 0) output += formatWebResults(allWeb);
-
-        const allCommunity = allSources[1].status === 'fulfilled' ? allSources[1].value : [];
-        if (allCommunity.length > 0) {
-          const allTopUrls = allCommunity.slice(0, 3).map(r => r.url);
-          let allCrawledPages = [];
-          try {
-            allCrawledPages = await crawlForumPages(allTopUrls);
-          } catch { /* ignore */ }
-          output += formatCommunityResults(allCommunity, allCrawledPages);
-        }
-
-        const allScholar = allSources[2].status === 'fulfilled' ? allSources[2].value : [];
-        if (allScholar.length > 0) output += formatSemanticScholarResults(allScholar);
-
-        const allArticles = allSources[3].status === 'fulfilled' ? allSources[3].value : [];
-        if (allArticles.length > 0) output += formatOpenAlexResults(allArticles);
-
-        const allGH = allSources[4].status === 'fulfilled' ? allSources[4].value : [];
-        if (allGH.length > 0) output += formatGitHubResults(allGH, 'GitHub 相關專案');
-
-        const allGHCode = allSources[5].status === 'fulfilled' ? allSources[5].value : [];
-        if (allGHCode.length > 0) {
-          output += `💻 **GitHub 程式碼**\n\n`;
-          for (const r of allGHCode) output += `- [${r.name}](${r.url}) — *${r.repo}*\n`;
-          output += '\n';
-        }
-
+        // 多源並行搜尋（使用統一入口）
+        output += await multiSourceSearch(searchQuery, maxResults);
         return { ok: true, output: output || '🔍 綜合搜尋：未找到結果' };
       }
 
@@ -818,69 +390,10 @@ async function edaSearch(args = {}) {
         return { ok: true, output: out };
       }
 
-      // ── DFT 流程查詢 ──
-      case 'dft': {
-        const stage = CELL_FLOW_STAGES['1.5-dft'];
-        if (!stage) return { ok: false, error: 'DFT stage not found' };
-        let out = `🔧 **${stage.name}**\n\n`;
-        out += `${stage.desc}\n\n`;
-        for (const [toolName, toolData] of Object.entries(stage.tools)) {
-          out += `### ${toolName}\n`;
-          for (const c of toolData.commands) {
-            out += `- \`${c.cmd}\` — ${c.desc}\n`;
-          }
-          out += '\n';
-        }
-        return { ok: true, output: out };
-      }
-
-      // ── LEC 流程查詢 ──
-      case 'lec': {
-        const stage = CELL_FLOW_STAGES['8-lec'];
-        if (!stage) return { ok: false, error: 'LEC stage not found' };
-        let out = `⚖️ **${stage.name}**\n\n`;
-        out += `${stage.desc}\n\n`;
-        for (const [toolName, toolData] of Object.entries(stage.tools)) {
-          out += `### ${toolName}\n`;
-          for (const c of toolData.commands) {
-            out += `- \`${c.cmd}\` — ${c.desc}\n`;
-          }
-          out += '\n';
-        }
-        return { ok: true, output: out };
-      }
-
-      // ── ECO 流程查詢 ──
-      case 'eco': {
-        const stage = CELL_FLOW_STAGES['9-eco'];
-        if (!stage) return { ok: false, error: 'ECO stage not found' };
-        let out = `🔧 **${stage.name}**\n\n`;
-        out += `${stage.desc}\n\n`;
-        for (const [toolName, toolData] of Object.entries(stage.tools)) {
-          out += `### ${toolName}\n`;
-          for (const c of toolData.commands) {
-            out += `- \`${c.cmd}\` — ${c.desc}\n`;
-          }
-          out += '\n';
-        }
-        return { ok: true, output: out };
-      }
-
-      // ── FPGA 流程查詢 ──
-      case 'fpga': {
-        const stage = CELL_FLOW_STAGES['10-fpga'];
-        if (!stage) return { ok: false, error: 'FPGA stage not found' };
-        let out = `🧩 **${stage.name}**\n\n`;
-        out += `${stage.desc}\n\n`;
-        for (const [toolName, toolData] of Object.entries(stage.tools)) {
-          out += `### ${toolName}\n`;
-          for (const c of toolData.commands) {
-            out += `- \`${c.cmd}\` — ${c.desc}\n`;
-          }
-          out += '\n';
-        }
-        return { ok: true, output: out };
-      }
+      case 'dft': return formatFlowStage('1.5-dft');
+      case 'lec': return formatFlowStage('8-lec');
+      case 'eco': return formatFlowStage('9-eco');
+      case 'fpga': return formatFlowStage('10-fpga');
 
       // ── Tool Troubleshooting（FAQ + 廠商搜尋 URL）──
       case 'troubleshoot': {
