@@ -5,6 +5,7 @@ import { registerAction } from './registry.mjs';
 import { EDA_TOOL_INDEX } from '../data/tools.mjs';
 import { searchToolFAQ, generateVendorSearchURL } from '../lib/vendor.mjs';
 import { compressOutput } from '../lib/caveman.mjs';
+import { detectHdlKgraph, matchKgTool, queryKGraph, formatKgResult } from '../lib/hdl-kgraph.mjs';
 
 registerAction('troubleshoot', async (args) => {
   const searchQuery = String(args.question || args.query || '').trim();
@@ -39,7 +40,25 @@ registerAction('troubleshoot', async (args) => {
     output += '\n';
   }
 
-  // 4. 補充建議
+  // 4. Knowledge Graph 查詢（若有本地 design）
+  try {
+    const kg = await detectHdlKgraph();
+    if (kg.available && kg.graphDb) {
+      const kgMatch = matchKgTool(searchQuery);
+      if (kgMatch) {
+        const kgResult = await queryKGraph(kgMatch.tool, kgMatch.args, { db: kg.graphDb });
+        if (kgResult.ok) {
+          const kgOutput = formatKgResult(kgResult.data, kgMatch.tool);
+          if (kgOutput) {
+            output += `## 🧠 Knowledge Graph（本地 Design）\n\n`;
+            output += kgOutput + '\n';
+          }
+        }
+      }
+    }
+  } catch { /* KG 非必要，忽略錯誤 */ }
+
+  // 5. 補充建議
   if (faqResults.length === 0 && vendorURLs.length === 0) {
     output += `⚠️ 未找到本地 FAQ 匹配。建議\n`;
     output += `1. 用 \`action=troubleshoot\` 加上具體錯誤訊息\n`;

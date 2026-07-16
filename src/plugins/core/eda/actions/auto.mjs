@@ -12,6 +12,7 @@ import { generateVendorSearchURL } from '../lib/vendor.mjs';
 import { detectConference } from '../query/enhance.mjs';
 import { multiSourceSearch } from '../sources/index.mjs';
 import { classifyQuery, QUERY_TYPES } from '../query/classify.mjs';
+import { detectHdlKgraph, matchKgTool, queryKGraph, formatKgResult } from '../lib/hdl-kgraph.mjs';
 
 registerAction('auto', async (args) => {
   const searchQuery = String(args.question || args.query || '').trim();
@@ -101,6 +102,25 @@ registerAction('auto', async (args) => {
     } catch { /* ignore */ }
     return { ok: true, output: output || '🔍 自動搜尋：未找到 PDK 相關結果' };
   }
+
+  // HDL Design 結構查詢（Knowledge Graph）
+  try {
+    const kg = await detectHdlKgraph();
+    if (kg.available && kg.graphDb) {
+      const kgMatch = matchKgTool(searchQuery);
+      if (kgMatch) {
+        const kgResult = await queryKGraph(kgMatch.tool, kgMatch.args, { db: kg.graphDb });
+        if (kgResult.ok) {
+          const kgOutput = formatKgResult(kgResult.data, kgMatch.tool);
+          if (kgOutput) {
+            let output = `> 🧠 偵測到本地 HDL Design，使用 Knowledge Graph 查詢\n\n`;
+            output += kgOutput;
+            return { ok: true, output };
+          }
+        }
+      }
+    }
+  } catch { /* KG 非必要，忽略錯誤 */ }
 
   // 多源並行廣搜（使用統一入口）
   const compress = args.compress || 'none';

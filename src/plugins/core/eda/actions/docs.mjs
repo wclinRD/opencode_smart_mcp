@@ -6,6 +6,7 @@ import { EDA_TOOL_INDEX } from '../data/tools.mjs';
 import { VENDOR_DOCS } from '../data/docs.mjs';
 import { detectDocTopic } from '../query/detect.mjs';
 import { fetchDocContent } from '../lib/doc-fetch.mjs';
+import { detectHdlKgraph, matchKgTool, queryKGraph, formatKgResult } from '../lib/hdl-kgraph.mjs';
 
 registerAction('docs', async (args) => {
   const searchQuery = String(args.question || args.query || '').trim();
@@ -58,6 +59,24 @@ registerAction('docs', async (args) => {
     out += `⚠️ 爬取失敗：${result.error}\n`;
     out += `📎 [原始文件](${result.source})\n`;
   }
+
+  // Knowledge Graph 補充（design 結構查詢）
+  try {
+    const kg = await detectHdlKgraph();
+    if (kg.available && kg.graphDb) {
+      const kgMatch = matchKgTool(searchQuery);
+      if (kgMatch) {
+        const kgResult = await queryKGraph(kgMatch.tool, kgMatch.args, { db: kg.graphDb });
+        if (kgResult.ok) {
+          const kgOutput = formatKgResult(kgResult.data, kgMatch.tool);
+          if (kgOutput) {
+            out += '\n---\n\n## 🧠 Knowledge Graph（本地 Design）\n\n';
+            out += kgOutput + '\n';
+          }
+        }
+      }
+    }
+  } catch { /* KG 非必要 */ }
 
   return { ok: true, output: out };
 });
