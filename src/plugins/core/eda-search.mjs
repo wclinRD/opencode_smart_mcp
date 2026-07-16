@@ -2344,23 +2344,79 @@ const EDA_COMMUNITIES = [
 ];
 
 async function searchEDACommunities(query, maxResults = 10) {
-  // 用一條 broadly query 搜所有社群（避免 rate limit）
-  const broadQuery = `EDA ASIC IC design ${query}`;
-  const results = await searchWebDDG(broadQuery, maxResults);
-  // 標記來自已知社群的結果
-  return results.map(r => {
-    const matched = EDA_COMMUNITIES.find(c => r.url.includes(c.domain));
-    return { ...r, community: matched ? matched.name : null };
+  // 為每個社群做 site-specific 搜尋（並行，限制每個社群 2-3 筆）
+  const perCommunity = Math.max(2, Math.floor(maxResults / EDA_COMMUNITIES.length));
+  
+  const searches = EDA_COMMUNITIES.map(async (community) => {
+    try {
+      const siteQuery = community.queryTemplate(query);
+      const results = await searchWebDDG(siteQuery, perCommunity);
+      return results.map(r => ({ ...r, community: community.name }));
+    } catch {
+      return [];
+    }
   });
+  
+  const allResults = await Promise.allSettled(searches);
+  const merged = allResults
+    .filter(r => r.status === 'fulfilled')
+    .flatMap(r => r.value)
+    .slice(0, maxResults);
+  
+  return merged;
 }
 
-function formatCommunityResults(results) {
+// 爬取論壇頁面提取討論內容（可選，用於深入分析）
+async function crawlForumPages(urls, maxChars = 3000) {
+  if (!urls || urls.length === 0) return [];
+  
+  const results = await Promise.allSettled(
+    urls.slice(0, 3).map(async (url) => {
+      try {
+        const resp = await fetch(url, {
+          headers: { 'User-Agent': USER_AGENT },
+          signal: AbortSignal.timeout(DEFAULT_TIMEOUT * 2),
+        });
+        if (!resp.ok) return null;
+        const html = await resp.text();
+        // 簡易提取：移除 script/style，取 body 文字
+        const text = html
+          .replace(/<script[\s\S]*?<\/script>/gi, '')
+          .replace(/<style[\s\S]*?<\/style>/gi, '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, maxChars);
+        return { url, content: text };
+      } catch {
+        return null;
+      }
+    })
+  );
+  
+  return results
+    .filter(r => r.status === 'fulfilled' && r.value)
+    .map(r => r.value);
+}
+
+function formatCommunityResults(results, crawledPages = []) {
   if (!results || results.length === 0) return '💬 EDA 社群：無結果\n';
   let out = `💬 EDA 社群討論（${results.length} 筆）\n\n`;
+  
+  // 建立 URL → content 映射
+  const crawledMap = new Map((crawledPages || []).map(p => [p.url, p.content]));
+  
   for (const r of results) {
     const badge = r.community ? ` [${r.community}]` : '';
     out += `###${badge} [${r.title}](${r.url})\n`;
     if (r.snippet) out += `> ${r.snippet.slice(0, 200)}\n`;
+    
+    // 如果有爬取內容，顯示摘要
+    const crawled = crawledMap.get(r.url);
+    if (crawled) {
+      out += `\n📄 **討論內容摘要**：\n`;
+      out += '```\n' + crawled.slice(0, 800) + '\n```\n';
+    }
     out += '\n';
   }
   return out;
@@ -2698,9 +2754,17 @@ async function edaSearch(args = {}) {
         const webResults = sources[0].status === 'fulfilled' ? sources[0].value : [];
         if (webResults.length > 0) output += formatWebResults(webResults);
 
-        // EDA 社群結果
+        // EDA 社群結果（含爬取論壇內容）
         const communityResults = sources[1].status === 'fulfilled' ? sources[1].value : [];
-        if (communityResults.length > 0) output += formatCommunityResults(communityResults);
+        if (communityResults.length > 0) {
+          // 爬取前 3 個社群頁面提取討論內容
+          const topUrls = communityResults.slice(0, 3).map(r => r.url);
+          let crawledPages = [];
+          try {
+            crawledPages = await crawlForumPages(topUrls);
+          } catch { /* ignore crawl errors */ }
+          output += formatCommunityResults(communityResults, crawledPages);
+        }
 
         // Semantic Scholar
         const scholarData = sources[2].status === 'fulfilled' ? sources[2].value : [];
@@ -2856,7 +2920,14 @@ async function edaSearch(args = {}) {
         if (allWeb.length > 0) output += formatWebResults(allWeb);
 
         const allCommunity = allSources[1].status === 'fulfilled' ? allSources[1].value : [];
-        if (allCommunity.length > 0) output += formatCommunityResults(allCommunity);
+        if (allCommunity.length > 0) {
+          const allTopUrls = allCommunity.slice(0, 3).map(r => r.url);
+          let allCrawledPages = [];
+          try {
+            allCrawledPages = await crawlForumPages(allTopUrls);
+          } catch { /* ignore */ }
+          output += formatCommunityResults(allCommunity, allCrawledPages);
+        }
 
         const allScholar = allSources[2].status === 'fulfilled' ? allSources[2].value : [];
         if (allScholar.length > 0) output += formatSemanticScholarResults(allScholar);
