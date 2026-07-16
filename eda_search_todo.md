@@ -17,6 +17,7 @@
 > Phase 9 ✅ 完成（2026-07-16）：warnings 回報 + Cache TTL 差異化 + schemaDecompress/header fix + TOON decoder fix + 59/59 單元測試
 > Phase 10 ⬜ 規劃中（長期改進）
 > Phase 13 ✅ 完成（2026-07-16）：RRF fusion + EDA rerank + Adaptive Top-K + Post-retrieval filter + 6/6 測試檔通過
+> Phase 14 ✅ 完成（2026-07-16）：5 個 benchmark suite（300 queries）+ metrics.mjs（6 指標）+ runner.mjs + 28/28 測試通過
 
 ---
 
@@ -230,15 +231,15 @@
 > 參考：RAG-EDA (ORD-QA, 90 pairs)、Ask-EDA (300 pairs)
 > 預估：~3 小時 | 風險：低
 
-- [ ] 14.1 建立 `tests/eda/benchmark/` 目錄結構
-- [ ] 14.2 建立 `tool-100.json`（100 筆工具查詢，含縮寫+模糊）
-- [ ] 14.3 建立 `troubleshoot-50.json`（50 筆問題診斷）
-- [ ] 14.4 建立 `flow-50.json`（50 筆 cell flow 查詢）
-- [ ] 14.5 建立 `academic-50.json`（50 筆學術論文查詢）
-- [ ] 14.6 建立 `abbreviation-50.json`（50 筆縮寫查詢）
-- [ ] 14.7 建立 `tests/eda/eval/metrics.mjs`（Recall@K, MRR, NDCG）
-- [ ] 14.8 建立 `tests/eda/eval/runner.mjs`（Benchmark runner）
-- [ ] 14.9 建立 `tests/eda/eda-benchmark.test.mjs`（自動化測試）
+- [x] 14.1 建立 `tests/eda/benchmark/` 目錄結構
+- [x] 14.2 建立 `tool-100.json`（100 筆工具查詢，含縮寫+模糊）
+- [x] 14.3 建立 `troubleshoot-50.json`（50 筆問題診斷）
+- [x] 14.4 建立 `flow-50.json`（50 筆 cell flow 查詢）
+- [x] 14.5 建立 `academic-50.json`（50 筆學術論文查詢）
+- [x] 14.6 建立 `abbreviation-50.json`（50 筆縮寫查詢）
+- [x] 14.7 建立 `tests/eda/eval/metrics.mjs`（Recall@K, MRR, NDCG, Precision@K, NDCG@K, Keyword Hit Rate）
+- [x] 14.8 建立 `tests/eda/eval/runner.mjs`（Benchmark runner + off-line mock + CLI）
+- [x] 14.9 建立 `tests/eda/eda-benchmark.test.mjs`（28/28 測試通過）
 
 ---
 
@@ -307,11 +308,11 @@
 | Phase 11: Abbreviation De-hallucination | 60 min | 23 hr | ✅ 已完成 |
 | Phase 12: Query Intelligence | 120 min | 25 hr | ✅ 已完成 |
 | Phase 13: Hybrid Retrieval RAG | 300 min | 30 hr | ✅ 已完成 |
-| Phase 14: EDA QA Benchmark | 180 min | 33 hr | 🟢 低 |
+| Phase 14: EDA QA Benchmark | 180 min | 33 hr | ✅ 已完成 |
 | Phase 15: Knowledge Graph（整合 hdl-kgraph） | 180 min | 36 hr | 🟢 低 |
 | Phase 16: Multi-Agent 🆕 | 480 min | 44 hr | 🔴 高 |
 
-**總計：~44 小時**（Phase 1-9 + 11 + 12 + 13 已完成 26 hr + Phase 10 + 14-16 需 18 hr）
+**總計：~44 小時**（Phase 1-9 + 11 + 12 + 13 + 14 已完成 29 hr + Phase 10 + 15-16 需 14 hr）
 
 ---
 

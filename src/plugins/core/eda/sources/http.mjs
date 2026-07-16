@@ -8,10 +8,26 @@ export const GITHUB_API = 'https://api.github.com';
 export const OPENALEX_API = 'https://api.openalex.org';
 export const SCHOLAR_API = 'https://api.semanticscholar.org/graph/v1';
 
-// 簡易 LRU Cache（TTL 5 分鐘，最多 50 條）
+// 簡易 LRU Cache（hostname 差異化 TTL，最多 50 條）
 const _cache = new Map();
-const CACHE_TTL = 5 * 60 * 1000;
 const CACHE_MAX = 50;
+
+// 按 hostname 差異化 TTL：學術 API 快取久，社群快取短
+const HOSTNAME_TTL = {
+  'api.github.com':        10 * 60 * 1000,  // GitHub API: 10 min
+  'api.openalex.org':      10 * 60 * 1000,  // OpenAlex: 10 min
+  'api.semanticscholar.org': 15 * 60 * 1000, // Scholar: 15 min（嚴格 rate limit）
+  'api.exa.ai':            5 * 60 * 1000,   // Exa: 5 min
+  'duckduckgo.com':        3 * 60 * 1000,   // DDG: 3 min（結果變動快）
+};
+const DEFAULT_TTL = 5 * 60 * 1000; // 其他: 5 min
+
+function getCacheTTL(url) {
+  try {
+    const hostname = new URL(url).hostname;
+    return HOSTNAME_TTL[hostname] ?? DEFAULT_TTL;
+  } catch { return DEFAULT_TTL; }
+}
 
 /**
  * 帶 429 retry 的 HTTPS GET（exponential backoff）
@@ -20,9 +36,10 @@ const CACHE_MAX = 50;
  * @returns {Promise<object>}
  */
 export async function httpsGet(url, opts = {}) {
-  // Cache hit check
+  // Cache hit check（hostname 差異化 TTL）
   const cached = _cache.get(url);
-  if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.data;
+  const ttl = getCacheTTL(url);
+  if (cached && Date.now() - cached.ts < ttl) return cached.data;
   if (_cache.size > CACHE_MAX) {
     const oldest = _cache.keys().next().value;
     _cache.delete(oldest);
