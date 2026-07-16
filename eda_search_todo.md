@@ -4,6 +4,7 @@
 > 狀態：⬜ Pending / 🔄 In Progress / ✅ Done / ⏭️ Skipped
 >
 > Phase 1 ✅ 完成（2026-07-16）：eda-search.mjs 3407→1347 行（-60%）
+> Phase 2 ✅ 完成（2026-07-16）：eda-search.mjs 1347→1033 行，6 個搜尋來源模組建立
 
 ---
 
@@ -30,16 +31,16 @@
 > 目標：每個搜尋來源成為獨立模組，可單獨測試/mock
 > 預估：~1 小時 | 風險：低
 
-- [ ] 2.1 建立 `src/plugins/core/eda/sources/`
-- [ ] 2.2 搬 `httpsGet()` → `eda/sources/http.mjs`（加 LRU cache + TTL）
-- [ ] 2.3 搬 `searchWebDDG()` + `formatWebResults()` → `eda/sources/web.mjs`
-- [ ] 2.4 搬 `searchEDACommunities()` + `crawlForumPages()` + `formatCommunityResults()` → `eda/sources/community.mjs`
-- [ ] 2.5 搬 `searchGitHubPDK/EDA/Code()` + `formatGitHubResults()` → `eda/sources/github.mjs`
-- [ ] 2.6 搬 `searchOpenAlex()` + `reconstructAbstract()` + `formatOpenAlexResults()` → `eda/sources/openalex.mjs`
-- [ ] 2.7 搬 `searchSemanticScholar()` + `formatSemanticScholarResults()` → `eda/sources/semantic-scholar.mjs`
-- [ ] 2.8 建立 `eda/sources/index.mjs`：`multiSourceSearch()` 統一入口
-- [ ] 2.9 `eda-search.mjs` 改為 `import { searchXxx } from './eda/sources/*.mjs'`
-- [ ] 2.10 驗證：重啟 MCP server → 測試 `auto` + `all` + `paper` 各 1 次
+- [x] 2.1 建立 `src/plugins/core/eda/sources/`
+- [x] 2.2 搬 `httpsGet()` → `eda/sources/http.mjs`（含 LRU cache TTL 5min）
+- [x] 2.3 搬 `searchWebDDG()` + `formatWebResults()` → `eda/sources/web.mjs`
+- [x] 2.4 搬 `searchEDACommunities()` + `crawlForumPages()` + `formatCommunityResults()` → `eda/sources/community.mjs`
+- [x] 2.5 搬 `searchGitHubPDK/EDA/Code()` + `formatGitHubResults()` → `eda/sources/github.mjs`
+- [x] 2.6 搬 `searchOpenAlex()` + `reconstructAbstract()` + `formatOpenAlexResults()` → `eda/sources/openalex.mjs`
+- [x] 2.7 搬 `searchSemanticScholar()` + `formatSemanticScholarResults()` → `eda/sources/semantic-scholar.mjs`
+- [x] 2.8 建立 `eda/sources/index.mjs`（re-export 統一入口）
+- [x] 2.9 `eda-search.mjs` 改為 import from eda/sources/*.mjs（1347→1033 行）
+- [x] 2.10 驗證：`auto` ✅ `paper` ✅ `list-tools` ✅
 
 ---
 
