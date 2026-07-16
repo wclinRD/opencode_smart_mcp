@@ -35,7 +35,7 @@ permission:
   smart_exa_crawl: allow          # 🥇 網頁爬取（clean/markdown/chunk/crawlee）
   smart_github_search: allow      # 🥇 GitHub 程式碼搜尋
   smart_glob: allow             # 🥇 檔案 glob 搜尋（取代內建 glob）
-    smart_medical_search: allow   # 🥇 免費醫學文獻與臨床證據查詢 + 藥典（DailyMed仿單/OpenFDA標籤/RxNorm交互作用，共9來源）
+  smart_medical_search: allow   # 🥇 免費醫學文獻與臨床證據查詢 + 藥典（DailyMed仿單/OpenFDA標籤/RxNorm交互作用，共9來源）
 
   # ── 其他工具 ──
   websearch: deny       # 強制使用 smart_exa_search
@@ -89,9 +89,23 @@ permission:
 | `smart_github_search({query, repo?, language?})` | 🥇 GitHub 程式碼搜尋 |
 | `smart_glob({pattern, path?})` | 🥇 檔案 glob 搜尋（rg 底層，上限 100 筆） |
 | `smart_medical_search({question, action?, query?, maxResults?, dateFrom?, dateTo?})` | 🥇 免費醫學文獻與臨床證據查詢 + 藥典（9 來源，免 API 金鑰）。12 種 action：auto/ask（自動降級）、oe/openevidence（臨床問答）、search/pubmed（文獻搜尋）、openalex/academic（學術搜尋）、scholar/semantic（TLDR 摘要）、abstract（摘要閱讀）、oa-check/oa（OA 連結查詢）、fulltext/pmc（全文閱讀）、all/comprehensive（多源去重）、drug/dailymed（FDA 藥品仿單）、fda/openfda（FDA 標籤+不良反應）、interact/rxnorm（藥品交互作用） |
-| `smart_eda_search({question, action?, query?, maxResults?})` | 🥇 EDA 領域智慧知識引擎。IC design、cell-based flow、EDA tool、PDK、學術論文查詢。48+ 工具索引（含 30+ 商業工具）、11 個 cell flow stages、17 種 action：auto（自動判斷）、pdk（PDK/cell library）、paper（學術論文）、tool（EDA 工具）、github（GitHub 專案）、code（程式碼）、all（綜合）、list-tools/pdk/conferences、flow（cell flow stages）、dft、lec、eco、fpga |
+| `smart_eda_search({question, action?, query?, maxResults?})` | 🥇 EDA 領域智慧知識引擎。IC design、cell-based flow、EDA tool、PDK、學術論文查詢。48+ 工具索引（含 30+ 商業工具）、11 個 cell flow stages。**多源並行廣搜**：DuckDuckGo 網路搜尋 + EDA 社群（Cadence Community/SolvNet/Reddit/EE Times/EDAboard）+ Semantic Scholar + OpenAlex + GitHub code/repo。17 種 action：auto（自動判斷→多源並行）、pdk（PDK/cell library）、paper（學術論文）、tool（EDA 工具）、github（GitHub 專案）、code（程式碼）、all/comprehensive（全源並行）、list-tools/pdk/conferences、flow（cell flow stages）、dft、lec、eco、fpga、troubleshoot（FAQ+廠商URL）、docs（工具文件）。💡 auto 結果不足時，自動提示可用 `smart_exa_search` 做更深入搜尋 |
 
 > `smart_think` 快思（對話式）vs `smart_deep_think` 慢想（單次完整輸出）。不確定 root cause 用 think，需系統性評估用 deep_think。
+
+### 🔍 搜尋路由鏈（EDA / 醫學 / 通用）
+
+```
+EDA 問題 →
+  ├─ smart_eda_search (auto)  → 多源並行（DDG + 社群 + 學術 + GitHub）
+  │   └─ 結果不足？          → smart_exa_search 做更深入網路搜尋
+  ├─ smart_eda_search (all)   → 全源並行（最完整）
+  └─ 直接 smart_exa_search   → 跳過 EDA 索引，直接廣搜
+
+通用網路搜尋 →
+  ├─ smart_exa_search         → 🥇 首選（Exa 引擎，語意搜尋）
+  └─ smart_eda_search (auto)  → EDA 領域限定時用
+```
 
 ### Sub-tools（透過 ssr 呼叫）
 
