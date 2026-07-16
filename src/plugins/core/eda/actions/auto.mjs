@@ -3,6 +3,7 @@
  */
 import { registerAction } from './registry.mjs';
 import { EDA_TOOL_INDEX } from '../data/tools.mjs';
+import { EDA_ABBREV_DICT } from '../data/abbreviations.mjs';
 import { searchLocalPDK, formatPDKResults, searchLocalTools, formatToolResults } from '../format/local.mjs';
 import { searchGitHubPDK, searchGitHubEDA, formatGitHubResults } from '../sources/github.mjs';
 import { isToolIssueQuery } from '../query/detect.mjs';
@@ -16,19 +17,33 @@ registerAction('auto', async (args) => {
   const maxResults = args.maxResults || 10;
   const q = searchQuery.toLowerCase();
 
+  // Phase 11: 利用 EDA_ABBREV_DICT 改善工具偵測
+  // 將查詢中的縮寫展開，提升匹配準確率
+  const words = q.split(/\s+/);
+  const expandedTerms = words.map(w => {
+    const clean = w.replace(/[^a-z0-9&]/g, '');
+    const match = EDA_ABBREV_DICT[clean];
+    return match ? match.full.toLowerCase() : w;
+  });
+  const qExpanded = expandedTerms.join(' ');
+
   // EDA 工具查詢（優先：tool 問題偵測需要先判斷）
-  if (q.includes('tool') || q.includes('工具') || q.includes('synthesis') || q.includes('synth')
-    || q.includes(' STA') || q.includes('timing') || q.includes('place') || q.includes('route')
-    || q.includes('verilat') || q.includes('iverilog') || q.includes('yosys') || q.includes('openroad')
-    || q.includes('klayout') || q.includes('simulation') || q.includes('formal')
-    || q.includes('dc ') || q.includes('genus') || q.includes('innovus') || q.includes('icc2')
-    || q.includes('primetime') || q.includes('tempus') || q.includes('lec') || q.includes('formality')
-    || q.includes('eco') || q.includes('vivado') || q.includes('quartus') || q.includes('calibre')
-    || q.includes('icv') || q.includes('vcs') || q.includes('xcelium') || q.includes('questa')
-    || q.includes('jasper') || q.includes('spyglass') || q.includes('dft') || q.includes('modus')
-    || q.includes('virtuoso') || q.includes('starrc') || q.includes('quantus') || q.includes('voltus')
-    || q.includes('primepower') || q.includes('redhawk') || q.includes('totem') || q.includes('hal')
-    || q.includes('diamond') || q.includes('synplify') || q.includes('netgen')) {
+  // 使用展開後的 qExpanded 匹配，解決縮寫誤判（如 hal/diamond/netgen）
+  const toolKeywords = ['tool', '工具', 'synthesis', 'synth',
+    ' STA', 'timing', 'place', 'route',
+    'verilat', 'iverilog', 'yosys', 'openroad',
+    'klayout', 'simulation', 'formal',
+    'dc ', 'design compiler', 'genus', 'innovus', 'icc2', 'ic compiler',
+    'primetime', 'tempus', 'lec', 'logic equivalence', 'conformal', 'formality',
+    'eco', 'engineering change', 'vivado', 'quartus', 'calibre',
+    'icv', 'ic validator', 'vcs', 'xcelium', 'questa',
+    'jasper', 'spyglass', 'dft', 'design for test', 'modus',
+    'virtuoso', 'starrc', 'star rc', 'quantus', 'voltus',
+    'primepower', 'prime power', 'redhawk', 'totem',
+    'netgen', 'openroad', 'openlane', 'yosys', 'klayout'];
+  const isToolQuery = toolKeywords.some(kw => q.includes(kw) || qExpanded.includes(kw));
+
+  if (isToolQuery) {
     const localTools = searchLocalTools(searchQuery);
     let output = '';
     if (localTools.length > 0) {

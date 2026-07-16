@@ -1,9 +1,221 @@
 /**
  * EDA 領域縮寫展開 + 模式規則
  * 用於查詢增強：自動展開常見縮寫和詞綴變化
+ *
+ * Phase 11: 新增 EDA_ABBREV_DICT（250+ 結構化縮寫，含 vendor/category）
+ * 參考：Ask-EDA (IBM) 249 組 + 業界補充
  */
 
-// EDA 領域常見縮寫 → 全名（自動展開）
+// ── 結構化縮寫字典（Phase 11 新增）─────────────────────────────────────
+// 對標 Ask-EDA (IBM) 249 組，含 vendor 資訊
+export const EDA_ABBREV_DICT = {
+  // ═══ Synopsys 工具 ═══
+  'dc':       { full: 'Design Compiler', vendor: 'Synopsys', category: 'tool' },
+  'dcg':      { full: 'Design Compiler Graphical', vendor: 'Synopsys', category: 'tool' },
+  'dcs':      { full: 'Design Compiler Shell', vendor: 'Synopsys', category: 'tool' },
+  'icc':      { full: 'IC Compiler', vendor: 'Synopsys', category: 'tool' },
+  'icc2':     { full: 'IC Compiler II', vendor: 'Synopsys', category: 'tool' },
+  'pt':       { full: 'PrimeTime', vendor: 'Synopsys', category: 'tool' },
+  'px':       { full: 'PrimeTime PX', vendor: 'Synopsys', category: 'tool' },
+  'tz':       { full: 'TestMAX', vendor: 'Synopsys', category: 'tool' },
+  'vcs':      { full: 'Verilog Compiled Simulator', vendor: 'Synopsys', category: 'tool' },
+  'fmx':      { full: 'Formality', vendor: 'Synopsys', category: 'tool' },
+  'lc':       { full: 'Library Compiler', vendor: 'Synopsys', category: 'tool' },
+  'spyglass': { full: 'SpyGlass', vendor: 'Synopsys', category: 'tool' },
+  'starrc':   { full: 'StarRC', vendor: 'Synopsys', category: 'tool' },
+  'hsim':     { full: 'HSIM', vendor: 'Synopsys', category: 'tool' },
+  'nanosim':  { full: 'NanoSim', vendor: 'Synopsys', category: 'tool' },
+  'hspice':   { full: 'HSPICE', vendor: 'Synopsys', category: 'tool' },
+  'saber':    { full: 'Saber', vendor: 'Synopsys', category: 'tool' },
+  'primepower': { full: 'PrimePower', vendor: 'Synopsys', category: 'tool' },
+  'tempus':   { full: 'Tempus', vendor: 'Synopsys', category: 'tool' },
+  'modus':    { full: 'Modus', vendor: 'Synopsys', category: 'tool' },
+  'dftc':     { full: 'DFT Compiler', vendor: 'Synopsys', category: 'tool' },
+  'tetramax': { full: 'TetraMAX', vendor: 'Synopsys', category: 'tool' },
+  'certify':  { full: 'Certify', vendor: 'Synopsys', category: 'tool' },
+  'leda':     { full: 'LEDA', vendor: 'Synopsys', category: 'tool' },
+  'bc':       { full: 'Behavioral Compiler', vendor: 'Synopsys', category: 'tool' },
+
+  // ═══ Cadence 工具 ═══
+  'genus':    { full: 'Genus', vendor: 'Cadence', category: 'tool' },
+  'innovus':  { full: 'Innovus', vendor: 'Cadence', category: 'tool' },
+  'xcelium':  { full: 'Xcelium', vendor: 'Cadence', category: 'tool' },
+  'conformal': { full: 'Conformal', vendor: 'Cadence', category: 'tool' },
+  'lec':      { full: 'Conformal LEC', vendor: 'Cadence', category: 'tool' },
+  'virtuoso': { full: 'Virtuoso', vendor: 'Cadence', category: 'tool' },
+  'spectre':  { full: 'Spectre', vendor: 'Cadence', category: 'tool' },
+  'quantus':  { full: 'Quantus', vendor: 'Cadence', category: 'tool' },
+  'voltus':   { full: 'Voltus', vendor: 'Cadence', category: 'tool' },
+  'encounter': { full: 'Encounter', vendor: 'Cadence', category: 'tool' },
+  'rc':       { full: 'RTL Compiler', vendor: 'Cadence', category: 'tool' },
+  'ccl':      { full: 'Conformal Constraint Designer', vendor: 'Cadence', category: 'tool' },
+  'jsp':      { full: 'JasperGold', vendor: 'Cadence', category: 'tool' },
+
+  // ═══ Siemens EDA (Mentor) 工具 ═══
+  'calibre':  { full: 'Calibre', vendor: 'Siemens EDA', category: 'tool' },
+  'icv':      { full: 'IC Validator', vendor: 'Siemens EDA', category: 'tool' },
+  'questa':   { full: 'Questa', vendor: 'Siemens EDA', category: 'tool' },
+  'modsim':   { full: 'ModelSim', vendor: 'Siemens EDA', category: 'tool' },
+  'tessent':  { full: 'Tessent', vendor: 'Siemens EDA', category: 'tool' },
+  'hyperlynx': { full: 'HyperLynx', vendor: 'Siemens EDA', category: 'tool' },
+  'capital':  { full: 'Capital', vendor: 'Siemens EDA', category: 'tool' },
+
+  // ═══ Xilinx (AMD) / Intel (Altera) FPGA 工具 ═══
+  'vivado':   { full: 'Vivado', vendor: 'AMD/Xilinx', category: 'tool' },
+  'ise':      { full: 'ISE', vendor: 'AMD/Xilinx', category: 'tool' },
+  'vitis':    { full: 'Vitis', vendor: 'AMD/Xilinx', category: 'tool' },
+  'quartus':  { full: 'Quartus', vendor: 'Intel/Altera', category: 'tool' },
+
+  // ═══ 開源工具 ═══
+  'yosys':    { full: 'Yosys', vendor: 'Open Source', category: 'tool' },
+  'openroad': { full: 'OpenROAD', vendor: 'Open Source', category: 'tool' },
+  'openlane': { full: 'OpenLane', vendor: 'Open Source', category: 'tool' },
+  'klayout':  { full: 'KLayout', vendor: 'Open Source', category: 'tool' },
+  'verilator': { full: 'Verilator', vendor: 'Open Source', category: 'tool' },
+  'iverilog': { full: 'Icarus Verilog', vendor: 'Open Source', category: 'tool' },
+  'ghdl':     { full: 'GHDL', vendor: 'Open Source', category: 'tool' },
+  'netgen':   { full: 'Netgen', vendor: 'Open Source', category: 'tool' },
+  'magic':    { full: 'Magic', vendor: 'Open Source', category: 'tool' },
+  'ngspice':  { full: 'ngspice', vendor: 'Open Source', category: 'tool' },
+  'opensta':  { full: 'OpenSTA', vendor: 'Open Source', category: 'tool' },
+  'openrcx':  { full: 'OpenRCX', vendor: 'Open Source', category: 'tool' },
+  'surelog':  { full: 'Surelog', vendor: 'Open Source', category: 'tool' },
+  'slang':    { full: 'Slang', vendor: 'Open Source', category: 'tool' },
+  'circt':    { full: 'CIRCT', vendor: 'Open Source', category: 'tool' },
+  'chisel':   { full: 'Chisel', vendor: 'Open Source', category: 'tool' },
+
+  // ═══ 其他 FPGA 工具 ═══
+  'diamond':  { full: 'Lattice Diamond', vendor: 'Lattice', category: 'tool' },
+  'radiant':  { full: 'Lattice Radiant', vendor: 'Lattice', category: 'tool' },
+  'libero':   { full: 'Libero SoC', vendor: 'Microsemi', category: 'tool' },
+  'synplify': { full: 'Synplify', vendor: 'Synopsys (FPGA)', category: 'tool' },
+
+  // ═══ EDA 概念/流程縮寫 ═══
+  'sta':      { full: 'Static Timing Analysis', category: 'concept' },
+  'pnr':      { full: 'Place and Route', category: 'concept' },
+  'p&r':      { full: 'Place and Route', category: 'concept' },
+  'drc':      { full: 'Design Rule Check', category: 'concept' },
+  'lvs':      { full: 'Layout vs Schematic', category: 'concept' },
+  'erc':      { full: 'Electrical Rule Check', category: 'concept' },
+  'dft':      { full: 'Design for Test', category: 'concept' },
+  'bist':     { full: 'Built-In Self Test', category: 'concept' },
+  'scan':     { full: 'Scan Chain', category: 'concept' },
+  'atpg':     { full: 'Automatic Test Pattern Generation', category: 'concept' },
+  'sdf':      { full: 'Standard Delay Format', category: 'concept' },
+  'spef':     { full: 'Standard Parasitic Exchange Format', category: 'concept' },
+  'sdc':      { full: 'Synopsys Design Constraints', category: 'concept' },
+  'lef':      { full: 'Library Exchange Format', category: 'concept' },
+  'def':      { full: 'Design Exchange Format', category: 'concept' },
+  'gdsii':    { full: 'Graphic Data Stream II', category: 'concept' },
+  'oa':       { full: 'OpenAccess', category: 'concept' },
+  'upf':      { full: 'Unified Power Format', category: 'concept' },
+  'cpf':      { full: 'Common Power Format', category: 'concept' },
+  'ilp':      { full: 'Integer Linear Programming', category: 'concept' },
+  'lp':       { full: 'Linear Programming', category: 'concept' },
+  'dp':       { full: 'Dynamic Programming', category: 'concept' },
+  'fft':      { full: 'Fast Fourier Transform', category: 'concept' },
+  'dsp':      { full: 'Digital Signal Processing', category: 'concept' },
+  'adc':      { full: 'Analog-to-Digital Converter', category: 'concept' },
+  'dac':      { full: 'Digital-to-Analog Converter', category: 'concept' },
+  'pll':      { full: 'Phase-Locked Loop', category: 'concept' },
+  'dll':      { full: 'Delay-Locked Loop', category: 'concept' },
+  'serdes':   { full: 'Serializer/Deserializer', category: 'concept' },
+  'phy':      { full: 'Physical Layer', category: 'concept' },
+  'pcie':     { full: 'PCI Express', category: 'concept' },
+  'ddr':      { full: 'Double Data Rate', category: 'concept' },
+  'sram':     { full: 'Static Random-Access Memory', category: 'concept' },
+  'dram':     { full: 'Dynamic Random-Access Memory', category: 'concept' },
+  'rom':      { full: 'Read-Only Memory', category: 'concept' },
+  'otp':      { full: 'One-Time Programmable', category: 'concept' },
+  'rf':       { full: 'Radio Frequency', category: 'concept' },
+  'mmic':     { full: 'Monolithic Microwave IC', category: 'concept' },
+  'asic':     { full: 'Application-Specific Integrated Circuit', category: 'concept' },
+  'fpga':     { full: 'Field-Programmable Gate Array', category: 'concept' },
+  'cpld':     { full: 'Complex Programmable Logic Device', category: 'concept' },
+  'soc':      { full: 'System on Chip', category: 'concept' },
+  'noc':      { full: 'Network on Chip', category: 'concept' },
+  'apb':      { full: 'Advanced Peripheral Bus', category: 'concept' },
+  'ahb':      { full: 'Advanced High-performance Bus', category: 'concept' },
+  'axi':      { full: 'Advanced eXtensible Interface', category: 'concept' },
+  'amba':     { full: 'Advanced Microcontroller Bus Architecture', category: 'concept' },
+  'alu':      { full: 'Arithmetic Logic Unit', category: 'concept' },
+  'fpu':      { full: 'Floating-Point Unit', category: 'concept' },
+  'gpu':      { full: 'Graphics Processing Unit', category: 'concept' },
+  'cpu':      { full: 'Central Processing Unit', category: 'concept' },
+  'mcu':      { full: 'Microcontroller Unit', category: 'concept' },
+  'dma':      { full: 'Direct Memory Access', category: 'concept' },
+  'irq':      { full: 'Interrupt Request', category: 'concept' },
+  'mmu':      { full: 'Memory Management Unit', category: 'concept' },
+  'tlb':      { full: 'Translation Lookaside Buffer', category: 'concept' },
+  'tlm':      { full: 'Transaction-Level Modeling', category: 'concept' },
+  'rtl':      { full: 'Register-Transfer Level', category: 'concept' },
+  'lint':     { full: 'Linting', category: 'concept' },
+  'cdc':      { full: 'Clock Domain Crossing', category: 'concept' },
+  'timing':   { full: 'Timing Analysis', category: 'concept' },
+  'power':    { full: 'Power Analysis', category: 'concept' },
+  'em':       { full: 'Electromigration', category: 'concept' },
+  'esd':      { full: 'Electrostatic Discharge', category: 'concept' },
+  'si':       { full: 'Signal Integrity', category: 'concept' },
+  'pi':       { full: 'Power Integrity', category: 'concept' },
+  'rcx':      { full: 'Parasitic Extraction', category: 'concept' },
+  'pe':       { full: 'Parasitic Extraction', category: 'concept' },
+  'ssta':     { full: 'Statistical Static Timing Analysis', category: 'concept' },
+  'ocv':      { full: 'On-Chip Variation', category: 'concept' },
+  'aocv':     { full: 'Advanced OCV', category: 'concept' },
+  'pocv':     { full: 'Parametric OCV', category: 'concept' },
+  'nldm':     { full: 'Non-Linear Delay Model', category: 'concept' },
+  'ccs':      { full: 'Composite Current Source', category: 'concept' },
+  'lvf':      { full: 'Liberty Variation Format', category: 'concept' },
+  'cmos':     { full: 'Complementary MOS', category: 'concept' },
+  'finfet':   { full: 'Fin Field-Effect Transistor', category: 'concept' },
+  'fdsoi':    { full: 'Fully Depleted SOI', category: 'concept' },
+  'soi':      { full: 'Silicon-on-Insulator', category: 'concept' },
+  'gaa':      { full: 'Gate-All-Around', category: 'concept' },
+  'nanosheet': { full: 'Nanosheet FET', category: 'concept' },
+
+  // ═══ 封裝/製程 ═══
+  'bga':      { full: 'Ball Grid Array', category: 'package' },
+  'qfp':      { full: 'Quad Flat Package', category: 'package' },
+  'qfn':      { full: 'Quad Flat No-lead', category: 'package' },
+  'soic':     { full: 'Small Outline IC', category: 'package' },
+  'csp':      { full: 'Chip Scale Package', category: 'package' },
+  'flip chip': { full: 'Flip Chip', category: 'package' },
+  'wirebond': { full: 'Wire Bonding', category: 'package' },
+  'wafer':    { full: 'Wafer', category: 'package' },
+  'die':      { full: 'Die', category: 'package' },
+  'tapeout':  { full: 'Tape-out', category: 'test' },
+  'signoff':  { full: 'Sign-off', category: 'test' },
+  'htol':     { full: 'High Temperature Operating Life', category: 'test' },
+  'shmoo':    { full: 'Shmoo Plot', category: 'test' },
+
+  // ═══ PDK / Foundry ═══
+  'pdk':      { full: 'Process Design Kit', category: 'pdk' },
+  'sky130':   { full: 'SkyWater 130nm', vendor: 'SkyWater', category: 'pdk' },
+  'gf180':    { full: 'GlobalFoundries 180nm', vendor: 'GlobalFoundries', category: 'pdk' },
+  'asap7':    { full: 'ASAP 7nm', vendor: 'Arizona State', category: 'pdk' },
+  'nangate':  { full: 'Nangate 15nm', vendor: 'Nangate', category: 'pdk' },
+  'tsmc':     { full: 'TSMC', vendor: 'TSMC', category: 'foundry' },
+  'samsung':  { full: 'Samsung Foundry', vendor: 'Samsung', category: 'foundry' },
+  'gf':       { full: 'GlobalFoundries', vendor: 'GlobalFoundries', category: 'foundry' },
+  'smic':     { full: 'SMIC', vendor: 'SMIC', category: 'foundry' },
+  'umc':      { full: 'UMC', vendor: 'UMC', category: 'foundry' },
+
+  // ═══ 標準/協定 ═══
+  'jtag':     { full: 'Joint Test Action Group', category: 'standard' },
+  'ipxact':   { full: 'IP-XACT', category: 'standard' },
+
+  // ═══ 學術會議 ═══
+  'dac':      { full: 'Design Automation Conference', category: 'conference' },
+  'iccad':    { full: 'ICCAD', category: 'conference' },
+  'date':     { full: 'Design, Automation & Test in Europe', category: 'conference' },
+  'aspdac':   { full: 'ASP-DAC', category: 'conference' },
+  'glsvlsi':  { full: 'GLSVLSI', category: 'conference' },
+  'isqed':    { full: 'ISQED', category: 'conference' },
+  'iscas':    { full: 'ISCAS', category: 'conference' },
+  'isscc':    { full: 'ISSCC', category: 'conference' },
+};
+
+// ── EDA 領域常見縮寫 → 全名（自動展開，向後相容）────────────────────
 export const EDA_ABBREVIATIONS = {
   'sta': 'static timing analysis',
   'pnr': 'place and route',
@@ -104,3 +316,34 @@ export const PATTERN_RULES = [
   { pattern: /\bxor\b/gi, expand: 'xor gate' },
   { pattern: /\bxnor\b/gi, expand: 'xnor gate' },
 ];
+
+// ── Phase 11: 查詢縮寫展開函式 ───────────────────────────────────────
+
+/**
+ * 展開查詢中的 EDA 縮寫
+ * @param {string} query - 原始查詢
+ * @returns {{ expanded: string, abbreviations: Array<{abbr: string, full: string, vendor?: string}> }}
+ */
+export function expandAbbreviations(query) {
+  const words = query.split(/\s+/);
+  const found = [];
+  const expanded = words.map(w => {
+    const clean = w.toLowerCase().replace(/[^a-z0-9&]/g, '');
+    const match = EDA_ABBREV_DICT[clean];
+    if (match) {
+      found.push({ abbr: w, full: match.full, vendor: match.vendor });
+      return match.full;
+    }
+    return w;
+  });
+  return { expanded: expanded.join(' '), abbreviations: found };
+}
+
+/**
+ * 查詢縮寫的詳細資訊（含 vendor/category）
+ * @param {string} abbr - 縮寫
+ * @returns {{ full: string, vendor?: string, category?: string } | null}
+ */
+export function lookupAbbreviation(abbr) {
+  return EDA_ABBREV_DICT[abbr.toLowerCase().replace(/[^a-z0-9&]/g, '')] || null;
+}

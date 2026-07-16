@@ -1,16 +1,19 @@
 // ── 查詢增強 + 展開 ─────────────────────────────────────────────────────
-import { EDA_ABBREVIATIONS, PATTERN_RULES } from '../data/abbreviations.mjs';
+import { EDA_ABBREVIATIONS, PATTERN_RULES, expandAbbreviations, EDA_ABBREV_DICT } from '../data/abbreviations.mjs';
 import { EDA_CONFERENCES } from '../data/meta.mjs';
 
 export function enhanceQueryForEDA(query) {
+  // Phase 11 Step 1: 縮寫展開
+  const { expanded: expandedQuery, abbreviations } = expandAbbreviations(query);
+
   const edaKeywords = ['synthesis', 'placement', 'routing', 'timing', 'clock tree', 'floorplan',
     'P&R', 'STA', 'DRC', 'LVS', 'PDK', 'standard cell', 'RTL', 'GDSII', 'netlist',
     'EDA', 'VLSI', 'ASIC', 'FPGA', 'FinFET', 'CMOS', 'liberty', '.lib', 'characterize',
     'clock mux', 'CDC', 'metastability', 'synchronizer', 'UPF', 'power domain',
     'multi-cycle', 'false path', 'clock gating', 'OCV', 'AOCV', 'POCV'];
-  const hasEDAKeyword = edaKeywords.some(k => query.toLowerCase().includes(k.toLowerCase()));
-  if (hasEDAKeyword) return query;
-  return `${query} VLSI EDA IC design`;
+  const hasEDAKeyword = edaKeywords.some(k => expandedQuery.toLowerCase().includes(k.toLowerCase()));
+  if (hasEDAKeyword) return expandedQuery;
+  return `${expandedQuery} VLSI EDA IC design`;
 }
 
 export function generateQueryVariants(originalQuery, maxVariants = 3) {
