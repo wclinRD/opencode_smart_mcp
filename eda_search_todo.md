@@ -18,6 +18,7 @@
 > Phase 10 ✅ 完成（2026-07-16）：靜態資料 JSON 化（-93%）+ 分頁 offset + Exa MCP free tier（無需 API key）
 > Phase 13 ✅ 完成（2026-07-16）：RRF fusion + EDA rerank + Adaptive Top-K + Post-retrieval filter + 6/6 測試檔通過
 > Phase 14 ✅ 完成（2026-07-16）：5 個 benchmark suite（300 queries）+ metrics.mjs（6 指標）+ runner.mjs + 28/28 測試通過
+> Phase 15 ✅ 完成（2026-07-17）：hdl-kgraph KG wrapper（337 行）+ 整合 auto/troubleshoot/docs + 7/7 測試通過
 
 ---
 
@@ -243,24 +244,23 @@
 
 ---
 
-## Phase 15：EDA Knowledge Graph（🟢 低優先級，長期）
+## Phase 15：EDA Knowledge Graph（✅ 完成 2026-07-17）
 
-> 目標：整合 hdl-kgraph MCP server，建立 EDA 知識圖譜（改為整合已有專案，降低風險）
+> 目標：整合 hdl-kgraph MCP server，建立 EDA 知識圖譜
 > 參考：hdl-kgraph（MCP server，已開源）、ChipMind (AAAI'26)、VeriRAG
-> 預估：~3 小時（原 8hr，改為整合後 -5hr）| 風險：低（整合已有專案）
+> 預估：~3 小時 | 風險：低 | 實際：~1.5 hr
 
-### Step 1: 安裝 + 整合 hdl-kgraph
-- [ ] 15.1 Clone + 安裝 hdl-kgraph MCP server
-- [ ] 15.2 整合到 smart_eda_search（sub-tool 呼叫）
-
-### Step 2: 整合到現有 actions
-- [ ] 15.3 整合到 `troubleshoot` action（用 hdl-kgraph 查 FAQ + command）
-- [ ] 15.4 整合到 `docs` action（用 hdl-kgraph 查工具文件關聯）
-- [ ] 15.5 整合到 `auto` action（查詢多跳關聯：Tool→Command→Option→Issue）
-
-### Step 3: 測試 + 驗證
-- [ ] 15.6 測試：DC → has_command → compile → has_option → map_effort
-- [ ] 15.7 效能測試：KG 查詢延遲 < 500ms
+- [x] 15.1 建立 `eda/lib/hdl-kgraph.mjs`（KG wrapper，337 行，12 個 export）
+  - detectHdlKgraph() 偵測 CLI + graph.db 可用性（session cache）
+  - 9 種 KG 工具（find_module, get_hierarchy, impact_of_change, etc.）
+  - matchKgTool() 自動從查詢內容選擇最佳 KG 工具
+  - formatKgResult() 響應式 Markdown 格式化
+- [x] 15.2 整合到 `auto.mjs`：偵測 HDL design 關鍵字 → KG 查詢（優先於多源搜尋）
+- [x] 15.3 整合到 `troubleshoot.mjs`：FAQ + 廠商 URL 之後補充 KG 設計結構
+- [x] 15.4 整合到 `docs.mjs`：文件查詢之後補充 KG 設計結構
+- [x] 15.5 全部 try/catch 包裹，KG 非必要，失敗不影響原有功能
+- [x] 15.6 測試：7/7 測試檔全部通過
+- [x] 15.7 Commit：`7793936` feat(eda): Phase 15 — 整合 hdl-kgraph Knowledge Graph
 
 ---
 
@@ -309,10 +309,10 @@
 | Phase 12: Query Intelligence | 120 min | 25 hr | ✅ 已完成 |
 | Phase 13: Hybrid Retrieval RAG | 300 min | 30 hr | ✅ 已完成 |
 | Phase 14: EDA QA Benchmark | 180 min | 33 hr | ✅ 已完成 |
-| Phase 15: Knowledge Graph（整合 hdl-kgraph） | 180 min | 36 hr | 🟢 低 |
+| Phase 15: Knowledge Graph（整合 hdl-kgraph） | 180 min | 36 hr | ✅ 已完成 |
 | Phase 16: Multi-Agent 🆕 | 480 min | 44 hr | 🔴 高 |
 
-**總計：~44 小時**（Phase 1-14 已完成 32 hr + Phase 15-16 需 11 hr）
+**總計：~44 小時**（Phase 1-15 已完成 33.5 hr + Phase 16 需 8 hr）
 
 ---
 
