@@ -1,11 +1,14 @@
 // ── OpenAlex — EDA 學術論文 ──────────────────────────────────────────────
 import { httpsGet, OPENALEX_API } from './http.mjs';
 
+// EDA 關鍵字（用於 post-filter 驗證）
+const EDA_KEYWORDS = /\b(EDA|VLSI|ASIC|FPGA|synthesis|place(?:ment)?|rout(?:e|ing)|timing|power|verification|simulation|PnR|P&R|physical design|logic design|circuit|netlist|RTL|GDSII|standard cell|design rule|DRC|LVS|STA|DFT|scan|ATPG|BIST|formal|equivalence|clock|constraint|floorplan|clock tree|CTS|buffer|fanout|wireload|congestion|utilization|area|delay|setup|hold|skew|jitter|signal integrity|crosstalk|IR drop|electromigration)\b/i;
+
 export async function searchOpenAlex(query, maxResults = 10) {
   const q = encodeURIComponent(query);
-  const url = `${OPENALEX_API}/works?search=${q}&per_page=${maxResults}&sort=cited_by_count:desc&filter=concepts.id:C119857082|C154945302|C41008148`;
+  const url = `${OPENALEX_API}/works?search=${q}&per_page=${maxResults * 2}&sort=cited_by_count:desc&filter=concepts.id:C119857082|C154945302|C41008148`;
   const data = await httpsGet(url);
-  return (data.results || []).map(w => ({
+  const allArticles = (data.results || []).map(w => ({
     title: w.title || 'Untitled',
     authors: (w.authorships || []).map(a => a.author?.display_name).filter(Boolean).slice(0, 3).join(', ') + ((w.authorships || []).length > 3 ? ' et al.' : ''),
     year: w.publication_year,
@@ -16,6 +19,8 @@ export async function searchOpenAlex(query, maxResults = 10) {
     url: w.open_access?.oa_url || w.doi || '',
     abstract: reconstructAbstract(w.abstract_inverted_index),
   }));
+  // Post-filter: 只保留 title 或 abstract 含 EDA 關鍵字的結果
+  return allArticles.filter(a => EDA_KEYWORDS.test(a.title) || EDA_KEYWORDS.test(a.abstract)).slice(0, maxResults);
 }
 
 export function reconstructAbstract(invertedIndex) {

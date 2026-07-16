@@ -68,15 +68,23 @@ export async function multiSourceSearch(searchQuery, maxResults = 10, options = 
   const searchQueries = generateSearchQueries(searchQuery);
   const enhancedQuery = enhanceQueryForEDA(searchQuery);
 
+  // Semantic Scholar with DDG fallback
+  const scholarQuery = searchQueries.academic || enhancedQuery;
+  const scholarSearch = searchSemanticScholar(scholarQuery, maxResults)
+    .then(r => r.ok ? r.data : [])
+    .catch(() => []); // 429/retry exhaustion → empty
+  const scholarDDGFallback = searchWebDDG(`site:semanticscholar.org ${scholarQuery}`, Math.min(maxResults, 3))
+    .then(r => r.map(item => ({ title: item.title, authors: '', year: '', venue: '', citedBy: 0, doi: '', url: item.url, tldr: item.snippet || '', abstract: '' })));
+
   const searches = [
     searchWebDDG(searchQueries.web, maxResults),
     searchEDACommunities(searchQuery, maxResults),
-    searchSemanticScholar(searchQueries.academic || enhancedQuery, maxResults).then(r => r.ok ? r.data : []),
+    scholarSearch,
+    scholarDDGFallback,
     searchOpenAlex(searchQueries.academic || enhancedQuery, Math.min(maxResults, 5)),
     searchGitHubCode(searchQueries.github, 5),
     searchGitHubEDA(searchQuery, 5),
   ];
-
   if (isExaAvailable()) searches.push(searchExa(searchQuery, Math.min(maxResults, 5)));
 
   const sources = await Promise.allSettled(searches);
@@ -93,23 +101,26 @@ export async function multiSourceSearch(searchQuery, maxResults = 10, options = 
     output += formatCommunityResults(communityResults, crawledPages);
   }
 
+  // Semantic Scholar with DDG fallback
   const scholarData = sources[2].status === 'fulfilled' ? sources[2].value : [];
-  if (scholarData.length > 0) output += formatSemanticScholarResults(scholarData);
+  const scholarFallback = sources[3].status === 'fulfilled' ? sources[3].value : [];
+  const finalScholar = scholarData.length > 0 ? scholarData : scholarFallback;
+  if (finalScholar.length > 0) output += formatSemanticScholarResults(finalScholar);
 
-  const articles = sources[3].status === 'fulfilled' ? sources[3].value : [];
+  const articles = sources[4].status === 'fulfilled' ? sources[4].value : [];
   if (articles.length > 0) output += formatOpenAlexResults(articles);
 
-  const ghCode = sources[4].status === 'fulfilled' ? sources[4].value : [];
+  const ghCode = sources[5].status === 'fulfilled' ? sources[5].value : [];
   if (ghCode.length > 0) {
     output += `💻 **GitHub 程式碼**（相關 script / tool flow）\n\n`;
     for (const r of ghCode) output += `- [${r.name}](${r.url}) — *${r.repo}*\n`;
     output += '\n';
   }
 
-  const ghRepos = sources[5].status === 'fulfilled' ? sources[5].value : [];
+  const ghRepos = sources[6].status === 'fulfilled' ? sources[6].value : [];
   if (ghRepos.length > 0) output += formatGitHubResults(ghRepos, 'GitHub 相關 EDA 專案');
 
-  const exaData = isExaAvailable() && sources[6]?.status === 'fulfilled' ? sources[6].value : [];
+  const exaData = isExaAvailable() && sources[7]?.status === 'fulfilled' ? sources[7].value : [];
   if (exaData.length > 0) {
     output += `🔍 **Exa 語意搜尋**（${exaData.length} 筆）\n\n`;
     for (const r of exaData) {

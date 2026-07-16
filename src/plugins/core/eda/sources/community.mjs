@@ -4,17 +4,37 @@ import { searchWebDDG } from './web.mjs';
 import { EDA_COMMUNITIES } from '../data/meta.mjs';
 import { exaGetContents, isExaAvailable } from './exa.mjs';
 
+/**
+ * 社群搜尋 with Tier 分級 + URL 去重
+ * Tier 1: 廠商官方社群（優先搜尋，always included）
+ * Tier 2: 社群補充來源（maxResults > 5 時 included）
+ */
 export async function searchEDACommunities(query, maxResults = 10) {
-  const perCommunity = Math.max(2, Math.floor(maxResults / EDA_COMMUNITIES.length));
-  const searches = EDA_COMMUNITIES.map(async (community) => {
+  const tier1 = EDA_COMMUNITIES.filter(c => c.tier === 1);
+  const tier2 = EDA_COMMUNITIES.filter(c => c.tier === 2);
+  // Tier 1 always searched; Tier 2 only when maxResults > 5
+  const communities = maxResults > 5 ? [...tier1, ...tier2] : tier1;
+  const perCommunity = Math.max(2, Math.floor(maxResults / communities.length));
+
+  const searches = communities.map(async (community) => {
     try {
       const siteQuery = community.queryTemplate(query);
       const results = await searchWebDDG(siteQuery, perCommunity);
-      return results.map(r => ({ ...r, community: community.name }));
+      return results.map(r => ({ ...r, community: community.name, tier: community.tier }));
     } catch { return []; }
   });
+
   const allResults = await Promise.allSettled(searches);
-  return allResults.filter(r => r.status === 'fulfilled').flatMap(r => r.value).slice(0, maxResults);
+  const flat = allResults.filter(r => r.status === 'fulfilled').flatMap(r => r.value);
+
+  // URL 去重
+  const seen = new Set();
+  return flat.filter(r => {
+    const norm = r.url?.toLowerCase().replace(/\/+$/, '');
+    if (seen.has(norm)) return false;
+    seen.add(norm);
+    return true;
+  }).slice(0, maxResults);
 }
 
 /**
@@ -57,7 +77,8 @@ export function formatCommunityResults(results, crawledPages = []) {
   const crawledMap = new Map((crawledPages || []).map(p => [p.url, p.content]));
   for (const r of results) {
     const badge = r.community ? ` [${r.community}]` : '';
-    out += `###${badge} [${r.title}](${r.url})\n`;
+    const tierBadge = r.tier === 1 ? ' 🏆' : '';
+    out += `###${badge}${tierBadge} [${r.title}](${r.url})\n`;
     if (r.snippet) out += `> ${r.snippet.slice(0, 200)}\n`;
     const crawled = crawledMap.get(r.url);
     if (crawled) {

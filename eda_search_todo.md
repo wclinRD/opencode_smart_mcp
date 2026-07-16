@@ -13,7 +13,8 @@
 > Phase 7B ✅ 完成（2026-07-16）：TOON encoder/decoder + SmartCrusher + Schema Compression
 > Phase 11 ✅ 完成（2026-07-16）：EDA_ABBREV_DICT 250+ 組 + expandAbbreviations + 整合 enhanceQueryForEDA + auto
 > Phase 12 ✅ 完成（2026-07-16）：6類 Query Intelligence 分類器 + CATEGORY_SOURCE_WEIGHTS + 整合 auto
-> Phase 8-10 ⬜ 規劃中（搜尋品質 + 可靠性 + 長期改進）
+> Phase 8 ✅ 完成（2026-07-16）：Semantic Scholar 429 retry + OpenAlex EDA post-filter + 社群 Tier 分級
+> Phase 9-10 ⬜ 規劃中（可靠性 + 長期改進）
 > Phase 13-16 ⬜ 規劃中（RAG + Benchmark + KG + Multi-Agent）
 
 ---
@@ -149,9 +150,9 @@
 > 目標：解決 A4 + B1 + B2，提升學術和社群搜尋品質
 > 預估：~2.5 小時 | 風險：低（改良現有邏輯）
 
-- [ ] 8.1 Semantic Scholar 429 自動降級（exponential backoff + DDG fallback）
-- [ ] 8.2 OpenAlex concept filter 收窄（post-filter EDA 關鍵字二次驗證）
-- [ ] 8.3 社群搜尋 Tier 分級（Tier 1 高優先 + Tier 2 補充）+ URL 去重
+- [x] 8.1 Semantic Scholar 429 自動降級（exponential backoff + DDG fallback）
+- [x] 8.2 OpenAlex concept filter 收窄（post-filter EDA 關鍵字二次驗證）
+- [x] 8.3 社群搜尋 Tier 分級（Tier 1 高優先 + Tier 2 補充）+ URL 去重
 
 ---
 
@@ -298,18 +299,18 @@
 | Phase 5: 搜尋增強 | 120 min | 6 hr | 🟢 低 |
 | Phase 6: 驗證清理 | 30 min | 6.5 hr | 🟢 低 |
 | Phase 7: Token 效率 + Caveman | 180 min | 9.5 hr | ✅ 已完成 |
-| Phase 7B: Tool-Level Token 🆕 | 180 min | 12.5 hr | 🔴 P0 |
-| Phase 8: 搜尋品質 | 150 min | 15 hr | 🟡 低 |
+| Phase 7B: Tool-Level Token 🆕 | 180 min | 12.5 hr | ✅ 已完成 |
+| Phase 8: 搜尋品質 | 150 min | 15 hr | ✅ 已完成 |
 | Phase 9: 可靠性 | 240 min | 19 hr | 🟢 低 |
 | Phase 10: 長期改進 | 180 min | 22 hr | 🟢 低 |
-| Phase 11: Abbreviation De-hallucination | 60 min | 23 hr | 🟢 極低 |
-| Phase 12: Query Intelligence | 120 min | 25 hr | 🟢 低 |
+| Phase 11: Abbreviation De-hallucination | 60 min | 23 hr | ✅ 已完成 |
+| Phase 12: Query Intelligence | 120 min | 25 hr | ✅ 已完成 |
 | Phase 13: Hybrid Retrieval RAG | 300 min | 30 hr | 🟡 中 |
 | Phase 14: EDA QA Benchmark | 180 min | 33 hr | 🟢 低 |
 | Phase 15: Knowledge Graph（整合 hdl-kgraph） | 180 min | 36 hr | 🟢 低 |
 | Phase 16: Multi-Agent 🆕 | 480 min | 44 hr | 🔴 高 |
 
-**總計：~44 小時**（Phase 1-7 已完成 9.5 hr + Phase 7B-16 需 34.5 hr）
+**總計：~44 小時**（Phase 1-8 + 11 + 12 已完成 17 hr + Phase 9-10 + 13-16 需 27 hr）
 
 ---
 

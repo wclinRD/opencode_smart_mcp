@@ -16,15 +16,17 @@ export const EDA_CONFERENCES = [
 ];
 
 // ── EDA Community 索引 ───────────────────────────────────────────────────────
+// Tier 1: 廠商官方社群（優先搜尋）
+// Tier 2: 社群補充來源
 export const EDA_COMMUNITIES = [
-  { name: 'Cadence Community', domain: 'community.cadence.com', queryTemplate: (q) => `site:community.cadence.com ${q}` },
-  { name: 'Synopsys SolvNet', domain: 'solvnet.synopsys.com', queryTemplate: (q) => `site:solvnet.synopsys.com ${q}` },
-  { name: 'EE Times', domain: 'eetimes.com', queryTemplate: (q) => `site:eetimes.com EDA ASIC ${q}` },
-  { name: 'Reddit r/ASIC', domain: 'reddit.com/r/ASIC', queryTemplate: (q) => `site:reddit.com/r/ASIC ${q}` },
-  { name: 'Reddit r/FPGA', domain: 'reddit.com/r/FPGA', queryTemplate: (q) => `site:reddit.com/r/FPGA ${q}` },
-  { name: 'EDAboard', domain: 'edaboard.com', queryTemplate: (q) => `site:edaboard.com ${q}` },
-  { name: 'ChipVerify', domain: 'chipverify.com', queryTemplate: (q) => `site:chipverify.com ${q}` },
-  { name: 'Verification Academy', domain: 'verificationacademy.com', queryTemplate: (q) => `site:verificationacademy.com ${q}` },
+  { name: 'Cadence Community', domain: 'community.cadence.com', tier: 1, queryTemplate: (q) => `site:community.cadence.com ${q}` },
+  { name: 'Synopsys SolvNet', domain: 'solvnet.synopsys.com', tier: 1, queryTemplate: (q) => `site:solvnet.synopsys.com ${q}` },
+  { name: 'EE Times', domain: 'eetimes.com', tier: 2, queryTemplate: (q) => `site:eetimes.com EDA ASIC ${q}` },
+  { name: 'Reddit r/ASIC', domain: 'reddit.com/r/ASIC', tier: 2, queryTemplate: (q) => `site:reddit.com/r/ASIC ${q}` },
+  { name: 'Reddit r/FPGA', domain: 'reddit.com/r/FPGA', tier: 2, queryTemplate: (q) => `site:reddit.com/r/FPGA ${q}` },
+  { name: 'EDAboard', domain: 'edaboard.com', tier: 2, queryTemplate: (q) => `site:edaboard.com ${q}` },
+  { name: 'ChipVerify', domain: 'chipverify.com', tier: 2, queryTemplate: (q) => `site:chipverify.com ${q}` },
+  { name: 'Verification Academy', domain: 'verificationacademy.com', tier: 2, queryTemplate: (q) => `site:verificationacademy.com ${q}` },
 ];
 
 // ── EDA 常用檔案格式 ─────────────────────────────────────────────────────────
