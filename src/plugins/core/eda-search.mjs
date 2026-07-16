@@ -2546,11 +2546,42 @@ function enhanceQueryForEDA(query) {
   // 如果查詢已包含 EDA 關鍵詞，直接用
   const edaKeywords = ['synthesis', 'placement', 'routing', 'timing', 'clock tree', 'floorplan',
     'P&R', 'STA', 'DRC', 'LVS', 'PDK', 'standard cell', 'RTL', 'GDSII', 'netlist',
-    'EDA', 'VLSI', 'ASIC', 'FPGA', 'FinFET', 'CMOS'];
+    'EDA', 'VLSI', 'ASIC', 'FPGA', 'FinFET', 'CMOS', 'liberty', '.lib', 'characterize',
+    'clock mux', 'CDC', 'metastability', 'synchronizer', 'UPF', 'power domain',
+    'multi-cycle', 'false path', 'clock gating', 'OCV', 'AOCV', 'POCV'];
   const hasEDAKeyword = edaKeywords.some(k => query.toLowerCase().includes(k.toLowerCase()));
   if (hasEDAKeyword) return query;
   // 否則加上 EDA 背景
   return `${query} VLSI EDA IC design`;
+}
+
+// 為不同搜尋來源生成最佳化查詢
+function generateSearchQueries(originalQuery, context = 'general') {
+  const q = originalQuery.toLowerCase();
+  const queries = { web: '', community: '', academic: '', github: '' };
+  
+  // 基礎查詢
+  const base = originalQuery;
+  
+  // Web 搜尋：加入 troubleshoot / solution / how to
+  if (q.includes('error') || q.includes('fail') || q.includes('問題') || q.includes('fix')) {
+    queries.web = `${base} EDA solution fix troubleshooting`;
+  } else if (q.includes('how to') || q.includes('怎么') || q.includes('如何') || q.includes('方法')) {
+    queries.web = `${base} EDA methodology best practice`;
+  } else {
+    queries.web = `${base} EDA ASIC IC design`;
+  }
+  
+  // Community 搜尋：加入 forum / discussion / experience
+  queries.community = `${base} site:community.cadence.com OR site:solvnet.synopsys.com OR site:reddit.com/r/ASIC OR site:edaboard.com`;
+  
+  // Academic 搜尋：加入 paper / survey / analysis
+  queries.academic = `${base} VLSI ASIC survey analysis`;
+  
+  // GitHub 搜尋：加入 script / tool / flow / example
+  queries.github = `${base} liberty script tool flow example`;
+  
+  return queries;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2643,19 +2674,20 @@ async function edaSearch(args = {}) {
           return { ok: true, output: output || '🔍 自動搜尋：未找到 PDK 相關結果' };
         }
 
-        // ── 多源並行廣搜（不再只查學術論文）──
+        // ── 多源並行廣搜（使用多維度查詢）──
+        const searchQueries = generateSearchQueries(searchQuery);
         const enhancedQuery = enhanceQueryForEDA(searchQuery);
         const sources = await Promise.allSettled([
-          // 1. 網路搜尋（DuckDuckGo）— 廣域覆蓋
-          searchWebDDG(`${searchQuery} EDA ASIC IC design`, maxResults),
-          // 2. EDA 社群搜尋（Cadence/Synopsys/Reddit/EE Times）
+          // 1. 網路搜尋（DuckDuckGo）— 廣域覆蓋，使用優化查詢
+          searchWebDDG(searchQueries.web, maxResults),
+          // 2. EDA 社群搜尋（Cadence/Synopsys/Reddit/EE Times）— 使用社群查詢
           searchEDACommunities(searchQuery, maxResults),
-          // 3. Semantic Scholar 學術論文
-          searchSemanticScholar(enhancedQuery, maxResults).then(r => r.ok ? r.data : []),
+          // 3. Semantic Scholar 學術論文 — 使用學術查詢
+          searchSemanticScholar(searchQueries.academic || enhancedQuery, maxResults).then(r => r.ok ? r.data : []),
           // 4. OpenAlex 學術論文
-          searchOpenAlex(enhancedQuery, Math.min(maxResults, 5)),
-          // 5. GitHub code search — 找實際 script / tool flow
-          searchGitHubCode(`${searchQuery} liberty characterize clock`, 5),
+          searchOpenAlex(searchQueries.academic || enhancedQuery, Math.min(maxResults, 5)),
+          // 5. GitHub code search — 使用 GitHub 查詢
+          searchGitHubCode(searchQueries.github, 5),
           // 6. GitHub repo search — 找相關 EDA 專案
           searchGitHubEDA(searchQuery, 5),
         ]);
@@ -2808,15 +2840,16 @@ async function edaSearch(args = {}) {
         const localTools = searchLocalTools(searchQuery);
         if (localTools.length > 0) output += formatToolResults(localTools);
 
-        // 多源並行搜尋
+        // 多源並行搜尋（使用多維度查詢）
+        const allSearchQueries = generateSearchQueries(searchQuery);
         const allEnhancedQuery = enhanceQueryForEDA(searchQuery);
         const allSources = await Promise.allSettled([
-          searchWebDDG(`${searchQuery} EDA ASIC IC design`, maxResults),
+          searchWebDDG(allSearchQueries.web, maxResults),
           searchEDACommunities(searchQuery, maxResults),
-          searchSemanticScholar(allEnhancedQuery, 5).then(r => r.ok ? r.data : []),
-          searchOpenAlex(allEnhancedQuery, 5),
+          searchSemanticScholar(allSearchQueries.academic || allEnhancedQuery, 5).then(r => r.ok ? r.data : []),
+          searchOpenAlex(allSearchQueries.academic || allEnhancedQuery, 5),
           searchGitHubEDA(searchQuery, 5),
-          searchGitHubCode(`${searchQuery} liberty characterize clock`, 5),
+          searchGitHubCode(allSearchQueries.github, 5),
         ]);
 
         const allWeb = allSources[0].status === 'fulfilled' ? allSources[0].value : [];
