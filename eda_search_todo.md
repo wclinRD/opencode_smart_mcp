@@ -9,6 +9,7 @@
 > Phase 4 ✅ 完成（2026-07-16）：eda-search.mjs 547→135 行（-75%），switch-case → Action Registry
 > Phase 5 ✅ 完成（2026-07-16）：整合 Exa 語意搜尋 + 深度爬取 + 去重 + 排序 + GitHub token
 > Phase 6 ✅ 完成（2026-07-16）：eda-search.mjs 239→72 行（3407→72，-98%），multiSourceSearch 搬到 sources/index.mjs，20/20 回歸測試通過
+> Phase 7 ⬜ 規劃中（Token 效率 + Caveman 壓縮）
 
 ---
 
@@ -120,6 +121,24 @@
 
 ---
 
+## Phase 7：Token 效率 + Caveman 壓縮
+
+> 目標：解決 A1-A3 + B3，預估省 50-70% token 輸出
+> 預估：~3 小時 | 風險：中
+
+- [x] 7.1 新建 `eda/lib/caveman.mjs` — 4 級壓縮引擎（light/semantic/aggressive/ultra）
+- [x] 7.2 整合到 `multiSourceSearch()` — 格式化後套用 `compressOutput()`
+- [x] 7.3 整合到 `paper` action — 論文搜尋結果壓縮
+- [x] 7.4 整合到 `troubleshoot` action — FAQ 內容壓縮
+- [x] 7.5 `inputSchema` 新增 `compress` 參數（none/light/semantic/aggressive/ultra）
+- [x] 7.6 `eda-search.mjs` handler 傳遞 compress 到 actions
+- [x] 7.7 專有名詞保護：stop words/filler/abbreviations 僅匹配小寫
+- [x] 7.8 修正 aggressive lemmatization（移除有 bug 的 regex，改為僅移除程度副詞）
+- [x] 7.9 測試驗證：Synopsys、Cadence、Information、Environment 等專有名詞安全
+- [x] 7.10 Commit：`71c5312` feat(eda): 新增 caveman 壓縮引擎
+
+---
+
 ## 估計工時
 
 | Phase | 工時 | 累計 | 風險 |
@@ -130,8 +149,9 @@
 | Phase 4: Action Registry | 60 min | 4 hr | 🟡 中 |
 | Phase 5: 搜尋增強 | 120 min | 6 hr | 🟢 低 |
 | Phase 6: 驗證清理 | 30 min | 6.5 hr | 🟢 低 |
+| Phase 7: Token 效率 + Caveman | 180 min | 9.5 hr | 🟡 中 |
 
-**總計：~6.5 小時**（可分 2-3 天執行）
+**總計：~9.5 小時**（可分 3-4 天執行）
 
 ---
 
