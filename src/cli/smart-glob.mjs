@@ -78,12 +78,17 @@ if (result.error) {
 }
 
 if (result.status !== 0 && result.status !== null) {
-  // rg returns 1 when no files found — that's not an error for us
-  if (result.status !== 1 || result.stdout.trim()) {
-    process.stderr.write(result.stderr || `Error: rg exited with status ${result.status}\n`);
-    process.exit(result.status);
+    // rg returns 1 when no files found — that's not an error for us
+    if (result.status === 2) {
+      // Exit 2 = glob pattern syntax error (e.g. unclosed character class)
+      process.stderr.write(`Error: invalid glob pattern "${pattern}"\n`);
+      process.stderr.write(`Tip: Check for unclosed brackets [], unmatched quotes, or special characters.\n`);
+      process.exit(2);
+    } else if (result.status !== 1 || result.stdout.trim()) {
+      process.stderr.write(result.stderr || `Error: rg exited with status ${result.status}\n`);
+      process.exit(result.status);
+    }
   }
-}
 
 // ── Process output ─────────────────────────────────────────────────────
 // Convert to absolute paths to match built-in glob behavior
