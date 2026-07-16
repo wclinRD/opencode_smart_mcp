@@ -292,23 +292,24 @@ export function getKgHint(detection) {
       '💡 **Knowledge Graph 未安裝**：偵測到 HDL design 結構查詢需求，但 `hdl-kgraph` 未安裝。',
       '安裝後可查詢 design hierarchy、module connections、CDC、UVM topology 等。',
       '',
-      '```bash',
-      'pip install \'hdl-kgraph[mcp]\'\n',
-      '# 在 HDL 專案目錄執行：',
-      'hdl-kgraph build',
-      '```',
+      '> 🤖 **建議下一步**：請詢問使用者 HDL 專案目錄位置，然後執行以下指令幫忙安裝：',
+      '> ```bash',
+      '> pip install \'hdl-kgraph[mcp]\'',
+      '> cd /path/to/hdl/project && hdl-kgraph build',
+      '> ```',
+      '> 安裝完成後重新查詢即可獲得 KG 結果。',
     ].join('\n');
   }
 
   if (detection.reason === 'no_graph_db') {
     return [
       '💡 **Knowledge Graph 尚未建立**：`hdl-kgraph` 已安裝，但未找到 `graph.db`。',
-      '在 HDL 專案目錄執行以下指令後，即可查詢 design 結構：',
       '',
-      '```bash',
-      'cd /path/to/your/hdl/project',
-      'hdl-kgraph build',
-      '```',
+      '> 🤖 **建議下一步**：請詢問使用者 HDL 專案目錄位置，然後執行以下指令建立 KG：',
+      '> ```bash',
+      '> cd /path/to/hdl/project && hdl-kgraph build',
+      '> ```',
+      '> 建立完成後重新查詢即可獲得 design 結構資訊。',
     ].join('\n');
   }
 
