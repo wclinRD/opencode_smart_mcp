@@ -2285,6 +2285,88 @@ function formatGitHubResults(items, title) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// 1b. DuckDuckGo Web Search — 廣域網路搜尋（免 API key）
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function searchWebDDG(query, maxResults = 8) {
+  try {
+    const params = new URLSearchParams({ q: query, t: 'h_', ia: 'web' });
+    const resp = await fetch('https://lite.duckduckgo.com/lite/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': USER_AGENT },
+      body: params.toString(),
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT),
+    });
+    if (!resp.ok) return [];
+    const html = await resp.text();
+    // Parse lite HTML — each result is in a <td class="result-link"> block
+    const results = [];
+    const linkRegex = /<a[^>]+rel="nofollow"[^>]+href="([^"]+)"[^>]*>\s*([^<]+)\s*<\/a>/gi;
+    const snippetRegex = /<td[^>]*class="result-snippet"[^>]*>([\s\S]*?)<\/td>/gi;
+    const links = [];
+    const snippets = [];
+    let m;
+    while ((m = linkRegex.exec(html)) !== null) links.push({ url: m[1].trim(), title: m[2].trim() });
+    while ((m = snippetRegex.exec(html)) !== null) snippets.push(m[1].replace(/<[^>]+>/g, '').trim());
+    for (let i = 0; i < Math.min(links.length, maxResults, snippets.length); i++) {
+      if (links[i].url.startsWith('http')) {
+        results.push({ title: links[i].title, url: links[i].url, snippet: snippets[i] || '' });
+      }
+    }
+    return results;
+  } catch { return []; }
+}
+
+function formatWebResults(results, title = '🌐 網路搜尋') {
+  if (!results || results.length === 0) return `${title}：無結果\n`;
+  let out = `${title}（${results.length} 筆）\n\n`;
+  for (const r of results) {
+    out += `### [${r.title}](${r.url})\n`;
+    if (r.snippet) out += `> ${r.snippet.slice(0, 200)}\n`;
+    out += '\n';
+  }
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 1c. EDA Community Search — Cadence/Synopsys/EE Times/Reddit 社群
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const EDA_COMMUNITIES = [
+  { name: 'Cadence Community', domain: 'community.cadence.com', queryTemplate: (q) => `site:community.cadence.com ${q}` },
+  { name: 'Synopsys SolvNet', domain: 'solvnet.synopsys.com', queryTemplate: (q) => `site:solvnet.synopsys.com ${q}` },
+  { name: 'EE Times', domain: 'eetimes.com', queryTemplate: (q) => `site:eetimes.com EDA ASIC ${q}` },
+  { name: 'Reddit r/ASIC', domain: 'reddit.com/r/ASIC', queryTemplate: (q) => `site:reddit.com/r/ASIC ${q}` },
+  { name: 'Reddit r/FPGA', domain: 'reddit.com/r/FPGA', queryTemplate: (q) => `site:reddit.com/r/FPGA ${q}` },
+  { name: 'EDAboard', domain: 'edaboard.com', queryTemplate: (q) => `site:edaboard.com ${q}` },
+  { name: 'ChipVerify', domain: 'chipverify.com', queryTemplate: (q) => `site:chipverify.com ${q}` },
+  { name: 'Verification Academy', domain: 'verificationacademy.com', queryTemplate: (q) => `site:verificationacademy.com ${q}` },
+];
+
+async function searchEDACommunities(query, maxResults = 10) {
+  // 用一條 broadly query 搜所有社群（避免 rate limit）
+  const broadQuery = `EDA ASIC IC design ${query}`;
+  const results = await searchWebDDG(broadQuery, maxResults);
+  // 標記來自已知社群的結果
+  return results.map(r => {
+    const matched = EDA_COMMUNITIES.find(c => r.url.includes(c.domain));
+    return { ...r, community: matched ? matched.name : null };
+  });
+}
+
+function formatCommunityResults(results) {
+  if (!results || results.length === 0) return '💬 EDA 社群：無結果\n';
+  let out = `💬 EDA 社群討論（${results.length} 筆）\n\n`;
+  for (const r of results) {
+    const badge = r.community ? ` [${r.community}]` : '';
+    out += `###${badge} [${r.title}](${r.url})\n`;
+    if (r.snippet) out += `> ${r.snippet.slice(0, 200)}\n`;
+    out += '\n';
+  }
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // 2. OpenAlex — EDA 學術論文
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -2561,23 +2643,54 @@ async function edaSearch(args = {}) {
           return { ok: true, output: output || '🔍 自動搜尋：未找到 PDK 相關結果' };
         }
 
-        // 學術論文（預設 fallback）
-        let output = '';
+        // ── 多源並行廣搜（不再只查學術論文）──
         const enhancedQuery = enhanceQueryForEDA(searchQuery);
-        try {
-          const scholarResult = await searchSemanticScholar(enhancedQuery, maxResults);
-          if (scholarResult.ok) {
-            output += formatSemanticScholarResults(scholarResult.data) + '\n';
-          }
-        } catch { /* ignore */ }
+        const sources = await Promise.allSettled([
+          // 1. 網路搜尋（DuckDuckGo）— 廣域覆蓋
+          searchWebDDG(`${searchQuery} EDA ASIC IC design`, maxResults),
+          // 2. EDA 社群搜尋（Cadence/Synopsys/Reddit/EE Times）
+          searchEDACommunities(searchQuery, maxResults),
+          // 3. Semantic Scholar 學術論文
+          searchSemanticScholar(enhancedQuery, maxResults).then(r => r.ok ? r.data : []),
+          // 4. OpenAlex 學術論文
+          searchOpenAlex(enhancedQuery, Math.min(maxResults, 5)),
+          // 5. GitHub code search — 找實際 script / tool flow
+          searchGitHubCode(`${searchQuery} liberty characterize clock`, 5),
+          // 6. GitHub repo search — 找相關 EDA 專案
+          searchGitHubEDA(searchQuery, 5),
+        ]);
+
+        let output = '';
+
+        // 網路搜尋結果（最廣覆蓋）
+        const webResults = sources[0].status === 'fulfilled' ? sources[0].value : [];
+        if (webResults.length > 0) output += formatWebResults(webResults);
+
+        // EDA 社群結果
+        const communityResults = sources[1].status === 'fulfilled' ? sources[1].value : [];
+        if (communityResults.length > 0) output += formatCommunityResults(communityResults);
+
+        // Semantic Scholar
+        const scholarData = sources[2].status === 'fulfilled' ? sources[2].value : [];
+        if (scholarData.length > 0) output += formatSemanticScholarResults(scholarData);
 
         // OpenAlex
-        try {
-          const articles = await searchOpenAlex(enhancedQuery, Math.min(maxResults, 5));
-          output += formatOpenAlexResults(articles);
-        } catch (err) {
-          output += `⚠️ OpenAlex：${err.message}\n`;
+        const articles = sources[3].status === 'fulfilled' ? sources[3].value : [];
+        if (articles.length > 0) output += formatOpenAlexResults(articles);
+
+        // GitHub code — 實際 script / flow
+        const ghCode = sources[4].status === 'fulfilled' ? sources[4].value : [];
+        if (ghCode.length > 0) {
+          output += `💻 **GitHub 程式碼**（相關 script / tool flow）\n\n`;
+          for (const r of ghCode) {
+            output += `- [${r.name}](${r.url}) — *${r.repo}*\n`;
+          }
+          output += '\n';
         }
+
+        // GitHub repo
+        const ghRepos = sources[5].status === 'fulfilled' ? sources[5].value : [];
+        if (ghRepos.length > 0) output += formatGitHubResults(ghRepos, 'GitHub 相關 EDA 專案');
 
         // 偵測是否提到特定會議
         const conf = detectConference(searchQuery);
@@ -2588,7 +2701,13 @@ async function edaSearch(args = {}) {
           output += `  • [dblp](https://dblp.org/search?q=${conf})\n`;
         }
 
-        return { ok: true, output: output || '📚 學術論文：無結果' };
+        // 提示：如需更深入搜尋可用 smart_exa_search
+        if (!output || output.length < 100) {
+          output += `\n💡 如需更深入搜尋，可用 \`smart_exa_search\` 查詢：\n`;
+          output += `  \`smart_exa_search({command:"search", query:"${searchQuery}", numResults:10})\`\n`;
+        }
+
+        return { ok: true, output: output || '🔍 自動搜尋：無結果' };
       }
 
       // ── PDK / Cell Library 查詢 ──
@@ -2676,7 +2795,7 @@ async function edaSearch(args = {}) {
         return { ok: true, output: out };
       }
 
-      // ── PDK + Tool + Paper 綜合搜尋 ──
+      // ── PDK + Tool + Paper + Web + Community 綜合搜尋 ──
       case 'all':
       case 'comprehensive': {
         let output = '';
@@ -2689,18 +2808,38 @@ async function edaSearch(args = {}) {
         const localTools = searchLocalTools(searchQuery);
         if (localTools.length > 0) output += formatToolResults(localTools);
 
-        // Papers
-        const enhancedQuery = enhanceQueryForEDA(searchQuery);
-        try {
-          const scholarResult = await searchSemanticScholar(enhancedQuery, 5);
-          if (scholarResult.ok) output += formatSemanticScholarResults(scholarResult.data);
-        } catch { /* ignore */ }
+        // 多源並行搜尋
+        const allEnhancedQuery = enhanceQueryForEDA(searchQuery);
+        const allSources = await Promise.allSettled([
+          searchWebDDG(`${searchQuery} EDA ASIC IC design`, maxResults),
+          searchEDACommunities(searchQuery, maxResults),
+          searchSemanticScholar(allEnhancedQuery, 5).then(r => r.ok ? r.data : []),
+          searchOpenAlex(allEnhancedQuery, 5),
+          searchGitHubEDA(searchQuery, 5),
+          searchGitHubCode(`${searchQuery} liberty characterize clock`, 5),
+        ]);
 
-        // GitHub
-        try {
-          const ghResults = await searchGitHubEDA(searchQuery, 5);
-          output += formatGitHubResults(ghResults, 'GitHub 相關專案');
-        } catch { /* ignore */ }
+        const allWeb = allSources[0].status === 'fulfilled' ? allSources[0].value : [];
+        if (allWeb.length > 0) output += formatWebResults(allWeb);
+
+        const allCommunity = allSources[1].status === 'fulfilled' ? allSources[1].value : [];
+        if (allCommunity.length > 0) output += formatCommunityResults(allCommunity);
+
+        const allScholar = allSources[2].status === 'fulfilled' ? allSources[2].value : [];
+        if (allScholar.length > 0) output += formatSemanticScholarResults(allScholar);
+
+        const allArticles = allSources[3].status === 'fulfilled' ? allSources[3].value : [];
+        if (allArticles.length > 0) output += formatOpenAlexResults(allArticles);
+
+        const allGH = allSources[4].status === 'fulfilled' ? allSources[4].value : [];
+        if (allGH.length > 0) output += formatGitHubResults(allGH, 'GitHub 相關專案');
+
+        const allGHCode = allSources[5].status === 'fulfilled' ? allSources[5].value : [];
+        if (allGHCode.length > 0) {
+          output += `💻 **GitHub 程式碼**\n\n`;
+          for (const r of allGHCode) output += `- [${r.name}](${r.url}) — *${r.repo}*\n`;
+          output += '\n';
+        }
 
         return { ok: true, output: output || '🔍 綜合搜尋：未找到結果' };
       }
