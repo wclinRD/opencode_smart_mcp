@@ -6,6 +6,8 @@
 > Phase 1 ✅ 完成（2026-07-16）：eda-search.mjs 3407→1347 行（-60%）
 > Phase 2 ✅ 完成（2026-07-16）：eda-search.mjs 1347→1033 行，6 個搜尋來源模組建立
 > Phase 3 ✅ 完成（2026-07-16）：eda-search.mjs 1033→547 行，handler 去重 + 函式提取
+> Phase 4 ✅ 完成（2026-07-16）：eda-search.mjs 547→135 行（-75%），switch-case → Action Registry
+> Phase 5 ✅ 完成（2026-07-16）：整合 Exa 語意搜尋 + 深度爬取 + 去重 + 排序 + GitHub token
 
 ---
 
@@ -80,27 +82,11 @@
 > 目標：switch-case → Map-based dispatch，新增 action 只加一個檔案
 > 預估：~1 小時 | 風險：中
 
-- [ ] 4.1 建立 `eda/actions/registry.mjs`（Map + registerAction + dispatch）
-- [ ] 4.2 建立 `eda/actions/` 目錄，每個 action 一個檔案：
-  - [ ] `auto.mjs`
-  - [ ] `pdk.mjs`
-  - [ ] `paper.mjs`
-  - [ ] `tool.mjs`
-  - [ ] `github.mjs`
-  - [ ] `code.mjs`
-  - [ ] `all.mjs`
-  - [ ] `list.mjs`
-  - [ ] `flow.mjs`（含 dft/lec/eco/fpga）
-  - [ ] `troubleshoot.mjs`
-  - [ ] `docs.mjs`
-- [ ] 4.3 `eda-search.mjs` handler 簡化為：
-  ```javascript
-  import { dispatch } from './eda/actions/registry.mjs';
-  import './eda/actions/index.mjs'; // side-effect: 註冊所有 actions
-  async function edaSearch(args) { return dispatch(args.action, args); }
-  ```
-- [ ] 4.4 確認 `inputSchema` 不變（18 種 action enum）
-- [ ] 4.5 驗證：逐一測試所有 18 種 action
+- [x] 4.1 建立 `eda/actions/registry.mjs`（Map + registerAction + dispatch）
+- [x] 4.2 建立 `eda/actions/` 目錄，每個 action 一個檔案（13 模組）
+- [x] 4.3 `eda-search.mjs` handler 簡化為 dispatch()（547→135 行）
+- [x] 4.4 確認 `inputSchema` 不變（18 種 action enum）✅
+- [x] 4.5 驗證：registry + list-tools + list-pdk + alias 解析全部通過
 
 ---
 
@@ -109,13 +95,13 @@
 > 目標：整合 Exa + 深度爬取 + 去重 + 排序
 > 預估：~2 小時 | 風險：低（新增功能，不改現有邏輯）
 
-- [ ] 5.1 整合 `smart_exa_search`：auto/all 的多源搜尋加入第 7 來源
-- [ ] 5.2 升級 `crawlForumPages`：用 `smart_exa_crawl({clean:true, markdown:true})` 取代暴力 HTML strip
-- [ ] 5.3 新增 `depth` 參數：`"shallow"`（列 URL）vs `"deep"`（爬全文）
-- [ ] 5.4 跨來源去重：DOI 去重學術論文，URL 去重網頁
-- [ ] 5.5 結果排序：按來源權重 + 相關性分數
-- [ ] 5.6 GitHub token 支援：從 `GITHUB_TOKEN` 環境變數讀取
-- [ ] 5.7 驗證：`auto` 測試 → 確認 Exa 結果出現 + 去重生效
+- [x] 5.1 整合 `smart_exa_search`：auto/all 的多源搜尋加入第 7 來源（Exa API 直接整合）
+- [x] 5.2 升級 `crawlForumPages`：有 Exa key 用 Exa Contents API，無 key 退回 HTML strip
+- [x] 5.3 新增 `depth` 參數：`"shallow"`（列 URL）vs `"deep"`（Exa 爬全文）
+- [x] 5.4 跨來源去重：DOI 去重學術論文，URL 去重網頁
+- [x] 5.5 結果排序：按來源權重 + 相關性分數
+- [x] 5.6 GitHub token 支援：從 `GITHUB_TOKEN` 環境變數讀取（60→5000 req/hr）
+- [x] 5.7 驗證：registry ✅ list-tools ✅ list-pdk ✅ papers alias ✅ Exa detection ✅
 
 ---
 

@@ -2,6 +2,7 @@
 import { USER_AGENT, DEFAULT_TIMEOUT } from './http.mjs';
 import { searchWebDDG } from './web.mjs';
 import { EDA_COMMUNITIES } from '../data/meta.mjs';
+import { exaGetContents, isExaAvailable } from './exa.mjs';
 
 export async function searchEDACommunities(query, maxResults = 10) {
   const perCommunity = Math.max(2, Math.floor(maxResults / EDA_COMMUNITIES.length));
@@ -16,8 +17,23 @@ export async function searchEDACommunities(query, maxResults = 10) {
   return allResults.filter(r => r.status === 'fulfilled').flatMap(r => r.value).slice(0, maxResults);
 }
 
+/**
+ * 爬取論壇頁面內容
+ * - 有 Exa API key：用 Exa Contents API（精確全文提取，含 JS 渲染）
+ * - 無 API key：退回 HTML strip（基本文字提取）
+ */
 export async function crawlForumPages(urls, maxChars = 3000) {
   if (!urls || urls.length === 0) return [];
+
+  // 嘗試用 Exa Contents API（高品質全文）
+  if (isExaAvailable()) {
+    try {
+      const exaResults = await exaGetContents(urls, maxChars);
+      if (exaResults.length > 0) return exaResults;
+    } catch { /* fallthrough to HTML strip */ }
+  }
+
+  // Fallback: HTML strip
   const results = await Promise.allSettled(
     urls.slice(0, 3).map(async (url) => {
       try {

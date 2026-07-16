@@ -1,10 +1,14 @@
 // ── GitHub API — PDK / Cell Library / EDA Tool 查詢 ──────────────────────
 import { httpsGet, GITHUB_API } from './http.mjs';
 
+// GitHub Token（從環境變數讀取，提升 rate limit 從 60→5000 req/hr）
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
+const githubHeaders = GITHUB_TOKEN ? { 'Authorization': `token ${GITHUB_TOKEN}` } : {};
+
 export async function searchGitHubPDK(query, maxResults = 10) {
   const q = encodeURIComponent(`${query} PDK OR "standard cell" OR "process design kit"`);
   const url = `${GITHUB_API}/search/repositories?q=${q}&sort=stars&order=desc&per_page=${maxResults}`;
-  const data = await httpsGet(url);
+  const data = await httpsGet(url, { headers: githubHeaders });
   return (data.items || []).map(r => ({
     name: r.full_name,
     stars: r.stargazers_count,
@@ -19,7 +23,7 @@ export async function searchGitHubPDK(query, maxResults = 10) {
 export async function searchGitHubEDA(query, maxResults = 10) {
   const q = encodeURIComponent(`${query} EDA OR "electronic design automation" OR synthesis OR "place and route" OR "static timing"`);
   const url = `${GITHUB_API}/search/repositories?q=${q}&sort=stars&order=desc&per_page=${maxResults}`;
-  const data = await httpsGet(url);
+  const data = await httpsGet(url, { headers: githubHeaders });
   return (data.items || []).map(r => ({
     name: r.full_name,
     stars: r.stargazers_count,
@@ -34,7 +38,7 @@ export async function searchGitHubEDA(query, maxResults = 10) {
 export async function searchGitHubCode(query, maxResults = 5) {
   const q = encodeURIComponent(query);
   const url = `${GITHUB_API}/search/code?q=${q}&per_page=${maxResults}`;
-  const data = await httpsGet(url).catch(() => ({ items: [] }));
+  const data = await httpsGet(url, { headers: githubHeaders }).catch(() => ({ items: [] }));
   return (data.items || []).map(r => ({
     name: r.name,
     path: r.path,
