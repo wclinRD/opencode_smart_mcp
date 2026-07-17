@@ -30,6 +30,7 @@ permission:
   smart_rules: allow        # 專案規則查詢
   smart_edit_chain: allow         # 🥇 批次編輯鏈（N 編輯 1 次 MCP 呼叫）
   smart_eda_search: allow         # 🥇 EDA 領域智慧知識引擎（IC design/cell flow/EDA tool/PDK/學術論文，18 種 action）
+  smart_rtl_analyze: allow       # 🥇 RTL 程式碼分析引擎（Verilog/VHDL 分析，12 種命令）
   smart_exa_search: allow         # 🥇 網路搜尋（取代 websearch/webfetch）
   smart_exa_crawl: allow          # 🥇 網頁爬取（clean/markdown/chunk/crawlee）
   smart_github_search: allow      # 🥇 GitHub 程式碼搜尋
@@ -91,6 +92,7 @@ permission:
 | `smart_glob({pattern, path?})` | 🥇 檔案 glob 搜尋（rg 底層，上限 100 筆） |
 | `smart_medical_search({question, action?, query?, maxResults?, dateFrom?, dateTo?})` | 🥇 免費醫學文獻與臨床證據查詢 + 藥典（9 來源，免 API 金鑰）。12 種 action：auto/ask（自動降級）、oe/openevidence（臨床問答）、search/pubmed（文獻搜尋）、openalex/academic（學術搜尋）、scholar/semantic（TLDR 摘要）、abstract（摘要閱讀）、oa-check/oa（OA 連結查詢）、fulltext/pmc（全文閱讀）、all/comprehensive（多源去重）、drug/dailymed（FDA 藥品仿單）、fda/openfda（FDA 標籤+不良反應）、interact/rxnorm（藥品交互作用） |
 | `smart_eda_search({question, action?, query?, maxResults?})` | 🥇 EDA 領域智慧知識引擎。IC design、cell-based flow、EDA tool、PDK、學術論文查詢。55+ 工具索引（含 30+ 商業工具）、11 個 cell flow stages。**多源並行廣搜**：DuckDuckGo 網路搜尋 + EDA 社群（Cadence Community/SolvNet/Reddit/EE Times/EDAboard）+ Semantic Scholar + OpenAlex + GitHub code/repo + Exa（可選）。18 種 action：auto（自動判斷→多源並行）、pdk（PDK/cell library）、paper（學術論文）、tool（EDA 工具）、github（GitHub 專案）、code（程式碼）、all/comprehensive（全源並行）、list-tools/pdk/conferences、flow（cell flow stages）、dft、lec、eco、fpga、troubleshoot（FAQ+廠商URL）、docs（工具文件）。💡 auto 結果不足時，自動提示可用 `smart_exa_search` 做更深入搜尋 |
+| `smart_rtl_analyze({command, file?})` | 🥇 RTL（Register Transfer Level）程式碼分析引擎。支援 12 種命令：analyze（設計分析）、hierarchy（層級）、ports（端口）、signals（信號）、trace（追蹤）、check（檢查）、lint（規則）、cdc（時鐘域交叉）、rules（lint 規則）、synth（綜合）、list（模組列表）、parsers（解析器）。用於 Verilog/VHDL 程式碼理解與分析 |
 
 > `smart_think` 快思（對話式）vs `smart_deep_think` 慢想（單次完整輸出）。不確定 root cause 用 think，需系統性評估用 deep_think。
 
