@@ -625,8 +625,8 @@ Instructions:
 | `smart_learn` | 分析專案結構、tech stack、相依性、coding conventions |
 | `smart_read` | **🥇 漸進式檔案讀取器**：11 種模式（auto/outline/signatures/symbol/explain/range/full/batch/project/image/directory），Session cache 零重複讀取 |
 | `smart_glob` | **🥇 快速檔案匹配**：glob 模式搜尋任何規模的程式碼庫，回傳絕對路徑 |
-| `smart_exa_search` | **🥇 網路搜尋**：網頁/程式碼搜尋，支援 caveman 壓縮 |
-| `smart_exa_crawl` | **🥇 網頁爬取**：支援 clean/markdown/chunk/crawlee/render |
+| `smart_exa_search` | **🥇 網路搜尋**：網頁/程式碼搜尋，含 searchType/category/highlights/domain filter/date filter，支援 caveman 壓縮 |
+| `smart_exa_crawl` | **🥇 網頁爬取**：支援 clean/markdown/chunk/crawlee/render，含 searchType/category/highlights |
 | `smart_github_search` | **🥇 GitHub 程式碼搜尋**：filter by repo/language/path |
 | `smart_fast_apply` | **🥇 統一編輯工具**：取代 write+edit，10 格式 + 6 級 fuzzy match，atomic multi-file |
 | `smart_think` | 快速推理引擎（hypothesis → verify → repeat，mode:cit/beam/forest/structured） |

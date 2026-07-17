@@ -63,6 +63,21 @@ export default {
         enum: ['light', 'semantic', 'aggressive', 'ultra'],
         description: 'Caveman compression level. light=stop-words only, semantic=content selection, aggressive=full lemmatization, ultra=abbreviations+arrows (50-70% savings). Default: semantic.',
       },
+      // ---- Advanced search options (for search-then-crawl workflow) ----
+      searchType: {
+        type: 'string',
+        enum: ['auto', 'fast', 'instant'],
+        description: 'Search type when used with search-then-crawl.',
+      },
+      category: {
+        type: 'string',
+        enum: ['company', 'people', 'research paper', 'news', 'personal site', 'financial report', 'pdf', 'github'],
+        description: 'Filter by category.',
+      },
+      highlights: {
+        type: 'boolean',
+        description: 'Enable highlights extraction.',
+      },
     },
     required: ['urls'],
   },
@@ -82,6 +97,9 @@ export default {
     if (a.extended) cli.push('--extended');
     if (a.maxChars) cli.push('--max-chars', String(a.maxChars));
     if (a.format) cli.push('--format', String(a.format));
+    if (a.searchType) cli.push('--search-type', String(a.searchType));
+    if (a.category) cli.push('--category', String(a.category));
+    if (a.highlights) cli.push('--highlights');
     if (a.compress === 'caveman') {
       cli.push('--caveman');
       if (a.compressLevel) cli.push('--caveman-level', String(a.compressLevel));

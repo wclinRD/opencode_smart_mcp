@@ -41,6 +41,39 @@ export default {
         enum: ['light', 'semantic', 'aggressive', 'ultra'],
         description: 'Caveman compression level. light=stop-words only, semantic=content selection, aggressive=full lemmatization, ultra=abbreviations+arrows (50-70% savings). Default: semantic.',
       },
+      // ---- Advanced search options (MCP free tier supported) ----
+      searchType: {
+        type: 'string',
+        enum: ['auto', 'fast', 'instant'],
+        description: 'Search type. auto=high quality (recommended), fast=~450ms, instant=~100ms. Default: auto.',
+      },
+      category: {
+        type: 'string',
+        enum: ['company', 'people', 'research paper', 'news', 'personal site', 'financial report', 'pdf', 'github'],
+        description: 'Filter results by category. company=50M+ company pages, people=1B+ profiles, research paper=100M+ papers, etc.',
+      },
+      highlights: {
+        type: 'boolean',
+        description: 'Enable highlights extraction — 10x token efficient excerpts. Recommended for search.',
+      },
+      includeDomains: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Only include results from these domains (e.g. ["github.com", "arxiv.org"])',
+      },
+      excludeDomains: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Exclude results from these domains',
+      },
+      startDate: {
+        type: 'string',
+        description: 'Only results published after this date (YYYY-MM-DD)',
+      },
+      endDate: {
+        type: 'string',
+        description: 'Only results published before this date (YYYY-MM-DD)',
+      },
     },
     required: ['command'],
   },
@@ -52,6 +85,14 @@ export default {
     if (a.numResults) cli.push('--num-results', String(a.numResults));
     if (a.maxChars) cli.push('--max-chars', String(a.maxChars));
     if (a.format) cli.push('--format', String(a.format));
+    // Advanced search options
+    if (a.searchType) cli.push('--search-type', String(a.searchType));
+    if (a.category) cli.push('--category', String(a.category));
+    if (a.highlights) cli.push('--highlights');
+    if (a.includeDomains) cli.push('--include-domains', JSON.stringify(a.includeDomains));
+    if (a.excludeDomains) cli.push('--exclude-domains', JSON.stringify(a.excludeDomains));
+    if (a.startDate) cli.push('--start-date', String(a.startDate));
+    if (a.endDate) cli.push('--end-date', String(a.endDate));
     if (a.compress === 'caveman') {
       cli.push('--caveman');
       if (a.compressLevel) cli.push('--caveman-level', String(a.compressLevel));

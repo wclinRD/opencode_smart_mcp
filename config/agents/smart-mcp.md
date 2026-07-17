@@ -86,8 +86,8 @@ permission:
 | `smart_read({file, mode?, symbol?, ...})` | 🥇 取代 raw read。11 種模式（auto/outline/signatures/symbol/explain/range/full/batch/project/image/目錄）。Session cache |
 | `smart_compact({toolHistory})` | 零成本 context 壓縮 |
 | `smart_config({set?})` | Runtime 設定（modelSize/mode/debug/timeoutMs） |
-| `smart_exa_search({command, query, numResults?})` | 🥇 網路搜尋（取代 websearch/webfetch） |
-| `smart_exa_crawl({urls, clean?, markdown?, chunk?})` | 🥇 網頁爬取 |
+| `smart_exa_search({command, query, numResults?, searchType?, category?, highlights?, includeDomains?, excludeDomains?, startDate?, endDate?})` | 🥇 網路搜尋（取代 websearch/webfetch）。進階：searchType(auto/fast/instant)、category(8類)、highlights(10x省token)、domain/date filter |
+| `smart_exa_crawl({urls, clean?, markdown?, chunk?, searchType?, category?, highlights?})` | 🥇 網頁爬取 |
 | `smart_github_search({query, repo?, language?})` | 🥇 GitHub 程式碼搜尋 |
 | `smart_glob({pattern, path?, depth?, maxFiles?, exclude?, type?, sort?})` | 🥇 檔案 glob（rg 底層）。`depth`/`exclude`/`type`/`sort` 參數 |
 | `smart_medical_search({question, action?, query?, maxResults?, dateFrom?, dateTo?})` | 🥇 免費醫學文獻與臨床證據查詢 + 藥典（9 來源，免 API 金鑰）。12 種 action：auto/ask（自動降級）、oe/openevidence（臨床問答）、search/pubmed（文獻搜尋）、openalex/academic（學術搜尋）、scholar/semantic（TLDR 摘要）、abstract（摘要閱讀）、oa-check/oa（OA 連結查詢）、fulltext/pmc（全文閱讀）、all/comprehensive（多源去重）、drug/dailymed（FDA 藥品仿單）、fda/openfda（FDA 標籤+不良反應）、interact/rxnorm（藥品交互作用） |

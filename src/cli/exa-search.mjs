@@ -42,12 +42,12 @@ import { compress as cavemanCompress } from './lib/caveman.mjs';
 
 const API_BASE = 'https://api.exa.ai';
 // Include ?tools= to enable non-default tools (get_code_context_exa, etc.)
-const MCP_TOOLS_PARAM = 'web_search_exa,get_code_context_exa,web_fetch_exa';
+const MCP_TOOLS_PARAM = 'web_search_advanced_exa,web_search_exa,get_code_context_exa,web_fetch_exa';
 const MCP_BASE = `https://mcp.exa.ai/mcp?tools=${MCP_TOOLS_PARAM}`;
 
 // MCP tool mapping for free tier fallback
 const MCP_TOOLS = {
-  search: 'web_search_exa',
+  search: 'web_search_advanced_exa',
   crawl:  'web_fetch_exa',
   code:   'get_code_context_exa',
 };
@@ -195,6 +195,19 @@ async function callMcp(command, cmdArgs, opts) {
         query,
         numResults: opts.numResults || (command === 'code' ? 8 : 10),
       };
+      // Advanced search options (MCP free tier supported)
+      if (command === 'search') {
+        if (opts.searchType) mcpArgs.type = opts.searchType;
+        if (opts.category) mcpArgs.category = opts.category;
+        if (opts.highlights) {
+          mcpArgs.enableHighlights = true;
+          mcpArgs.highlightsMaxCharacters = opts.maxChars || 500;
+        }
+        if (opts.includeDomains) mcpArgs.includeDomains = opts.includeDomains;
+        if (opts.excludeDomains) mcpArgs.excludeDomains = opts.excludeDomains;
+        if (opts.startDate) mcpArgs.startPublishedDate = opts.startDate;
+        if (opts.endDate) mcpArgs.endPublishedDate = opts.endDate;
+      }
       break;
     }
     case 'crawl': {
@@ -524,11 +537,19 @@ async function cmdSearch(query, opts) {
   const body = {
     query,
     numResults: opts.numResults || 10,
-    type: 'keyword',
+    type: opts.searchType || 'auto',
     contents: {
       text: { maxCharacters: opts.maxChars || 3000 },
     },
   };
+  if (opts.category) body.category = opts.category;
+  if (opts.includeDomains) body.includeDomains = opts.includeDomains;
+  if (opts.excludeDomains) body.excludeDomains = opts.excludeDomains;
+  if (opts.startDate) body.startPublishedDate = opts.startDate;
+  if (opts.endDate) body.endPublishedDate = opts.endDate;
+  if (opts.highlights) {
+    body.contents.highlights = { maxCharacters: opts.maxChars || 500 };
+  }
 
   const data = await exaFetch('/search', body);
   const results = data.results || [];
@@ -989,7 +1010,7 @@ async function cmdCode(query, opts) {
   const body = {
     query,
     numResults: opts.numResults || 8,
-    type: 'keyword',
+    type: opts.searchType || 'auto',
     category: 'code',
     contents: {
       text: { maxCharacters: opts.maxChars || 3000 },
@@ -1051,25 +1072,31 @@ function parseArgs() {
     stealth: false,
     caveman: false,
     cavemanLevel: 'semantic',
+    // Advanced search options
+    searchType: undefined,
+    category: undefined,
+    highlights: false,
+    includeDomains: undefined,
+    excludeDomains: undefined,
+    startDate: undefined,
+    endDate: undefined,
   };
 
   let i = 1;
   while (i < args.length) {
     switch (args[i]) {
-        case '--num-results':
-          opts.numResults = parseInt(args[i + 1], 10);
-          i++;
-          break;
-        case '--max-chars':
-          opts.maxChars = parseInt(args[i + 1], 10);
-          i++;
-          break;
-        case '--render':
-          opts.render = true;
-          break;
-        case '--extended':
-          opts.extended = true;
-          break;
+      case '--num-results':
+        opts.numResults = parseInt(args[++i], 10);
+        break;
+      case '--max-chars':
+        opts.maxChars = parseInt(args[++i], 10);
+        break;
+      case '--render':
+        opts.render = true;
+        break;
+      case '--extended':
+        opts.extended = true;
+        break;
       case '--fetch-only':
         opts.fetchOnly = true;
         break;
@@ -1102,6 +1129,28 @@ function parseArgs() {
         break;
       case '--format':
         opts.format = args[++i];
+        break;
+      // Advanced search options
+      case '--search-type':
+        opts.searchType = args[++i];
+        break;
+      case '--category':
+        opts.category = args[++i];
+        break;
+      case '--highlights':
+        opts.highlights = true;
+        break;
+      case '--include-domains':
+        opts.includeDomains = JSON.parse(args[++i]);
+        break;
+      case '--exclude-domains':
+        opts.excludeDomains = JSON.parse(args[++i]);
+        break;
+      case '--start-date':
+        opts.startDate = args[++i];
+        break;
+      case '--end-date':
+        opts.endDate = args[++i];
         break;
       case '--no-color':
         // no-op, kept for interface parity
@@ -1151,6 +1200,16 @@ Options:
   --no-color            Disable color output
   -h, --help            Show this help
 
+Advanced Search (MCP free tier supported):
+  --search-type <type>  Search type: auto (default), fast, instant
+  --category <cat>      Category filter: company, people, research paper,
+                        news, personal site, financial report, pdf, github
+  --highlights          Enable highlights — 10x token efficient excerpts
+  --include-domains [d] JSON array of domains to include (e.g. '["github.com"]')
+  --exclude-domains [d] JSON array of domains to exclude
+  --start-date <date>   Only results published after (YYYY-MM-DD)
+  --end-date <date>     Only results published before (YYYY-MM-DD)
+
 Combinations:
   --clean --markdown    Best combo: Readability article → Markdown output
   --fetch-only --clean --markdown  Full offline: fetch + clean + MD (no API key)
@@ -1159,16 +1218,13 @@ Combinations:
 
 Examples:
   node exa-search.mjs search "React Server Components"
+  node exa-search.mjs search "NVIDIA" --category company --highlights
+  node exa-search.mjs search "MCP" --search-type fast --num-results 5
+  node exa-search.mjs search "AI" --start-date 2025-01-01 --end-date 2025-12-31
+  node exa-search.mjs search "Exa" --include-domains '["github.com"]'
   node exa-search.mjs crawl https://example.com/docs
   node exa-search.mjs code "Python fastapi middleware"
-  node exa-search.mjs search "latest AI news" --num-results 5
-  node exa-search.mjs crawl https://react-spa.example.com --render
-  node exa-search.mjs crawl https://long-article.example.com --extended
-  node exa-search.mjs crawl https://example.com --fetch-only
   node exa-search.mjs crawl https://example.com --clean --markdown
-  node exa-search.mjs crawl https://example.com --fetch-only --clean --markdown
-  node exa-search.mjs crawl https://example.com --clean --markdown --chunk
-  node exa-search.mjs crawl https://long-article.example.com --chunk --max-chunk-size 1000
 `);
 }
 
