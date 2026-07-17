@@ -456,6 +456,202 @@ export function getModulePorts(graph, moduleName) {
 }
 
 /**
+ * 取得指定 module 的所有 signal 宣告（wire/reg/variable）
+ * @param {DesignGraph} graph
+ * @param {string} moduleName
+ * @returns {object} signal list
+ */
+export function getModuleSignals(graph, moduleName) {
+  const mod = graph.modules.get(moduleName);
+  if (!mod) return { error: `找不到 module: ${moduleName}` };
+
+  const signals = mod.signals || [];
+  return {
+    name: mod.name,
+    file: mod.file,
+    signals,
+    signalCount: signals.length,
+    nets: signals.filter(s => s.kind === 'Net'),
+    variables: signals.filter(s => s.kind === 'Variable'),
+  };
+}
+
+/**
+ * 追蹤 signal 從 source 到 sink 的路徑
+ * @param {DesignGraph} graph
+ * @param {string} signalName - 要追蹤的 signal 名稱
+ * @param {string} [startModule] - 起始 module（預設 top）
+ * @returns {object} trace path
+ */
+export function traceSignal(graph, signalName, startModule = null) {
+  const traces = [];
+  const visited = new Set();
+
+  // 從 top module 開始搜尋
+  const startModules = startModule
+    ? [startModule]
+    : graph.topModules;
+
+  if (startModules.length === 0) {
+    return { error: '找不到 top module', traces: [] };
+  }
+
+  // recursive 追蹤 signal
+  function traceInModule(moduleName, path = []) {
+    if (visited.has(moduleName)) return;
+    visited.add(moduleName);
+
+    const mod = graph.modules.get(moduleName);
+    if (!mod) return;
+
+    // 檢查這個 module 的 port connection
+    for (const inst of mod.instances) {
+      const portMap = inst.portMap || {};
+
+      // 檢查每個 port connection
+      for (const [portName, connectedSignal] of Object.entries(portMap)) {
+        if (!connectedSignal) continue;
+
+        // 檢查是否連接到目標 signal
+        const baseSignal = connectedSignal.split('[')[0]; // 移除 range select
+        if (baseSignal === signalName) {
+          traces.push({
+            module: moduleName,
+            instance: inst.name,
+            instanceModule: inst.module,
+            port: portName,
+            connectedTo: connectedSignal,
+            line: inst.line,
+          });
+        }
+
+        // 遞迴到子 module
+        traceInModule(inst.module, [...path, `${moduleName}.${inst.name}`]);
+      }
+    }
+
+    // 檢查 module 的 signal 宣告
+    const modSignals = mod.signals || [];
+    for (const sig of modSignals) {
+      if (sig.name === signalName) {
+        traces.push({
+          module: moduleName,
+          declaration: true,
+          type: sig.kind,
+          bus: sig.bus,
+        });
+      }
+    }
+  }
+
+  for (const startMod of startModules) {
+    traceInModule(startMod);
+  }
+
+  return {
+    signalName,
+    traces,
+    traceCount: traces.length,
+  };
+}
+
+/**
+ * 找出所有 unconnected ports（有 port 但沒連接）
+ * @param {DesignGraph} graph
+ * @returns {object} unconnected ports list
+ */
+export function findUnconnectedPorts(graph) {
+  const unconnected = [];
+
+  for (const [moduleName, mod] of graph.modules) {
+    for (const inst of mod.instances) {
+      const portMap = inst.portMap || {};
+
+      // 檢查 module 的 port 定義
+      const instMod = graph.modules.get(inst.module);
+      if (!instMod) continue;
+
+      for (const port of instMod.ports) {
+        const connected = portMap[port.name];
+        if (!connected || connected === '(unconnected)') {
+          unconnected.push({
+            module: moduleName,
+            instance: inst.name,
+            instanceModule: inst.module,
+            port: port.name,
+            direction: port.direction,
+            width: port.width,
+            line: inst.line,
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    unconnected,
+    count: unconnected.length,
+  };
+}
+
+/**
+ * 找出 width mismatch 的 ports
+ * @param {DesignGraph} graph
+ * @returns {object} width mismatch list
+ */
+export function findWidthMismatches(graph) {
+  const mismatches = [];
+
+  for (const [moduleName, mod] of graph.modules) {
+    for (const inst of mod.instances) {
+      const portMap = inst.portMap || {};
+
+      const instMod = graph.modules.get(inst.module);
+      if (!instMod) continue;
+
+      for (const port of instMod.ports) {
+        const connected = portMap[port.name];
+        if (!connected || connected === '(unconnected)') continue;
+
+        // 嘗試解析連接 signal 的 width
+        const connectedWidth = parseSignalWidth(connected);
+        if (connectedWidth !== null && connectedWidth !== port.width) {
+          mismatches.push({
+            module: moduleName,
+            instance: inst.name,
+            port: port.name,
+            portWidth: port.width,
+            connectedSignal: connected,
+            connectedWidth,
+            line: inst.line,
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    mismatches,
+    count: mismatches.length,
+  };
+}
+
+// 輔助：從 signal 字串解析 width
+function parseSignalWidth(signalStr) {
+  if (!signalStr) return null;
+
+  // match "signal[31:0]" pattern
+  const m = signalStr.match(/\[(\d+):(\d+)\]/);
+  if (m) {
+    const msb = parseInt(m[1]);
+    const lsb = parseInt(m[2]);
+    return msb - lsb + 1;
+  }
+
+  return null; // 無法解析
+}
+
+/**
  * 取得完整設計分析
  */
 export function analyzeDesign(graph) {

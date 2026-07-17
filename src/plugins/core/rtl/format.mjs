@@ -210,3 +210,103 @@ export function formatHierarchyMarkdown(hierarchy) {
   lines.push(`> Max hierarchy depth: ${hierarchy.maxDepth}`);
   return lines.join('\n');
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Phase 2: Signal Graph 格式
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 格式化 signal 列表
+ */
+export function formatSignalsText(signalInfo) {
+  if (signalInfo.error) return `❌ ${signalInfo.error}`;
+  const lines = [];
+
+  lines.push(`📋 Module: ${signalInfo.name}`);
+  lines.push(`📁 File: ${signalInfo.file}`);
+  lines.push(`📊 Signals: ${signalInfo.signalCount}`);
+  lines.push('');
+
+  if (signalInfo.nets.length > 0) {
+    lines.push('  🔗 Nets (wire):');
+    for (const s of signalInfo.nets) {
+      const bus = s.bus || '';
+      lines.push(`    wire ${bus} ${s.name}`);
+    }
+  }
+
+  if (signalInfo.variables.length > 0) {
+    lines.push('  📦 Variables (reg):');
+    for (const s of signalInfo.variables) {
+      const bus = s.bus || '';
+      lines.push(`    reg ${bus} ${s.name}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * 格式化 signal trace
+ */
+export function formatTraceText(traceInfo) {
+  if (traceInfo.error) return `❌ ${traceInfo.error}`;
+  const lines = [];
+
+  lines.push(`🔍 Signal Trace: ${traceInfo.signalName}`);
+  lines.push('━'.repeat(30));
+  lines.push('');
+
+  if (traceInfo.traces.length === 0) {
+    lines.push('  (no connections found)');
+  } else {
+    for (const t of traceInfo.traces) {
+      if (t.declaration) {
+        lines.push(`  📦 ${t.module} — ${t.type} ${t.bus || ''} ${traceInfo.signalName}`);
+      } else {
+        lines.push(`  ${t.module}.${t.instance} (${t.instanceModule})`);
+        lines.push(`    └─ .${t.port} ← ${t.connectedTo}`);
+      }
+    }
+  }
+
+  lines.push('');
+  lines.push(`📊 Found ${traceInfo.traceCount} connection(s)`);
+  return lines.join('\n');
+}
+
+/**
+ * 格式化 check 結果
+ */
+export function formatCheckText(checkResult) {
+  const lines = [];
+
+  lines.push('🔍 RTL Design Check');
+  lines.push('━'.repeat(20));
+  lines.push('');
+
+  // Unconnected ports
+  const { unconnected } = checkResult;
+  if (unconnected.count === 0) {
+    lines.push('✅ No unconnected ports');
+  } else {
+    lines.push(`⚠️  Unconnected Ports (${unconnected.count}):`);
+    for (const u of unconnected) {
+      lines.push(`  ${u.module}.${u.instance} (.${u.port}) — ${u.direction} [${u.width || 1}b]`);
+    }
+  }
+  lines.push('');
+
+  // Width mismatches
+  const { widthMismatches } = checkResult;
+  if (widthMismatches.count === 0) {
+    lines.push('✅ No width mismatches');
+  } else {
+    lines.push(`⚠️  Width Mismatches (${widthMismatches.count}):`);
+    for (const m of widthMismatches) {
+      lines.push(`  ${m.module}.${m.instance} (.${m.port}) — port ${m.portWidth}b vs signal ${m.connectedWidth}b`);
+    }
+  }
+
+  return lines.join('\n');
+}

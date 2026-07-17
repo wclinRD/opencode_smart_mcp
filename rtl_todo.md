@@ -80,18 +80,20 @@ slang v11 `--ast-json` 的 AST 格式與預期不同：
 
 ---
 
-## Phase 2 — Signal Graph
+## Phase 2 — Signal Graph ✅ 完成
+
+> **完成日期**：2026-07-17
 
 ### 🔗 Signal 連接
-- [ ] **wire/reg 宣告提取** — 從 module body 提取所有 signal 宣告
-- [ ] **Port connection map** — instantiation 的 port mapping（.port(signal) 格式）
-- [ ] **跨 module 連接追蹤** — 從 top 往下追蹤 signal 如何在 module 間傳遞
-- [ ] **command: "signals"** — 列出某個 module 的所有 signal
-- [ ] **command: "trace"** — 追蹤特定 signal 的路徑（從 source 到 sink）
+- [x] **wire/reg 宣告提取** — 從 module body 提取所有 signal 宣告
+- [x] **Port connection map** — instantiation 的 port mapping（.port(signal) 格式）
+- [x] **跨 module 連接追蹤** — 從 top 往下追蹤 signal 如何在 module 間傳遞
+- [x] **command: "signals"** — 列出某個 module 的所有 signal
+- [x] **command: "trace"** — 追蹤特定 signal 的路徑（從 source 到 sink）
 
 ### ⚠️ 基本檢查
-- [ ] **Unconnected port 偵測** — instantiation 有 port 未連接（潛在 bug）
-- [ ] **Width mismatch** — port 寬度不一致的警告
+- [x] **Unconnected port 偵測** — instantiation 有 port 未連接（潛在 bug）
+- [x] **Width mismatch** — port 寬度不一致的警告
 - [ ] **Float signal** — 有 driver 無 load 或有 load 無 driver
 
 ### 📐 輸出增強
@@ -135,10 +137,10 @@ Week 1-2: Phase 1 MVP ✅ 完成 (commit b0d4784)
 Week 3: Phase 1.5 — slang v11 AST 整合 ✅ 完成
   └── 重寫 buildFromSlang() + port connection map + signal extraction
 
-Week 4-5: Phase 2
-  └── signal graph + trace + 基本檢查 + Mermaid 輸出
+Week 4: Phase 2 — Signal Graph ✅ 完成 (2026-07-17)
+  └── signals command + trace command + check command (unconnected/width)
 
-Week 6+: Phase 3
+Week 5+: Phase 3
   └── PDK mapping + constraint 驗證 + DFT + eda_search 整合
 ```
 

@@ -10,10 +10,14 @@
  */
 
 import { parseRTL, detectParsers, getParserInfo } from './rtl/parser.mjs';
-import { buildGraph, getHierarchy, getModulePorts, analyzeDesign, listModules } from './rtl/graph-builder.mjs';
+import {
+  buildGraph, getHierarchy, getModulePorts, analyzeDesign, listModules,
+  getModuleSignals, traceSignal, findUnconnectedPorts, findWidthMismatches,
+} from './rtl/graph-builder.mjs';
 import {
   formatHierarchyText, formatPortsText, formatAnalyzeText,
   formatHierarchyMermaid, formatHierarchyMarkdown, formatAnalyzeMarkdown,
+  formatSignalsText, formatTraceText, formatCheckText,
 } from './rtl/format.mjs';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -33,8 +37,12 @@ export default {
     properties: {
       command: {
         type: 'string',
-        enum: ['analyze', 'hierarchy', 'ports', 'list', 'parsers'],
-        description: '分析動作。analyze=全面分析，hierarchy=module tree，ports=port list，list=列出所有 module，parsers=偵測可用 parser',
+        enum: ['analyze', 'hierarchy', 'ports', 'signals', 'trace', 'check', 'list', 'parsers'],
+        description: '分析動作。analyze=全面分析，hierarchy=module tree，ports=port list，signals=signal 宣告，trace=signal 追蹤，check=基本檢查（unconnected/width），list=列出所有 module，parsers=偵測可用 parser',
+      },
+      signal: {
+        type: 'string',
+        description: '要追蹤的 signal 名稱（trace 使用）',
       },
       root: {
         type: 'string',
@@ -60,6 +68,7 @@ export default {
     const command = String(args.command || 'analyze').toLowerCase();
     const root = String(args.root || '.');
     const target = args.target || null;
+    const signal = args.signal || null;
     const format = String(args.format || 'text').toLowerCase();
     const filelist = args.filelist || null;
 
@@ -87,11 +96,11 @@ export default {
       const fallbackResult = await parseRTL(root, { filelist, forceParser: 'regex' });
       if (fallbackResult.ok) {
         const fallbackGraph = buildGraph(fallbackResult.data, 'regex-fallback');
-        return handleCommand(command, fallbackGraph, { ...parseResult, ...fallbackResult, parser: 'regex-fallback (slang AST 格式不支援，已自動降級)' }, target, format);
+        return handleCommand(command, fallbackGraph, { ...parseResult, ...fallbackResult, parser: 'regex-fallback (slang AST 格式不支援，已自動降級)' }, target, signal, format);
       }
     }
 
-    return handleCommand(command, graph, parseResult, target, format);
+    return handleCommand(command, graph, parseResult, target, signal, format);
   },
 };
 
@@ -99,7 +108,7 @@ export default {
 // 內部：command 處理
 // ═══════════════════════════════════════════════════════════════════════════
 
-function handleCommand(command, graph, parseResult, target, format) {
+function handleCommand(command, graph, parseResult, target, signal, format) {
   let output;
 
   switch (command) {
@@ -164,8 +173,56 @@ function handleCommand(command, graph, parseResult, target, format) {
       };
     }
 
+    case 'signals': {
+      if (!target) {
+        return { ok: false, error: 'signals 命令需要指定 target（module 名稱）' };
+      }
+      const signalInfo = getModuleSignals(graph, target);
+      output = format === 'json'
+        ? JSON.stringify(signalInfo, null, 2)
+        : formatSignalsText(signalInfo);
+      return {
+        ok: true,
+        output,
+        parser: parseResult.parser,
+      };
+    }
+
+    case 'trace': {
+      if (!signal) {
+        return { ok: false, error: 'trace 命令需要指定 signal（signal 名稱）' };
+      }
+      const traceInfo = traceSignal(graph, signal, target);
+      output = format === 'json'
+        ? JSON.stringify(traceInfo, null, 2)
+        : formatTraceText(traceInfo);
+      return {
+        ok: true,
+        output,
+        parser: parseResult.parser,
+      };
+    }
+
+    case 'check': {
+      const unconnected = findUnconnectedPorts(graph);
+      const widthMismatches = findWidthMismatches(graph);
+      const checkResult = { unconnected, widthMismatches };
+      output = format === 'json'
+        ? JSON.stringify(checkResult, null, 2)
+        : formatCheckText(checkResult);
+      return {
+        ok: true,
+        output,
+        parser: parseResult.parser,
+        stats: {
+          unconnectedCount: unconnected.count,
+          widthMismatchCount: widthMismatches.count,
+        },
+      };
+    }
+
     default:
-      return { ok: false, error: `未知 command: ${command}. 可用: analyze, hierarchy, ports, list, parsers` };
+      return { ok: false, error: `未知 command: ${command}. 可用: analyze, hierarchy, ports, signals, trace, check, list, parsers` };
   }
 }
 
