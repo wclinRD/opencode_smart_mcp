@@ -21,7 +21,9 @@ import {
   formatHierarchyDot,
   formatSignalsText, formatTraceText, formatCheckText,
   formatFloatMermaid, formatFloatDot,
+  formatLintText, formatLintMarkdown,
 } from './rtl/format.mjs';
+import { analyzeSdc } from './rtl/sdc-parser.mjs';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Plugin Export
@@ -40,7 +42,7 @@ export default {
     properties: {
       command: {
         type: 'string',
-        enum: ['analyze', 'hierarchy', 'ports', 'signals', 'trace', 'check', 'list', 'parsers'],
+        enum: ['analyze', 'hierarchy', 'ports', 'signals', 'trace', 'check', 'lint', 'list', 'parsers'],
         description: '分析動作。analyze=全面分析，hierarchy=module tree，ports=port list，signals=signal 宣告，trace=signal 追蹤，check=基本檢查（unconnected/width/float），list=列出所有 module，parsers=偵測可用 parser',
       },
       signal: {
@@ -64,6 +66,10 @@ export default {
         type: 'string',
         description: 'Verilog file list 路徑（default: 自動掃描）',
       },
+      sdc: {
+        type: 'string',
+        description: 'SDC constraint 檔案路徑（lint 使用，default: 自動掃描 .sdc）',
+      },
     },
   },
 
@@ -74,6 +80,7 @@ export default {
     const signal = args.signal || null;
     const format = String(args.format || 'text').toLowerCase();
     const filelist = args.filelist || null;
+    const sdcFile = args.sdc || null;
 
     // 特殊命令：不需 parse
     if (command === 'parsers') {
@@ -102,11 +109,11 @@ export default {
       const fallbackResult = await parseRTL(root, { filelist, forceParser: 'regex' });
       if (fallbackResult.ok) {
         const fallbackGraph = buildGraph(fallbackResult.data, 'regex-fallback');
-        return handleCommand(command, fallbackGraph, { ...parseResult, ...fallbackResult, parser: 'regex-fallback (slang AST 格式不支援，已自動降級)' }, target, signal, format);
+        return handleCommand(command, fallbackGraph, { ...parseResult, ...fallbackResult, parser: 'regex-fallback (slang AST 格式不支援，已自動降級)' }, target, signal, format, root, sdcFile);
       }
     }
 
-    return handleCommand(command, graph, parseResult, target, signal, format);
+    return handleCommand(command, graph, parseResult, target, signal, format, root, sdcFile);
   },
 };
 
@@ -114,7 +121,7 @@ export default {
 // 內部：command 處理
 // ═══════════════════════════════════════════════════════════════════════════
 
-function handleCommand(command, graph, parseResult, target, signal, format) {
+function handleCommand(command, graph, parseResult, target, signal, format, root = ".", sdcFile = null) {
   let output;
 
   switch (command) {
@@ -235,8 +242,114 @@ function handleCommand(command, graph, parseResult, target, signal, format) {
       };
     }
 
+
+    case 'lint': {
+      // 取得 top-level ports
+      const designAnalysis = analyzeDesign(graph);
+      const topLevelPorts = designAnalysis.topLevelPorts || [];
+
+      // 解析 SDC files
+      const sdcResult = analyzeSdc(root, sdcFile ? [sdcFile] : null);
+
+      // 比對：哪些 top-level port 缺少 constraint
+      const constrainedSet = new Set(sdcResult.allConstrainedPorts);
+      const clockSet = new Set(sdcResult.clockPorts);
+
+      const unconstrainedInputs = [];
+      const unconstrainedOutputs = [];
+      const fixes = [];
+
+      // 取得第一個 clock name（用於 SDC template）
+      const defaultClock = sdcResult.clocks.length > 0
+        ? (sdcResult.clocks[0].name || sdcResult.clocks[0].port || 'clk')
+        : 'clk';
+
+      for (const port of topLevelPorts) {
+        const name = port.name;
+        if (port.direction === 'input') {
+          if (!constrainedSet.has(name) && !clockSet.has(name)) {
+            unconstrainedInputs.push(port);
+            // 生成 SDC fix 建議
+            const bus = port.width > 1 ? `[${port.name}[*]]` : `[get_ports ${port.name}]`;
+            fixes.push({
+              port: name,
+              direction: 'input',
+              width: port.width,
+              module: port.module,
+              suggestedSdc: `set_input_delay -clock ${defaultClock} 0.0 ${bus}  # TODO: 調整 delay 值`,
+              reason: '缺少 input delay constraint',
+            });
+          }
+        } else {
+          if (!constrainedSet.has(name)) {
+            unconstrainedOutputs.push(port);
+            // 生成 SDC fix 建議
+            const bus = port.width > 1 ? `[${port.name}[*]]` : `[get_ports ${port.name}]`;
+            fixes.push({
+              port: name,
+              direction: 'output',
+              width: port.width,
+              module: port.module,
+              suggestedSdc: `set_output_delay -clock ${defaultClock} 0.0 ${bus}  # TODO: 調整 delay 值`,
+              reason: '缺少 output delay constraint',
+            });
+          }
+        }
+      }
+
+      // 偵測 name mismatch（SDC 有類似名稱但不完全一致）
+      const sdcAllPorts = new Set([
+        ...sdcResult.constrainedInputPorts,
+        ...sdcResult.constrainedOutputPorts,
+        ...sdcResult.clockPorts,
+      ]);
+      for (const port of topLevelPorts) {
+        const name = port.name;
+        if (sdcAllPorts.has(name)) continue;
+        // 搜尋 SDC 中是否有「很像」的名稱
+        for (const sdcPort of sdcAllPorts) {
+          if (isSimilarName(name, sdcPort)) {
+            fixes.push({
+              port: name,
+              direction: port.direction,
+              width: port.width,
+              module: port.module,
+              suggestedSdc: null,
+              reason: `SDC 中有類似名稱 "${sdcPort}"，可能是 port 名稱不一致（SDC: ${sdcPort} vs RTL: ${name}）`,
+              mismatch: { sdc: sdcPort, rtl: name },
+            });
+          }
+        }
+      }
+
+      const lintResult = {
+        sdcFiles: sdcResult.files,
+        sdcSummary: sdcResult.summary,
+        clocks: sdcResult.clocks,
+        topLevelPortCount: topLevelPorts.length,
+        unconstrainedInputs,
+        unconstrainedOutputs,
+        totalUnconstrained: unconstrainedInputs.length + unconstrainedOutputs.length,
+        totalConstrained: constrainedSet.size + clockSet.size,
+        fixes,
+      };
+
+      output = format === 'json'
+        ? JSON.stringify(lintResult, null, 2)
+        : format === 'markdown'
+          ? formatLintMarkdown(lintResult)
+          : formatLintText(lintResult);
+
+      return {
+        ok: true,
+        output,
+        parser: parseResult.parser,
+        lintResult,
+      };
+    }
+
     default:
-      return { ok: false, error: `未知 command: ${command}. 可用: analyze, hierarchy, ports, signals, trace, check, list, parsers` };
+      return { ok: false, error: `未知 command: ${command}. 可用: analyze, hierarchy, ports, signals, trace, check, lint, list, parsers` };
   }
 }
 
@@ -314,4 +427,61 @@ function generateParserActions(info) {
   }
 
   return actions;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 內部：name similarity
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 判斷兩個 port 名稱是否「很像」（可能是 naming mismatch）
+ */
+function isSimilarName(a, b) {
+  if (a === b) return false;
+  const normalize = (s) => s.replace(/^_+|_+$/g, '').toLowerCase();
+  const na = normalize(a);
+  const nb = normalize(b);
+  if (na === nb) return true;
+
+  // 常見縮寫對照表
+  const abbrevMap = {
+    'rst': 'reset', 'reset': 'rst',
+    'clk': 'clock', 'clock': 'clk',
+    'addr': 'address', 'address': 'addr',
+    'valid': 'vld', 'vld': 'valid',
+    'ready': 'rdy', 'rdy': 'ready',
+    'enable': 'en', 'en': 'enable',
+    'din': 'data_in', 'dout': 'data_out',
+    'wdata': 'write_data', 'rdata': 'read_data',
+  };
+
+  for (const [short, long] of Object.entries(abbrevMap)) {
+    const re = new RegExp(`^${short}$|^${short}_|_${short}_|_${short}$`);
+    if (na.replace(re, long) === nb) return true;
+    if (nb.replace(re, long) === na) return true;
+  }
+
+  // Levenshtein distance（允許 2 個字元差異）
+  const dist = levenshtein(na, nb);
+  if (Math.max(na.length, nb.length) > 3 && dist <= 2) return true;
+
+  return false;
+}
+
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + (a[i - 1] !== b[j - 1] ? 1 : 0)
+      );
+    }
+  }
+  return dp[m][n];
 }

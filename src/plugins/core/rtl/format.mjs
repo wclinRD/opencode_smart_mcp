@@ -432,3 +432,191 @@ export function formatCheckText(checkResult) {
 
   return lines.join('\n');
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Lint 格式（Constraint 完整性檢查）
+// ═══════════════════════════════════════════════════════════════════════════
+
+export function formatLintText(result) {
+  const lines = [];
+  lines.push('⏱️  Constraint Lint Report');
+  lines.push('━'.repeat(22));
+  lines.push('');
+
+  // SDC 檔案摘要
+  if (result.sdcFiles.length === 0) {
+    lines.push('⚠️  未找到 SDC 檔案（constraint 驗證將跳過 SDC 比對）');
+    lines.push('');
+  } else {
+    lines.push(`📂 SDC Files: ${result.sdcFiles.length}`);
+    for (const f of result.sdcFiles) {
+      lines.push(`  • ${f}`);
+    }
+    lines.push('');
+  }
+
+  // Clock 摘要
+  if (result.clocks.length > 0) {
+    lines.push(`🕐 Clocks (${result.clocks.length}):`);
+    for (const c of result.clocks) {
+      const period = c.period ? `${c.period} ns` : '?';
+      const name = c.name ? ` [${c.name}]` : '';
+      lines.push(`  • ${c.port || '?'}${name} — period ${period}`);
+    }
+    lines.push('');
+  }
+
+  // Top-level port 摘要
+  lines.push(`📊 Top-level Ports: ${result.topLevelPortCount}`);
+
+  // Unconstrained ports
+  const hasIssue = result.totalUnconstrained > 0;
+
+  if (result.unconstrainedInputs.length > 0) {
+    lines.push('');
+    lines.push(`🔴 Unconstrained Inputs (${result.unconstrainedInputs.length}):`);
+    for (const p of result.unconstrainedInputs) {
+      const bus = p.width > 1 ? `[${p.width - 1}:0]` : '';
+      lines.push(`  ⚠️  ${p.name}${bus} — ${p.module}`);
+    }
+  }
+
+  if (result.unconstrainedOutputs.length > 0) {
+    lines.push('');
+    lines.push(`🔴 Unconstrained Outputs (${result.unconstrainedOutputs.length}):`);
+    for (const p of result.unconstrainedOutputs) {
+      const bus = p.width > 1 ? `[${p.width - 1}:0]` : '';
+      lines.push(`  ⚠️  ${p.name}${bus} — ${p.module}`);
+    }
+  }
+
+  if (!hasIssue) {
+    lines.push('');
+    lines.push('✅ 所有 top-level port 都有 constraint');
+  }
+
+  // Fix suggestions
+  if (result.fixes && result.fixes.length > 0) {
+    lines.push('');
+    lines.push('💡 Fix Suggestions:');
+    lines.push('━'.repeat(20));
+
+    // Name mismatches first
+    const mismatches = result.fixes.filter(f => f.mismatch);
+    if (mismatches.length > 0) {
+      lines.push('');
+      lines.push('  🔧 Name Mismatches:');
+      for (const f of mismatches) {
+        lines.push(`    ⚠️  RTL: ${f.port} ←→ SDC: ${f.mismatch.sdc}`);
+        lines.push(`        建議：統一其中一個名稱`);
+      }
+    }
+
+    // SDC template
+    const sdcFixes = result.fixes.filter(f => f.suggestedSdc);
+    if (sdcFixes.length > 0) {
+      lines.push('');
+      lines.push('  📝 SDC Template（複製到你的 .sdc 檔案）:');
+      lines.push('  ```sdc');
+      for (const f of sdcFixes) {
+        lines.push('  ' + f.suggestedSdc);
+      }
+      lines.push('  ```');
+    }
+  }
+
+  // Summary
+  lines.push('');
+  lines.push('━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  lines.push(`  Constrained: ${result.totalConstrained}`);
+  lines.push(`  Unconstrained: ${result.totalUnconstrained}`);
+
+  return lines.join('\n');
+}
+
+export function formatLintMarkdown(result) {
+  const lines = [];
+  lines.push('# ⏱️ Constraint Lint Report');
+  lines.push('');
+
+  // SDC 檔案
+  if (result.sdcFiles.length === 0) {
+    lines.push('> ⚠️ 未找到 SDC 檔案');
+  } else {
+    lines.push('## 📂 SDC Files');
+    for (const f of result.sdcFiles) {
+      lines.push(`- \`${f}\``);
+    }
+  }
+  lines.push('');
+
+  // Clocks
+  if (result.clocks.length > 0) {
+    lines.push('## 🕐 Clocks');
+    lines.push('| Port | Period | Name |');
+    lines.push('|------|--------|------|');
+    for (const c of result.clocks) {
+      lines.push(`| \`${c.port || '?'}\` | ${c.period || '?'} ns | ${c.name || '-'} |`);
+    }
+    lines.push('');
+  }
+
+  // Top-level ports
+  lines.push(`## 📊 Top-level Ports: ${result.topLevelPortCount}`);
+  lines.push('');
+
+  if (result.unconstrainedInputs.length > 0) {
+    lines.push(`### 🔴 Unconstrained Inputs (${result.unconstrainedInputs.length})`);
+    lines.push('| Port | Width | Module |');
+    lines.push('|------|-------|--------|');
+    for (const p of result.unconstrainedInputs) {
+      lines.push(`| \`${p.name}\` | ${p.width || 1} | ${p.module} |`);
+    }
+    lines.push('');
+  }
+
+  if (result.unconstrainedOutputs.length > 0) {
+    lines.push(`### 🔴 Unconstrained Outputs (${result.unconstrainedOutputs.length})`);
+    lines.push('| Port | Width | Module |');
+    lines.push('|------|-------|--------|');
+    for (const p of result.unconstrainedOutputs) {
+      lines.push(`| \`${p.name}\` | ${p.width || 1} | ${p.module} |`);
+    }
+    lines.push('');
+  }
+
+  if (result.totalUnconstrained === 0) {
+    lines.push('> ✅ 所有 top-level port 都有 constraint');
+  }
+
+  // Fix suggestions
+  if (result.fixes && result.fixes.length > 0) {
+    lines.push('## 💡 Fix Suggestions');
+
+    const mismatches = result.fixes.filter(f => f.mismatch);
+    if (mismatches.length > 0) {
+      lines.push('### 🔧 Name Mismatches');
+      lines.push('| RTL Port | SDC Port | 建議 |');
+      lines.push('|----------|----------|------|');
+      for (const f of mismatches) {
+        lines.push(`| \`${f.port}\` | \`${f.mismatch.sdc}\` | 統一其中一個名稱 |`);
+      }
+      lines.push('');
+    }
+
+    const sdcFixes = result.fixes.filter(f => f.suggestedSdc);
+    if (sdcFixes.length > 0) {
+      lines.push('### 📝 SDC Template');
+      lines.push('```sdc');
+      for (const f of sdcFixes) {
+        lines.push(f.suggestedSdc);
+      }
+      lines.push('```');
+    }
+  }
+
+  lines.push('---');
+  lines.push(`**Constrained:** ${result.totalConstrained} | **Unconstrained:** ${result.totalUnconstrained}`);
+
+  return lines.join('\n');
+}

@@ -757,9 +757,28 @@ function parseSignalWidth(signalStr) {
  */
 export function analyzeDesign(graph) {
   const floatSignals = findFloatSignals(graph);
+
+  // 收集 top-level ports（所有 top module 的 input/output port）
+  const topLevelPorts = [];
+  for (const topName of graph.topModules) {
+    const topMod = graph.modules.get(topName);
+    if (topMod) {
+      for (const port of topMod.ports) {
+        topLevelPorts.push({
+          name: port.name,
+          direction: port.direction,
+          width: port.width || 1,
+          module: topName,
+          file: topMod.file,
+        });
+      }
+    }
+  }
+
   return {
     stats: { ...graph.stats, floatSignals: floatSignals.noLoadCount + floatSignals.noDriverCount },
     topModules: graph.topModules,
+    topLevelPorts,
     modules: [...graph.modules.values()].map(m => ({
       name: m.name,
       file: m.file,

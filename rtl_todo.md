@@ -113,8 +113,11 @@ slang v11 `--ast-json` 的 AST 格式與預期不同：
 - [ ] **GF180MCU 支援** — 新增 GF180MCU 的 cell index
 
 ### ⏱️ Constraint 驗證
-- [ ] **SDC port 比對** — 列出所有 top-level port，標示缺少 constraint 的
-- [ ] **command: "lint"** — 驗證 constraint 完整性
+- [x] **SDC parser** — 解析 .sdc 檔案（create_clock, set_input_delay, set_output_delay, etc.）
+- [x] **SDC file 自動掃描** — 遞迴掃描目錄找 .sdc 檔案
+- [x] **command: "lint"** — 比對 RTL top-level port 與 SDC constraint，標示缺少 constraint 的 port
+- [x] **支援多格式** — text / json / markdown 輸出
+- [x] **Name mismatch 偵測** — SDC 與 RTL port 名稱不一致時正確標示
 - [ ] **跟 smart_eda_search 整合** — 搜尋 SDC 最佳實踐
 
 ### 🔍 DFT 分析
@@ -143,7 +146,10 @@ Week 4: Phase 2 — Signal Graph ✅ 完成 (2026-07-17)
   └── Mermaid + DOT 輸出格式
 
 Week 5+: Phase 3
-  └── PDK mapping + constraint 驗證 + DFT + eda_search 整合
+  └── Constraint 驗證 ✅ 完成 (2026-07-17)
+     └── SDC parser + command: "lint" + text/json/markdown 輸出
+  └── DFT 分析
+  └── eda_search 協作
 ```
 
 ---

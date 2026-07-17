@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-16T17:02:15.259Z",
+  "generatedAt": "2026-07-17T02:34:58.495Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -1691,6 +1691,70 @@
       }
     },
     {
+      "name": "smart_rtl_analyze",
+      "description": "[code] [rtl] EDA 領域 RTL 程式碼理解引擎。解析 Verilog/SystemVerilog 設計，產出 module hierarchy、port list、instantiation map。支援多層降級：slang（完整 elaboration）→ regex fallback。跟 smart_eda_search 互補：eda_search 搜尋 EDA 知識，rtl_analyze 理解你的設計。",
+      "category": "analyze",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "analyze",
+              "hierarchy",
+              "ports",
+              "signals",
+              "trace",
+              "check",
+              "list",
+              "parsers"
+            ],
+            "description": "分析動作。analyze=全面分析，hierarchy=module tree，ports=port list，signals=signal 宣告，trace=signal 追蹤，check=基本檢查（unconnected/width/float），list=列出所有 module，parsers=偵測可用 parser"
+          },
+          "signal": {
+            "type": "string",
+            "description": "要追蹤的 signal 名稱（trace 使用）"
+          },
+          "root": {
+            "type": "string",
+            "description": "RTL 專案根目錄（default: .）"
+          },
+          "target": {
+            "type": "string",
+            "description": "目標 module 名稱（hierarchy/ports 使用）"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json",
+              "markdown",
+              "mermaid",
+              "dot"
+            ],
+            "description": "輸出格式（default: text）。dot=Graphviz DOT 格式"
+          },
+          "filelist": {
+            "type": "string",
+            "description": "Verilog file list 路徑（default: 自動掃描）"
+          }
+        }
+      }
+    },
+    {
       "name": "smart_security",
       "description": "Use when: need to scan project for credentials leaks, injection flaws, path traversal, or dependency vulnerabilities. Run before committing or before CI. Avoid when: looking for general code quality issues (use lint instead).",
       "category": "security",
@@ -1891,45 +1955,6 @@
           }
         },
         "required": []
-      }
-    },
-    {
-      "name": "deps",
-      "description": "Dependency audit tool — audit security, check outdated packages, analyze structure.\nCommands:\n  audit   — npm audit wrapper, returns vulnerability report with severity breakdown\n  outdated — npm outdated wrapper, lists out-of-date packages\n  analyze — reads package.json, reports dependency count and lock file size\nUse when: need to check for vulnerable deps, review outdated packages, understand dep structure.",
-      "category": "standard",
-      "domain": "general",
-      "safetyLevel": "medium",
-      "routingRules": {
-        "autoRoute": true,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "command": {
-            "type": "string",
-            "enum": [
-              "audit",
-              "outdated",
-              "analyze"
-            ],
-            "description": "audit = security audit, outdated = outdated packages, analyze = dep structure"
-          },
-          "root": {
-            "type": "string",
-            "description": "Project root directory (default: current working directory)"
-          }
-        },
-        "required": [
-          "command"
-        ]
       }
     },
     {
@@ -2331,6 +2356,45 @@
             "description": "Output format (default: json — LLM-friendly)"
           }
         }
+      }
+    },
+    {
+      "name": "deps",
+      "description": "Dependency audit tool — audit security, check outdated packages, analyze structure.\nCommands:\n  audit   — npm audit wrapper, returns vulnerability report with severity breakdown\n  outdated — npm outdated wrapper, lists out-of-date packages\n  analyze — reads package.json, reports dependency count and lock file size\nUse when: need to check for vulnerable deps, review outdated packages, understand dep structure.",
+      "category": "standard",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "enum": [
+              "audit",
+              "outdated",
+              "analyze"
+            ],
+            "description": "audit = security audit, outdated = outdated packages, analyze = dep structure"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root directory (default: current working directory)"
+          }
+        },
+        "required": [
+          "command"
+        ]
       }
     },
     {
