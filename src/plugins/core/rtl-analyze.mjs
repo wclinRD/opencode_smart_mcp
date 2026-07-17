@@ -1,0 +1,195 @@
+/**
+ * smart_rtl_analyze — RTL 程式碼理解引擎
+ *
+ * 解析 Verilog/SystemVerilog 設計，產出 module hierarchy、port list、
+ * instantiation map。支援多層降級（slang → regex fallback）。
+ *
+ * 跟 smart_eda_search 的差異：
+ *   - smart_rtl_analyze：理解「你的設計」（解析你的 RTL code）
+ *   - smart_eda_search：搜尋「EDA 知識」（從外部來源找資料）
+ */
+
+import { parseRTL, detectParsers, getParserInfo } from './rtl/parser.mjs';
+import { buildGraph, getHierarchy, getModulePorts, analyzeDesign, listModules } from './rtl/graph-builder.mjs';
+import {
+  formatHierarchyText, formatPortsText, formatAnalyzeText,
+  formatHierarchyMermaid, formatHierarchyMarkdown, formatAnalyzeMarkdown,
+} from './rtl/format.mjs';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Plugin Export
+// ═══════════════════════════════════════════════════════════════════════════
+
+export default {
+  name: 'smart_rtl_analyze',
+  category: 'analyze',
+  description:
+    '[code] [rtl] EDA 領域 RTL 程式碼理解引擎。解析 Verilog/SystemVerilog 設計，'
+    + '產出 module hierarchy、port list、instantiation map。'
+    + '支援多層降級：slang（完整 elaboration）→ regex fallback。'
+    + '跟 smart_eda_search 互補：eda_search 搜尋 EDA 知識，rtl_analyze 理解你的設計。',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      command: {
+        type: 'string',
+        enum: ['analyze', 'hierarchy', 'ports', 'list', 'parsers'],
+        description: '分析動作。analyze=全面分析，hierarchy=module tree，ports=port list，list=列出所有 module，parsers=偵測可用 parser',
+      },
+      root: {
+        type: 'string',
+        description: 'RTL 專案根目錄（default: .）',
+      },
+      target: {
+        type: 'string',
+        description: '目標 module 名稱（hierarchy/ports 使用）',
+      },
+      format: {
+        type: 'string',
+        enum: ['text', 'json', 'markdown', 'mermaid'],
+        description: '輸出格式（default: text）',
+      },
+      filelist: {
+        type: 'string',
+        description: 'Verilog file list 路徑（default: 自動掃描）',
+      },
+    },
+  },
+
+  async handler(args = {}) {
+    const command = String(args.command || 'analyze').toLowerCase();
+    const root = String(args.root || '.');
+    const target = args.target || null;
+    const format = String(args.format || 'text').toLowerCase();
+    const filelist = args.filelist || null;
+
+    // 特殊命令：不需 parse
+    if (command === 'parsers') {
+      const info = getParserInfo();
+      return {
+        ok: true,
+        output: formatParsers(info, format),
+        parserInfo: info,
+      };
+    }
+
+    // 其他命令需要 parse
+    const parseResult = await parseRTL(root, { filelist });
+    if (!parseResult.ok) {
+      return { ok: false, error: parseResult.error };
+    }
+
+    const graph = buildGraph(parseResult.data, parseResult.parser);
+    let output;
+
+    // 如果 slang 結果為空，自動降級到 regex fallback
+    if (graph.stats.moduleCount === 0 && parseResult.parser === 'slang') {
+      const fallbackResult = await parseRTL(root, { filelist, forceParser: 'regex' });
+      if (fallbackResult.ok) {
+        const fallbackGraph = buildGraph(fallbackResult.data, 'regex-fallback');
+        return handleCommand(command, fallbackGraph, { ...parseResult, ...fallbackResult, parser: 'regex-fallback (slang AST 格式不支援，已自動降級)' }, target, format);
+      }
+    }
+
+    return handleCommand(command, graph, parseResult, target, format);
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 內部：command 處理
+// ═══════════════════════════════════════════════════════════════════════════
+
+function handleCommand(command, graph, parseResult, target, format) {
+  let output;
+
+  switch (command) {
+    case 'analyze': {
+      const analysis = analyzeDesign(graph);
+      output = format === 'markdown'
+        ? formatAnalyzeMarkdown(analysis)
+        : format === 'json'
+          ? JSON.stringify(analysis, null, 2)
+          : formatAnalyzeText(analysis);
+      return {
+        ok: true,
+        output,
+        parser: parseResult.parser,
+        warnings: parseResult.warnings,
+        stats: graph.stats,
+      };
+    }
+
+    case 'hierarchy': {
+      const hierarchy = getHierarchy(graph, target);
+      output = format === 'markdown'
+        ? formatHierarchyMarkdown(hierarchy)
+        : format === 'mermaid'
+          ? formatHierarchyMermaid(hierarchy)
+          : format === 'json'
+            ? JSON.stringify(hierarchy, null, 2)
+            : formatHierarchyText(hierarchy);
+      return {
+        ok: true,
+        output,
+        parser: parseResult.parser,
+        warnings: parseResult.warnings,
+      };
+    }
+
+    case 'ports': {
+      if (!target) {
+        return { ok: false, error: 'ports 命令需要指定 target（module 名稱）' };
+      }
+      const portInfo = getModulePorts(graph, target);
+      output = format === 'json'
+        ? JSON.stringify(portInfo, null, 2)
+        : formatPortsText(portInfo);
+      return {
+        ok: true,
+        output,
+        parser: parseResult.parser,
+      };
+    }
+
+    case 'list': {
+      const modules = listModules(graph);
+      output = format === 'json'
+        ? JSON.stringify(modules, null, 2)
+        : `📦 Modules (${modules.length}):\n${modules.map(m => `  • ${m}`).join('\n')}`;
+      return {
+        ok: true,
+        output,
+        parser: parseResult.parser,
+        modules,
+      };
+    }
+
+    default:
+      return { ok: false, error: `未知 command: ${command}. 可用: analyze, hierarchy, ports, list, parsers` };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 內部格式化
+// ═══════════════════════════════════════════════════════════════════════════
+
+function formatParsers(info, format) {
+  if (format === 'json') return JSON.stringify(info, null, 2);
+
+  const lines = ['🔧 RTL Parser Status', '━'.repeat(19), ''];
+  for (const p of info.parsers) {
+    const icon = p.available ? '✅' : '❌';
+    const ver = p.version ? ` (${p.version})` : '';
+    lines.push(`  ${icon} ${p.name}${ver}`);
+  }
+
+  if (info.suggestions.length > 0) {
+    lines.push('');
+    lines.push('💡 建議：');
+    for (const s of info.suggestions) {
+      lines.push(`  • ${s}`);
+    }
+  }
+
+  return lines.join('\n');
+}
