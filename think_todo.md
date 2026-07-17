@@ -117,7 +117,7 @@
 |---|------|------|
 | 1 | classifyThinkingMode 對中文「分析」觸發率偏低 | ⚠️ 待觀察 |
 | 2 | detectOverconfidence 的 threshold 動態範圍 2-4 可能需微調 | ⚠️ 待觀察 |
-| 3 | enhanceVerifyStage 的 complementarity 觸發詞不包含「vs」 | ✅ 已知 |
+| 3 | enhanceVerifyStage 的 complementarity 觸發詞不包含「vs」 | ✅ 已修復（vs/versus 已加入觸發詞） |
 
 ### 中優先級
 

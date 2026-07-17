@@ -486,7 +486,7 @@ describe('端到端工作流模擬', () => {
     });
     assert.ok(output.includes('GOAL'), 'Structured should have GOAL');
     assert.ok(output.includes('範圍限定檢查'), 'VERIFY should be enhanced');
-    // 'vs' 不觸發 complementarity，需用「比較」或「差異」
+    // vs/versus 已加入 complementarity 觸發詞，此處僅驗證 scope check
     assert.ok(output.includes('範圍限定檢查'), 'VERIFY should include scope check');
   });
 
