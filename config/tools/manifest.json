@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-17T02:34:58.495Z",
+  "generatedAt": "2026-07-17T17:52:35.378Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -655,7 +655,7 @@
     },
     {
       "name": "smart_think",
-      "description": "Conversational reasoning engine — surpasses sequential-thinking.\n\nDefault mode: mode:\"cit\" (BN-DP auto-branch). Only branches when uncertain — saves ~70% tokens on routine tasks.\n  mode:\"beam\" → explore 2-3 alternative paths with confidence scoring. Use for high-risk decisions.\n  mode:\"forest\" → multi-tree reasoning with consensus voting. Use for complex multi-angle problems.\n\nCore workflow:\n  thought + nextThoughtNeeded=true → hypothesis → verification → repeat → nextThoughtNeeded=false\n\nSupports: template guidance (debug/refactor/architecture...), branchFromThought, isRevision,\nneedsMoreThoughts (beyond initial plan), adjustTotalThoughts (mid-stream expansion).\nReturns done flag + optional updated totalThoughts.",
+      "description": "Conversational reasoning engine — surpasses sequential-thinking.\n\nDefault mode: mode:\"cit\" (BN-DP auto-branch). Only branches when uncertain — saves ~70% tokens on routine tasks.\n  mode:\"beam\" → explore 2-3 alternative paths with confidence scoring. Use for high-risk decisions.\n  mode:\"forest\" → multi-tree reasoning with consensus voting. Use for complex multi-angle problems.\n  mode:\"structured\" → Grammar-Constrained CoT (GOAL/STATE/ALGO/EDGE/VERIFY — saves 50-70% thinking tokens).\n    VERIFY stage includes: scope verification, complementarity vs overlap check, devil's advocate.\n\nCore workflow:\n  thought + nextThoughtNeeded=true → hypothesis → verification → repeat → nextThoughtNeeded=false\n\nThink-Guard (3-layer defense):\n  Layer 1: Task classification → auto-suggest thinking mode based on task keywords\n  Layer 2: Overconfidence detection → warn when CIT under-branches on complex tasks\n  Layer 3: VERIFY stage enhancement → scope/complementarity/devil's advocate checks\n\nPhase 2 enhancements:\n  2.1: Dynamic threshold — adjusts overconfidence score based on context budget\n  2.2: Historical learning — tracks classification accuracy + auto-adjusts weights\n  2.3: Cross-tool integration — domain-specific rules for EDA/exa/medical\n  2.4: Concurrency safety — session isolation + lock mechanism\n\nSupports: template guidance (debug/refactor/architecture...), branchFromThought, isRevision,\nneedsMoreThoughts (beyond initial plan), adjustTotalThoughts (mid-stream expansion).\nReturns done flag + optional updated totalThoughts.",
       "category": "core",
       "domain": "reasoning",
       "safetyLevel": "low",
@@ -865,6 +865,10 @@
           "verify": {
             "type": "string",
             "description": "VERIFY: Self-verification logic. Used with mode:\"structured\"."
+          },
+          "classifyTask": {
+            "type": "string",
+            "description": "Task description to classify. Returns suggested thinking mode and reasoning. Use before starting a thinking session to choose the right mode."
           }
         },
         "required": [
@@ -1041,6 +1045,33 @@
               "ultra"
             ],
             "description": "Caveman compression level. light=stop-words only, semantic=content selection, aggressive=full lemmatization, ultra=abbreviations+arrows (50-70% savings). Default: semantic."
+          },
+          "searchType": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "fast",
+              "instant"
+            ],
+            "description": "Search type when used with search-then-crawl."
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "company",
+              "people",
+              "research paper",
+              "news",
+              "personal site",
+              "financial report",
+              "pdf",
+              "github"
+            ],
+            "description": "Filter by category."
+          },
+          "highlights": {
+            "type": "boolean",
+            "description": "Enable highlights extraction."
           }
         },
         "required": [
@@ -1113,6 +1144,55 @@
               "ultra"
             ],
             "description": "Caveman compression level. light=stop-words only, semantic=content selection, aggressive=full lemmatization, ultra=abbreviations+arrows (50-70% savings). Default: semantic."
+          },
+          "searchType": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "fast",
+              "instant"
+            ],
+            "description": "Search type. auto=high quality (recommended), fast=~450ms, instant=~100ms. Default: auto."
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "company",
+              "people",
+              "research paper",
+              "news",
+              "personal site",
+              "financial report",
+              "pdf",
+              "github"
+            ],
+            "description": "Filter results by category. company=50M+ company pages, people=1B+ profiles, research paper=100M+ papers, etc."
+          },
+          "highlights": {
+            "type": "boolean",
+            "description": "Enable highlights extraction — 10x token efficient excerpts. Recommended for search."
+          },
+          "includeDomains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only include results from these domains (e.g. [\"github.com\", \"arxiv.org\"])"
+          },
+          "excludeDomains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Exclude results from these domains"
+          },
+          "startDate": {
+            "type": "string",
+            "description": "Only results published after this date (YYYY-MM-DD)"
+          },
+          "endDate": {
+            "type": "string",
+            "description": "Only results published before this date (YYYY-MM-DD)"
           }
         },
         "required": [
@@ -1478,6 +1558,31 @@
           "path": {
             "type": "string",
             "description": "The directory to search in. If not specified, the current working directory will be used. IMPORTANT: Omit this field to use the default directory. DO NOT enter \"undefined\" or \"null\" - simply omit it for the default behavior. Must be a valid directory path if provided."
+          },
+          "depth": {
+            "type": "number",
+            "description": "Max directory traversal depth (default: unlimited). 0=only root, 1=root+1 level, etc."
+          },
+          "maxFiles": {
+            "type": "number",
+            "description": "Max number of results to return (default: 100)"
+          },
+          "exclude": {
+            "type": "string",
+            "description": "Glob pattern to exclude (repeatable). E.g. \"**/node_modules/**\""
+          },
+          "type": {
+            "type": "string",
+            "description": "Filter by file extension without dot. E.g. \"js\", \"ts\", \"py\". Multiple: \"js,ts\""
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "name",
+              "size",
+              "mtime"
+            ],
+            "description": "Sort results: name (default), size, mtime"
           }
         },
         "required": [
@@ -1719,10 +1824,14 @@
               "signals",
               "trace",
               "check",
+              "lint",
+              "cdc",
+              "rules",
+              "synth",
               "list",
               "parsers"
             ],
-            "description": "分析動作。analyze=全面分析，hierarchy=module tree，ports=port list，signals=signal 宣告，trace=signal 追蹤，check=基本檢查（unconnected/width/float），list=列出所有 module，parsers=偵測可用 parser"
+            "description": "分析動作。analyze=全面分析，hierarchy=module tree，ports=port list，signals=signal 宣告，trace=signal 追蹤，check=基本檢查（unconnected/width/float），lint=SDC constraint 驗證，cdc=Clock Domain Crossing 偵測，rules=可配置 lint 規則，synth=Synthesis 資源分析，list=列出所有 module，parsers=偵測可用 parser"
           },
           "signal": {
             "type": "string",
@@ -1750,13 +1859,42 @@
           "filelist": {
             "type": "string",
             "description": "Verilog file list 路徑（default: 自動掃描）"
+          },
+          "sdc": {
+            "type": "string",
+            "description": "SDC constraint 檔案路徑（lint 使用，default: 自動掃描 .sdc）"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "要執行的 lint 規則 ID 列表（rules 使用，default: 全部）"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "error",
+              "warning",
+              "info"
+            ],
+            "description": "過濾 severity（rules 使用）"
+          },
+          "technology": {
+            "type": "string",
+            "enum": [
+              "generic",
+              "asic",
+              "fpga"
+            ],
+            "description": "Synthesis 技術（synth 使用，default: generic）"
           }
         }
       }
     },
     {
       "name": "smart_security",
-      "description": "Use when: need to scan project for credentials leaks, injection flaws, path traversal, or dependency vulnerabilities. Run before committing or before CI. Avoid when: looking for general code quality issues (use lint instead).",
+      "description": "Use when: need to scan project for credentials leaks, .env secrets, injection flaws, path traversal, or dependency vulnerabilities. Automatically scans .env files for exposed secrets. Run before committing or before CI. Avoid when: looking for general code quality issues (use lint instead).",
       "category": "security",
       "domain": "security",
       "safetyLevel": "high",
@@ -1819,7 +1957,7 @@
     },
     {
       "name": "smart_test",
-      "description": "Use when: need to discover or run project tests. Auto-detects vitest/jest/mocha/ava/node:test. Supports watch mode for iterative development. Avoid when: checking test coverage (use coverage instead).",
+      "description": "Use when: need to discover or run project tests. Auto-detects vitest/jest/mocha/ava/node:test. Supports watch mode, coverage, and related test discovery. Avoid when: checking test coverage (use coverage instead).",
       "category": "test",
       "domain": "test",
       "safetyLevel": "low",
@@ -1848,6 +1986,22 @@
           "watch": {
             "type": "boolean",
             "description": "Run tests in watch mode"
+          },
+          "coverage": {
+            "type": "boolean",
+            "description": "Run with coverage report"
+          },
+          "related": {
+            "type": "string",
+            "description": "Find tests related to a file (e.g. \"src/auth.ts\")"
+          },
+          "grep": {
+            "type": "string",
+            "description": "Filter tests by name pattern"
+          },
+          "failFast": {
+            "type": "boolean",
+            "description": "Stop on first failure"
           }
         }
       }
