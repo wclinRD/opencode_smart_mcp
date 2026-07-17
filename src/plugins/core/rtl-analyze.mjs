@@ -24,6 +24,9 @@ import {
   formatLintText, formatLintMarkdown,
 } from './rtl/format.mjs';
 import { analyzeSdc } from './rtl/sdc-parser.mjs';
+import { analyzeCdc } from './rtl/cdc-detector.mjs';
+import { runLintRules, BUILT_IN_RULES, RULE_CATEGORIES } from './rtl/lint-rules.mjs';
+import { analyzeSynth, detectYosys } from './rtl/synth.mjs';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Plugin Export
@@ -42,8 +45,8 @@ export default {
     properties: {
       command: {
         type: 'string',
-        enum: ['analyze', 'hierarchy', 'ports', 'signals', 'trace', 'check', 'lint', 'list', 'parsers'],
-        description: '分析動作。analyze=全面分析，hierarchy=module tree，ports=port list，signals=signal 宣告，trace=signal 追蹤，check=基本檢查（unconnected/width/float），list=列出所有 module，parsers=偵測可用 parser',
+        enum: ['analyze', 'hierarchy', 'ports', 'signals', 'trace', 'check', 'lint', 'cdc', 'rules', 'synth', 'list', 'parsers'],
+        description: '分析動作。analyze=全面分析，hierarchy=module tree，ports=port list，signals=signal 宣告，trace=signal 追蹤，check=基本檢查（unconnected/width/float），lint=SDC constraint 驗證，cdc=Clock Domain Crossing 偵測，rules=可配置 lint 規則，synth=Synthesis 資源分析，list=列出所有 module，parsers=偵測可用 parser',
       },
       signal: {
         type: 'string',
@@ -69,6 +72,21 @@ export default {
       sdc: {
         type: 'string',
         description: 'SDC constraint 檔案路徑（lint 使用，default: 自動掃描 .sdc）',
+      },
+      rules: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '要執行的 lint 規則 ID 列表（rules 使用，default: 全部）',
+      },
+      severity: {
+        type: 'string',
+        enum: ['error', 'warning', 'info'],
+        description: '過濾 severity（rules 使用）',
+      },
+      technology: {
+        type: 'string',
+        enum: ['generic', 'asic', 'fpga'],
+        description: 'Synthesis 技術（synth 使用，default: generic）',
       },
     },
   },
@@ -109,11 +127,11 @@ export default {
       const fallbackResult = await parseRTL(root, { filelist, forceParser: 'regex' });
       if (fallbackResult.ok) {
         const fallbackGraph = buildGraph(fallbackResult.data, 'regex-fallback');
-        return handleCommand(command, fallbackGraph, { ...parseResult, ...fallbackResult, parser: 'regex-fallback (slang AST 格式不支援，已自動降級)' }, target, signal, format, root, sdcFile);
+        return handleCommand(command, fallbackGraph, { ...parseResult, ...fallbackResult, parser: 'regex-fallback (slang AST 格式不支援，已自動降級)' }, target, signal, format, root, sdcFile, args);
       }
     }
 
-    return handleCommand(command, graph, parseResult, target, signal, format, root, sdcFile);
+    return handleCommand(command, graph, parseResult, target, signal, format, root, sdcFile, args);
   },
 };
 
@@ -121,7 +139,7 @@ export default {
 // 內部：command 處理
 // ═══════════════════════════════════════════════════════════════════════════
 
-function handleCommand(command, graph, parseResult, target, signal, format, root = ".", sdcFile = null) {
+function handleCommand(command, graph, parseResult, target, signal, format, root = ".", sdcFile = null, args = {}) {
   let output;
 
   switch (command) {
@@ -348,14 +366,163 @@ function handleCommand(command, graph, parseResult, target, signal, format, root
       };
     }
 
+    case 'cdc': {
+      const cdcResult = analyzeCdc(root);
+      if (!cdcResult.ok) {
+        return { ok: false, error: cdcResult.error };
+      }
+      output = format === 'json'
+        ? JSON.stringify(cdcResult, null, 2)
+        : formatCdcText(cdcResult);
+      return {
+        ok: true,
+        output,
+        parser: parseResult.parser,
+        stats: cdcResult.stats,
+      };
+    }
+
+    case 'rules': {
+      const rulesFilter = args.rules || null;
+      const sevFilter = args.severity || null;
+      const lintResult = runLintRules(root, { rules: rulesFilter, severity: sevFilter });
+      output = format === 'json'
+        ? JSON.stringify(lintResult, null, 2)
+        : formatRulesText(lintResult);
+      return {
+        ok: true,
+        output,
+        parser: parseResult.parser,
+        stats: lintResult.stats,
+      };
+    }
+
+    case 'synth': {
+      const synthOptions = {
+        top: target,
+        technology: args.technology || 'generic',
+      };
+      const synthResult = analyzeSynth(root, synthOptions);
+      output = format === 'json'
+        ? JSON.stringify(synthResult, null, 2)
+        : formatSynthText(synthResult);
+      return {
+        ok: true,
+        output,
+        parser: parseResult.parser,
+        yosys: synthResult.yosys,
+      };
+    }
+
     default:
-      return { ok: false, error: `未知 command: ${command}. 可用: analyze, hierarchy, ports, signals, trace, check, lint, list, parsers` };
+      return { ok: false, error: `未知 command: ${command}. 可用: analyze, hierarchy, ports, signals, trace, check, lint, cdc, rules, synth, list, parsers` };
   }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 內部格式化
 // ═══════════════════════════════════════════════════════════════════════════
+
+function formatCdcText(result) {
+  const { clockDomains, crossings, synchronizers, stats } = result;
+  const lines = ['⏱️  CDC (Clock Domain Crossing) Report', '━'.repeat(35), ''];
+
+  lines.push(`🕐 Clock Domains (${stats.clockDomainCount}):`);
+  for (const d of clockDomains) {
+    lines.push(`  • ${d.displayName} — ${d.file}:${d.line}`);
+  }
+  lines.push('');
+
+  if (crossings.length === 0) {
+    lines.push('✅ No clock domain crossings detected');
+  } else {
+    lines.push(`🔀 Crossings (${stats.crossingCount}):`);
+    for (const c of crossings) {
+      const risk = c.risk === 'high' ? '🔴' : '🟢';
+      lines.push(`  ${risk} ${c.source} (${c.sourceDomain}) → ${c.dest} (${c.destDomain})`);
+      if (c.suggestion) {
+        lines.push(`     💡 Suggestion: Add 2-FF synchronizer`);
+      }
+    }
+  }
+
+  lines.push('');
+  lines.push(`📊 Summary: ${stats.synchronizedCount} synchronized, ${stats.unsynchronizedCount} unsynchronized`);
+
+  return lines.join('\n');
+}
+
+function formatRulesText(result) {
+  const { violations, stats, rules } = result;
+  const lines = ['🔍 RTL Lint Report', '━'.repeat(18), ''];
+
+  lines.push(`📋 Rules Active: ${rules.length}`);
+  lines.push(`📊 Files: ${stats.totalFiles}`);
+  lines.push(`❌ Errors: ${stats.bySeverity.error}  ⚠️ Warnings: ${stats.bySeverity.warning}  ℹ️ Info: ${stats.bySeverity.info}`);
+  lines.push('');
+
+  if (violations.length === 0) {
+    lines.push('✅ No violations found');
+  } else {
+    // Group by category
+    const byCat = {};
+    for (const v of violations) {
+      const cat = v.rule.category;
+      if (!byCat[cat]) byCat[cat] = [];
+      byCat[cat].push(v);
+    }
+
+    for (const [cat, vs] of Object.entries(byCat)) {
+      const catInfo = RULE_CATEGORIES[cat] || { name: cat, icon: '📋' };
+      lines.push(`${catInfo.icon} ${catInfo.name} (${vs.length}):`);
+      for (const v of vs.slice(0, 10)) {
+        const sev = v.rule.severity === 'error' ? '❌' : v.rule.severity === 'warning' ? '⚠️' : 'ℹ️';
+        lines.push(`  ${sev} ${v.file}:${v.line} — ${v.message}`);
+      }
+      if (vs.length > 10) lines.push(`  ... and ${vs.length - 10} more`);
+      lines.push('');
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function formatSynthText(result) {
+  const lines = ['⚙️  Synthesis Report', '━'.repeat(19), ''];
+
+  if (!result.ok) {
+    lines.push(`❌ ${result.error}`);
+    if (result.suggestion) lines.push(`💡 ${result.suggestion}`);
+    return lines.join('\n');
+  }
+
+  if (result.yosys) {
+    lines.push('🔧 Yosys Synthesis (actual)');
+    lines.push(`  Top Module: ${result.topModule || 'auto'}`);
+    lines.push(`  Technology: ${result.technology}`);
+    lines.push('');
+    lines.push('📊 Utilization:');
+    if (result.utilization) {
+      lines.push(`  Modules: ${result.utilization.modules || 0}`);
+      lines.push(`  Cells: ${result.cellCount}`);
+      lines.push(`  Wires: ${result.wireCount}`);
+    }
+    if (result.stats?.cellTypes) {
+      lines.push('  Cell Types:');
+      for (const [type, count] of Object.entries(result.stats.cellTypes)) {
+        lines.push(`    ${type}: ${count}`);
+      }
+    }
+  } else {
+    lines.push('📏 Fallback Analysis (no Yosys)');
+    lines.push(`  Total Regs: ${result.totalRegs}`);
+    lines.push(`  Total Wires: ${result.totalWires}`);
+    lines.push(`  Total Ports: ${result.totalPorts}`);
+    lines.push(`  Estimated LUTs: ${result.estimatedLuts}`);
+  }
+
+  return lines.join('\n');
+}
 
 function formatParsers(info, format) {
   if (format === 'json') return JSON.stringify(info, null, 2);

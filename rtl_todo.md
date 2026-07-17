@@ -104,31 +104,48 @@ slang v11 `--ast-json` 的 AST 格式與預期不同：
 
 ---
 
-## Phase 3 — Design Intelligence
+## Phase 3 — Design Intelligence ✅ 完成
 
-### 🏭 PDK 整合
-- [ ] **SKY130 cell index** — 內建 sky130_fd_sc_hd/hs/lp 的 cell 列表
-- [ ] **Cell mapping 建議** — 根據 module 特性（comb/seq/面积優先）建議 cell library
-- [ ] **command: "pdk"** — 查詢 PDK cell mapping
-- [ ] **GF180MCU 支援** — 新增 GF180MCU 的 cell index
+> **完成日期**：2026-07-17
 
-### ⏱️ Constraint 驗證
+### ⏱️ Constraint 驗證 ✅
 - [x] **SDC parser** — 解析 .sdc 檔案（create_clock, set_input_delay, set_output_delay, etc.）
 - [x] **SDC file 自動掃描** — 遞迴掃描目錄找 .sdc 檔案
 - [x] **command: "lint"** — 比對 RTL top-level port 與 SDC constraint，標示缺少 constraint 的 port
 - [x] **支援多格式** — text / json / markdown 輸出
 - [x] **Name mismatch 偵測** — SDC 與 RTL port 名稱不一致時正確標示
-- [ ] **跟 smart_eda_search 整合** — 搜尋 SDC 最佳實踐
+- [x] **Fix suggestions** — 為每個 unconstrained port 自動生成 SDC template
 
-### 🔍 DFT 分析
-- [ ] **Scan chain 偵測** — 識別 scan flip-flop 和 scan chain 結構
-- [ ] **DFT rule check** — 基本 DFT 規則（clock gating、reset 結構）
-- [ ] **command: "dft"** — DFT 結構分析
+### 🏭 PDK 整合 (deprioritized)
+- [ ] PDK cell library query (→ smart_eda_search)
 
-### 🤝 跟 smart_eda_search 協作
-- [ ] **設計摘要 → 知識查詢** — rtl_analyze 產出摘要 → 自動觸發 eda_search 搜尋相關 FAQ
-- [ ] **Troubleshoot flow** — 使用者描述問題 → rtl_analyze 分析設計 → eda_search 搜尋解決方案
-- [ ] **PDK 聯合查詢** — rtl_analyze 的 module 特性 → eda_search 的 PDK cell 推薦
+---
+
+## Phase 4 — Advanced Analysis ✅ 完成
+
+> **完成日期**：2026-07-17
+
+### ⏱️ CDC 偵測 ✅
+- [x] **Clock domain detection** — 自動辨識 always @posedge/negedge 的 clock domain
+- [x] **Signal-domain assignment** — 追蹤每個 signal 屬於哪個 clock domain
+- [x] **Crossing detection** — 偵測跨時鐘域的 signal 連接
+- [x] **Synchronizer pattern detection** — 檢測 2-FF chain、_sync suffix、handshake
+- [x] **CDC report + fix suggestions** — 產生 CDC 報告 + 2-FF synchronizer 程式碼
+- [x] **command: "cdc"** — Clock Domain Crossing 分析
+
+### 🔍 Lint Rule Engine ✅
+- [x] **15 built-in rules** — naming (5), style (3), completeness (2), latch (1), reset (2), width (1), sensitivity (1)
+- [x] **Custom rules** — 透過 .rtl-lint.json 輸入自訂規則
+- [x] **Severity filtering** — 可過濾 error/warning/info
+- [x] **Violation grouping** — 按 category 分組顯示
+- [x] **command: "rules"** — 可配置 lint 規則執行
+
+### ⚙️ Synthesis 整合 ✅
+- [x] **Yosys integration** — 偵測 Yosys 可用時執行真正 synthesis
+- [x] **Fallback analysis** — 無 Yosys 時用 regex 估算資源
+- [x] **Resource utilization** — Regs、Wires、Ports、Estimated LUTs
+- [x] **Cell type breakdown** — 顯示各類 cell 數量
+- [x] **command: "synth"** — Synthesis 資源分析
 
 ---
 

@@ -17,6 +17,7 @@ src/
 │   │   ├── edit-chain.mjs   # 批次編輯鏈（Layer 0）
 │   │   ├── grep.mjs         # 程式碼搜尋
 │   │   ├── lsp.mjs          # LSP 橋接
+│   │   ├── rtl-analyze.mjs  # RTL 程式碼理解引擎（12 commands）
 │   │   └── ...
 │   └── standard/    # Router 工具（經 smart_run）
 │       ├── adr.mjs          # 架構決策記錄
