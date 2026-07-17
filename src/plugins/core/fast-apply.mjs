@@ -314,7 +314,8 @@ Dry-run by default — safe to use without side effects.`,
           const lang = detectLanguage(filePath);
           const sym = extractSymbol(symContent, lang, args.symbol);
           if (!sym) {
-            return formatOutput({ status: 'error', error: `Symbol "${args.symbol}" not found in ${args.file}` }, outputFormat);
+            const suggestions = suggestSimilarSymbols(symContent, lang, args.symbol);
+            return formatOutput({ status: 'error', error: `Symbol "${args.symbol}" not found in ${args.file}.${suggestions}` }, outputFormat);
           }
           const act = args.action || 'replace';
           const nc = args.newContent || '';
@@ -352,7 +353,19 @@ Dry-run by default — safe to use without side effects.`,
       }
 
     } catch (e) {
-      return formatOutput({ status: 'error', error: `Parse error: ${e.message}` }, outputFormat);
+      // Add format-specific hints to help LLM self-correct
+      const hints = [];
+      if (format === 'block-diff') {
+        hints.push('block-diff format: {file:"path", symbol:"name", newContent:"code"}');
+      } else if (format === 'search-replace' || format === 'lazy' || format === 'partial') {
+        hints.push('search-replace format: {file:"path", search:"old code", replace:"new code"}');
+      } else if (format === 'hashline') {
+        hints.push('hashline format: {file:"path", startLine:N, endLine:N, newContent:"code"}');
+      } else if (format === 'unified-diff') {
+        hints.push('unified-diff: use ---/+++ file headers with @@ hunk markers');
+      }
+      const hintStr = hints.length > 0 ? `\n  Hint: ${hints[0]}` : '';
+      return formatOutput({ status: 'error', error: `Parse error: ${e.message}${hintStr}` }, outputFormat);
     }
 
     // ---- Step 2: Validate and preview ----
@@ -746,18 +759,54 @@ function wrapDiffBlock(diffText, filePath) {
  * BlockDiff: { file, symbol, newContent, action? } — no fuzzy matching needed,
  * uses extractSymbol() for precise AST-aware targeting.
  */
+/**
+ * Suggest similar symbol names when exact match fails.
+ * Returns a formatted string of available symbols or empty string if none.
+ */
+function suggestSimilarSymbols(content, lang, name) {
+  const decls = parseDeclarations(content, lang);
+  if (decls.length === 0) return '';
+  const names = decls.map(d => d.name);
+  const lower = name.toLowerCase();
+  const candidates = names.filter(n => {
+    const nl = n.toLowerCase();
+    return nl.startsWith(lower) || lower.startsWith(nl) ||
+           nl.includes(lower) || lower.includes(nl);
+  });
+  if (candidates.length === 0) return '';
+  const display = candidates.slice(0, 8).join(', ');
+  const extra = candidates.length > 8 ? ` ... (${names.length} total)` : '';
+  return `\n  Available symbols: ${display}${extra}`;
+}
+
 export function parseBlockDiff(blocks, root) {
   const changes = [];
-  for (const b of blocks) {
-    if (!b.file || !b.symbol || b.newContent === undefined) {
-      throw new Error(`Invalid block-diff block for ${b.file || 'unknown'}: need file, symbol, newContent`);
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
+    // ── Field validation ──
+    const missing = [];
+    if (!b.file) missing.push('file');
+    if (!b.symbol) missing.push('symbol');
+    if (b.newContent === undefined) missing.push('newContent');
+    if (missing.length > 0) {
+      throw new Error(
+        `Block[${i}]: missing required fields: ${missing.join(', ')}. ` +
+        `block-diff format needs {file, symbol, newContent}. ` +
+        `Received: {file:${b.file ? `"${b.file}"` : 'undefined'}, ` +
+        `symbol:${b.symbol ? `"${b.symbol}"` : 'undefined'}, ` +
+        `newContent:${b.newContent === undefined ? 'undefined' : `${typeof b.newContent}(${String(b.newContent).length} chars)`}}`
+      );
     }
+
     const filePath = resolve(root, b.file);
     const fc = readFileSafe(filePath);
     if (fc === null) throw new Error(`File not found: ${b.file}`);
     const lang = detectLanguage(filePath);
     const sym = extractSymbol(fc, lang, b.symbol);
-    if (!sym) throw new Error(`Symbol "${b.symbol}" not found in ${b.file}`);
+    if (!sym) {
+      const suggestions = suggestSimilarSymbols(fc, lang, b.symbol);
+      throw new Error(`Symbol "${b.symbol}" not found in ${b.file}.${suggestions}`);
+    }
 
     // 🛡️ Body range validation — P0: braces balance check.
     // findBodyEnd can miscount braces inside strings/regexes/comments,

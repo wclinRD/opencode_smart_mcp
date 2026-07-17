@@ -29,10 +29,25 @@ import { diff_match_patch } from 'diff-match-patch';
  * Each block: { file: string, search: string, replace: string }
  */
 export function parseSearchReplace(blocks) {
-  if (!Array.isArray(blocks)) throw new Error('Expected array of { file, search, replace }');
-  for (const b of blocks) {
-    if (!b.file || typeof b.search !== 'string' || typeof b.replace !== 'string') {
-      throw new Error(`Invalid block for ${b.file || 'unknown'}`);
+  if (!Array.isArray(blocks)) {
+    throw new Error(
+      'Expected array of { file, search, replace }. ' +
+      'Example: [{file:"src/app.js", search:"old code", replace:"new code"}]'
+    );
+  }
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
+    const missing = [];
+    if (!b.file) missing.push('file');
+    if (typeof b.search !== 'string') missing.push('search (must be a string)');
+    if (typeof b.replace !== 'string') missing.push('replace (must be a string)');
+    if (missing.length > 0) {
+      throw new Error(
+        `Block[${i}]: missing required fields: ${missing.join(', ')}. ` +
+        `Each block needs {file, search, replace}. ` +
+        `Received: {file:${b.file ? `"${b.file}"` : 'undefined'}, ` +
+        `search:${typeof b.search}, replace:${typeof b.replace}}`
+      );
     }
   }
   return blocks;

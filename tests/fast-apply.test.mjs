@@ -65,8 +65,8 @@ describe('parseSearchReplace', () => {
   });
 
   it('rejects invalid blocks', () => {
-    assert.throws(() => parseSearchReplace([{}]), /Invalid block/);
-    assert.throws(() => parseSearchReplace('not array'), /expected array/i);
+    assert.throws(() => parseSearchReplace([{}]), /missing required fields/);
+    assert.throws(() => parseSearchReplace('not array'), /Expected array/i);
   });
 });
 
@@ -887,7 +887,7 @@ describe('parseBlockDiff', () => {
 
   it('throws on missing fields', () => {
     const blocks = [{ file: 'test.js' }];
-    assert.throws(() => parseBlockDiff(blocks, '/tmp'), /need file, symbol/);
+    assert.throws(() => parseBlockDiff(blocks, '/tmp'), /missing required fields: symbol, newContent/);
   });
 
   it('handles append action', () => {
