@@ -89,6 +89,12 @@ export function getParserInfo() {
     suggestions.push('安裝 slang 可獲得完整 elaboration 功能：https://github.com/MikePopoloski/slang#building');
   }
 
+  // verilator 未安裝時提供指引（可選工具）
+  const verilator = parsers.find(p => p.name === 'verilator');
+  if (verilator && !verilator.available) {
+    suggestions.push('verilator 未安裝（可選）：用於 lint check。安裝方式：brew install verilator / apt install verilator');
+  }
+
   return {
     parsers,
     best: best || { name: 'regex-fallback', available: true, version: 'built-in', path: null },
