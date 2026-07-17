@@ -7,7 +7,7 @@
 | **專案名稱** | Think-Guard 3 層防禦系統 |
 | **所屬專案** | Smart MCP（`~/opencode/dev/smart`） |
 | **建立日期** | 2026-07-17 |
-| **狀態** | ✅ Phase 2 完成，187 測試通過 |
+| **狀態** | ✅ Phase 2 + Bug Fixes 完成，206 測試通過 |
 
 ---
 
@@ -53,10 +53,10 @@
 src/
 ├── lib/
 │   ├── think-guard.mjs          # 核心模組（480 行）
-│   │   ├── classifyThinkingMode()   # Layer 1
-│   │   ├── detectOverconfidence()   # Layer 2（Phase 2.1: 動態閾值）
+│   │   ├── classifyThinkingMode()   # Layer 1（Phase 3 Fix #1: 中文增強）
+│   │   ├── detectOverconfidence()   # Layer 2（Phase 2.1: 動態閾值 5 級）
 │   │   ├── enhanceVerifyStage()     # Layer 3
-│   │   ├── TASK_MODE_RULES          # 分類規則（20 條）
+│   │   ├── TASK_MODE_RULES          # 分類規則（32 條，含中文觸發詞）
 │   │   ├── OVERCONFIDENCE_INDICATORS # 過度自信指標（12 條）
 │   │   ├── SCOPE_QUESTIONS          # 範圍限定問題（3 個）
 │   │   ├── COMPLEMENTARITY_CHECKLIST # 互補判定清單（4 項）
@@ -83,7 +83,7 @@ tests/
 ├── think-guard.test.mjs              # 基礎單元測試（20 tests）
 ├── think-guard-comprehensive.test.mjs # 完整功能測試（80 tests）
 ├── think-guard-realworld.test.mjs     # 真實世界測試（47 tests）
-└── think-guard-phase2.test.mjs        # Phase 2 功能測試（40 tests）
+└── think-guard-phase2.test.mjs        # Phase 2 功能測試（59 tests，含 Phase 3 Fix）
 ```
 
 ---
@@ -123,9 +123,11 @@ tests/
 
 | Budget 剩餘 | 閾值調整 | 效果 |
 |-------------|---------|------|
-| < 30% | +1（提高） | 減少誤觸發，節省 token |
-| 30%–60% | 0（基礎） | 平衡 |
-| > 60% | -1（降低） | 更積極偵測 |
+| < 20% | +2（非常保守） | 最大限度減少誤觸發 |
+| 20%–40% | +1（保守） | 減少誤觸發，節省 token |
+| 40%–60% | 0（基礎） | 平衡 |
+| 60%–80% | -1（積極） | 更積極偵測 |
+| > 80% | -2（非常積極） | 最大限度偵測過度自信 |
 
 ### getDynamicThreshold(remainingFraction)
 
@@ -162,8 +164,8 @@ tests/
 | think-guard.test.mjs | 20 | 基礎單元（分類/偵測/增強/常數） |
 | think-guard-comprehensive.test.mjs | 80 | 完整功能（簡單→複雜→真實案例→邊界→整合→token） |
 | think-guard-realworld.test.mjs | 47 | 真實世界（對話查詢→子指令→多回合→跨層級→對抗性→壓力） |
-| think-guard-phase2.test.mjs | 40 | Phase 2（動態閾值→歷史學習→跨工具整合→並發安全→整合→壓力） |
-| **合計** | **187** | — |
+| think-guard-phase2.test.mjs | 59 | Phase 2 + Phase 3 Fix（動態閾值 5 級→中文觸發率→歷史學習→跨工具整合→並發安全→整合→壓力） |
+| **合計** | **206** | — |
 
 ---
 
@@ -183,12 +185,81 @@ tests/
 
 ## 🔮 未來擴展
 
-### Phase 3（規劃中）
+### Phase 3（基於學術研究，Token 優先）
 
-1. **歷史學習進階** — 根據 accuracyRate 自動調整 TASK_MODE_RULES 權重
-2. **A/B 測試** — 比較有/無 think-guard 的推理品質
-3. **可視化儀表板** — 分類統計、過度自信偵測率、token 節省量
-4. **更多領域** — 加入 finance、legal、science 等領域規則
+基於 2025-2026 年最新論文（Premature Confidence、ReBalance、Think Just Enough、Layered-CoT、ConFix）的分析，Phase 3 採取**最小 Token 損耗**策略：
+
+#### 3.1 Underthinking 偵測（P1 — 零成本）
+
+**來源**：ReBalance (2025)、Think Just Enough (EACL 2026)
+
+> 學術發現：overthinking（推理太長）和 underthinking（推理太短）都是問題。
+> Think-Guard 目前只處理 overthinking，未處理 underthinking。
+
+**實作**：在 `classifyThinkingMode` 加入反向規則 — 偵測「太早結束」的模式：
+- 「比較 A 和 B」→ 但只分析了 A → 需要分支
+- 「優缺點分析」→ 只有優點 → 需要分支
+- 「分析 X 的影響」→ 只正面 → 需要分支
+
+**Token 成本**：0（純規則，複用現有結構）
+
+#### 3.2 Confidence Trajectory 追蹤（P2 — 條件觸發）
+
+**來源**：Premature Confidence (arxiv 2605.24396)
+
+> 學術發現：模型在 CoT 20% 處就 commitment，剩餘 80% 推理已無法改變答案。
+> 大型模型更嚴重。
+
+**實作**：只在 `branchingNeeded=true` 時追蹤信心變化（非每次 CIT）：
+- 複用 `branchReasoning` 欄位，不新增欄位
+- 在 branchReasoning 中加入 underthinking 訊號
+
+**Token 成本**：~20-30 token（僅 5% 呼叫觸發）
+
+#### 3.3 Self-Correction Prompt（P3 — 高風險限定）
+
+**來源**：ConFix (2024)、Self-Check Pattern (2026)
+
+> 學術發現：用高信心事實修正低信心事實，不需要外部知識。
+> Think-Guard 偵測到問題後只建議切換 mode，未嘗試修正推理。
+
+**實作**：只在高風險任務（安全/重構）時注入修正指令：
+- 偵測到過度自信 + `taskRisk === 'high'` → 注入修正 prompt
+- 其他任務只建議切換 mode
+
+**Token 成本**：~30-50 token（僅高風險任務觸發）
+
+#### 3.4 更多領域（P4 — 模組化擴充）
+
+**來源**：現有 `DOMAIN_RULES` 架構
+
+**實作**：採用 plugin 架構，每個領域一個 `.mjs`：
+- finance — 與 `stock-quant-analyzer` skill 互補
+- legal — 法律文件分析
+- science — 科學研究
+
+**Token 成本**：0（純規則擴充）
+
+### Phase 3 不做的事
+
+| 功能 | 理由 |
+|------|------|
+| 形式化驗證（VeriCoT） | 成本太高（+200-500 token），不符合 Think-Guard 理念 |
+| A/B 測試框架 | 需大量數據，建議 Phase 3.5+ |
+| 可視化儀表板 | 非核心功能，建議用 Markdown 報告或對接 Obsidian |
+| PANL probe（二階信心） | 需要 logprobs，短期不可行 |
+
+### Phase 3 Token 預算
+
+| 功能 | 觸發率 | 每次成本 | 年化成本（1000 次） |
+|------|--------|---------|-------------------|
+| P1: Underthinking | 100%（CIT） | 0 token | 0 |
+| P2: Confidence trajectory | 5% | 20-30 token | 20K-30K |
+| P3: Self-correction | 5%（高風險） | 30-50 token | 30K-50K |
+| P4: 更多領域 | 100%（領域任務） | 0 token | 0 |
+| **合計** | — | — | **+50K-80K token/年** |
+
+**結論**：Phase 3 整體 token 增加 < 80%，主要來自 P2 和 P3 的條件觸發。
 
 ---
 
@@ -198,3 +269,6 @@ tests/
 |------|------|------|
 | 2026-07-17 | v1.0 | Phase 1 核心實作完成，147 測試通過 |
 | 2026-07-17 | v2.0 | Phase 2 完成：動態閾值 + 歷史學習 + 跨工具整合 + 並發安全，187 測試通過 |
+| 2026-07-17 | v2.1 | Bug Fix #1: 中文「分析」觸發率增強（+12 個中文觸發詞） |
+| 2026-07-17 | v2.2 | Bug Fix #2: Threshold 動態範圍從 3 級擴展為 5 級（範圍 1-5） |
+| 2026-07-17 | v3.0 | Phase 3 規劃：基於學術研究（Premature Confidence/ReBalance/ConFix），Token 優先策略 |

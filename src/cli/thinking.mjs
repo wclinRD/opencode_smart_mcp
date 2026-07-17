@@ -2,6 +2,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
+import { enhanceVerifyStage, SCOPE_QUESTIONS, COMPLEMENTARITY_CHECKLIST, DEVILS_ADVOCATE } from '../lib/think-guard.mjs';
 
 // thinking.mjs — Structured Reasoning & Problem Analysis CLI
 //
@@ -495,7 +496,16 @@ export function quickThought(args) {
       if (state) lines.push(`│ STATE: ${state}`);
       if (algo) lines.push(`│ ALGO:  ${algo}`);
       if (edge) lines.push(`│ EDGE:  ${edge}`);
-      if (verify) lines.push(`│ VERIFY: ${verify}`);
+      if (verify) {
+        // Layer 3: Enhanced VERIFY with scope/complementarity/devil's advocate
+        const enhancedVerify = enhanceVerifyStage(verify, thought);
+        lines.push(`│ VERIFY:`);
+        // Split enhanced verify into multiple lines for readability
+        const verifyLines = enhancedVerify.split('\n');
+        for (const vLine of verifyLines) {
+          lines.push(`│   ${vLine}`);
+        }
+      }
       lines.push(`└───────────────────────────────────────────`);
       lines.push('');
       // Append free-form thought as supplementary if provided

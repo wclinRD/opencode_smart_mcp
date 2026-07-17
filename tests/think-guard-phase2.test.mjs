@@ -30,46 +30,67 @@ import smartThinkPlugin from '../src/plugins/core/quick-think.mjs';
 // 1. 動態閾值（Dynamic Threshold）
 // ═══════════════════════════════════════════════════════════════════════════════
 describe('Phase 2.1: 動態閾值', () => {
-  it('budget < 30% → threshold +1（減少誤觸發）', () => {
+  it('budget < 20% → threshold +2（非常保守）', () => {
+    assert.equal(getDynamicThreshold(0.10), 5);
+    assert.equal(getDynamicThreshold(0.05), 5);
+    assert.equal(getDynamicThreshold(0.15), 5);
+  });
+
+  it('budget 20%-40% → threshold +1（保守）', () => {
     assert.equal(getDynamicThreshold(0.20), 4);
-    assert.equal(getDynamicThreshold(0.10), 4);
-    assert.equal(getDynamicThreshold(0.05), 4);
+    assert.equal(getDynamicThreshold(0.30), 4);
+    assert.equal(getDynamicThreshold(0.35), 4);
   });
 
-  it('budget > 60% → threshold -1（更積極偵測）', () => {
-    assert.equal(getDynamicThreshold(0.70), 2);
-    assert.equal(getDynamicThreshold(0.80), 2);
-    assert.equal(getDynamicThreshold(0.90), 2);
-  });
-
-  it('budget 30%-60% → 基礎閾值（平衡）', () => {
-    assert.equal(getDynamicThreshold(0.30), 3);
-    assert.equal(getDynamicThreshold(0.45), 3);
+  it('budget 40%-60% → 基礎閾值（平衡）', () => {
+    assert.equal(getDynamicThreshold(0.40), 3);
+    assert.equal(getDynamicThreshold(0.50), 3);
     assert.equal(getDynamicThreshold(0.60), 3);
   });
 
-  it('budget 邊界值：0.30 → 基礎閾值', () => {
-    assert.equal(getDynamicThreshold(0.30), 3);
+  it('budget 60%-80% → threshold -1（更積極）', () => {
+    assert.equal(getDynamicThreshold(0.65), 2);
+    assert.equal(getDynamicThreshold(0.70), 2);
+    assert.equal(getDynamicThreshold(0.75), 2);
+  });
+
+  it('budget > 80% → threshold -2（非常積極）', () => {
+    assert.equal(getDynamicThreshold(0.80), 1);
+    assert.equal(getDynamicThreshold(0.85), 1);
+    assert.equal(getDynamicThreshold(0.90), 1);
+    assert.equal(getDynamicThreshold(0.95), 1);
+  });
+
+  it('budget 邊界值：0.20 → threshold +1', () => {
+    assert.equal(getDynamicThreshold(0.20), 4);
+  });
+
+  it('budget 邊界值：0.40 → 基礎閾值', () => {
+    assert.equal(getDynamicThreshold(0.40), 3);
   });
 
   it('budget 邊界值：0.60 → 基礎閾值', () => {
     assert.equal(getDynamicThreshold(0.60), 3);
   });
 
+  it('budget 邊界值：0.80 → threshold -2', () => {
+    assert.equal(getDynamicThreshold(0.80), 1);
+  });
+
   it('detectOverconfidence 整合動態閾值', () => {
     // '分析優缺點' matches /優缺點/ with weight=4, so score=4
-    // budget=0.70 → threshold=2 → score(4) >= threshold(2) → 觸發
+    // budget=0.85 → threshold=1 → score(4) >= threshold(1) → 觸發
     const r1 = detectOverconfidence(
       '分析優缺點', '不需要分支', false, 'cit',
-      { budgetFraction: 0.70 }
+      { budgetFraction: 0.85 }
     );
     assert.equal(r1.overconfident, true);
-    assert.equal(r1.threshold, 2);
+    assert.equal(r1.threshold, 1);
 
-    // budget=0.20 → threshold=4 → score(4) >= threshold(4) → 仍觸發（borderline）
+    // budget=0.30 → threshold=4 → score(4) >= threshold(4) → 仍觸發（borderline）
     const r2 = detectOverconfidence(
       '分析優缺點', '不需要分支', false, 'cit',
-      { budgetFraction: 0.20 }
+      { budgetFraction: 0.30 }
     );
     assert.equal(r2.overconfident, true);
     assert.equal(r2.threshold, 4);
@@ -83,13 +104,21 @@ describe('Phase 2.1: 動態閾值', () => {
     assert.equal(r3.overconfident, true);
     assert.equal(r3.threshold, 2);
 
-    // budget=0.20 → threshold=4 → score(3) < threshold(4) → 不觸發
+    // budget=0.30 → threshold=4 → score(3) < threshold(4) → 不觸發
     const r4 = detectOverconfidence(
       '工具選擇問題', '不需要分支', false, 'cit',
-      { budgetFraction: 0.20 }
+      { budgetFraction: 0.30 }
     );
     assert.equal(r4.overconfident, false);
     assert.equal(r4.threshold, 4);
+
+    // budget=0.10 → threshold=5 → score(4) < threshold(5) → 不觸發
+    const r5 = detectOverconfidence(
+      '分析優缺點', '不需要分支', false, 'cit',
+      { budgetFraction: 0.10 }
+    );
+    assert.equal(r5.overconfident, false);
+    assert.equal(r5.threshold, 5);
   });
 
   it('detectOverconfidence 不傳 budgetFraction 時用基礎閾值', () => {
@@ -382,7 +411,87 @@ describe('Phase 2.5: Handler 整合', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 6. 壓力測試
+// 6. Phase 3 Fix #1: 中文「分析」觸發率測試
+// ═══════════════════════════════════════════════════════════════════════════════
+describe('Phase 3 Fix #1: 中文「分析」觸發率', () => {
+  it('基本「分析」觸發 cit mode', () => {
+    const r = classifyThinkingMode('分析這個問題');
+    assert.equal(r.suggestedMode, 'cit');
+  });
+
+  it('「幫我分析」觸發 cit mode', () => {
+    const r = classifyThinkingMode('幫我分析一下這個方案');
+    assert.equal(r.suggestedMode, 'cit');
+  });
+
+  it('「請分析」觸發 cit mode', () => {
+    const r = classifyThinkingMode('請分析這個技術的優缺點');
+    assert.equal(r.suggestedMode, 'cit');
+  });
+
+  it('「深入分析」觸發 cit mode', () => {
+    const r = classifyThinkingMode('深入分析這個架構的影響');
+    assert.equal(r.suggestedMode, 'cit');
+  });
+
+  it('「詳細分析」觸發 cit mode', () => {
+    const r = classifyThinkingMode('詳細分析這個方案的可行性');
+    assert.equal(r.suggestedMode, 'cit');
+  });
+
+  it('「全面分析」觸發 cit mode', () => {
+    const r = classifyThinkingMode('全面分析這個系統的風險');
+    assert.equal(r.suggestedMode, 'cit');
+  });
+
+  it('「探討」觸發 cit mode', () => {
+    const r = classifyThinkingMode('探討這個技術的未來發展');
+    assert.equal(r.suggestedMode, 'cit');
+  });
+
+  it('「檢討」觸發 cit mode', () => {
+    const r = classifyThinkingMode('檢討這個專案的執行過程');
+    assert.equal(r.suggestedMode, 'cit');
+  });
+
+  it('「審視」觸發 cit mode', () => {
+    const r = classifyThinkingMode('審視這個決策的合理性');
+    assert.equal(r.suggestedMode, 'cit');
+  });
+
+  it('「考察」觸發 cit mode', () => {
+    const r = classifyThinkingMode('考察這個方案的實施效果');
+    assert.equal(r.suggestedMode, 'cit');
+  });
+
+  it('「分析一下」觸發 cit mode', () => {
+    const r = classifyThinkingMode('分析一下這個問題的根本原因');
+    assert.equal(r.suggestedMode, 'cit');
+  });
+
+  it('「分析看看」觸發 cit mode', () => {
+    const r = classifyThinkingMode('分析看看這個方案是否可行');
+    assert.equal(r.suggestedMode, 'cit');
+  });
+
+  it('英文 analysis 仍觸發 cit mode', () => {
+    const r = classifyThinkingMode('analysis of this problem');
+    assert.equal(r.suggestedMode, 'cit');
+  });
+
+  it('高風險任務仍優先觸發 beam mode', () => {
+    const r = classifyThinkingMode('重構這個模組的分析');
+    assert.equal(r.suggestedMode, 'beam');
+  });
+
+  it('簡單查詢仍觸發 null mode', () => {
+    const r = classifyThinkingMode('搜尋文件');
+    assert.equal(r.suggestedMode, null);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 7. 壓力測試
 // ═══════════════════════════════════════════════════════════════════════════════
 describe('Phase 2.6: 壓力測試', () => {
   it('100 次 recordClassification + getHistoryStats < 1s', () => {

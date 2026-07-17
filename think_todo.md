@@ -4,8 +4,8 @@
 
 | 項目 | 狀態 |
 |------|------|
-| **整體進度** | 🟢 Phase 2 完成 |
-| **測試狀態** | ✅ 187/187 通過 |
+| **整體進度** | 🟢 Phase 2 + Bug Fixes 完成 |
+| **測試狀態** | ✅ 206/206 通過 |
 | **最後更新** | 2026-07-17 |
 
 ---
@@ -17,7 +17,7 @@
 - [x] classifyThinkingMode() — 任務分類器
 - [x] detectOverconfidence() — 過度自信偵測
 - [x] enhanceVerifyStage() — VERIFY 增強
-- [x] TASK_MODE_RULES — 20 條分類規則
+- [x] TASK_MODE_RULES — 32 條分類規則（含 12 個中文觸發詞）
 - [x] OVERCONFIDENCE_INDICATORS — 12 條過度自信指標
 - [x] SCOPE_QUESTIONS — 3 個範圍限定問題
 - [x] COMPLEMENTARITY_CHECKLIST — 4 項互補判定清單
@@ -49,8 +49,11 @@
 ### 2.1 動態閾值
 
 - [x] getDynamicThreshold(remainingFraction) — 根據 context budget 動態調整 overconfidence threshold
-- [x] budget < 30% → threshold +1（減少誤觸發）
-- [x] budget > 60% → threshold -1（更積極偵測）
+- [x] budget < 20% → threshold +2（非常保守）
+- [x] budget 20%–40% → threshold +1（保守）
+- [x] budget 40%–60% → 基礎閾值（平衡）
+- [x] budget 60%–80% → threshold -1（積極）
+- [x] budget > 80% → threshold -2（非常積極）
 - [x] detectOverconfidence 整合 budgetFraction 參數
 
 ### 2.2 歷史學習
@@ -77,35 +80,48 @@
 
 ### 2.5 測試
 
-- [x] think-guard-phase2.test.mjs — Phase 2 功能測試（40 tests）
+- [x] think-guard-phase2.test.mjs — Phase 2 功能測試（59 tests，含 Phase 3 Fix）
 
 ---
 
-## 🔲 Phase 3：願景（規劃中）
+## 🔲 Phase 3：基於學術研究（Token 優先） — 大部分延後
 
-### 3.1 歷史學習進階
+> 基於 2025-2026 年最新論文分析，Phase 3 採取**最小 Token 損耗**策略。
+> 參考：Premature Confidence (2025)、ReBalance (2025)、Think Just Enough (EACL 2026)、ConFix (2024)
 
-- [ ] 根據 accuracyRate 自動調整 TASK_MODE_RULES 權重
-- [ ] 歷史資料持久化（JSON 檔案）
-- [ ] 分類模式分析（哪類任務最容易誤判）
+### 3.1 Underthinking 偵測（P1 — 零成本） ⭐ 最高優先
 
-### 3.2 A/B 測試框架
+- [ ] 在 `classifyThinkingMode` 加入反向規則
+- [ ] 偵測「太早結束」模式（只分析 A 未比較 B）
+- [ ] 複用現有 `branchingNeeded` 欄位
+- [ ] Token 成本：0（純規則）
 
-- [ ] 比較有/無 think-guard 的推理品質
-- [ ] 量化 think-guard 對推理錯誤的改善程度
-- [ ] 統計顯著性檢驗
+### 3.2 Confidence Trajectory 追蹤（P2 — 條件觸發）
 
-### 3.3 可視化儀表板
+- [ ] 只在 `branchingNeeded=true` 時追蹤（非每次 CIT）
+- [ ] 複用 `branchReasoning` 欄位，不新增欄位
+- [ ] 在 branchReasoning 中加入 underthinking 訊號
+- [ ] Token 成本：~20-30 token（僅 5% 呼叫觸發）
 
-- [ ] 分類統計圖表
-- [ ] 過度自信偵測率趨勢
-- [ ] Token 節省量統計
+### 3.3 Self-Correction Prompt（P3 — 高風險限定）
 
-### 3.4 更多領域
+- [ ] 偵測到過度自信 + `taskRisk === 'high'` → 注入修正 prompt
+- [ ] 其他任務只建議切換 mode（不注入）
+- [ ] Token 成本：~30-50 token（僅高風險任務觸發）
 
-- [ ] finance — 金融分析領域
-- [ ] legal — 法律文件領域
-- [ ] science — 科學研究領域
+### 3.4 更多領域（P4 — 模組化擴充）
+
+- [ ] finance — 金融分析（與 stock-quant-analyzer 互補）
+- [ ] legal — 法律文件分析
+- [ ] science — 科學研究
+- [ ] 採用 plugin 架構（每個領域一個 .mjs）
+
+### Phase 3 不做的事
+
+- ❌ 形式化驗證（VeriCoT）— 成本太高（+200-500 token）
+- ❌ A/B 測試框架 — 需大量數據，建議 Phase 3.5+
+- ❌ 可視化儀表板 — 非核心，建議用 Markdown 報告
+- ❌ PANL probe（二階信心）— 需要 logprobs，短期不可行
 
 ---
 
@@ -115,8 +131,8 @@
 
 | # | 描述 | 狀態 |
 |---|------|------|
-| 1 | classifyThinkingMode 對中文「分析」觸發率偏低 | ⚠️ 待觀察 |
-| 2 | detectOverconfidence 的 threshold 動態範圍 2-4 可能需微調 | ⚠️ 待觀察 |
+| 1 | classifyThinkingMode 對中文「分析」觸發率偏低 | ✅ 已修復（+12 個中文觸發詞） |
+| 2 | detectOverconfidence 的 threshold 動態範圍 2-4 可能需微調 | ✅ 已修復（擴展為 5 級範圍 1-5） |
 | 3 | enhanceVerifyStage 的 complementarity 觸發詞不包含「vs」 | ✅ 已修復（vs/versus 已加入觸發詞） |
 
 ### 中優先級
@@ -136,8 +152,8 @@
 | think-guard.test.mjs | 20 | 20 | 0 | 100% |
 | think-guard-comprehensive.test.mjs | 80 | 80 | 0 | 100% |
 | think-guard-realworld.test.mjs | 47 | 47 | 0 | 100% |
-| think-guard-phase2.test.mjs | 40 | 40 | 0 | 100% |
-| **合計** | **187** | **187** | **0** | **100%** |
+| think-guard-phase2.test.mjs | 59 | 59 | 0 | 100% |
+| **合計** | **206** | **206** | **0** | **100%** |
 
 ### 測試執行時間
 
@@ -158,11 +174,14 @@
 | 2026-07-17 | v1.0 | Phase 1 完成，147 測試通過 |
 | 2026-07-17 | v1.0 | 建立 think_plan.md 和 think_todo.md |
 | 2026-07-17 | v2.0 | Phase 2 完成：動態閾值 + 歷史學習 + 跨工具整合 + 並發安全，187 測試通過 |
+| 2026-07-17 | v2.1 | Bug Fix #1: 中文「分析」觸發率增強（+12 個中文觸發詞） |
+| 2026-07-17 | v2.2 | Bug Fix #2: Threshold 動態範圍從 3 級擴展為 5 級（範圍 1-5） |
+| 2026-07-17 | v2.3 | 測試更新：think-guard-phase2.test.mjs 從 40 增加到 59 個測試 |
 
 ---
 
 ## 🎯 下一步
 
-1. **觀察期** — 使用 1-2 週，收集動態閾值和歷史學習數據
-2. **調整** — 根據觀察結果調整 threshold 範圍和領域規則
-3. **Phase 3** — 開始歷史學習進階和 A/B 測試框架
+1. **觀察 1-2 週** — 收集實際使用數據（動態閾值、中文觸發率）
+2. **決定是否做 P1** — Underthinking 偵測（需觀察是否有 false positive）
+3. **決定是否做 P4** — 更多領域規則（finance/legal/science）

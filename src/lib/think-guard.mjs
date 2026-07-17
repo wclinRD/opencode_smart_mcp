@@ -54,8 +54,16 @@ const TASK_MODE_RULES = [
     mode: 'cit',
     reason: '評估任務需要多角度分析，建議 cit mode',
   },
+  // Phase 3 Fix #1: 增強中文「分析」觸發率
   {
-    patterns: [/分析/i, /評析/i, /剖析/i, /analysis/i],
+    patterns: [
+      /分析/i, /評析/i, /剖析/i, /analysis/i,
+      // Phase 3: 新增中文常見搭配詞
+      /探討/i, /檢討/i, /審視/i, /考察/i, /研究.*分析/i,
+      /深入.*分析/i, /詳細.*分析/i, /全面.*分析/i,
+      /分析.*一下/i, /幫.*分析/i, /請.*分析/i,
+      /分析.*這/i, /分析.*那/i, /分析.*看看/i,
+    ],
     mode: 'cit',
     reason: '分析任務建議 cit mode 以確保多角度推理',
   },
@@ -289,19 +297,25 @@ const BASE_OVERCONFIDENCE_THRESHOLD = 3;
 
 /**
  * Adjust overconfidence threshold based on context budget.
- * 
- * Strategy:
- *   - budget < 30% → raise threshold by +1 (reduce false positives, conserve tokens)
- *   - budget > 60% → lower threshold by -1 (more aggressive detection)
- *   - 30%–60% → use base threshold (balanced)
+ *
+ * Phase 3 Fix #2: 擴大動態範圍並增加粒度
+ *
+ * Strategy (5 levels):
+ *   - budget < 20% → +2 (very conservative, save tokens)
+ *   - 20%–40% → +1 (conservative, reduce false positives)
+ *   - 40%–60% → 0 (balanced)
+ *   - 60%–80% → -1 (more aggressive)
+ *   - > 80% → -2 (very aggressive, ample budget)
  *
  * @param {number} remainingFraction — 0.0 to 1.0, remaining context budget
- * @returns {number} adjusted threshold
+ * @returns {number} adjusted threshold (range: 1-5)
  */
 export function getDynamicThreshold(remainingFraction) {
-  if (remainingFraction < 0.30) return BASE_OVERCONFIDENCE_THRESHOLD + 1;
-  if (remainingFraction > 0.60) return BASE_OVERCONFIDENCE_THRESHOLD - 1;
-  return BASE_OVERCONFIDENCE_THRESHOLD;
+  if (remainingFraction < 0.20) return BASE_OVERCONFIDENCE_THRESHOLD + 2;  // 5
+  if (remainingFraction < 0.40) return BASE_OVERCONFIDENCE_THRESHOLD + 1;  // 4
+  if (remainingFraction >= 0.80) return BASE_OVERCONFIDENCE_THRESHOLD - 2;  // 1
+  if (remainingFraction > 0.60) return BASE_OVERCONFIDENCE_THRESHOLD - 1;  // 2
+  return BASE_OVERCONFIDENCE_THRESHOLD;  // 3
 }
 
 // ---------------------------------------------------------------------------
