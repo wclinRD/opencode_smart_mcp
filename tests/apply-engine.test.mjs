@@ -64,8 +64,8 @@ describe('parseSearchReplace (structured blocks)', () => {
   });
 
   it('rejects blocks missing required fields', () => {
-    assert.throws(() => parseSearchReplace([{ file: 'a.js' }]), /Invalid block/);
-    assert.throws(() => parseSearchReplace([{ file: 'a.js', search: 'x' }]), /Invalid block/);
+    assert.throws(() => parseSearchReplace([{ file: 'a.js' }]), /missing required fields/);
+    assert.throws(() => parseSearchReplace([{ file: 'a.js', search: 'x' }]), /missing required fields/);
   });
 });
 
