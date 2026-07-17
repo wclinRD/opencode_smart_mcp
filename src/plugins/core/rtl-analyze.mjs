@@ -259,16 +259,20 @@ function formatParsers(info, format) {
  */
 function generateParserActions(info) {
   const actions = [];
+  const isMac = process.platform === 'darwin';
 
   // 檢查 slang（必要）
   const slang = info.parsers.find(p => p.name === 'slang');
   if (!slang?.available) {
     actions.push({
       tool: 'bash',
-      command: 'cd ~/src && git clone https://github.com/MikePopoloski/slang.git && cd slang && mkdir build && cd build && cmake .. && make -j$(nproc) && cp slang ~/bin/',
-      reason: 'slang 是 RTL 解析的核心 parser，缺少時功能受限',
+      command: isMac
+        ? 'brew install slang'
+        : 'cd /tmp && git clone https://github.com/MikePopoloski/slang.git && cd slang && mkdir build && cd build && cmake .. && make -j$(nproc) && sudo cp slang /usr/local/bin/',
+      reason: 'slang 是 RTL 解析的核心 parser，缺少時只能使用 regex fallback（功能受限）',
       priority: 'high',
       installUrl: 'https://github.com/MikePopoloski/slang#building',
+      fallbackAvailable: true,  // 有 regex fallback，不會完全壞掉
     });
   }
 
@@ -277,10 +281,24 @@ function generateParserActions(info) {
   if (!verilator?.available) {
     actions.push({
       tool: 'bash',
-      command: process.platform === 'darwin' ? 'brew install verilator' : 'sudo apt install -y verilator',
-      reason: 'verilator 用於 lint check（可選）',
+      command: isMac ? 'brew install verilator' : 'sudo apt install -y verilator',
+      reason: 'verilator 用於 lint check（可選，不影響核心功能）',
       priority: 'low',
       installUrl: 'https://www.veripool.org/verilator/',
+      fallbackAvailable: false,  // 無 fallback，但不影響核心
+    });
+  }
+
+  // 檢查 tree-sitter-verilog（可選 fallback）
+  const ts = info.parsers.find(p => p.name === 'tree-sitter-verilog');
+  if (!ts?.available) {
+    actions.push({
+      tool: 'bash',
+      command: 'npm install tree-sitter-verilog',
+      reason: 'tree-sitter-verilog 是輕量 fallback，用於 code navigation（可選）',
+      priority: 'low',
+      installUrl: 'https://github.com/tree-sitter/tree-sitter-verilog',
+      fallbackAvailable: false,
     });
   }
 
