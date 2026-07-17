@@ -1,5 +1,10 @@
 import { quickThink } from '../../cli/thinking.mjs';
 import { getContextBudget } from '../../lib/context-budget.mjs';
+import {
+  classifyThinkingMode,
+  detectOverconfidence,
+  enhanceVerifyStage,
+} from '../../lib/think-guard.mjs';
 
 export default {
   name: 'smart_think',
@@ -9,9 +14,16 @@ export default {
 Default mode: mode:"cit" (BN-DP auto-branch). Only branches when uncertain — saves ~70% tokens on routine tasks.
   mode:"beam" → explore 2-3 alternative paths with confidence scoring. Use for high-risk decisions.
   mode:"forest" → multi-tree reasoning with consensus voting. Use for complex multi-angle problems.
+  mode:"structured" → Grammar-Constrained CoT (GOAL/STATE/ALGO/EDGE/VERIFY — saves 50-70% thinking tokens).
+    VERIFY stage includes: scope verification, complementarity vs overlap check, devil's advocate.
 
 Core workflow:
   thought + nextThoughtNeeded=true → hypothesis → verification → repeat → nextThoughtNeeded=false
+
+Think-Guard (3-layer defense):
+  Layer 1: Task classification → auto-suggest thinking mode based on task keywords
+  Layer 2: Overconfidence detection → warn when CIT under-branches on complex tasks
+  Layer 3: VERIFY stage enhancement → scope/complementarity/devil's advocate checks
 
 Supports: template guidance (debug/refactor/architecture...), branchFromThought, isRevision,
 needsMoreThoughts (beyond initial plan), adjustTotalThoughts (mid-stream expansion).
@@ -160,6 +172,11 @@ Returns done flag + optional updated totalThoughts.`,
         type: 'string',
         description: 'VERIFY: Self-verification logic. Used with mode:"structured".',
       },
+      // ── Think-Guard fields ──
+      classifyTask: {
+        type: 'string',
+        description: 'Task description to classify. Returns suggested thinking mode and reasoning. Use before starting a thinking session to choose the right mode.',
+      },
     },
     required: ['thought', 'nextThoughtNeeded'],
   },
@@ -169,34 +186,101 @@ Returns done flag + optional updated totalThoughts.`,
   },
   /** Direct handler — no process spawn overhead */
   handler(args) {
+    // ── Think-Guard: classifyTask subcommand ──
+    if (args.classifyTask) {
+      const taskDesc = String(args.classifyTask);
+      const classification = classifyThinkingMode(taskDesc, args.mode || null);
+      let output = `┌─ Task Classification ─────────────────────\n`;
+      output += `│ Task: ${taskDesc.slice(0, 80)}${taskDesc.length > 80 ? '...' : ''}\n`;
+      output += `│ Suggested mode: ${classification.suggestedMode || '(none — simple task)'}`;
+      if (classification.reason) {
+        output += `\n│ Reason: ${classification.reason}`;
+      }
+      if (classification.forceBranch) {
+        output += `\n│ ⚡ Force branch: This task type requires multi-path exploration`;
+      }
+      output += `\n└───────────────────────────────────────────\n`;
+      return output;
+    }
+
+    // ── Layer 1: Task Classification ──
+    // Auto-suggest mode if not specified, based on task content
+    let taskSuggestion = null;
+    if (!args.mode && args.thought) {
+      taskSuggestion = classifyThinkingMode(String(args.thought), null);
+      if (taskSuggestion.suggestedMode && taskSuggestion.reason) {
+        // Append suggestion to output later (after quickThink)
+      }
+    }
+
+    // ── Layer 2: Overconfidence Detection ──
+    // Check if CIT mode is under-branching
+    let overconfidenceWarning = null;
+    if (args.mode === 'cit' && args.branchingNeeded === false) {
+      const detection = detectOverconfidence(
+        String(args.thought ?? ''),
+        args.branchReasoning ? String(args.branchReasoning) : null,
+        false,
+        'cit'
+      );
+      if (detection.overconfident) {
+        overconfidenceWarning = detection;
+      }
+    }
+
+    // ── Layer 3: VERIFY Stage Enhancement ──
+    // Enhance verify field in structured mode
+    let enhancedArgs = { ...args };
+    if (args.mode === 'structured' && args.verify) {
+      enhancedArgs.verify = enhanceVerifyStage(
+        String(args.verify),
+        String(args.thought ?? '')
+      );
+    }
+
     const result = quickThink({
-      thought: String(args.thought ?? ''),
-      nextThoughtNeeded: Boolean(args.nextThoughtNeeded),
-      thoughtNumber: Number(args.thoughtNumber ?? 1),
-      totalThoughts: Number(args.totalThoughts ?? 1),
-      mode: args.mode || null,
-      beams: Array.isArray(args.beams) ? args.beams : null,
-      selectedBeam: args.selectedBeam ? String(args.selectedBeam) : null,
-      branchingNeeded: args.branchingNeeded != null ? Boolean(args.branchingNeeded) : null,
-      branchReasoning: args.branchReasoning ? String(args.branchReasoning) : null,
-      trees: Array.isArray(args.trees) ? args.trees : null,
-      consensus: args.consensus || null,
-      hypothesis: args.hypothesis ? String(args.hypothesis) : null,
-      verification: args.verification ? String(args.verification) : null,
-      needsMoreThoughts: Boolean(args.needsMoreThoughts),
-      adjustTotalThoughts: args.adjustTotalThoughts != null ? Number(args.adjustTotalThoughts) : null,
-      isRevision: Boolean(args.isRevision),
-      revisesThought: args.revisesThought != null ? Number(args.revisesThought) : null,
-      branchFromThought: args.branchFromThought != null ? Number(args.branchFromThought) : null,
-      branchId: args.branchId != null ? String(args.branchId) : null,
-      template: args.template || null,
+      thought: String(enhancedArgs.thought ?? ''),
+      nextThoughtNeeded: Boolean(enhancedArgs.nextThoughtNeeded),
+      thoughtNumber: Number(enhancedArgs.thoughtNumber ?? 1),
+      totalThoughts: Number(enhancedArgs.totalThoughts ?? 1),
+      mode: enhancedArgs.mode || null,
+      beams: Array.isArray(enhancedArgs.beams) ? enhancedArgs.beams : null,
+      selectedBeam: enhancedArgs.selectedBeam ? String(enhancedArgs.selectedBeam) : null,
+      branchingNeeded: enhancedArgs.branchingNeeded != null ? Boolean(enhancedArgs.branchingNeeded) : null,
+      branchReasoning: enhancedArgs.branchReasoning ? String(enhancedArgs.branchReasoning) : null,
+      trees: Array.isArray(enhancedArgs.trees) ? enhancedArgs.trees : null,
+      consensus: enhancedArgs.consensus || null,
+      hypothesis: enhancedArgs.hypothesis ? String(enhancedArgs.hypothesis) : null,
+      verification: enhancedArgs.verification ? String(enhancedArgs.verification) : null,
+      needsMoreThoughts: Boolean(enhancedArgs.needsMoreThoughts),
+      adjustTotalThoughts: enhancedArgs.adjustTotalThoughts != null ? Number(enhancedArgs.adjustTotalThoughts) : null,
+      isRevision: Boolean(enhancedArgs.isRevision),
+      revisesThought: enhancedArgs.revisesThought != null ? Number(enhancedArgs.revisesThought) : null,
+      branchFromThought: enhancedArgs.branchFromThought != null ? Number(enhancedArgs.branchFromThought) : null,
+      branchId: enhancedArgs.branchId != null ? String(enhancedArgs.branchId) : null,
+      template: enhancedArgs.template || null,
       // Structured thinking fields
-      goal: args.goal ? String(args.goal) : null,
-      state: args.state ? String(args.state) : null,
-      algo: args.algo ? String(args.algo) : null,
-      edge: args.edge ? String(args.edge) : null,
-      verify: args.verify ? String(args.verify) : null,
+      goal: enhancedArgs.goal ? String(enhancedArgs.goal) : null,
+      state: enhancedArgs.state ? String(enhancedArgs.state) : null,
+      algo: enhancedArgs.algo ? String(enhancedArgs.algo) : null,
+      edge: enhancedArgs.edge ? String(enhancedArgs.edge) : null,
+      verify: enhancedArgs.verify ? String(enhancedArgs.verify) : null,
     });
+
+    // ── Layer 2: Overconfidence Warning Output ──
+    if (overconfidenceWarning) {
+      result.output += `\n\n${'─'.repeat(50)}\n⚠️ ${overconfidenceWarning.reason}\n`;
+      result.output += `💡 建議改用: smart_think({mode:"beam", thought:"...", nextThoughtNeeded:true})\n`;
+    }
+
+    // ── Layer 1: Task Classification Suggestion Output ──
+    if (taskSuggestion && taskSuggestion.suggestedMode && taskSuggestion.reason && !args.mode) {
+      result.output += `\n\n${'─'.repeat(50)}\n📋 任務分類建議: ${taskSuggestion.suggestedMode} mode\n`;
+      result.output += `   ${taskSuggestion.reason}\n`;
+      if (taskSuggestion.forceBranch) {
+        result.output += `   ⚡ 強制分支：此任務類型需要多路徑探索\n`;
+      }
+    }
 
     // Phase 34: Budget-aware thinking hint — append when budget is low
     try {
