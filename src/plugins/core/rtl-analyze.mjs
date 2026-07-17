@@ -75,10 +75,13 @@ export default {
     // 特殊命令：不需 parse
     if (command === 'parsers') {
       const info = getParserInfo();
+      const actions = generateParserActions(info);
       return {
         ok: true,
         output: formatParsers(info, format),
         parserInfo: info,
+        needsAction: actions.length > 0,
+        actions,  // LLM 可程式化處理的 action 陣列
       };
     }
 
@@ -249,4 +252,37 @@ function formatParsers(info, format) {
   }
 
   return lines.join('\n');
+}
+
+/**
+ * 產生結構化的 parser安裝 actions（供 LLM 程式化處理）
+ */
+function generateParserActions(info) {
+  const actions = [];
+
+  // 檢查 slang（必要）
+  const slang = info.parsers.find(p => p.name === 'slang');
+  if (!slang?.available) {
+    actions.push({
+      tool: 'bash',
+      command: 'cd ~/src && git clone https://github.com/MikePopoloski/slang.git && cd slang && mkdir build && cd build && cmake .. && make -j$(nproc) && cp slang ~/bin/',
+      reason: 'slang 是 RTL 解析的核心 parser，缺少時功能受限',
+      priority: 'high',
+      installUrl: 'https://github.com/MikePopoloski/slang#building',
+    });
+  }
+
+  // 檢查 verilator（可選）
+  const verilator = info.parsers.find(p => p.name === 'verilator');
+  if (!verilator?.available) {
+    actions.push({
+      tool: 'bash',
+      command: process.platform === 'darwin' ? 'brew install verilator' : 'sudo apt install -y verilator',
+      reason: 'verilator 用於 lint check（可選）',
+      priority: 'low',
+      installUrl: 'https://www.veripool.org/verilator/',
+    });
+  }
+
+  return actions;
 }
