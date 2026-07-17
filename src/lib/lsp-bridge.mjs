@@ -11,7 +11,7 @@
 // - 多語言支援：依檔案副檔名自動選擇對應 LSP server
 
 import { spawn, execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { resolve, dirname, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -424,6 +424,56 @@ export class LspBridge {
     return null;
   }
 
+  /**
+   * Ensure a jsconfig.json exists for JS-only projects.
+   * TypeScript LSP needs this to enable allowJs mode for .mjs/.js files.
+   */
+  _ensureJsConfig() {
+    const root = this.rootDir;
+    const configNames = ['jsconfig.json', 'tsconfig.json', 'jsconfig.app.json', 'tsconfig.app.json'];
+    if (configNames.some(c => existsSync(resolve(root, c)))) return;
+    // Scan root + one level of subdirectories for JS source files
+    const jsFiles = ['.', 'src', 'lib', 'app'].some(dir => {
+      try {
+        const dirPath = resolve(root, dir);
+        const entries = readdirSync(dirPath, { withFileTypes: true });
+        // Check files at this level
+        if (entries.some(e => e.isFile() && /\.(m?js|cjs)$/.test(e.name))) return true;
+        // Check one level of subdirectories
+        return entries.filter(e => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules')
+          .some(e => {
+            try {
+              return readdirSync(resolve(dirPath, e.name), { withFileTypes: true })
+                .some(f => f.isFile() && /\.(m?js|cjs)$/.test(f.name));
+            } catch { return false; }
+          });
+      } catch { return false; }
+    });
+    if (!jsFiles) return;
+    const jsconfig = {
+      compilerOptions: {
+        target: 'ES2022',
+        module: 'ESNext',
+        moduleResolution: 'bundler',
+        allowJs: true,
+        checkJs: false,
+        noEmit: true,
+        skipLibCheck: true,
+        maxNodeModuleJsDepth: 2,
+      },
+      include: ['src/**/*.mjs', 'src/**/*.js', 'src/**/*.cjs', 'lib/**/*.mjs', 'lib/**/*.js'],
+      exclude: ['node_modules', '**/*.test.mjs', '**/*.spec.mjs'],
+    };
+    try {
+      writeFileSync(resolve(root, 'jsconfig.json'), JSON.stringify(jsconfig, null, 2) + '\n');
+      if (process.env.DEBUG?.includes('lsp')) {
+        console.error('[lsp-bridge] Auto-created jsconfig.json for JS project');
+      }
+    } catch (err) {
+      console.warn('[lsp-bridge] Failed to auto-create jsconfig.json:', err.message);
+    }
+  }
+
   async _start(lang) {
     const cfg = LSP_CONFIGS[lang];
     if (!cfg) {
@@ -433,6 +483,11 @@ export class LspBridge {
     const prevCount = this._restartCounts.get(lang) || 0;
     if (prevCount > 3) {
       throw new Error(`${cfg.name} unavailable after ${prevCount - 1} restart attempts`);
+    }
+
+    // Auto-create jsconfig.json for JS-only projects before starting TS LSP
+    if (lang === 'typescript') {
+      this._ensureJsConfig();
     }
 
     let serverPath = this._findLspServer(lang);
@@ -505,10 +560,21 @@ export class LspBridge {
         }, 1000);
       });
 
+      // Build initializationOptions — pass allowJs hints to TS LSP
+      const initOptions = lang === 'typescript' ? {
+        tsserver: { plugins: [] },
+        preferences: {
+          includeInlayParameterNameHints: 'none',
+          includeInlayVariableTypeHints: false,
+          includeInlayFunctionLikeReturnTypeHints: false,
+        },
+      } : {};
+
       // Send initialize request
       this._sendRequest('initialize', {
         processId: process.pid,
         rootUri: this._toUri(this.rootDir),
+        initializationOptions: initOptions,
         capabilities: {
           textDocument: {
             documentSymbol: { hierarchicalDocumentSymbolSupport: true },
