@@ -13,11 +13,14 @@ import { parseRTL, detectParsers, getParserInfo } from './rtl/parser.mjs';
 import {
   buildGraph, getHierarchy, getModulePorts, analyzeDesign, listModules,
   getModuleSignals, traceSignal, findUnconnectedPorts, findWidthMismatches,
+  findFloatSignals,
 } from './rtl/graph-builder.mjs';
 import {
   formatHierarchyText, formatPortsText, formatAnalyzeText,
   formatHierarchyMermaid, formatHierarchyMarkdown, formatAnalyzeMarkdown,
+  formatHierarchyDot,
   formatSignalsText, formatTraceText, formatCheckText,
+  formatFloatMermaid, formatFloatDot,
 } from './rtl/format.mjs';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -38,7 +41,7 @@ export default {
       command: {
         type: 'string',
         enum: ['analyze', 'hierarchy', 'ports', 'signals', 'trace', 'check', 'list', 'parsers'],
-        description: '分析動作。analyze=全面分析，hierarchy=module tree，ports=port list，signals=signal 宣告，trace=signal 追蹤，check=基本檢查（unconnected/width），list=列出所有 module，parsers=偵測可用 parser',
+        description: '分析動作。analyze=全面分析，hierarchy=module tree，ports=port list，signals=signal 宣告，trace=signal 追蹤，check=基本檢查（unconnected/width/float），list=列出所有 module，parsers=偵測可用 parser',
       },
       signal: {
         type: 'string',
@@ -54,8 +57,8 @@ export default {
       },
       format: {
         type: 'string',
-        enum: ['text', 'json', 'markdown', 'mermaid'],
-        description: '輸出格式（default: text）',
+        enum: ['text', 'json', 'markdown', 'mermaid', 'dot'],
+        description: '輸出格式（default: text）。dot=Graphviz DOT 格式',
       },
       filelist: {
         type: 'string',
@@ -137,9 +140,11 @@ function handleCommand(command, graph, parseResult, target, signal, format) {
         ? formatHierarchyMarkdown(hierarchy)
         : format === 'mermaid'
           ? formatHierarchyMermaid(hierarchy)
-          : format === 'json'
-            ? JSON.stringify(hierarchy, null, 2)
-            : formatHierarchyText(hierarchy);
+          : format === 'dot'
+            ? formatHierarchyDot(hierarchy)
+            : format === 'json'
+              ? JSON.stringify(hierarchy, null, 2)
+              : formatHierarchyText(hierarchy);
       return {
         ok: true,
         output,
@@ -209,10 +214,15 @@ function handleCommand(command, graph, parseResult, target, signal, format) {
     case 'check': {
       const unconnected = findUnconnectedPorts(graph);
       const widthMismatches = findWidthMismatches(graph);
-      const checkResult = { unconnected, widthMismatches };
-      output = format === 'json'
-        ? JSON.stringify(checkResult, null, 2)
-        : formatCheckText(checkResult);
+      const floatSignals = findFloatSignals(graph);
+      const checkResult = { unconnected, widthMismatches, floatSignals };
+      output = format === 'mermaid'
+        ? formatFloatMermaid(floatSignals)
+        : format === 'dot'
+          ? formatFloatDot(floatSignals)
+          : format === 'json'
+            ? JSON.stringify(checkResult, null, 2)
+            : formatCheckText(checkResult);
       return {
         ok: true,
         output,
@@ -220,6 +230,7 @@ function handleCommand(command, graph, parseResult, target, signal, format) {
         stats: {
           unconnectedCount: unconnected.count,
           widthMismatchCount: widthMismatches.count,
+          floatSignalCount: floatSignals.noLoadCount + floatSignals.noDriverCount,
         },
       };
     }

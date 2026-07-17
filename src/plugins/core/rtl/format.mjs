@@ -87,6 +87,9 @@ export function formatAnalyzeText(analysis) {
   lines.push(`  Top-level:  ${s.topModuleCount}`);
   lines.push(`  Ports:      ${s.totalPorts} (${s.totalInputs} in, ${s.totalOutputs} out)`);
   lines.push(`  Instances:  ${s.totalInstances}`);
+  if (s.floatSignals > 0) {
+    lines.push(`  ⚠️  Floats:   ${s.floatSignals}`);
+  }
   lines.push('');
 
   // Top modules
@@ -140,6 +143,37 @@ export function formatHierarchyMermaid(hierarchy) {
     renderMermaid(tree);
   }
 
+  return lines.join('\n');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Graphviz DOT 格式
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * 格式化 module hierarchy 為 Graphviz DOT
+ */
+export function formatHierarchyDot(hierarchy) {
+  if (hierarchy.error) return `// ${hierarchy.error}`;
+  const lines = ['digraph Hierarchy {', '  rankdir=TB;', '  node [shape=box style=filled fillcolor=lightblue];', ''];
+
+  function renderDot(node, parentId = null) {
+    const id = node.name?.replace(/[^a-zA-Z0-9_]/g, '_') || 'unknown';
+    const label = node.file ? `${node.name}\\n(${node.file}:${node.line || '?'})` : node.name;
+    const ports = node.ports ? ` [${node.ports}p]` : '';
+    lines.push(`  ${id} [label="${label}${ports}"];`);
+    if (parentId) lines.push(`  ${parentId} -> ${id};`);
+
+    for (const child of node.children || []) {
+      renderDot(child, id);
+    }
+  }
+
+  for (const tree of hierarchy.trees) {
+    renderDot(tree);
+  }
+
+  lines.push('}');
   return lines.join('\n');
 }
 
@@ -276,6 +310,69 @@ export function formatTraceText(traceInfo) {
 }
 
 /**
+ * 格式化 float signals 為 Mermaid 圖
+ */
+export function formatFloatMermaid(floatInfo) {
+  const lines = ['graph LR'];
+
+  const allSignals = [
+    ...floatInfo.noLoad.map(s => ({ ...s, type: 'noLoad' })),
+    ...floatInfo.noDriver.map(s => ({ ...s, type: 'noDriver' })),
+  ];
+
+  if (allSignals.length === 0) {
+    lines.push('  ok["✅ No float signals"]');
+    return lines.join('\n');
+  }
+
+  for (const s of allSignals) {
+    const id = `${s.module}__${s.signal}`.replace(/[^a-zA-Z0-9_]/g, '_');
+    const bus = s.bus || '';
+    if (s.type === 'noLoad') {
+      lines.push(`  ${id}["🔴 ${s.module}.${s.signal}${bus}"]`);
+      lines.push(`  ${id} -->|no load| unused["unused"]`);
+    } else {
+      lines.push(`  ${id}["🟡 ${s.module}.${s.signal}${bus}"]`);
+      lines.push(`  undriven["undriven"] -->|drives| ${id}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * 格式化 float signals 為 Graphviz DOT
+ */
+export function formatFloatDot(floatInfo) {
+  const lines = ['digraph FloatSignals {', '  rankdir=LR;', '  node [shape=box];', ''];
+
+  const allSignals = [
+    ...floatInfo.noLoad.map(s => ({ ...s, type: 'noLoad' })),
+    ...floatInfo.noDriver.map(s => ({ ...s, type: 'noDriver' })),
+  ];
+
+  if (allSignals.length === 0) {
+    lines.push('  ok [label="✅ No float signals" shape=ellipse style=filled fillcolor=lightgreen];');
+  } else {
+    for (const s of allSignals) {
+      const id = `${s.module}_${s.signal}`.replace(/[^a-zA-Z0-9_]/g, '_');
+      const bus = s.bus || '';
+      const label = `${s.module}\\n${s.signal}${bus}`;
+      if (s.type === 'noLoad') {
+        lines.push(`  ${id} [label="${label}" style=filled fillcolor=lightyellow];`);
+        lines.push(`  ${id} -> unused [label="${s.reason}" style=dashed];`);
+      } else {
+        lines.push(`  ${id} [label="${label}" style=filled fillcolor=lightyellow];`);
+        lines.push(`  undriven -> ${id} [label="${s.reason}" style=dashed];`);
+      }
+    }
+  }
+
+  lines.push('}');
+  return lines.join('\n');
+}
+
+/**
  * 格式化 check 結果
  */
 export function formatCheckText(checkResult) {
@@ -305,6 +402,31 @@ export function formatCheckText(checkResult) {
     lines.push(`⚠️  Width Mismatches (${widthMismatches.count}):`);
     for (const m of widthMismatches) {
       lines.push(`  ${m.module}.${m.instance} (.${m.port}) — port ${m.portWidth}b vs signal ${m.connectedWidth}b`);
+    }
+  }
+  lines.push('');
+
+  // Float signals
+  const { floatSignals } = checkResult;
+  if (floatSignals) {
+    if (floatSignals.noLoadCount === 0 && floatSignals.noDriverCount === 0) {
+      lines.push('✅ No float signals');
+    } else {
+      if (floatSignals.noLoadCount > 0) {
+        lines.push(`⚠️  Signals with no load (${floatSignals.noLoadCount}):`);
+        for (const f of floatSignals.noLoad) {
+          const bus = f.bus || '';
+          lines.push(`  ${f.module}.${f.signal}${bus} — ${f.type || ''} (${f.reason})`);
+        }
+        lines.push('');
+      }
+      if (floatSignals.noDriverCount > 0) {
+        lines.push(`⚠️  Signals with no driver (${floatSignals.noDriverCount}):`);
+        for (const f of floatSignals.noDriver) {
+          const bus = f.bus || '';
+          lines.push(`  ${f.module}.${f.signal}${bus} — ${f.type || ''} (${f.reason})`);
+        }
+      }
     }
   }
 

@@ -595,6 +595,107 @@ export function findUnconnectedPorts(graph) {
 }
 
 /**
+ * 找出 float signals（有 driver 無 load / 有 load 無 driver）
+ * @param {DesignGraph} graph
+ * @returns {object} float signals list
+ */
+export function findFloatSignals(graph) {
+  const noLoad = [];   // 有 driver 無 load
+  const noDriver = []; // 有 load 無 driver
+
+  for (const [moduleName, mod] of graph.modules) {
+    // 收集所有 port connection 中用到的 signal
+    const signalsWithDriver = new Set();
+    const signalsWithLoad = new Set();
+
+    // 收集 module 的 port names（避免把 port 當成 internal signal 檢查）
+    const portNames = new Set(mod.ports.map(p => p.name));
+
+    for (const inst of mod.instances) {
+      const portMap = inst.portMap || {};
+      const instMod = graph.modules.get(inst.module);
+
+      for (const [portName, connectedSignal] of Object.entries(portMap)) {
+        if (!connectedSignal || connectedSignal === '(unconnected)') continue;
+
+        const baseSignal = connectedSignal.split('[')[0];
+
+        // 找到對應的 port direction
+        const port = instMod?.ports.find(p => p.name === portName);
+        if (!port) continue;
+
+        if (port.direction === 'input') {
+          // input port → connected signal is driving into the instance → signal has a load
+          signalsWithLoad.add(baseSignal);
+        } else if (port.direction === 'output') {
+          // output port → connected signal receives data from the instance → signal has a driver
+          signalsWithDriver.add(baseSignal);
+        } else if (port.direction === 'inout') {
+          signalsWithDriver.add(baseSignal);
+          signalsWithLoad.add(baseSignal);
+        }
+      }
+    }
+
+    // 也把 top-level port 納入考量（top module 的 input port 由外部驅動）
+    if (mod.isTop) {
+      for (const port of mod.ports) {
+        if (port.direction === 'input') {
+          // top-level input: 由外部驅動 → 有 driver
+          signalsWithDriver.add(port.name);
+        } else if (port.direction === 'output') {
+          // top-level output: 被外部消費 → 有 load
+          signalsWithLoad.add(port.name);
+        } else if (port.direction === 'inout') {
+          signalsWithDriver.add(port.name);
+          signalsWithLoad.add(port.name);
+        }
+      }
+    }
+
+    // 檢查 module 內宣告的 signal（跳過 port，port 由外部連接）
+    for (const sig of (mod.signals || [])) {
+      const name = sig.name;
+      if (portNames.has(name)) continue; // port 不是 internal signal
+
+      if (signalsWithDriver.has(name) && !signalsWithLoad.has(name)) {
+        noLoad.push({
+          module: moduleName,
+          signal: name,
+          type: sig.kind,
+          bus: sig.bus,
+          reason: 'declared but never used as a load',
+        });
+      } else if (!signalsWithDriver.has(name) && signalsWithLoad.has(name)) {
+        noDriver.push({
+          module: moduleName,
+          signal: name,
+          type: sig.kind,
+          bus: sig.bus,
+          reason: 'consumed but never driven',
+        });
+      } else if (!signalsWithDriver.has(name) && !signalsWithLoad.has(name)) {
+        // 宣告了但完全沒用到（也沒 driver 也沒 load）
+        noLoad.push({
+          module: moduleName,
+          signal: name,
+          type: sig.kind,
+          bus: sig.bus,
+          reason: 'declared but not connected to any port',
+        });
+      }
+    }
+  }
+
+  return {
+    noLoad,
+    noDriver,
+    noLoadCount: noLoad.length,
+    noDriverCount: noDriver.length,
+  };
+}
+
+/**
  * 找出 width mismatch 的 ports
  * @param {DesignGraph} graph
  * @returns {object} width mismatch list
@@ -655,8 +756,9 @@ function parseSignalWidth(signalStr) {
  * 取得完整設計分析
  */
 export function analyzeDesign(graph) {
+  const floatSignals = findFloatSignals(graph);
   return {
-    stats: graph.stats,
+    stats: { ...graph.stats, floatSignals: floatSignals.noLoadCount + floatSignals.noDriverCount },
     topModules: graph.topModules,
     modules: [...graph.modules.values()].map(m => ({
       name: m.name,
@@ -666,6 +768,7 @@ export function analyzeDesign(graph) {
       isTop: m.isTop,
     })),
     parentMap: Object.fromEntries(graph.parentMap),
+    floatSignals,
   };
 }
 

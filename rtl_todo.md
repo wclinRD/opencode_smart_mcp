@@ -94,12 +94,13 @@ slang v11 `--ast-json` 的 AST 格式與預期不同：
 ### ⚠️ 基本檢查
 - [x] **Unconnected port 偵測** — instantiation 有 port 未連接（潛在 bug）
 - [x] **Width mismatch** — port 寬度不一致的警告
-- [ ] **Float signal** — 有 driver 無 load 或有 load 無 driver
+- [x] **Float signal** — 有 driver 無 load 或有 load 無 driver（基於 port connection 分析）
 
 ### 📐 輸出增強
-- [ ] **Mermaid 圖** — module hierarchy 的 Mermaid flowchart
-- [ ] **Graphviz DOT** — signal graph 的 DOT 格式（可渲染成圖片）
-- [ ] **format: "mermaid"** — 直接輸出可貼到 Markdown 的 Mermaid 程式碼
+- [x] **Mermaid 圖** — module hierarchy 的 Mermaid flowchart（`format: "mermaid"`）
+- [x] **Graphviz DOT** — module hierarchy 的 DOT 格式（`format: "dot"`）
+- [x] **format: "mermaid"** — hierarchy 和 check 命令均支援
+- [x] **format: "dot"** — hierarchy 和 check 命令均支援（Graphviz DOT 格式）
 
 ---
 
@@ -138,7 +139,8 @@ Week 3: Phase 1.5 — slang v11 AST 整合 ✅ 完成
   └── 重寫 buildFromSlang() + port connection map + signal extraction
 
 Week 4: Phase 2 — Signal Graph ✅ 完成 (2026-07-17)
-  └── signals command + trace command + check command (unconnected/width)
+  └── signals command + trace command + check command (unconnected/width/float)
+  └── Mermaid + DOT 輸出格式
 
 Week 5+: Phase 3
   └── PDK mapping + constraint 驗證 + DFT + eda_search 整合
