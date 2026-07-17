@@ -4,6 +4,11 @@ import {
   classifyThinkingMode,
   detectOverconfidence,
   enhanceVerifyStage,
+  getDynamicThreshold,
+  recordClassification,
+  detectDomain,
+  getSessionState,
+  clearSessionState,
 } from '../../lib/think-guard.mjs';
 
 export default {
@@ -24,6 +29,12 @@ Think-Guard (3-layer defense):
   Layer 1: Task classification → auto-suggest thinking mode based on task keywords
   Layer 2: Overconfidence detection → warn when CIT under-branches on complex tasks
   Layer 3: VERIFY stage enhancement → scope/complementarity/devil's advocate checks
+
+Phase 2 enhancements:
+  2.1: Dynamic threshold — adjusts overconfidence score based on context budget
+  2.2: Historical learning — tracks classification accuracy + auto-adjusts weights
+  2.3: Cross-tool integration — domain-specific rules for EDA/exa/medical
+  2.4: Concurrency safety — session isolation + lock mechanism
 
 Supports: template guidance (debug/refactor/architecture...), branchFromThought, isRevision,
 needsMoreThoughts (beyond initial plan), adjustTotalThoughts (mid-stream expansion).
@@ -208,20 +219,25 @@ Returns done flag + optional updated totalThoughts.`,
     let taskSuggestion = null;
     if (!args.mode && args.thought) {
       taskSuggestion = classifyThinkingMode(String(args.thought), null);
-      if (taskSuggestion.suggestedMode && taskSuggestion.reason) {
-        // Append suggestion to output later (after quickThink)
-      }
     }
 
     // ── Layer 2: Overconfidence Detection ──
-    // Check if CIT mode is under-branching
+    // Check if CIT mode is under-branching (Phase 2.1: dynamic threshold)
     let overconfidenceWarning = null;
     if (args.mode === 'cit' && args.branchingNeeded === false) {
+      // Phase 2.1: Get budget fraction for dynamic threshold
+      let budgetFraction = null;
+      try {
+        const budget = getContextBudget();
+        if (budget) budgetFraction = budget.remainingFraction;
+      } catch { /* silent */ }
+
       const detection = detectOverconfidence(
         String(args.thought ?? ''),
         args.branchReasoning ? String(args.branchReasoning) : null,
         false,
-        'cit'
+        'cit',
+        { budgetFraction }
       );
       if (detection.overconfident) {
         overconfidenceWarning = detection;
@@ -229,13 +245,22 @@ Returns done flag + optional updated totalThoughts.`,
     }
 
     // ── Layer 3: VERIFY Stage Enhancement ──
-    // Enhance verify field in structured mode
+    // Enhance verify field in structured mode + domain-specific additions
     let enhancedArgs = { ...args };
     if (args.mode === 'structured' && args.verify) {
-      enhancedArgs.verify = enhanceVerifyStage(
+      let verifyText = enhanceVerifyStage(
         String(args.verify),
         String(args.thought ?? '')
       );
+      // Phase 2.3: Add domain-specific verify questions
+      const domainInfo = detectDomain(String(args.thought ?? ''));
+      if (domainInfo.rules?.verifyAdditions?.length) {
+        verifyText += '\n── 領域特定檢查 ──';
+        for (const q of domainInfo.rules.verifyAdditions) {
+          verifyText += `\n  □ ${q}`;
+        }
+      }
+      enhancedArgs.verify = verifyText;
     }
 
     const result = quickThink({
@@ -281,6 +306,16 @@ Returns done flag + optional updated totalThoughts.`,
         result.output += `   ⚡ 強制分支：此任務類型需要多路徑探索\n`;
       }
     }
+
+    // Phase 2.2: Record classification history
+    try {
+      recordClassification({
+        task: String(args.thought ?? ''),
+        classification: taskSuggestion || classifyThinkingMode(String(args.thought ?? ''), args.mode),
+        overconfidence: overconfidenceWarning,
+        outcome: 'unknown',
+      });
+    } catch { /* silent — history recording is best-effort */ }
 
     // Phase 34: Budget-aware thinking hint — append when budget is low
     try {

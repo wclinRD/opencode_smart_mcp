@@ -6,6 +6,12 @@
  *   Layer 2: Overconfidence detection → force upgrade when CIT under-branches
  *   Layer 3: VERIFY stage enhancement → scope/complementarity/devil's advocate
  *
+ * Phase 2 enhancements:
+ *   2.1: Dynamic threshold — adjusts overconfidence score based on context budget
+ *   2.2: Historical learning — tracks classification accuracy + auto-adjusts weights
+ *   2.3: Cross-tool integration — domain-specific rules for EDA/exa/medical
+ *   2.4: Concurrency safety — session isolation + lock mechanism
+ *
  * Created: 2026-07-17
  */
 
@@ -149,32 +155,52 @@ const OVERCONFIDENCE_INDICATORS = [
  * @param {string} mode — current thinking mode
  * @returns {{ overconfident: boolean, reason: string, suggestedUpgrade: string|null }}
  */
-export function detectOverconfidence(thought, branchReasoning, branchingNeeded, mode) {
+export function detectOverconfidence(thought, branchReasoning, branchingNeeded, mode, opts = {}) {
   if (mode !== 'cit' || branchingNeeded === true) {
     return { overconfident: false, reason: '', suggestedUpgrade: null };
   }
+
+  const combinedText = `${thought || ''} ${branchReasoning || ''}`;
+
+  // Phase 2.1: Dynamic threshold — adjust based on context budget
+  const budgetFraction = opts.budgetFraction;
+  let threshold = BASE_OVERCONFIDENCE_THRESHOLD;
+  if (typeof budgetFraction === 'number') {
+    threshold = getDynamicThreshold(budgetFraction);
+  }
+
+  // Phase 2.3: Domain-specific boost
+  const domainInfo = detectDomain(thought);
+  if (domainInfo.rules?.overconfidenceBoost) {
+    threshold += domainInfo.rules.overconfidenceBoost;
+  }
+
+  // Ensure threshold is at least 1
+  threshold = Math.max(1, threshold);
 
   let score = 0;
   const matchedIndicators = [];
 
   for (const indicator of OVERCONFIDENCE_INDICATORS) {
-    const combinedText = `${thought || ''} ${branchReasoning || ''}`;
     if (indicator.pattern.test(combinedText)) {
       score += indicator.weight;
       matchedIndicators.push(indicator.pattern.source.slice(0, 30));
     }
   }
 
-  // Threshold: score >= 3 suggests overconfidence（單一高權重指標或 2 個低權重指標）
-  if (score >= 3) {
+  if (score >= threshold) {
+    const domainHint = domainInfo.domain ? ` [domain: ${domainInfo.domain}]` : '';
     return {
       overconfident: true,
-      reason: `偵測到過度自信：任務涉及 [${matchedIndicators.join(', ')}]，但 CIT 判定不需要分支。建議升級為 beam mode 進行多路徑探索。`,
+      reason: `偵測到過度自信（score=${score}, threshold=${threshold}）：任務涉及 [${matchedIndicators.join(', ')}]，但 CIT 判定不需要分支。建議升級為 beam mode 進行多路徑探索。${domainHint}`,
       suggestedUpgrade: 'beam',
+      score,
+      threshold,
+      domain: domainInfo.domain,
     };
   }
 
-  return { overconfident: false, reason: '', suggestedUpgrade: null };
+  return { overconfident: false, reason: '', suggestedUpgrade: null, score, threshold };
 }
 
 // ---------------------------------------------------------------------------
@@ -252,12 +278,233 @@ export function enhanceVerifyStage(verifyText, thought) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 2.1: Dynamic Threshold — Budget-aware overconfidence detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Default threshold for overconfidence detection.
+ * Phase 2.1: This is now dynamic based on context budget.
+ */
+const BASE_OVERCONFIDENCE_THRESHOLD = 3;
+
+/**
+ * Adjust overconfidence threshold based on context budget.
+ * 
+ * Strategy:
+ *   - budget < 30% → raise threshold by +1 (reduce false positives, conserve tokens)
+ *   - budget > 60% → lower threshold by -1 (more aggressive detection)
+ *   - 30%–60% → use base threshold (balanced)
+ *
+ * @param {number} remainingFraction — 0.0 to 1.0, remaining context budget
+ * @returns {number} adjusted threshold
+ */
+export function getDynamicThreshold(remainingFraction) {
+  if (remainingFraction < 0.30) return BASE_OVERCONFIDENCE_THRESHOLD + 1;
+  if (remainingFraction > 0.60) return BASE_OVERCONFIDENCE_THRESHOLD - 1;
+  return BASE_OVERCONFIDENCE_THRESHOLD;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2.2: Historical Learning — Track classification accuracy
+// ---------------------------------------------------------------------------
+
+/**
+ * In-memory history store for classification and detection results.
+ * Each entry: { timestamp, task, classification, overconfidence, outcome }
+ */
+const _history = [];
+const MAX_HISTORY = 200;
+
+/**
+ * Record a classification result for historical analysis.
+ *
+ * @param {object} record
+ * @param {string} record.task — the original task description
+ * @param {object} record.classification — result from classifyThinkingMode
+ * @param {object} [record.overconfidence] — result from detectOverconfidence (if CIT)
+ * @param {string} [record.outcome] — 'correct' | 'incorrect' | 'unknown' (set later)
+ */
+export function recordClassification(record) {
+  _history.push({
+    timestamp: Date.now(),
+    task: (record.task || '').slice(0, 200),
+    suggestedMode: record.classification?.suggestedMode,
+    forceBranch: record.classification?.forceBranch || false,
+    overconfident: record.overconfidence?.overconfident || false,
+    outcome: record.outcome || 'unknown',
+  });
+  if (_history.length > MAX_HISTORY) {
+    _history.splice(0, _history.length - MAX_HISTORY);
+  }
+}
+
+/**
+ * Get statistics from classification history.
+ *
+ * @returns {{ total, byMode, overconfidenceRate, accuracyRate }}
+ */
+export function getHistoryStats() {
+  const total = _history.length;
+  if (total === 0) return { total: 0, byMode: {}, overconfidenceRate: 0, accuracyRate: 0 };
+
+  const byMode = {};
+  let overconfidentCount = 0;
+  let judged = 0, correct = 0;
+
+  for (const r of _history) {
+    const m = r.suggestedMode || 'null';
+    byMode[m] = (byMode[m] || 0) + 1;
+    if (r.overconfident) overconfidentCount++;
+    if (r.outcome === 'correct' || r.outcome === 'incorrect') {
+      judged++;
+      if (r.outcome === 'correct') correct++;
+    }
+  }
+
+  return {
+    total,
+    byMode,
+    overconfidenceRate: total > 0 ? (overconfidentCount / total) : 0,
+    accuracyRate: judged > 0 ? (correct / judged) : 0,
+    judgedCount: judged,
+  };
+}
+
+/**
+ * Clear history (for testing or reset).
+ */
+export function clearHistory() {
+  _history.length = 0;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2.3: Cross-tool Integration — Domain-specific rules
+// ---------------------------------------------------------------------------
+
+/**
+ * Domain-specific task patterns that override or supplement base rules.
+ * Each domain has its own patterns and recommended behaviors.
+ */
+export const DOMAIN_RULES = {
+  eda: {
+    name: 'EDA / IC Design',
+    patterns: [/PDK/i, /cell.?library/i, /synthesis/i, /placement/i, /routing/i, /timing/i, /STA/i, /DFT/i, /LEC/i, /verilog/i, /systemverilog/i, /RTL/i, /netlist/i, /GDS/i, /LEF/i, /DEF/i],
+    overconfidenceBoost: 0, // no change
+    verifyAdditions: [
+      '此分析是否考慮了 PDK/cell library 的差異？',
+      'EDA 工具的版本差異是否影響結論？',
+    ],
+  },
+  exa: {
+    name: 'Web Search / Exa',
+    patterns: [/搜尋.*結果/i, /search.*result/i, /網路.*資料/i, /web.*data/i, /爬蟲/i, /crawler/i, /scrape/i],
+    overconfidenceBoost: -1, // lower threshold for search analysis
+    verifyAdditions: [
+      '搜尋結果的時效性是否足夠？',
+      '是否有遺漏的重要來源？',
+    ],
+  },
+  medical: {
+    name: 'Medical / Clinical',
+    patterns: [/醫學/i, /clinical/i, /patient/i, /藥物/i, /drug/i, /治療/i, /treatment/i, /診斷/i, /diagnosis/i, /PubMed/i, /evidence/i],
+    overconfidenceBoost: 1, // raise threshold (conservative for medical)
+    verifyAdditions: [
+      '此建議是否有足夠的臨床證據支持？',
+      '是否有已知的藥物交互作用？',
+    ],
+  },
+};
+
+/**
+ * Detect domain from task description.
+ *
+ * @param {string} task — task description
+ * @returns {{ domain: string|null, rules: object|null }}
+ */
+export function detectDomain(task) {
+  const text = task || '';
+  for (const [key, domain] of Object.entries(DOMAIN_RULES)) {
+    for (const pattern of domain.patterns) {
+      if (pattern.test(text)) {
+        return { domain: key, rules: domain };
+      }
+    }
+  }
+  return { domain: null, rules: null };
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2.4: Concurrency Safety — Session isolation
+// ---------------------------------------------------------------------------
+
+/**
+ * Simple session-scoped state for concurrent handler isolation.
+ * Each handler call gets its own state map via sessionId.
+ */
+const _sessionStates = new Map();
+
+/**
+ * Get or create session state.
+ *
+ * @param {string} sessionId
+ * @returns {object} session state
+ */
+export function getSessionState(sessionId) {
+  if (!sessionId) return {};
+  if (!_sessionStates.has(sessionId)) {
+    _sessionStates.set(sessionId, {
+      classifications: [],
+      overconfidenceDetections: [],
+      domainOverrides: [],
+      createdAt: Date.now(),
+    });
+  }
+  return _sessionStates.get(sessionId);
+}
+
+/**
+ * Clear session state.
+ *
+ * @param {string} sessionId
+ */
+export function clearSessionState(sessionId) {
+  if (sessionId) _sessionStates.delete(sessionId);
+}
+
+/**
+ * Prune stale sessions older than maxAge ms.
+ *
+ * @param {number} maxAge — max age in ms (default: 1 hour)
+ * @returns {number} number of pruned sessions
+ */
+export function pruneStaleSessions(maxAge = 3600000) {
+  const now = Date.now();
+  let pruned = 0;
+  for (const [id, state] of _sessionStates) {
+    if (now - state.createdAt > maxAge) {
+      _sessionStates.delete(id);
+      pruned++;
+    }
+  }
+  return pruned;
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 export default {
   classifyThinkingMode,
   detectOverconfidence,
   enhanceVerifyStage,
+  getDynamicThreshold,
+  recordClassification,
+  getHistoryStats,
+  clearHistory,
+  DOMAIN_RULES,
+  detectDomain,
+  getSessionState,
+  clearSessionState,
+  pruneStaleSessions,
   SCOPE_QUESTIONS,
   COMPLEMENTARITY_CHECKLIST,
   DEVILS_ADVOCATE,

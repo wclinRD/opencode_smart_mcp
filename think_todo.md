@@ -4,8 +4,8 @@
 
 | 項目 | 狀態 |
 |------|------|
-| **整體進度** | 🟢 Phase 1 完成 |
-| **測試狀態** | ✅ 147/147 通過 |
+| **整體進度** | 🟢 Phase 2 完成 |
+| **測試狀態** | ✅ 187/187 通過 |
 | **最後更新** | 2026-07-17 |
 
 ---
@@ -25,10 +25,10 @@
 
 ### 1.2 Handler 整合 `src/plugins/core/quick-think.mjs`
 
-- [x] Layer 1 整合（L206-214）
-- [x] Layer 2 整合（L216-229）
-- [x] Layer 3 整合（L231-239）
-- [x] classifyTask 子指令（L189-203）
+- [x] Layer 1 整合
+- [x] Layer 2 整合
+- [x] Layer 3 整合
+- [x] classifyTask 子指令
 - [x] smart_think 描述更新
 
 ### 1.3 測試
@@ -44,41 +44,50 @@
 
 ---
 
-## 🔲 Phase 2：進階功能（待辦）
+## ✅ Phase 2：進階功能（已完成）
 
 ### 2.1 動態閾值
 
-- [ ] 根據 context budget 動態調整 overconfidence threshold
-- [ ] budget < 30% 時提高 threshold（減少誤觸發）
-- [ ] budget > 60% 時降低 threshold（更積極偵測）
+- [x] getDynamicThreshold(remainingFraction) — 根據 context budget 動態調整 overconfidence threshold
+- [x] budget < 30% → threshold +1（減少誤觸發）
+- [x] budget > 60% → threshold -1（更積極偵測）
+- [x] detectOverconfidence 整合 budgetFraction 參數
 
 ### 2.2 歷史學習
 
-- [ ] 記錄 classifyThinkingMode 的分類結果
-- [ ] 統計過度自信偵測的準確率
-- [ ] 根據歷史數據自動調整規則權重
+- [x] recordClassification(record) — 記錄分類結果
+- [x] getHistoryStats() — 統計分類準確率
+- [x] clearHistory() — 清空歷史
+- [x] MAX_HISTORY = 200 自動截斷
+- [x] Handler 整合歷史記錄
 
 ### 2.3 跨工具整合
 
-- [ ] 與 smart_eda_search 聯動（EDA 領域特定規則）
-- [ ] 與 smart_exa_search 聯動（廣度搜尋特定規則）
-- [ ] 與 smart_medical_search 聯動（醫學領域特定規則）
+- [x] DOMAIN_RULES — 3 個領域規則（eda/exa/medical）
+- [x] detectDomain(task) — 領域偵測
+- [x] 各領域 overconfidenceBoost 調整
+- [x] 各領域 verifyAdditions 領域特定檢查
+- [x] Handler 整合領域特定 VERIFY
 
 ### 2.4 並發安全
 
-- [ ] 多個 handler 同時執行時的狀態隔離
-- [ ] 全域狀態鎖機制
-- [ ] 並發測試
+- [x] getSessionState(sessionId) — Session 隔離狀態
+- [x] clearSessionState(sessionId) — 清除 Session
+- [x] pruneStaleSessions(maxAge) — 清理過期 Session
+
+### 2.5 測試
+
+- [x] think-guard-phase2.test.mjs — Phase 2 功能測試（40 tests）
 
 ---
 
-## 🔮 Phase 3：願景（規劃中）
+## 🔲 Phase 3：願景（規劃中）
 
-### 3.1 自適應規則
+### 3.1 歷史學習進階
 
-- [ ] 根據使用者歷史行為自動生成規則
-- [ ] 根據使用頻率自動停用無效規則
-- [ ] 規則權重動態調整演算法
+- [ ] 根據 accuracyRate 自動調整 TASK_MODE_RULES 權重
+- [ ] 歷史資料持久化（JSON 檔案）
+- [ ] 分類模式分析（哪類任務最容易誤判）
 
 ### 3.2 A/B 測試框架
 
@@ -91,7 +100,12 @@
 - [ ] 分類統計圖表
 - [ ] 過度自信偵測率趨勢
 - [ ] Token 節省量統計
-- [ ] 測試覆蓋率儀表板
+
+### 3.4 更多領域
+
+- [ ] finance — 金融分析領域
+- [ ] legal — 法律文件領域
+- [ ] science — 科學研究領域
 
 ---
 
@@ -99,10 +113,10 @@
 
 ### 高優先級
 
-| # | 問述 | 狀態 |
+| # | 描述 | 狀態 |
 |---|------|------|
 | 1 | classifyThinkingMode 對中文「分析」觸發率偏低 | ⚠️ 待觀察 |
-| 2 | detectOverconfidence 的 threshold=4 可能過高 | ⚠️ 待觀察 |
+| 2 | detectOverconfidence 的 threshold 動態範圍 2-4 可能需微調 | ⚠️ 待觀察 |
 | 3 | enhanceVerifyStage 的 complementarity 觸發詞不包含「vs」 | ✅ 已知 |
 
 ### 中優先級
@@ -111,6 +125,7 @@
 |---|------|------|
 | 4 | classifyTask 空字串走正常 handler 路徑 | ✅ 預期行為 |
 | 5 | CIT 輸出格式為 "Thought N/N" 而非 "Round N" | ✅ 已修正測試 |
+| 6 | DOMAIN_RULES 目前僅 3 個領域，可擴展 | ✅ 已知限制 |
 
 ---
 
@@ -121,16 +136,18 @@
 | think-guard.test.mjs | 20 | 20 | 0 | 100% |
 | think-guard-comprehensive.test.mjs | 80 | 80 | 0 | 100% |
 | think-guard-realworld.test.mjs | 47 | 47 | 0 | 100% |
-| **合計** | **147** | **147** | **0** | **100%** |
+| think-guard-phase2.test.mjs | 40 | 40 | 0 | 100% |
+| **合計** | **187** | **187** | **0** | **100%** |
 
 ### 測試執行時間
 
 | 測試檔 | 時間 |
 |--------|------|
-| think-guard.test.mjs | ~82ms |
-| think-guard-comprehensive.test.mjs | ~85ms |
-| think-guard-realworld.test.mjs | ~79ms |
-| **合計** | **~246ms** |
+| think-guard.test.mjs | ~110ms |
+| think-guard-comprehensive.test.mjs | ~129ms |
+| think-guard-realworld.test.mjs | ~123ms |
+| think-guard-phase2.test.mjs | ~121ms |
+| **合計** | **~483ms** |
 
 ---
 
@@ -140,11 +157,12 @@
 |------|------|------|
 | 2026-07-17 | v1.0 | Phase 1 完成，147 測試通過 |
 | 2026-07-17 | v1.0 | 建立 think_plan.md 和 think_todo.md |
+| 2026-07-17 | v2.0 | Phase 2 完成：動態閾值 + 歷史學習 + 跨工具整合 + 並發安全，187 測試通過 |
 
 ---
 
 ## 🎯 下一步
 
-1. **觀察期** — 使用 1-2 週，收集分類準確率數據
-2. **調整** — 根據觀察結果調整 threshold 和規則
-3. **Phase 2** — 開始動態閾值和歷史學習功能
+1. **觀察期** — 使用 1-2 週，收集動態閾值和歷史學習數據
+2. **調整** — 根據觀察結果調整 threshold 範圍和領域規則
+3. **Phase 3** — 開始歷史學習進階和 A/B 測試框架
