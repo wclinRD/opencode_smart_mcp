@@ -278,7 +278,53 @@ MVP 階段支援 SKY130 的 basic cell library mapping：
 
 ---
 
-## 7. 部署考量
+## 7. slang v11 AST 整合策略
+
+> **研究日期**：2026-07-17  |  **slang 版本**：v11.0.0  |  **安裝位置**：`~/bin/slang`
+
+### 7.1 研究發現
+
+slang v11 `--ast-json` 產出的 AST 格式與預期不同：
+
+| 預期格式 | 實際格式 |
+|----------|----------|
+| `{ modules: [...] }` | `{ design: { members: [...] } }` |
+| flat module list | nested elaborated instance tree |
+
+**實際 AST 結構**：
+
+```
+design.members[4]  ← top Instance (ModuleInstance)
+  ├── body.members
+  │   ├── Port { name, type: "logic[3:0]", direction: "input", kind: "Port" }
+  │   ├── Net  { name, type: "logic", kind: "Net" }
+  │   ├── Instance (子 module)
+  │   │   ├── body.members  ← recurse: Port, Net, Instance, Assign...
+  │   │   └── connections [ { port: "clk", expression: ... } ]
+  │   └── ContinuousAssign / ProceduralBlock...
+  └── (完整 elaboration tree)
+```
+
+### 7.2 slang vs Regex 比較
+
+| 面向 | Regex Fallback | slang v11 AST |
+|------|---------------|---------------|
+| Module 定義 | ✅ | ✅ |
+| Port name + direction | ✅ | ✅ + **完整 type（bit width）** |
+| Port connection mapping | ❌ 無法可靠提取 | ✅ **完整 .port(signal)**，含 range select |
+| Wire/reg 宣告 | ❌ 無法提取 | ✅ **所有 signal 宣告 + type** |
+| Assign/always 邏輯 | ❌ 完全無法 | ✅ **完整 AST**（BinaryOp, Conditional, ForLoop...） |
+| 跨 module signal trace | ❌ 無法 | ✅ 可追蹤 signal 從 top 到 leaf |
+| Type checking | ❌ 無法 | ✅ 每個 expression 都有 type |
+
+### 7.3 整合建議
+
+- **Phase 1.5**：重寫 `buildFromSlang()`，支援 v11 nested AST 結構
+- Phase 1 MVP 使用 regex fallback 已足夠，slang 整合是 Phase 2 signal graph 的基礎
+
+---
+
+## 8. 部署考量
 
 ### slang binary
 

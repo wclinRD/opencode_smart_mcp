@@ -64,31 +64,257 @@ export function buildGraph(parserOutput, parser = 'regex-fallback') {
   return buildFromRegex(parserOutput);
 }
 
-// ── slang JSON → DesignGraph ──────────────────────────────────────────────
+// ── slang v11 JSON → DesignGraph ─────────────────────────────────────────
+//
+// slang v11 AST 結構：
+//   design.members[] → CompilationUnit | Instance (top)
+//   Instance.body.members[] → Port | Net | Variable | Instance | ...
+//   Instance.connections[] → { port: Port, expr: Expression } (child instances)
+//
+// 關鍵：connections 只出現在 child instance，top Instance 沒有
 
 function buildFromSlang(json) {
   const modules = new Map();
   const parentMap = new Map();
 
-  // slang --json output 格式：{ design: { top: [...], modules: [...] } }
-  // 實際格式可能不同，需要根據 slang 版本調整
   const design = json.design || json;
+  const members = design.members || [];
 
-  // 如果 slang 輸出是 flat module list
+  // 找 top Instance (kind === 'Instance' 在 design.members 裡)
+  const topInstance = members.find(m => m.kind === 'Instance');
+  if (!topInstance) {
+    // fallback: 如果找不到 Instance，嘗試 flat module list
+    return buildFromSlangFlat(json);
+  }
+
+  // 從 top Instance recursive 建構 module tree
+  traverseInstance(topInstance, null, modules, parentMap);
+
+  // 建構 topModules
+  const allModuleNames = new Set(modules.keys());
+  const instantiated = new Set();
+  for (const [, mod] of modules) {
+    for (const inst of mod.instances) {
+      instantiated.add(inst.module);
+    }
+  }
+
+  const topModules = [...allModuleNames].filter(n => !instantiated.has(n));
+
+  // 標記 isTop
+  for (const name of topModules) {
+    const mod = modules.get(name);
+    if (mod) mod.isTop = true;
+  }
+
+  return {
+    modules,
+    topModules,
+    parentMap,
+    stats: computeStats(modules),
+  };
+}
+
+// recursive traverse Instance tree
+function traverseInstance(instanceNode, parentModuleName, modules, parentMap) {
+  const instanceName = instanceNode.name || 'unknown';
+  const body = instanceNode.body || {};
+  const bodyMembers = body.members || [];
+
+  // 取得 module name (from body.name)
+  const moduleName = body.name || instanceName;
+
+  // 如果 module 已經建構過，跳過（避免重複）
+  if (modules.has(moduleName)) {
+    // 但還是要記錄 parentMap
+    if (parentModuleName) {
+      if (!parentMap.has(moduleName)) parentMap.set(moduleName, []);
+      if (!parentMap.get(moduleName).includes(parentModuleName)) {
+        parentMap.get(moduleName).push(parentModuleName);
+      }
+    }
+    return;
+  }
+
+  // 從 body members 提取 ports, signals, child instances
+  const ports = [];
+  const signals = [];
+  const childInstances = [];
+
+  for (const member of bodyMembers) {
+    if (member.kind === 'Port') {
+      ports.push(extractPort(member));
+    } else if (member.kind === 'Net' || member.kind === 'Variable') {
+      signals.push(extractSignal(member));
+    } else if (member.kind === 'Instance') {
+      childInstances.push(member);
+    }
+  }
+
+  // 從 connections 提取 portMap (child instances 的 port mapping)
+  // connections 在 Instance 級別，不在 body 裡
+  const instanceConnections = instanceNode.connections || [];
+  const portMap = extractPortMap(instanceConnections);
+
+  // 建構 module info
+  const modInfo = {
+    name: moduleName,
+    file: body.file || 'unknown',
+    line: body.startLine || 0,
+    ports,
+    signals,
+    instances: [], // 稍後填入
+    portMap,       // top-level port mapping (如果有)
+    isTop: false,
+  };
+
+  modules.set(moduleName, modInfo);
+
+  // 記錄 parentMap
+  if (parentModuleName) {
+    if (!parentMap.has(moduleName)) parentMap.set(moduleName, []);
+    if (!parentMap.get(moduleName).includes(parentModuleName)) {
+      parentMap.get(moduleName).push(parentModuleName);
+    }
+  }
+
+  // recursive traverse child instances
+  for (const childInst of childInstances) {
+    const childModuleName = childInst.body?.name || childInst.name || 'unknown';
+
+    // 記錄 instance info
+    modInfo.instances.push({
+      name: childInst.name || 'unknown',
+      module: childModuleName,
+      line: childInst.body?.startLine || 0,
+      portMap: extractPortMap(childInst.connections || []),
+    });
+
+    // recursive
+    traverseInstance(childInst, moduleName, modules, parentMap);
+  }
+}
+
+// 提取 Port info
+function extractPort(portNode) {
+  const typeStr = portNode.type || '';
+  const { width, bus } = parseTypeWidth(typeStr);
+
+  return {
+    name: portNode.name || 'unknown',
+    direction: normalizeDirection(portNode.direction || 'unknown'),
+    width,
+    bus,
+    type: typeStr,
+  };
+}
+
+// 提取 Signal (Net/Variable) info
+function extractSignal(signalNode) {
+  const typeStr = signalNode.type || signalNode.netType?.type || '';
+  const { width, bus } = parseTypeWidth(typeStr);
+
+  return {
+    name: signalNode.name || 'unknown',
+    type: typeStr,
+    kind: signalNode.kind, // 'Net' or 'Variable'
+    width,
+    bus,
+  };
+}
+
+// 從 connections 陣列提取 portMap
+function extractPortMap(connections) {
+  const portMap = {};
+  for (const conn of connections) {
+    const portName = conn.port?.name;
+    if (!portName) continue;
+
+    const expr = conn.expr;
+    if (!expr) {
+      portMap[portName] = '(unconnected)';
+      continue;
+    }
+
+    // 根據 expression 類型提取連接的 signal
+    portMap[portName] = extractExpressionString(expr);
+  }
+  return portMap;
+}
+
+// 從 Expression 提取可讀字串
+function extractExpressionString(expr) {
+  if (!expr) return '(empty)';
+
+  switch (expr.kind) {
+    case 'NamedValue': {
+      // 直接連接到某個 signal
+      const sym = expr.symbol || '';
+      // symbol 格式: "6072364897304 reg_rdata1" → 取後半
+      const parts = sym.split(' ');
+      return parts.length > 1 ? parts[1] : sym;
+    }
+    case 'RangeSelect': {
+      // instr[14:11] 格式
+      const base = extractExpressionString(expr.value);
+      const left = expr.left?.constant || expr.left?.value || '?';
+      const right = expr.right?.constant || expr.right?.value || '?';
+      return `${base}[${left}:${right}]`;
+    }
+    case 'Assignment': {
+      // output port: .result(alu_result)
+      const left = extractExpressionString(expr.left);
+      return left;
+    }
+    case 'Conversion': {
+      return extractExpressionString(expr.operand);
+    }
+    case 'IntegerLiteral': {
+      return expr.constant || expr.value || '?';
+    }
+    case 'Concatenation': {
+      const elems = (expr.operands || []).map(extractExpressionString);
+      return `{${elems.join(', ')}}`;
+    }
+    default:
+      return `(${expr.kind})`;
+  }
+}
+
+// 從 type 字串解析 width
+function parseTypeWidth(typeStr) {
+  if (!typeStr) return { width: 1, bus: null };
+
+  // match "logic[31:0]" or "reg[4:0]" etc.
+  const m = typeStr.match(/\[(\d+):(\d+)\]/);
+  if (m) {
+    const msb = parseInt(m[1]);
+    const lsb = parseInt(m[2]);
+    return { width: msb - lsb + 1, bus: `[${msb}:${lsb}]` };
+  }
+
+  return { width: 1, bus: null };
+}
+
+// fallback: flat module list (for older slang versions)
+function buildFromSlangFlat(json) {
+  const modules = new Map();
+  const parentMap = new Map();
+
+  const design = json.design || json;
   if (Array.isArray(design)) {
     for (const mod of design) {
       if (mod.type !== 'module' && mod.kind !== 'module') continue;
-      const info = convertSlangModule(mod);
+      const info = convertSlangModuleLegacy(mod);
       modules.set(info.name, info);
     }
   } else if (design.modules) {
     for (const mod of design.modules) {
-      const info = convertSlangModule(mod);
+      const info = convertSlangModuleLegacy(mod);
       modules.set(info.name, info);
     }
   }
 
-  // 建構 parentMap + 找 top
   const allModuleNames = new Set(modules.keys());
   const instantiated = new Set();
   for (const [, mod] of modules) {
@@ -109,7 +335,7 @@ function buildFromSlang(json) {
   };
 }
 
-function convertSlangModule(mod) {
+function convertSlangModuleLegacy(mod) {
   const name = mod.name || mod.moduleName || 'unknown';
   const file = mod.file || mod.sourceFile || 'unknown';
   const line = mod.line || mod.startLine || 0;
@@ -122,7 +348,7 @@ function convertSlangModule(mod) {
     type: p.type || p.dataType || null,
   }));
 
-  const instances = (mod.instances || mod.instances || []).map(inst => ({
+  const instances = (mod.instances || []).map(inst => ({
     name: inst.name || inst.instanceName || 'unknown',
     module: inst.module || inst.moduleName || inst.type || 'unknown',
     line: inst.line || inst.startLine || 0,
@@ -302,6 +528,11 @@ function computeMaxDepth(graph, startModule, depth = 0, visited = new Set()) {
 
 function normalizeDirection(dir) {
   const d = String(dir).toLowerCase();
+  // slang v11 uses 'In'/'Out'/'InOut' (capitalized)
+  if (d === 'in' || d === 'input') return 'input';
+  if (d === 'out' || d === 'output') return 'output';
+  if (d === 'inout') return 'inout';
+  // fallback: check contains
   if (d.includes('input') && !d.includes('output')) return 'input';
   if (d.includes('output')) return 'output';
   if (d.includes('inout')) return 'inout';

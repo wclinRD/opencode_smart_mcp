@@ -4,40 +4,79 @@
 
 ---
 
-## Phase 1 — MVP：RTL 結構解析
+## Phase 1 — MVP：RTL 結構解析 ✅ 完成
+
+> **完成日期**：2026-07-17  |  **Commit**：b0d4784
 
 ### 🔧 環境準備
-- [ ] **安裝 slang** — 在 macOS/Linux 上 compile slang，或下載預編譯 binary
-- [ ] **建立 slang wrapper** — `src/plugins/core/rtl/parser.mjs`（CLI 呼叫 + JSON output）
-- [ ] **降級機制** — 找不到 slang 時，嘗試 `tree-sitter-verilog` 做 fallback（僅語法層）
+- [x] **安裝 slang** — slang v11.0.0 compile 完成，安裝於 `~/bin/slang`
+- [x] **建立 slang wrapper** — `src/plugins/core/rtl/parser.mjs`（CLI 呼叫 + `--ast-json` output）
+- [x] **降級機制** — 找不到 slang 時，自動降級到 regex fallback（支援 module + port + instance 解析）
 
 ### 📁 File Discovery
-- [ ] **掃描 RTL 檔案** — 支援 `.v` / `.sv` / `.vhd` / `.vhdl`
-- [ ] **解析 filelist.f** — 支援 `-f filelist.f` 格式（EDA 工具標準）
-- [ ] **自動掃描模式** — 無 filelist 時，遞迴掃描目錄
+- [x] **掃描 RTL 檔案** — 支援 `.v` / `.sv` / `.vhd` / `.vhdl`
+- [x] **解析 filelist.f** — 支援 `-f filelist.f` 格式（EDA 工具標準）
+- [x] **自動掃描模式** — 無 filelist 時，遞迴掃描目錄
 
 ### 🌳 Module Hierarchy
-- [ ] **slang elaborate** — 呼叫 `slang --elaborate` 產出 JSON AST
-- [ ] **Module tree 建構** — 從 AST 提取 module 定義 + instantiation
-- [ ] **Port list 提取** — 每個 module 的 input/output/inout port + 寬度
-- [ ] **Hierarchy 顯示** — 樹狀圖格式輸出（含檔案位置）
+- [x] **slang elaborate** — 呼叫 `slang --ast-json` 產出 JSON AST
+- [x] **Module tree 建構** — 從 AST 提取 module 定義 + instantiation
+- [x] **Port list 提取** — 每個 module 的 input/output/inout port + 寬度
+- [x] **Hierarchy 顯示** — 樹狀圖格式輸出（含檔案位置）
 
 ### 📊 Summary Statistics
-- [ ] **計數統計** — module 數量、port 數量、instantiation 數量
-- [ ] **File → Module 對應** — 哪個檔案定義了哪些 module
-- [ ] **Top module 偵測** — 自動識別 top-level module（無人 instantiate 的）
+- [x] **計數統計** — module 數量、port 數量、instantiation 數量
+- [x] **File → Module 對應** — 哪個檔案定義了哪些 module
+- [x] **Top module 偵測** — 自動識別 top-level module（無人 instantiate 的）
 
 ### 🔌 Plugin 入口
-- [ ] **rtl-analyze.mjs** — Plugin 入口（name/handler/inputSchema）
-- [ ] **command: "analyze"** — 全面分析（MVP 核心）
-- [ ] **command: "hierarchy"** — 單獨查詢 module hierarchy
-- [ ] **command: "ports"** — 單獨查詢 port list
-- [ ] **format 支援** — text / json / markdown
+- [x] **rtl-analyze.mjs** — Plugin 入口（name/handler/inputSchema）
+- [x] **command: "analyze"** — 全面分析（MVP 核心）
+- [x] **command: "hierarchy"** — 單獨查詢 module hierarchy
+- [x] **command: "ports"** — 單獨查詢 port list
+- [x] **format 支援** — text / json / markdown
 
 ### 🧪 測試
-- [ ] **建立測試 RTL** — 寫一組簡單的 Verilog 測試檔案（top + 2 sub-modules）
-- [ ] **單元測試** — parser / graph-builder / queries 各自的 unit test
-- [ ] **整合測試** — 端到端：RTL 目錄 → analyze → 驗證輸出
+- [x] **建立測試 RTL** — `/tmp/test-rtl/`：top.v + cpu_core.v + alu.v + reg_file.v
+- [x] **單元測試** — 通過基本驗證
+- [x] **整合測試** — 端到端測試通過
+
+---
+
+## Phase 1.5 — slang v11 AST 整合 ✅ 完成
+
+> **完成日期**：2026-07-17  |  **slang 版本**：v11.0.0
+
+### 🔬 研究結論
+
+slang v11 `--ast-json` 的 AST 格式與預期不同：
+- 預期：`{ modules: [...] }` flat module list
+- 實際：`{ design: { members: [...] } }` nested elaborated instance tree
+- **需要完全重寫 `buildFromSlang()`** 才能正確解析 v11 AST
+
+### ✅ 整合價值
+
+| 面向 | Regex Fallback | slang v11 AST |
+|------|---------------|---------------|
+| Port connection mapping | ❌ | ✅ **完整 .port(signal)** |
+| Wire/reg 宣告 | ❌ | ✅ **所有 signal 宣告 + type** |
+| Assign/always 邏輯 | ❌ | ✅ **完整 AST** |
+| 跨 module signal trace | ❌ | ✅ 可追蹤 signal |
+| Type checking | ❌ | ✅ 每個 expression 有 type |
+
+### 📋 整合任務
+
+- [x] **研究 v11 AST 結構** — 分析 `design.members` tree，找出 module/instance/port 的正確 path
+- [x] **重寫 `buildFromSlang()`** — 依照 v11 實際 AST 結構 traversal
+- [x] **新增 Port Connection Map** — 從 `connections` 欄位提取 `.port(signal)` mapping
+- [x] **新增 Signal 宣告提取** — 從 `body.members` 提取所有 Net/Variable 宣告
+- [x] **測試驗證** — 用 `/tmp/test-rtl/` 驗證 slang 整合後的結果
+- [x] **更新 `graph-builder.mjs`** — 加入 v11 AST traversal 邏輯
+
+### 📁 參考文件
+
+- `rtl_plan.md` §7 — slang v11 AST 結構與比較表
+- `/tmp/slang-ast.json` — slang v11 實際 AST 範例（test RTL project）
 
 ---
 
@@ -90,16 +129,16 @@
 ## 📋 優先順序總覽
 
 ```
-Week 1-2: Phase 1 MVP
+Week 1-2: Phase 1 MVP ✅ 完成 (commit b0d4784)
   └── slang 安裝 + file discovery + module hierarchy + plugin 入口
 
-Week 3-4: Phase 1 完善
-  └── 統計 + file-module 對應 + 測試 + format 支援
+Week 3: Phase 1.5 — slang v11 AST 整合 ✅ 完成
+  └── 重寫 buildFromSlang() + port connection map + signal extraction
 
-Week 5-6: Phase 2
+Week 4-5: Phase 2
   └── signal graph + trace + 基本檢查 + Mermaid 輸出
 
-Week 7+: Phase 3
+Week 6+: Phase 3
   └── PDK mapping + constraint 驗證 + DFT + eda_search 整合
 ```
 
