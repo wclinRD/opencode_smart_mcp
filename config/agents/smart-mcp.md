@@ -76,8 +76,8 @@ permission:
 | `smart_decompose({goal, subtasks, currentSubtaskId, thought, nextNeeded})` | 🆕 小模型專用推理 scaffold。強制任務分解 + 工具引導 + 循環檢測。模型是 3-5B 且需多步驟時使用 |
 | `smart_decompose_think({goal, subtasks, ...})` | 🆕 小模型 think↔tool 迴圈（FR-CoT + budget auto-detect + XML parsing） |
 | `smart_deep_think({topic, template})` | 慢想深度分析（10 模板含 peer_review） |
-| `smart_security({scan})` | 安全掃描 |
-| `smart_test({root})` | 測試執行 |
+| `smart_security({scan?, failOn?})` | 🥇 安全掃描（`.env` 洩漏偵測）。`failOn:"high"` 阻擋提交 |
+| `smart_test({root?, coverage?, related?, grep?})` | 🥇 測試執行。`coverage:true` / `related:"src/x.ts"` / `grep:"name"` |
 | `smart_fast_apply({file, content\|search, replace\|sed, file, sed})` | 🥇 統一編輯（10 格式，6 級 fuzzy → structural → diff-match-patch → conflict，validate+auto-retry，atomic multi-file，dry-run 安全） |
 | `smart_edit_chain({chain, apply?, atomic?})` | 🥇 批次編輯鏈（1 次呼叫 = N 編輯，自動偵測格式，共享檔案讀取，原子 rollback，節省 40-60% token） |
 | `smart_context({command})` | Session 管理 + budget 查詢 |
@@ -89,7 +89,7 @@ permission:
 | `smart_exa_search({command, query, numResults?})` | 🥇 網路搜尋（取代 websearch/webfetch） |
 | `smart_exa_crawl({urls, clean?, markdown?, chunk?})` | 🥇 網頁爬取 |
 | `smart_github_search({query, repo?, language?})` | 🥇 GitHub 程式碼搜尋 |
-| `smart_glob({pattern, path?})` | 🥇 檔案 glob 搜尋（rg 底層，上限 100 筆） |
+| `smart_glob({pattern, path?, depth?, maxFiles?, exclude?, type?, sort?})` | 🥇 檔案 glob（rg 底層）。`depth`/`exclude`/`type`/`sort` 參數 |
 | `smart_medical_search({question, action?, query?, maxResults?, dateFrom?, dateTo?})` | 🥇 免費醫學文獻與臨床證據查詢 + 藥典（9 來源，免 API 金鑰）。12 種 action：auto/ask（自動降級）、oe/openevidence（臨床問答）、search/pubmed（文獻搜尋）、openalex/academic（學術搜尋）、scholar/semantic（TLDR 摘要）、abstract（摘要閱讀）、oa-check/oa（OA 連結查詢）、fulltext/pmc（全文閱讀）、all/comprehensive（多源去重）、drug/dailymed（FDA 藥品仿單）、fda/openfda（FDA 標籤+不良反應）、interact/rxnorm（藥品交互作用） |
 | `smart_eda_search({question, action?, query?, maxResults?})` | 🥇 EDA 領域智慧知識引擎。IC design、cell-based flow、EDA tool、PDK、學術論文查詢。55+ 工具索引（含 30+ 商業工具）、11 個 cell flow stages。**多源並行廣搜**：DuckDuckGo 網路搜尋 + EDA 社群（Cadence Community/SolvNet/Reddit/EE Times/EDAboard）+ Semantic Scholar + OpenAlex + GitHub code/repo + Exa（可選）。18 種 action：auto（自動判斷→多源並行）、pdk（PDK/cell library）、paper（學術論文）、tool（EDA 工具）、github（GitHub 專案）、code（程式碼）、all/comprehensive（全源並行）、list-tools/pdk/conferences、flow（cell flow stages）、dft、lec、eco、fpga、troubleshoot（FAQ+廠商URL）、docs（工具文件）。💡 auto 結果不足時，自動提示可用 `smart_exa_search` 做更深入搜尋 |
 | `smart_rtl_analyze({command, file?})` | 🥇 RTL（Register Transfer Level）程式碼分析引擎。支援 12 種命令：analyze（設計分析）、hierarchy（層級）、ports（端口）、signals（信號）、trace（追蹤）、check（檢查）、lint（規則）、cdc（時鐘域交叉）、rules（lint 規則）、synth（綜合）、list（模組列表）、parsers（解析器）。用於 Verilog/VHDL 程式碼理解與分析 |

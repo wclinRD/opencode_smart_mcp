@@ -22,13 +22,39 @@
 
 import { readFileSync, statSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { resolve, relative, extname } from 'node:path';
+import { resolve, relative, extname, basename } from 'node:path';
 import { COLORS, useColor, globToRegex, matchGlob, findFiles } from '../lib/utils.mjs';
 
 // ---------------------------------------------------------------------------
 // Security patterns
 // ---------------------------------------------------------------------------
+// .env file patterns — scan for secrets in environment files
+const ENV_FILE_PATTERNS = [
+  // Common .env variable patterns with high-entropy values
+  { re: /^(?:[\w_]+)=(['"])[^\s'"]{8,}\1\s*$/gm, severity: 'medium', label: 'Env Variable (potential secret)' },
+  // API keys in .env
+  { re: /^(?:API[_-]?KEY|SECRET[_-]?KEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY)=['"]?[^\s'"]{8,}/gmi, severity: 'high', label: 'API Key in .env' },
+  // Database credentials
+  { re: /^(?:DB[_-]?(?:PASSWORD|PASSWD|SECRET)|DATABASE[_-]?(?:PASSWORD|SECRET))=['"]?[^\s'"]{8,}/gmi, severity: 'high', label: 'Database Password in .env' },
+  // OAuth tokens
+  { re: /^(?:OAUTH[_-]?(?:TOKEN|SECRET)|CLIENT[_-]?(?:SECRET|TOKEN))=['"]?[^\s'"]{8,}/gmi, severity: 'high', label: 'OAuth Secret in .env' },
+  // AWS credentials in .env
+  { re: /^AWS[_-]?(?:ACCESS[_-]?KEY[_-]?ID|SECRET[_-]?ACCESS[_-]?KEY)=['"]?[^\s'"]{8,}/gmi, severity: 'high', label: 'AWS Credential in .env' },
+  // Stripe keys in .env
+  { re: /^(?:STRIPE[_-]?(?:SECRET|PUBLIC)[-_]?KEY|STRIPE[_-]?API[_-]?KEY)=['"]?[^\s'"]{8,}/gmi, severity: 'high', label: 'Stripe Key in .env' },
+  // JWT/Token secrets
+  { re: /^(?:JWT[_-]?(?:SECRET|TOKEN)|SESSION[_-]?(?:SECRET|KEY))=['"]?[^\s'"]{8,}/gmi, severity: 'high', label: 'JWT/Session Secret in .env' },
+  // SMTP credentials
+  { re: /^(?:SMTP[_-]?(?:PASSWORD|PASSWD)|MAIL[_-]?(?:PASSWORD|SECRET))=['"]?[^\s'"]{8,}/gmi, severity: 'high', label: 'SMTP Password in .env' },
+  // Private keys in .env
+  { re: /^(?:PRIVATE[_-]?KEY|SIGNING[_-]?KEY)=['"]?[^\s'"]{20,}/gmi, severity: 'high', label: 'Private Key in .env' },
+];
+
 const CREDENTIAL_PATTERNS = [
+  // .env file detection (check filename first, then patterns)
+  // NOTE: .env file scanning is handled separately in scanFile() for better performance
+  
+  // Generic credential patterns
   { re: /(?:['"`]?(?:api[_-]?key|apikey|api_key)['"`]?\s*[:=]\s*['"`][^'"`\s]{8,})/gi, severity: 'high', label: 'API Key' },
   { re: /(?:['"`]?(?:secret|token|password|passwd)['"`]?\s*[:=]\s*['"`][^'"`\s]{8,})/gi, severity: 'high', label: 'Secret/Token/Password' },
   { re: /(?:['"`]?(?:access[_-]?key|access_key|secret[_-]?key|secret_key)['"`]?\s*[:=]\s*['"`][^'"`\s]{8,})/gi, severity: 'high', label: 'Access/Secret Key' },
@@ -228,12 +254,18 @@ function runNpmAudit(root) {
 function scanFile(filePath, patterns, content) {
   const findings = [];
   const ext = extname(filePath).toLowerCase();
+  const fileName = basename(filePath).toLowerCase();
+  
   // Skip binary-like files
   if (['.png', '.jpg', '.gif', '.ico', '.woff', '.woff2', '.ttf', '.eot'].includes(ext)) return findings;
 
   const lines = content.split('\n');
 
-  for (const pattern of patterns) {
+  // Use .env-specific patterns for .env files
+  const isEnvFile = fileName.startsWith('.env') || fileName === 'env' || ext === '.env';
+  const effectivePatterns = isEnvFile ? [...ENV_FILE_PATTERNS, ...patterns] : patterns;
+
+  for (const pattern of effectivePatterns) {
     let match;
     let count = 0;
     while ((match = pattern.re.exec(content)) !== null && count < 500) {
@@ -489,7 +521,7 @@ function parseArgs() {
   }
 
   if (opts.include.length === 0) {
-    opts.include = ['**/*.{js,mjs,cjs,jsx,ts,tsx,py,rb,json,yaml,yml,env,toml,ini,cfg}'];
+    opts.include = ['**/*.{js,mjs,cjs,jsx,ts,tsx,py,rb,json,yaml,yml,toml,ini,cfg}', '**/.env*', '**/env'];
   }
   if (opts.exclude.length === 0) {
     opts.exclude = ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**', '**/*.min.*', '**/package-lock.json'];
@@ -541,7 +573,8 @@ function main() {
   const root = resolve(opts.root);
   const color = useColor(opts);
 
-  const files = findFiles(root, opts.include, opts.exclude);
+  // Find files including hidden files like .env
+  const files = findFiles(root, opts.include, opts.exclude, { skipHidden: false });
   if (files.length === 0) {
     console.log('No matching files found.');
     return;

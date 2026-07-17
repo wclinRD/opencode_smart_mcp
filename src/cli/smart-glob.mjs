@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * smart_glob — Enhanced glob tool (Phase 1: backward-compatible core)
+ * smart_glob — Enhanced glob tool (Phase 2: advanced options)
  *
  * Replaces OpenCode's built-in glob with ripgrep-backed file discovery.
  * Default behavior matches built-in glob exactly:
@@ -8,16 +8,23 @@
  *   - path (optional):   root directory
  *   - Output: absolute path list, max 100 entries
  *
+ * New options:
+ *   --depth <N>       Max directory traversal depth
+ *   --max-files <N>   Max results (default: 100)
+ *   --exclude <glob>  Exclude patterns (repeatable)
+ *   --type <ext>      Filter by file extension (comma-separated)
+ *   --sort <method>   Sort: name (default), size, mtime
+ *
  * Usage:
- *   node smart-glob.mjs <pattern> [--path <dir>] [--no-color]
+ *   node smart-glob.mjs <pattern> [--path <dir>] [--depth N] [--max-files N] [--exclude <glob>] [--type <ext>] [--sort <method>] [--no-color]
  */
 
 import { spawnSync } from 'node:child_process';
-import { resolve, normalize } from 'node:path';
-import { existsSync } from 'node:fs';
+import { resolve, normalize, extname } from 'node:path';
+import { existsSync, statSync } from 'node:fs';
 
 // ── Constants ──────────────────────────────────────────────────────────
-const MAX_RESULTS = 100;
+const DEFAULT_MAX_RESULTS = 100;
 const RG_TIMEOUT = 30_000; // 30s timeout for rg
 
 // ── Parse CLI args ─────────────────────────────────────────────────────
@@ -27,10 +34,23 @@ const flags = {};
 for (let i = 1; i < args.length; i++) {
   if (args[i] === '--path' && i + 1 < args.length) {
     flags.path = args[++i];
+  } else if (args[i] === '--depth' && i + 1 < args.length) {
+    flags.depth = parseInt(args[++i], 10);
+  } else if (args[i] === '--max-files' && i + 1 < args.length) {
+    flags.maxFiles = parseInt(args[++i], 10);
+  } else if (args[i] === '--exclude' && i + 1 < args.length) {
+    if (!flags.exclude) flags.exclude = [];
+    flags.exclude.push(args[++i]);
+  } else if (args[i] === '--type' && i + 1 < args.length) {
+    flags.type = args[++i];
+  } else if (args[i] === '--sort' && i + 1 < args.length) {
+    flags.sort = args[++i];
   } else if (args[i] === '--no-color') {
     // accepted, no-op
   }
 }
+
+const maxResults = flags.maxFiles || DEFAULT_MAX_RESULTS;
 
 // ── Validate ───────────────────────────────────────────────────────────
 if (!pattern) {
@@ -59,6 +79,27 @@ if (rgCheck.error && rgCheck.error.code === 'ENOENT') {
 // ── Build rg command ───────────────────────────────────────────────────
 // rg --files lists all non-ignored files, output order matches built-in glob
 const rgArgs = ['--files', '--glob', pattern, '--no-messages'];
+
+// Add depth limit
+if (flags.depth !== undefined && !isNaN(flags.depth)) {
+  rgArgs.push('--max-depth', String(flags.depth));
+}
+
+// Add exclude patterns
+if (flags.exclude && flags.exclude.length > 0) {
+  for (const ex of flags.exclude) {
+    rgArgs.push('--glob', `!${ex}`);
+  }
+}
+
+// Add type filter (convert extension to rg type)
+if (flags.type) {
+  const types = flags.type.split(',').map(t => t.trim().toLowerCase());
+  for (const t of types) {
+    // rg uses type names like js, py, etc.
+    rgArgs.push('--type', t);
+  }
+}
 
 // ── Execute rg ─────────────────────────────────────────────────────────
 const result = spawnSync('rg', rgArgs, {
@@ -100,11 +141,39 @@ let files = result.stdout
   .filter(Boolean)
   .map(f => normalize(resolve(cwd, f)));
 
+// ── Type extension filter (post-process for multi-extension) ───────────
+// rg --type only supports single type, so we filter here for "js,ts" etc.
+if (flags.type && flags.type.includes(',')) {
+  const extensions = flags.type.split(',').map(t => `.${t.trim().toLowerCase()}`);
+  files = files.filter(f => extensions.includes(extname(f).toLowerCase()));
+}
+
+// ── Sort if requested ──────────────────────────────────────────────────
+if (flags.sort && flags.sort !== 'name') {
+  const sortMethod = flags.sort;
+  files.sort((a, b) => {
+    try {
+      if (sortMethod === 'size') {
+        const statA = statSync(a);
+        const statB = statSync(b);
+        return statB.size - statA.size; // largest first
+      } else if (sortMethod === 'mtime') {
+        const statA = statSync(a);
+        const statB = statSync(b);
+        return statB.mtimeMs - statA.mtimeMs; // newest first
+      }
+    } catch {
+      // If stat fails, keep original order
+    }
+    return 0;
+  });
+}
+
 // ── Truncate if needed ─────────────────────────────────────────────────
 const total = files.length;
-const truncated = total > MAX_RESULTS;
+const truncated = total > maxResults;
 if (truncated) {
-  files = files.slice(0, MAX_RESULTS);
+  files = files.slice(0, maxResults);
 }
 
 // ── Output ─────────────────────────────────────────────────────────────
@@ -113,6 +182,6 @@ if (files.length === 0) {
 } else {
   process.stdout.write(files.join('\n') + '\n');
   if (truncated) {
-    process.stdout.write(`\n[Showing ${MAX_RESULTS} of ${total} results. Use offset/limit for pagination.]\n`);
+    process.stdout.write(`\n[Showing ${maxResults} of ${total} results. Use offset/limit for pagination.]\n`);
   }
 }

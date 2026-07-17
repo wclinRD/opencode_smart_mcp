@@ -1,7 +1,7 @@
 export default {
   name: 'smart_security',
   category: 'security',
-  description: 'Use when: need to scan project for credentials leaks, injection flaws, path traversal, or dependency vulnerabilities. Run before committing or before CI. Avoid when: looking for general code quality issues (use lint instead).',
+  description: 'Use when: need to scan project for credentials leaks, .env secrets, injection flaws, path traversal, or dependency vulnerabilities. Automatically scans .env files for exposed secrets. Run before committing or before CI. Avoid when: looking for general code quality issues (use lint instead).',
   responsePolicy: { maxLevel: 2 },
   responsePipeline: [
     { stage: 'format' },
