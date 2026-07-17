@@ -25,8 +25,11 @@ const SKIP_DIRS = new Set(['.git', 'node_modules', '__pycache__', 'build', 'outp
 // ═══════════════════════════════════════════════════════════════════════════
 
 function tryExec(cmd, timeout = 5000) {
-  try { return execSync(cmd, { encoding: 'utf-8', timeout }).trim(); }
-  catch { return null; }
+  try {
+    return execSync(`${cmd} 2>/dev/null`, { encoding: 'utf-8', timeout }).trim();
+  } catch {
+    return null;
+  }
 }
 
 /**
