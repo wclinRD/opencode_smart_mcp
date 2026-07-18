@@ -49,6 +49,7 @@ import {
 } from '../../lib/apply-engine.mjs';
 import { getLspBridge } from '../../lib/lsp-bridge.mjs';
 import { extractFunctionAST, isTreeSitterAvailable, isTreeSitterLang } from '../../lib/tree-sitter-edit.mjs';
+import { recordEdit, getEditStats, clearTelemetry } from '../../lib/edit-telemetry.mjs';
 
 export default {
   name: 'smart_fast_apply',
@@ -113,6 +114,16 @@ Dry-run by default — safe to use without side effects.`,
           modelSize: { type: 'string', enum: ['large', 'small', 'micro'], description: 'Model size (default: large)' },
           editLines: { type: 'number', description: 'Number of lines being edited (default: 10)' },
           budget: { type: 'string', enum: ['tight', 'normal', 'generous'], description: 'Context budget (default: normal)' },
+        },
+      },
+      telemetry: {
+        type: 'object',
+        description: 'Query or manage edit telemetry. command: "stats" (default) or "clear".',
+        properties: {
+          command: { type: 'string', enum: ['stats', 'clear'], description: 'Telemetry command (default: stats)' },
+          format: { type: 'string', description: 'Filter stats by format' },
+          lang: { type: 'string', description: 'Filter stats by language' },
+          since: { type: 'number', description: 'Filter entries after this timestamp' },
         },
       },
       text: {
@@ -280,6 +291,20 @@ Dry-run by default — safe to use without side effects.`,
     let changes = [];
 
     try {
+      // ── P4-3: telemetry action ──
+      if (args.telemetry) {
+        const cmd = args.telemetry.command || 'stats';
+        if (cmd === 'stats') {
+          const stats = getEditStats(args.telemetry);
+          return JSON.stringify({ ok: true, ...stats }, null, 2);
+        }
+        if (cmd === 'clear') {
+          clearTelemetry();
+          return JSON.stringify({ ok: true, message: 'Telemetry cleared.' });
+        }
+        return JSON.stringify({ ok: false, error: `Unknown telemetry command: ${cmd}` });
+      }
+
       // ── P4-2: suggestFormat action (model-adaptive format recommendation) ──
       if (args.suggestFormat) {
         const sf = args.suggestFormat;
@@ -683,6 +708,19 @@ Dry-run by default — safe to use without side effects.`,
         if (diagResult.error) return formatOutput({ status: 'error', ...diagResult }, outputFormat);
       }
 
+      // ── P4-3: Record telemetry for atomic apply ──
+      const _telemStart = Date.now();
+      for (const ch of changes) {
+        recordEdit({
+          format: ch.type || format,
+          lang: detectLanguage(resolve(root, ch.file || '')),
+          fileLines: 0,
+          editLines: (ch.search || ch.newContent || '').split('\n').length,
+          success: allSucceeded,
+          retries: 0,
+          durationMs: Date.now() - _telemStart,
+        });
+      }
 
       return formatOutput({
         status: allSucceeded ? 'applied' : 'partial',
@@ -737,6 +775,19 @@ Dry-run by default — safe to use without side effects.`,
       if (validateLevel === 'full') {
         const diagResult = await validatePostApply(appResults.filter(r => r.status === 'applied'), root);
         if (diagResult.error) return formatOutput({ status: 'error', ...diagResult }, outputFormat);
+      }
+
+      // ── P4-3: Record telemetry for sequential apply ──
+      for (const r of appResults) {
+        recordEdit({
+          format: r.type || format,
+          lang: detectLanguage(resolve(root, r.file || '')),
+          fileLines: 0,
+          editLines: (r.search || r.newContent || '').split('\n').length,
+          success: r.status === 'applied',
+          retries: r.retries || 0,
+          durationMs: r.durationMs || 0,
+        });
       }
 
       return formatOutput({
