@@ -28,7 +28,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { resolve, relative, extname, dirname, sep } from 'node:path';
 import { globToRegex, matchGlob, findFiles, COLORS, useColor } from '../lib/utils.mjs';
 import { rankResults, applyRerankSignals } from '../lib/bm25.mjs';
-import { detectQueryType } from '../lib/query-detector.mjs';
+import { detectQueryType, nlToRegex } from '../lib/query-detector.mjs';
 import { semanticSearch } from '../lib/semantic-search.mjs';
 import { hybridRank } from '../lib/hybrid-search.mjs';
 import { loadCache, saveCache, getCachedOrEmbed } from '../lib/embedding-cache.mjs';
@@ -66,6 +66,34 @@ const SCOPE_PATTERNS = {
     exts: ['.rb'],
     definitions: [
       /^\s*(?:def|class|module)\s+\w+/,
+    ],
+  },
+  verilog: {
+    exts: ['.v', '.vh'],
+    definitions: [
+      /^\s*module\s+\w+/,
+      /^\s*task\s+\w+/,
+      /^\s*function\s+(?:\[\w+:\w+\]\s+)?\w+/,
+      /^\s*initial\b/,
+      /^\s*always\s*(?:@|\b)/,
+      /^\s*generate\b/,
+    ],
+  },
+  systemverilog: {
+    exts: ['.sv', '.svh'],
+    definitions: [
+      /^\s*module\s+\w+/,
+      /^\s*interface\s+\w+/,
+      /^\s*class\s+\w+/,
+      /^\s*package\s+\w+/,
+      /^\s*task\s+\w+/,
+      /^\s*function\s+(?:\[\w+:\w+\]\s+)?\w+/,
+      /^\s*initial\b/,
+      /^\s*always\s*(?:@|_ff|_comb|_latch|\b)/,
+      /^\s*generate\b/,
+      /^\s*constraint\s+\w+/,
+      /^\s*covergroup\s+\w+/,
+      /^\s*sequence\s+\w+/,
     ],
   },
 };
@@ -153,6 +181,17 @@ function extractFileStructure(content, ext) {
       if (lines[i].startsWith(' ') || lines[i].startsWith('\t')) continue;
       if ((match = trimmed.match(/^\s*(?:async\s+)?def\s+(\w+)/)) ||
           (match = trimmed.match(/^\s*class\s+(\w+)/))) {
+        symbols.push({ line: i + 1, name: match[1], kind: 'definition' });
+      }
+    } else if (lang === 'verilog' || lang === 'systemverilog') {
+      if ((match = trimmed.match(/^\s*module\s+(\w+)/)) ||
+          (match = trimmed.match(/^\s*interface\s+(\w+)/)) ||
+          (match = trimmed.match(/^\s*class\s+(\w+)/)) ||
+          (match = trimmed.match(/^\s*package\s+(\w+)/)) ||
+          (match = trimmed.match(/^\s*task\s+(\w+)/)) ||
+          (match = trimmed.match(/^\s*function\s+(?:\[\w+:\w+\]\s+)?(\w+)/)) ||
+          (match = trimmed.match(/^\s*constraint\s+(\w+)/)) ||
+          (match = trimmed.match(/^\s*covergroup\s+(\w+)/))) {
         symbols.push({ line: i + 1, name: match[1], kind: 'definition' });
       }
     }
@@ -682,7 +721,7 @@ function parseArgs() {
   }
 
   if (opts.include.length === 0) {
-    opts.include = ['**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts,py,rb,rs,go,java,kt,php,c,h,cpp,hpp,cc,cxx,json,yaml,yml,md,html,css,scss,sass}'];
+    opts.include = ['**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts,py,rb,rs,go,java,kt,php,c,h,cpp,hpp,cc,cxx,v,vh,sv,svh,json,yaml,yml,md,html,css,scss,sass}'];
   }
   if (opts.exclude.length === 0) {
     opts.exclude = ['**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**', '**/.next/**', '**/__pycache__/**', '**/*.min.*', '**/package-lock.json'];
@@ -773,6 +812,20 @@ const results = searchFiles(files, regex, opts);
 let queryType = null;
 if (opts.queryDetect) {
   queryType = detectQueryType(opts.pattern);
+}
+
+// NL→regex conversion: if query is natural language, auto-convert to regex
+let nlInfo = null;
+if (queryType && queryType.type === 'natural_language' && queryType.confidence >= 0.6) {
+  nlInfo = nlToRegex(opts.pattern);
+  // Rebuild regex with converted pattern
+  try {
+    regex = new RegExp(nlInfo.regex, regexFlags);
+    opts.pattern = nlInfo.regex;  // update for BM25 ranking
+  } catch {
+    // If converted regex is invalid, keep original
+    nlInfo = null;
+  }
 }
 
 // BM25 ranking (skip for countOnly — results have matchCount not matches)
@@ -872,6 +925,9 @@ switch (opts.format) {
     };
     if (queryType) {
       jsonOutput.queryType = queryType;
+    }
+    if (nlInfo) {
+      jsonOutput.nlConversion = nlInfo;
     }
     console.log(formatJSON(jsonOutput));
     break;

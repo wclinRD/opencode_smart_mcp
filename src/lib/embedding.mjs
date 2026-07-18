@@ -21,6 +21,8 @@
 //   // emb is Float32Array(384), ready for sqlite-vec storage
 
 // ---------------------------------------------------------------------------
+import { tokenize as bm25Tokenize } from './bm25.mjs';
+
 // Tokenizer
 // ---------------------------------------------------------------------------
 
@@ -39,8 +41,9 @@ const STOP_WORDS = new Set([
 ]);
 
 function tokenize(text) {
-  const normalized = text.toLowerCase().replace(/[^a-z0-9\s_]/g, ' ').trim();
-  const tokens = normalized.split(/\s+/).filter(Boolean);
+  // Use BM25's identifier-aware tokenizer (camelCase/snake_case/kebab-case splitting)
+  // then filter stop words for TF-IDF quality
+  const tokens = bm25Tokenize(text);
   return tokens.filter(t => !STOP_WORDS.has(t) && t.length > 1);
 }
 

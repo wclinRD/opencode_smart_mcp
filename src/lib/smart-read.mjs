@@ -544,6 +544,7 @@ function findBodyEnd(lines, startLine, lang) {
   if (braceLangs.has(lang)) {
     // Find opening brace — could be on same line or next lines
     // Single-pass: find first {, then count all braces from that position
+    // IMPORTANT: skip strings, comments to avoid miscounting
     for (let lineIdx = idx; lineIdx < lines.length; lineIdx++) {
       const line = lines[lineIdx];
       for (let ci = 0; ci < line.length; ci++) {
@@ -551,15 +552,48 @@ function findBodyEnd(lines, startLine, lang) {
         // Found first { — count it and all remaining braces on this line
         let depth = 1;
         for (let cj = ci + 1; cj < line.length; cj++) {
-          if (line[cj] === '{') depth++;
-          if (line[cj] === '}') depth--;
+          const ch = line[cj];
+          if (ch === '{') depth++;
+          else if (ch === '}') depth--;
+          else if (ch === '"' || ch === "'" || ch === '`') {
+            cj++;
+            while (cj < line.length && line[cj] !== ch) {
+              if (line[cj] === '\\') cj++;
+              cj++;
+            }
+          }
+          else if (ch === '/' && cj + 1 < line.length) {
+            if (line[cj + 1] === '/') { cj = line.length; break; }
+            if (line[cj + 1] === '*') {
+              cj += 2;
+              while (cj < line.length - 1 && !(line[cj] === '*' && line[cj + 1] === '/')) cj++;
+              cj++;
+            }
+          }
         }
         if (depth <= 0) return lineIdx + 1; // Balanced on same line
         // Scan subsequent lines
         for (let i = lineIdx + 1; i < lines.length; i++) {
-          for (const ch of lines[i]) {
+          const ln = lines[i];
+          for (let ci2 = 0; ci2 < ln.length; ci2++) {
+            const ch = ln[ci2];
             if (ch === '{') depth++;
-            if (ch === '}') depth--;
+            else if (ch === '}') depth--;
+            else if (ch === '"' || ch === "'" || ch === '`') {
+              ci2++;
+              while (ci2 < ln.length && ln[ci2] !== ch) {
+                if (ln[ci2] === '\\') ci2++;
+                ci2++;
+              }
+            }
+            else if (ch === '/' && ci2 + 1 < ln.length) {
+              if (ln[ci2 + 1] === '/') { ci2 = ln.length; break; }
+              if (ln[ci2 + 1] === '*') {
+                ci2 += 2;
+                while (ci2 < ln.length - 1 && !(ln[ci2] === '*' && ln[ci2 + 1] === '/')) ci2++;
+                ci2++;
+              }
+            }
           }
           if (depth <= 0) return i + 1;
         }
@@ -570,13 +604,30 @@ function findBodyEnd(lines, startLine, lang) {
   }
 
   // For unknown languages: try brace matching as fallback
+  // Also skip strings and comments for accuracy
   let braceCount = 0;
   let foundAnyBrace = false;
   for (let i = idx; i < lines.length; i++) {
-    const line = lines[i];
-    for (const ch of line) {
+    const ln = lines[i];
+    for (let ci2 = 0; ci2 < ln.length; ci2++) {
+      const ch = ln[ci2];
       if (ch === '{') { braceCount++; foundAnyBrace = true; }
-      if (ch === '}') { braceCount--; }
+      else if (ch === '}') { braceCount--; }
+      else if (ch === '"' || ch === "'" || ch === '`') {
+        ci2++;
+        while (ci2 < ln.length && ln[ci2] !== ch) {
+          if (ln[ci2] === '\\') ci2++;
+          ci2++;
+        }
+      }
+      else if (ch === '/' && ci2 + 1 < ln.length) {
+        if (ln[ci2 + 1] === '/') { ci2 = ln.length; break; }
+        if (ln[ci2 + 1] === '*') {
+          ci2 += 2;
+          while (ci2 < ln.length - 1 && !(ln[ci2] === '*' && ln[ci2 + 1] === '/')) ci2++;
+          ci2++;
+        }
+      }
     }
     if (foundAnyBrace && braceCount <= 0) {
       return i + 1;

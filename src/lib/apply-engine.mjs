@@ -765,10 +765,18 @@ function tryStructuralMatch(content, search, lang) {
         if (potentialBody.replace(/\s+/g, ' ').trim() === normSearch) {
           return { line: i + 1, level: 7 };
         }
-        // Even if body doesn't match exactly, if it's a short search (< 5 lines)
-        // and we found the right function signature, use it
+        // Lenient: for short searches (< 5 lines), require at least 50% line overlap
+        // to avoid false positives on overloaded/different functions with same name
         if (searchLines.length < 5) {
-          return { line: i + 1, level: 7 };
+          const sigLines = potentialBody.split('\n');
+          let overlap = 0;
+          for (const sl of searchLines) {
+            const slTrim = sl.trim();
+            if (slTrim && sigLines.some(cl => cl.trim() === slTrim || cl.trim().includes(slTrim))) overlap++;
+          }
+          if (overlap >= Math.ceil(searchLines.length / 2)) {
+            return { line: i + 1, level: 7 };
+          }
         }
       }
     }
@@ -839,24 +847,29 @@ export function applySearchReplace(filePath, block, opts = {}) {
     // Phase 2: Last-resort DMP semantic patching
     const dmpResult = applyByDiffMatchPatch(content, search, replace);
     if (dmpResult.ok && dmpResult.result !== content) {
-      // Write DMP result directly
-      if (undo) {
-        try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* best effort */ }
+      // Validate DMP result before write
+      const dmpBalance = checkBalance(dmpResult.result);
+      if (!dmpBalance.balanced) {
+        // DMP produced unbalanced output — reject and fall through to suggestNearest
+      } else {
+        if (undo) {
+          try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* best effort */ }
+        }
+        try {
+          writeFileSync(filePath, dmpResult.result, 'utf-8');
+        } catch (e) {
+          return { status: 'error', file: filePath, error: `Cannot write (DMP): ${e.message}` };
+        }
+        const diff = generateDiffSummary(content, dmpResult.result, filePath);
+        return {
+          status: 'applied',
+          file: filePath,
+          matchLevel: 7,
+          method: 'dmp-patch',
+          diff,
+          backup: undo ? (filePath + '.apply.bak') : undefined,
+        };
       }
-      try {
-        writeFileSync(filePath, dmpResult.result, 'utf-8');
-      } catch (e) {
-        return { status: 'error', file: filePath, error: `Cannot write (DMP): ${e.message}` };
-      }
-      const diff = generateDiffSummary(content, dmpResult.result, filePath);
-      return {
-        status: 'applied',
-        file: filePath,
-        matchLevel: 7,
-        method: 'dmp-patch',
-        diff,
-        backup: undo ? (filePath + '.apply.bak') : undefined,
-      };
     }
 
     const nearest = suggestNearest(content, search);
@@ -1756,20 +1769,21 @@ export function suggestNearest(content, search) {
 
   const top = scores.sort((a, b) => b.score - a.score).slice(0, 3);
 
-  // Add diff hints for best match
+  // Add diff hints: compare top match against first search lines
   if (top.length > 0 && searchLines.length > 0) {
+    const hints = [];
     for (let i = 0; i < Math.min(searchLines.length, 3); i++) {
       const expected = searchLines[i].trim();
       const matchLine = top[0].line - 1 + i;
       if (matchLine < contentLines.length) {
         const actual = contentLines[matchLine]?.trim() || '';
         if (expected && actual && expected !== actual) {
-          top[i] = {
-            ...top[i] || top[0],
-            diffHint: `Line ${matchLine + 1}: expected "${expected.substring(0, 50)}" but found "${actual.substring(0, 50)}"`,
-          };
+          hints.push(`Line ${matchLine + 1}: expected "${expected.substring(0, 50)}" but found "${actual.substring(0, 50)}"`);
         }
       }
+    }
+    if (hints.length > 0) {
+      top[0] = { ...top[0], diffHint: hints.join('; ') };
     }
   }
 

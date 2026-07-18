@@ -177,6 +177,111 @@ function scoreNaturalLanguage(query) {
 }
 
 /**
+ * Convert a natural language query to a regex pattern for broad matching.
+ *
+ * Strategy:
+ *   1. Remove stop words and filler phrases
+ *   2. Extract meaningful keywords (code-relevant terms)
+ *   3. Build a regex that matches keywords in any order
+ *
+ * @param {string} nlQuery - natural language query
+ * @returns {{ regex: string, keywords: string[], intent: string }}
+ */
+export function nlToRegex(nlQuery) {
+  if (!nlQuery || typeof nlQuery !== 'string') {
+    return { regex: '.*', keywords: [], intent: 'unknown' };
+  }
+
+  const trimmed = nlQuery.trim();
+
+  // --- Intent detection ---
+  let intent = 'search';
+  if (/\b(find|search|look|get|show|list|locate)\b/i.test(trimmed)) intent = 'search';
+  if (/\b(define|definition|declare|implement)\b/i.test(trimmed)) intent = 'definition';
+  if (/\b(import|require|include|use|depend)\b/i.test(trimmed)) intent = 'import';
+  if (/\b(test|spec|assert|verify|check)\b/i.test(trimmed)) intent = 'test';
+  if (/\b(error|bug|fix|issue|fail|crash)\b/i.test(trimmed)) intent = 'error';
+  if (/\b(todo|fixme|hack|xxx|note)\b/i.test(trimmed)) intent = 'comment';
+
+  // --- Stop words (common English + filler) ---
+  const stopWords = new Set([
+    'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+    'should', 'may', 'might', 'can', 'shall', 'to', 'of', 'in', 'for',
+    'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during',
+    'before', 'after', 'above', 'below', 'between', 'out', 'off', 'over',
+    'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when',
+    'where', 'why', 'how', 'all', 'each', 'every', 'both', 'few', 'more',
+    'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own',
+    'same', 'so', 'than', 'too', 'very', 'just', 'it', 'its', 'this',
+    'that', 'these', 'those', 'i', 'me', 'my', 'we', 'our', 'you', 'your',
+    'he', 'she', 'they', 'them', 'their', 'what', 'which', 'who', 'whom',
+    // Filler words
+    'find', 'search', 'look', 'get', 'show', 'list', 'locate',
+    'define', 'definition', 'declare', 'implement',
+    'import', 'require', 'include', 'use', 'depend',
+    'all', 'any', 'every', 'each', 'some',
+    'the', 'that', 'this', 'these', 'those',
+  ]);
+
+  // --- Extract keywords ---
+  const words = trimmed
+    .toLowerCase()
+    .replace(/[^a-z0-9\s_]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 1 && !stopWords.has(w));
+
+  // Deduplicate
+  const keywords = [...new Set(words)];
+
+  if (keywords.length === 0) {
+    return { regex: trimmed, keywords: [], intent };
+  }
+
+  // --- Build regex ---
+  // For intent=definition: prefix with common definition patterns
+  // For others: match keywords in any order (word boundary aware)
+  let pattern;
+
+  if (intent === 'definition') {
+    // Match: function/class/const/def/module + keyword
+    const kw = keywords.map(k => escapeRegex(k)).join('|');
+    pattern = `(?:function|class|const|let|var|def|module|interface|type|enum)\\s+\\w*(?:${kw})\\w*`;
+  } else if (intent === 'import') {
+    // Match: import/require/include + keyword
+    const kw = keywords.map(k => escapeRegex(k)).join('|');
+    pattern = `(?:import|require|include|use)\\s+.*(?:${kw})`;
+  } else if (intent === 'error') {
+    // Match: error/throw/catch/throw + keyword
+    const kw = keywords.map(k => escapeRegex(k)).join('|');
+    pattern = `(?:error|throw|catch|reject|fail|exception|panic)\\s*(?:\\([^)]*\\))?\\s*(?:.*(?:${kw})|.*)`;
+  } else if (intent === 'comment') {
+    // Match: comment markers + keyword
+    const kw = keywords.map(k => escapeRegex(k)).join('|');
+    pattern = `(?:\/\/|\/\*|#|<!--|TODO|FIXME|HACK|XXX)\\s*(?:.*(?:${kw})|.*)`;
+  } else if (intent === 'test') {
+    // Match: test/it/describe + keyword
+    const kw = keywords.map(k => escapeRegex(k)).join('|');
+    pattern = `(?:describe|it|test|spec)\\s*\(\s*['"\`](?:.*(?:${kw})|.*)`;
+  } else {
+    // Generic: match all keywords in any order (lookahead)
+    const lookaheads = keywords.map(k => `(?=.*\\b${escapeRegex(k)}\\b)`);
+    pattern = lookaheads.join('') + '.*';
+  }
+
+  return { regex: pattern, keywords, intent };
+}
+
+/**
+ * Escape special regex characters in a string.
+ * @param {string} str
+ * @returns {string}
+ */
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
  * Get recommended BM25/semantic weight split based on query type.
  *
  * @param {'symbol'|'natural_language'|'path'} type
@@ -195,4 +300,4 @@ export function getQueryWeights(type) {
   }
 }
 
-export default { detectQueryType, getQueryWeights };
+export default { detectQueryType, getQueryWeights, nlToRegex };

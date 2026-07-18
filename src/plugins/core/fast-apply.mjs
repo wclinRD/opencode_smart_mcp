@@ -364,7 +364,9 @@ Dry-run by default — safe to use without side effects.`,
       } else if (format === 'unified-diff') {
         hints.push('unified-diff: use ---/+++ file headers with @@ hunk markers');
       }
-      const hintStr = hints.length > 0 ? `\n  Hint: ${hints[0]}` : '';
+      // Only add generic hint if error doesn't already have 💡 guidance
+      const alreadyHasGuidance = e.message && e.message.includes('💡');
+      const hintStr = (hints.length > 0 && !alreadyHasGuidance) ? `\n  Hint: ${hints[0]}` : '';
       return formatOutput({ status: 'error', error: `Parse error: ${e.message}${hintStr}` }, outputFormat);
     }
 
@@ -769,15 +771,28 @@ function suggestSimilarSymbols(content, lang, name) {
   if (decls.length === 0) return '';
   const names = decls.map(d => d.name);
   const lower = name.toLowerCase();
+
+  // First: try similar name matching
   const candidates = names.filter(n => {
     const nl = n.toLowerCase();
     return nl.startsWith(lower) || lower.startsWith(nl) ||
            nl.includes(lower) || lower.includes(nl);
   });
-  if (candidates.length === 0) return '';
-  const display = candidates.slice(0, 8).join(', ');
-  const extra = candidates.length > 8 ? ` ... (${names.length} total)` : '';
-  return `\n  Available symbols: ${display}${extra}`;
+  if (candidates.length > 0) {
+    const display = candidates.slice(0, 8).join(', ');
+    const extra = candidates.length > 8 ? ` ... (${names.length} total)` : '';
+    return `\n  Did you mean: ${display}${extra}`;
+  }
+
+  // Fallback: no similar names — list all + suggest alternative formats
+  const display = names.slice(0, 12).join(', ');
+  const extra = names.length > 12 ? ` ... (${names.length} total)` : '';
+  // Detect if name looks like a comment (contains spaces, common header patterns)
+  const looksLikeComment = name.includes(' ') || /^(?:section|header|part|region|area)/i.test(name);
+  const formatHint = looksLikeComment
+    ? `\n  💡 "${name}" looks like a section header, not a code symbol.\n     To replace a comment section, use search-replace:\n       search: "// ${name}"  (or the actual comment text)\n       replace: <your new code>`
+    : `\n  💡 block-diff only accepts code symbols (function/class/const/let/var).\n     To insert new code, use search-replace or hashline format.`;
+  return `${formatHint}\n  Available symbols: ${display}${extra}`;
 }
 
 export function parseBlockDiff(blocks, root) {
@@ -834,7 +849,11 @@ export function parseBlockDiff(blocks, root) {
       }
       if (!sym) {
         const suggestions = suggestSimilarSymbols(fc, lang, b.symbol);
-        throw new Error(`Symbol "${b.symbol}" not found in ${b.file}.${suggestions}`);
+        // Provide actionable guidance based on what was attempted
+        const hint = suggestions.includes('search-replace')
+          ? ''  // already has format suggestion
+          : `\n  💡 Use search-replace or hashline format for non-symbol edits.`;
+        throw new Error(`Symbol "${b.symbol}" not found in ${b.file}.${suggestions}${hint}`);
       }
     }
 
@@ -847,11 +866,10 @@ export function parseBlockDiff(blocks, root) {
     const totalLines = lines.length;
     let actualBody = lines.slice(sym.lineStart - 1, sym.lineEnd).join('\n');
 
-    // Phase 1: Braces balance check
-    const bodyOpen = (actualBody.match(/\{/g) || []).length;
-    const bodyClose = (actualBody.match(/\}/g) || []).length;
+    // Phase 1: Braces balance check (skip strings/comments for accuracy)
+    const balance = checkBalance(actualBody);
 
-    if (bodyOpen !== bodyClose) {
+    if (!balance.balanced) {
       // Braces unbalanced — extractSymbol returned wrong lineEnd.
       // Try to correct using parseDeclarations (next declaration boundary).
       let corrected = false;
@@ -864,9 +882,8 @@ export function parseBlockDiff(blocks, root) {
             // Cap or extend to next declaration boundary
             sym.lineEnd = next.lineStart - 1;
             const correctedBody = lines.slice(sym.lineStart - 1, sym.lineEnd).join('\n');
-            const cOpen = (correctedBody.match(/\{/g) || []).length;
-            const cClose = (correctedBody.match(/\}/g) || []).length;
-            if (cOpen === cClose && correctedBody.trimEnd().length > 0) {
+            const correctedBalance = checkBalance(correctedBody);
+            if (correctedBalance.balanced && correctedBody.trimEnd().length > 0) {
               sym.body = correctedBody;
               actualBody = correctedBody;
               corrected = true;
@@ -878,8 +895,7 @@ export function parseBlockDiff(blocks, root) {
       if (!corrected) {
         throw new Error(
           `Symbol "${b.symbol}" in ${b.file} has unbalanced braces ` +
-          `(${bodyOpen} open, ${bodyClose} close across ${actualBody.length} chars). ` +
-          `This is likely a parser miscount inside strings/comments. ` +
+          `(expected "${balance.expected || '?'}" but found "${balance.found || '?'}" at position ${balance.position ?? '?'}). ` +
           `Use search-replace or hashline format instead.`
         );
       }
@@ -897,9 +913,8 @@ export function parseBlockDiff(blocks, root) {
           const safeEnd = Math.min(sym.lineEnd, next.lineStart - 1);
           if (safeEnd > sym.lineStart) {
             const cappedBody = lines.slice(sym.lineStart - 1, safeEnd).join('\n');
-            const cOpen = (cappedBody.match(/\{/g) || []).length;
-            const cClose = (cappedBody.match(/\}/g) || []).length;
-            if (cOpen === cClose && cappedBody.trimEnd().length > 0) {
+            const cappedBalance = checkBalance(cappedBody);
+            if (cappedBalance.balanced && cappedBody.trimEnd().length > 0) {
               sym.lineEnd = safeEnd;
               sym.body = cappedBody;
               actualBody = cappedBody;
