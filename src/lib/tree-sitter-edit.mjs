@@ -559,3 +559,155 @@ export function insertNearSymbolAST(content, lang, anchorName, newCode, position
     _source: 'tree-sitter',
   };
 }
+
+/**
+ * Extract selected lines into a new function (tree-sitter AST-aware).
+ *
+ * @param {string} content — full file content
+ * @param {string} lang — language identifier
+ * @param {number} startLine — first line to extract (1-indexed)
+ * @param {number} endLine — last line to extract (1-indexed, inclusive)
+ * @param {string} funcName — name for the extracted function
+ * @param {{ params?: string, insertAt?: 'after'|'before'|'end' }} [opts]
+ * @returns {{ newContent: string, callLine: number, defLine: number } | null}
+ */
+export function extractFunctionAST(content, lang, startLine, endLine, funcName, opts = {}) {
+  if (!isTreeSitterAvailable() || !isTreeSitterLang(lang)) return null;
+
+  const lines = content.split('\n');
+  if (startLine < 1 || endLine > lines.length || startLine > endLine) return null;
+
+  // Extract the code block
+  const extractedLines = lines.slice(startLine - 1, endLine);
+  const extractedCode = extractedLines.join('\n');
+
+  // Detect indentation from first non-empty line
+  const firstNonEmpty = extractedLines.find(l => l.trim().length > 0) || '';
+  const indent = firstNonEmpty.match(/^(\s*)/)?.[1] || '';
+  const bodyIndent = indent + '  ';
+
+  // Build the function definition
+  const params = opts.params || '';
+  const defLines = [
+    `${indent}function ${funcName}(${params}) {`,
+    ...extractedLines.map(l => {
+      // Re-indent: remove common indent, add body indent
+      const trimmed = l.trimStart();
+      return trimmed.length > 0 ? bodyIndent + trimmed : '';
+    }),
+    `${indent}}`,
+  ];
+
+  // Build the function call
+  const callLine = `${indent}${funcName}(${params});`;
+
+  // Determine where to insert the definition
+  let insertAt = opts.insertAt || 'after';
+
+  // Try to find enclosing scope using tree-sitter
+  let defInsertLine = -1;
+  try {
+    const parser = getParser(lang);
+    if (parser) {
+      const tree = parser.parse(content);
+      // Find the function/class containing startLine
+      const enclosing = findEnclosingScope(tree.rootNode, startLine);
+      if (enclosing) {
+        if (insertAt === 'after') {
+          defInsertLine = enclosing.endLine; // 1-indexed, insert after
+        } else if (insertAt === 'before') {
+          defInsertLine = enclosing.startLine - 1; // 1-indexed, insert before
+        }
+      }
+    }
+  } catch { /* fallback to end of file */ }
+
+  // Fallback: insert at end of file
+  if (defInsertLine < 0) {
+    if (insertAt === 'end' || insertAt === 'after') {
+      defInsertLine = lines.length;
+    } else {
+      defInsertLine = 0;
+    }
+  }
+
+  // Apply: 1) Insert definition, 2) Replace extracted lines with call
+  // Work bottom-up to preserve line numbers
+  let newLines = [...lines];
+
+  // Insert definition at defInsertLine
+  const defContent = defLines.join('\n');
+  if (defInsertLine >= newLines.length) {
+    // Append at end
+    newLines.push('', ...defLines);
+  } else {
+    newLines.splice(defInsertLine, 0, ...defLines, '');
+  }
+
+  // Replace extracted lines with call (startLine is 1-indexed, now shifted by def insertion)
+  const callInsertLine = startLine - 1; // original start line (0-indexed)
+  newLines.splice(callInsertLine, endLine - startLine + 1, callLine);
+
+  const newContent = newLines.join('\n');
+
+  return {
+    newContent,
+    callLine: startLine, // where the call was inserted (1-indexed, before shift)
+    defLine: defInsertLine + 1, // where the definition was inserted (1-indexed)
+    _source: 'tree-sitter',
+    _action: 'extract-function',
+  };
+}
+
+/**
+ * Find the enclosing scope (function/class) for a given line number.
+ */
+function findEnclosingScope(node, targetLine) {
+  if (!node) return null;
+
+  const startLine = node.startPosition.row + 1; // 1-indexed
+  const endLine = node.endPosition.row + 1;
+
+  if (targetLine < startLine || targetLine > endLine) return null;
+
+  // Check children (prioritize innermost scope)
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    const childResult = findEnclosingScope(child, targetLine);
+    if (childResult) return childResult;
+  }
+
+  // This node contains the target — check if it's a scope-creating node
+  const scopeTypes = new Set([
+    'function_declaration', 'function',
+    'class_declaration', 'class',
+    'arrow_function',
+    'method_definition',
+    'export_statement',
+    'program',
+  ]);
+
+  if (scopeTypes.has(node.type)) {
+    return {
+      type: node.type,
+      startLine,
+      endLine,
+      name: node.childForFieldName?.('name')?.text || node.type,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Get a parser instance for the given language.
+ */
+function getParser(lang) {
+  if (!Parser || !Language) return null;
+  const cached = languageCache.get(lang);
+  if (!cached) return null;
+  const parser = new Parser();
+  parser.setLanguage(cached);
+  return parser;
+}
+

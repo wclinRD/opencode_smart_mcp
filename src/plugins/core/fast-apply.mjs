@@ -47,6 +47,7 @@ import {
   verifyLineFingerprint,
 } from '../../lib/apply-engine.mjs';
 import { getLspBridge } from '../../lib/lsp-bridge.mjs';
+import { extractFunctionAST, isTreeSitterAvailable, isTreeSitterLang } from '../../lib/tree-sitter-edit.mjs';
 
 export default {
   name: 'smart_fast_apply',
@@ -89,6 +90,19 @@ Dry-run by default — safe to use without side effects.`,
           required: ['file', 'search', 'replace'],
         },
         description: 'Edit blocks. For search-replace/lazy/partial: {file,search,replace}. For block-diff: {file,symbol,newContent,action?}.',
+      },
+      extractFunction: {
+        type: 'object',
+        description: 'Extract selected lines into a new function (tree-sitter AST-aware). Only works when tree-sitter is available.',
+        properties: {
+          file: { type: 'string', description: 'Target file path' },
+          funcName: { type: 'string', description: 'Name for the extracted function' },
+          startLine: { type: 'number', description: 'First line to extract (1-indexed)' },
+          endLine: { type: 'number', description: 'Last line to extract (1-indexed, inclusive)' },
+          params: { type: 'string', description: 'Function parameters (e.g. "a, b")' },
+          insertAt: { type: 'string', enum: ['after', 'before', 'end'], description: 'Where to insert the function definition (default: after enclosing scope)' },
+        },
+        required: ['file', 'funcName', 'startLine', 'endLine'],
       },
       text: {
         type: 'string',
@@ -257,6 +271,64 @@ Dry-run by default — safe to use without side effects.`,
     try {
       // ── Format auto-detect: infer format from args when not explicitly set ──
       let effectiveFormat = format;
+
+      // ── P4-1: extractFunction action (tree-sitter code action) ──
+      if (args.extractFunction) {
+        const ef = args.extractFunction;
+        const fp = resolve(root, ef.file);
+        if (!existsSync(fp)) {
+          return JSON.stringify({ ok: false, error: `File not found: ${ef.file}` });
+        }
+        if (!isTreeSitterAvailable()) {
+          return JSON.stringify({ ok: false, error: 'tree-sitter not available. extractFunction requires tree-sitter.' });
+        }
+        const lang = detectLanguage(fp);
+        if (!isTreeSitterLang(lang)) {
+          return JSON.stringify({ ok: false, error: `tree-sitter not supported for language: ${lang}` });
+        }
+        const content = readFileSync(fp, 'utf-8');
+        const result = extractFunctionAST(content, lang, ef.startLine, ef.endLine, ef.funcName, {
+          params: ef.params,
+          insertAt: ef.insertAt,
+        });
+        if (!result) {
+          return JSON.stringify({ ok: false, error: 'extractFunction failed — tree-sitter could not parse the file or line range is invalid.' });
+        }
+        if (explicitlyDryRun) {
+          return JSON.stringify({
+            ok: true,
+            action: 'extract-function',
+            file: ef.file,
+            funcName: ef.funcName,
+            callLine: result.callLine,
+            defLine: result.defLine,
+            preview: result.newContent,
+          }, null, 2);
+        }
+        // Apply the change
+        try {
+          const backupPath = fp + '.apply.bak';
+          if (undo) { try { require('node:fs').copyFileSync(fp, backupPath); } catch {} }
+          const stagingPath = fp + '.apply.staging';
+          require('node:fs').writeFileSync(stagingPath, result.newContent, 'utf-8');
+          require('node:fs').renameSync(stagingPath, fp);
+          const diff = generateDiffSummary(content, result.newContent, fp);
+          return JSON.stringify({
+            ok: true,
+            status: 'applied',
+            action: 'extract-function',
+            file: ef.file,
+            funcName: ef.funcName,
+            callLine: result.callLine,
+            defLine: result.defLine,
+            diff,
+            backup: undo ? backupPath : undefined,
+          }, null, 2);
+        } catch (e) {
+          return JSON.stringify({ ok: false, error: `Write failed: ${e.message}` });
+        }
+      }
+
       if (!args.format) {
         // No explicit format → infer from arg shape
         if (args.blocks) {
