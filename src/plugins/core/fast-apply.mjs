@@ -1119,25 +1119,59 @@ function validateSymbolBody(sym, fc, lang, symbolName, symbolAutoResolved) {
 
   if (!balance.balanced) {
     // Braces unbalanced — extractSymbol returned wrong lineEnd.
-    // Try to correct using parseDeclarations (next declaration boundary).
+    // Multi-strategy correction to find the actual closing brace.
     let corrected = false;
-    try {
-      const allDecls = parseDeclarations(fc, lang);
-      const myIdx = allDecls.findIndex(d => d.name === sym.name && d.lineStart === sym.lineStart);
-      if (myIdx !== -1 && myIdx + 1 < allDecls.length) {
-        const next = allDecls[myIdx + 1];
-        if (next.lineStart > sym.lineStart) {
-          sym.lineEnd = next.lineStart - 1;
-          const correctedBody = lines.slice(sym.lineStart - 1, sym.lineEnd).join('\n');
-          const correctedBalance = checkBalance(correctedBody);
-          if (correctedBalance.balanced && correctedBody.trimEnd().length > 0) {
-            sym.body = correctedBody;
-            actualBody = correctedBody;
-            corrected = true;
-          }
+
+    // Strategy 0: Walk backwards from lineEnd to find where braces actually close.
+    // Handles: arrow functions inside class, callbacks, nested expressions.
+    for (let tryEnd = sym.lineEnd - 1; tryEnd >= sym.lineStart && tryEnd >= sym.lineEnd - 30; tryEnd--) {
+      const tryBody = lines.slice(sym.lineStart - 1, tryEnd).join('\n');
+      const tryBalance = checkBalance(tryBody);
+      if (tryBalance.balanced && tryBody.trimEnd().length > 0) {
+        sym.lineEnd = tryEnd;
+        sym.body = tryBody;
+        actualBody = tryBody;
+        corrected = true;
+        break;
+      }
+    }
+
+    // Strategy 1: Walk forwards from lineEnd to find where braces close.
+    // Handles: extractSymbol under-estimated the end (e.g. multi-line return).
+    if (!corrected) {
+      for (let tryEnd = sym.lineEnd + 1; tryEnd <= Math.min(lines.length, sym.lineEnd + 50); tryEnd++) {
+        const tryBody = lines.slice(sym.lineStart - 1, tryEnd).join('\n');
+        const tryBalance = checkBalance(tryBody);
+        if (tryBalance.balanced && tryBody.trimEnd().length > 0) {
+          sym.lineEnd = tryEnd;
+          sym.body = tryBody;
+          actualBody = tryBody;
+          corrected = true;
+          break;
         }
       }
-    } catch { /* fall through to error */ }
+    }
+
+    // Strategy 2: Next declaration boundary (existing logic).
+    if (!corrected) {
+      try {
+        const allDecls = parseDeclarations(fc, lang);
+        const myIdx = allDecls.findIndex(d => d.name === sym.name && d.lineStart === sym.lineStart);
+        if (myIdx !== -1 && myIdx + 1 < allDecls.length) {
+          const next = allDecls[myIdx + 1];
+          if (next.lineStart > sym.lineStart) {
+            sym.lineEnd = next.lineStart - 1;
+            const correctedBody = lines.slice(sym.lineStart - 1, sym.lineEnd).join('\n');
+            const correctedBalance = checkBalance(correctedBody);
+            if (correctedBalance.balanced && correctedBody.trimEnd().length > 0) {
+              sym.body = correctedBody;
+              actualBody = correctedBody;
+              corrected = true;
+            }
+          }
+        }
+      } catch { /* fall through to error */ }
+    }
 
     if (!corrected) {
       throw new Error(

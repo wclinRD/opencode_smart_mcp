@@ -487,14 +487,32 @@ export function applyHashline(filePath, change, opts = {}) {
         }
       }
 
+      // Classify drift severity: formatting-only vs content change
+      const formattingOnly = mismatches.every(m => {
+        if (m.expected === '(missing)' || m.actual === '(missing)') return false;
+        return m.expected.trim() === m.actual.trim();
+      });
+
+      // Build human-readable diff for LLM consumption
+      const diffLines = mismatches.slice(0, 5).map(m => {
+        if (m.expected === '(missing)') return `  + ${m.actual}`;
+        if (m.actual === '(missing)') return `  - ${m.expected}`;
+        return `  - ${m.expected}\n  + ${m.actual}`;
+      });
+
+      const driftHint = formattingOnly
+        ? 'Only whitespace/formatting changed — this edit may still be safe to apply with relaxed matching.'
+        : 'Content has materially changed — re-read the file and generate a new edit.';
+
       return {
         status: 'conflict', file: filePath,
-        error: `Content mismatch at line ${startLine}. File has changed since LLM read it.`,
+        error: `Content mismatch at line ${startLine}. File has changed since LLM read it.\n${diffLines.join('\n')}`,
         details: {
           expected: oldContent,
           actual: actualRange,
           mismatches: mismatches.slice(0, 5),
-          hint: 'The file has drifted — re-read the file and generate a new edit.',
+          formattingOnly,
+          hint: driftHint,
         },
       };
     }
@@ -863,11 +881,13 @@ export function applySearchReplace(filePath, block, opts = {}) {
       if (resolved) {
         match = resolved;
       } else {
+        const fb = buildApplyFeedback(content, search, filePath);
         return {
           status: 'conflict',
           file: filePath,
           error: `Search block appears ${multiCheck.count} times in ${filePath}. Be more specific — add surrounding context lines.`,
           multiOccurrence: multiCheck.contexts,
+          ...fb,
         };
       }
     } else {
@@ -922,6 +942,7 @@ export function applySearchReplace(filePath, block, opts = {}) {
     }
 
     const nearest = suggestNearest(content, search);
+    const fb = buildApplyFeedback(content, search, filePath);
     const detailMsg = nearest ? nearest.map(n =>
       n.diffHint || `Line ${n.line}: "${n.text}"`
     ).join('; ') : '';
@@ -930,6 +951,7 @@ export function applySearchReplace(filePath, block, opts = {}) {
       file: filePath,
       error: `Cannot find search block in ${filePath}${detailMsg ? `. Nearest: ${detailMsg}` : ''}`,
       details: nearest,
+      ...fb,
     };
   }
 
@@ -939,11 +961,13 @@ export function applySearchReplace(filePath, block, opts = {}) {
     if (multiCheck.multi) {
       const resolved = disambiguateMultiOccurrence(content, search, multiCheck, startLine, cl);
       if (!resolved) {
+        const fb2 = buildApplyFeedback(content, search, filePath);
         return {
           status: 'conflict',
           file: filePath,
           error: `Fuzzy search anchor "${search.split('\n').filter(l => l.trim() && !/^[{}\s]*$/.test(l.trim()))[0]?.trim() || ''}" appears ${multiCheck.count} times in ${filePath} (lines ${multiCheck.lines?.join(', ')}). Add more unique context lines.`,
           multiOccurrence: multiCheck,
+          ...fb2,
         };
       }
     }
@@ -1788,6 +1812,75 @@ export function checkFileAccess(filePath) {
   }
 
   return { ok: errors.length === 0, errors, warnings };
+}
+
+/**
+ * Build structured feedback for apply failure — helps LLM self-correct
+ * without re-reading the file, saving 1 round-trip.
+ *
+ * @param {string} content — full file content
+ * @param {string} search — the search block that failed
+ * @param {string} filePath — target file path
+ * @param {{ line?: number }} [opts] — optional context (e.g. expected line)
+ * @returns {{ feedback: { retryable: boolean, currentContext?: string, suggestions: string[], hint: string } }}
+ */
+export function buildApplyFeedback(content, search, filePath, opts = {}) {
+  const cl = content.split('\n');
+  const searchLines = search.split('\n');
+  const searchUnique = searchLines.filter(l => l.trim() && !/^[{}\s]*$/.test(l.trim()));
+  const anchor = searchUnique[0]?.trim() || '';
+
+  // Find closest matching anchor in file
+  let closestLine = -1;
+  let closestScore = 0;
+  if (anchor) {
+    for (let i = 0; i < cl.length; i++) {
+      const line = cl[i].trim();
+      if (line === anchor) { closestLine = i + 1; closestScore = 100; break; }
+      if (line.includes(anchor) && closestScore < 80) { closestLine = i + 1; closestScore = 80; }
+      // Levenshtein-style: check if anchor words appear
+      const anchorWords = anchor.split(/\s+/).filter(w => w.length > 2);
+      const matched = anchorWords.filter(w => line.includes(w));
+      if (matched.length >= anchorWords.length * 0.5 && closestScore < 50) {
+        closestLine = i + 1; closestScore = 50;
+      }
+    }
+  }
+
+  const suggestions = [];
+  if (closestLine > 0) {
+    const excerpt = cl.slice(Math.max(0, closestLine - 3), closestLine + searchLines.length + 2);
+    const currentContext = excerpt.map((l, i) => `${Math.max(1, closestLine - 2) + i}: ${l}`).join('\n');
+    suggestions.push(`Similar code found at line ${closestLine} (score: ${closestScore}). Check if this is the intended target.`);
+    return {
+      feedback: {
+        retryable: true,
+        currentContext,
+        suggestions,
+        hint: `Search block not found in ${filePath}. The file may have changed since you read it. Re-read the file and adjust your edit.`,
+      },
+    };
+  }
+
+  // No similar code found — provide file structure hint
+  const decls = [];
+  for (let i = 0; i < Math.min(cl.length, 200); i++) {
+    const line = cl[i].trim();
+    if (/^(?:export\s+)?(?:async\s+)?(?:function|class|const|let|var|def|func|fn)\s+\w+/.test(line)) {
+      decls.push(`  Line ${i + 1}: ${line.substring(0, 60)}`);
+    }
+  }
+  if (decls.length > 0) {
+    suggestions.push(`File structure (first 200 lines):\n${decls.slice(0, 10).join('\n')}`);
+  }
+
+  return {
+    feedback: {
+      retryable: true,
+      suggestions,
+      hint: `Search block not found in ${filePath}. Read the file to get the current content, then adjust your edit.`,
+    },
+  };
 }
 
 /**

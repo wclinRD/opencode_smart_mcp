@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-18T06:41:58.062Z",
+  "generatedAt": "2026-07-18T13:14:07.789Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -1285,6 +1285,105 @@
             },
             "description": "Edit blocks. For search-replace/lazy/partial: {file,search,replace}. For block-diff: {file,symbol,newContent,action?}."
           },
+          "extractFunction": {
+            "type": "object",
+            "description": "Extract selected lines into a new function (tree-sitter AST-aware). Only works when tree-sitter is available.",
+            "properties": {
+              "file": {
+                "type": "string",
+                "description": "Target file path"
+              },
+              "funcName": {
+                "type": "string",
+                "description": "Name for the extracted function"
+              },
+              "startLine": {
+                "type": "number",
+                "description": "First line to extract (1-indexed)"
+              },
+              "endLine": {
+                "type": "number",
+                "description": "Last line to extract (1-indexed, inclusive)"
+              },
+              "params": {
+                "type": "string",
+                "description": "Function parameters (e.g. \"a, b\")"
+              },
+              "insertAt": {
+                "type": "string",
+                "enum": [
+                  "after",
+                  "before",
+                  "end"
+                ],
+                "description": "Where to insert the function definition (default: after enclosing scope)"
+              }
+            },
+            "required": [
+              "file",
+              "funcName",
+              "startLine",
+              "endLine"
+            ]
+          },
+          "suggestFormat": {
+            "type": "object",
+            "description": "Get model-adaptive format recommendation. Returns optimal format + reason + token estimate. No edits performed.",
+            "properties": {
+              "file": {
+                "type": "string",
+                "description": "Target file path (optional, improves recommendation)"
+              },
+              "modelSize": {
+                "type": "string",
+                "enum": [
+                  "large",
+                  "small",
+                  "micro"
+                ],
+                "description": "Model size (default: large)"
+              },
+              "editLines": {
+                "type": "number",
+                "description": "Number of lines being edited (default: 10)"
+              },
+              "budget": {
+                "type": "string",
+                "enum": [
+                  "tight",
+                  "normal",
+                  "generous"
+                ],
+                "description": "Context budget (default: normal)"
+              }
+            }
+          },
+          "telemetry": {
+            "type": "object",
+            "description": "Query or manage edit telemetry. command: \"stats\" (default) or \"clear\".",
+            "properties": {
+              "command": {
+                "type": "string",
+                "enum": [
+                  "stats",
+                  "clear"
+                ],
+                "description": "Telemetry command (default: stats)"
+              },
+              "format": {
+                "type": "string",
+                "description": "Filter stats by format"
+              },
+              "lang": {
+                "type": "string",
+                "description": "Filter stats by language"
+              },
+              "since": {
+                "type": "number",
+                "description": "Filter entries after this timestamp"
+              }
+            }
+          },
           "text": {
             "type": "string",
             "description": "Raw text containing SEARCH/REPLACE blocks or unified diff (auto-parsed)"
@@ -1437,8 +1536,8 @@
             "description": "Enable 4-level fuzzy matching (default: true)"
           },
           "validate": {
-            "type": "boolean",
-            "description": "Check brace/bracket balance after apply (default: false)"
+            "type": "string",
+            "description": "Post-apply validation: undefined=none, \"balance\"=check braces, \"full\"=balance+LSP diagnostics (auto-rollback on errors)"
           },
           "undo": {
             "type": "boolean",
