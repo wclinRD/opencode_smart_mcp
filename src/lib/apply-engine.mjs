@@ -15,7 +15,7 @@
 //   const r = applySearchReplace('file.js', { search: 'old', replace: 'new' });
 //   if (r.status === 'applied') console.log('OK');
 
-import { readFileSync, writeFileSync, existsSync, copyFileSync, unlinkSync, statSync, openSync, readSync, closeSync, globSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, copyFileSync, unlinkSync, renameSync, statSync, openSync, readSync, closeSync, globSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 import { parseCheck } from './tree-sitter-edit.mjs';
@@ -500,11 +500,6 @@ export function applyHashline(filePath, change, opts = {}) {
     }
   }
 
-  // Create undo snapshot
-  if (undo) {
-    try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* */ }
-  }
-
   let newContent_full;
 
   switch (action) {
@@ -547,17 +542,36 @@ export function applyHashline(filePath, change, opts = {}) {
     return { status: 'conflict', file: filePath, error: sanity.error, details: { ratio: sanity.ratio, originalLength: content.length, newLength: newContent_full.length } };
   }
 
+  let backup;
   try {
-    writeFileSync(filePath, newContent_full, 'utf-8');
+    backup = stagingWrite(filePath, newContent_full, undo);
   } catch (e) {
     return { status: 'error', file: filePath, error: `Cannot write: ${e.message}` };
   }
 
   const diff = generateDiffSummary(content, newContent_full, filePath);
-  return { status: 'applied', file: filePath, matchLevel: 6, diff, backup: undo ? (filePath + '.apply.bak') : undefined };
+  return { status: 'applied', file: filePath, matchLevel: 6, diff, backup };
 }
 
-// L5 removed: replaced by L7 structural matching + DMP fallback
+/**
+ * Transactional write: backup → staging → atomic rename.
+ * Prevents file corruption if process crashes mid-write.
+ */
+function stagingWrite(filePath, newContent, undo) {
+  if (undo) {
+    try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* best effort */ }
+  }
+  const stagingPath = filePath + '.apply.staging';
+  try {
+    writeFileSync(stagingPath, newContent, 'utf-8');
+    renameSync(stagingPath, filePath);
+  } catch (e) {
+    // Cleanup staging on failure
+    try { unlinkSync(stagingPath); } catch { /* */ }
+    throw e;
+  }
+  return undo ? filePath + '.apply.bak' : undefined;
+}
 
 export function fuzzyMatch(content, search, opts = {}) {
   if (!content || !search) return null;
@@ -888,11 +902,9 @@ export function applySearchReplace(filePath, block, opts = {}) {
         if (!dmpParse.ok) {
           // DMP produced syntactically invalid output — reject
         } else {
-          if (undo) {
-            try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* best effort */ }
-          }
+          let backup;
           try {
-            writeFileSync(filePath, dmpResult.result, 'utf-8');
+            backup = stagingWrite(filePath, dmpResult.result, undo);
           } catch (e) {
             return { status: 'error', file: filePath, error: `Cannot write (DMP): ${e.message}` };
           }
@@ -903,7 +915,7 @@ export function applySearchReplace(filePath, block, opts = {}) {
             matchLevel: 7,
             method: 'dmp-patch',
             diff,
-            backup: undo ? (filePath + '.apply.bak') : undefined,
+            backup,
           };
         }
       }
@@ -968,14 +980,10 @@ export function applySearchReplace(filePath, block, opts = {}) {
     return { status: 'conflict', file: filePath, error: sanity.error, details: { ratio: sanity.ratio, originalLength: content.length, newLength: newContent.length } };
   }
 
-  // Create undo snapshot
-  if (undo) {
-    try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* best effort */ }
-  }
-
-  // Write
+  // Write with transactional staging
+  let backup;
   try {
-    writeFileSync(filePath, newContent, 'utf-8');
+    backup = stagingWrite(filePath, newContent, undo);
   } catch (e) {
     return { status: 'error', file: filePath, error: `Cannot write: ${e.message}` };
   }
@@ -995,7 +1003,7 @@ export function applySearchReplace(filePath, block, opts = {}) {
           // Tree-sitter syntax validation (P2-3)
           const retryParse = parseCheck(retryResult.result, lang);
           if (retryParse.ok) {
-            // Write cleaned version
+            // Overwrite with cleaned version (backup already exists)
             try {
               writeFileSync(filePath, retryResult.result, 'utf-8');
             } catch { /* best effort - original write already done */ }
@@ -1006,7 +1014,7 @@ export function applySearchReplace(filePath, block, opts = {}) {
               matchLevel: match.level,
               method: 'dmp-retry',
               diff: retryDiff,
-              backup: undo ? (filePath + '.apply.bak') : undefined,
+              backup,
             };
           }
           // If DMP retry syntax invalid, keep original result
@@ -1021,7 +1029,7 @@ export function applySearchReplace(filePath, block, opts = {}) {
     file: filePath,
     matchLevel: match.level,
     diff,
-    backup: undo ? (filePath + '.apply.bak') : undefined,
+    backup,
   };
 }
 
@@ -1077,12 +1085,14 @@ export function applyPartial(filePath, block, opts = {}) {
       const actualStart = before.length > 0 ? before.join('\n').length + 1 : 0;
       const matchedRegion = cl.slice(matchedLine - 1, matchedLine - 1 + partial.split('\n').length).join('\n');
       const newContent = content.substring(0, actualStart) + replace + content.substring(actualStart + matchedRegion.length);
-      if (undo) { try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* */ } }
-      try { writeFileSync(filePath, newContent, 'utf-8'); } catch (e) {
+      let backup;
+      try {
+        backup = stagingWrite(filePath, newContent, undo);
+      } catch (e) {
         return { status: 'error', file: filePath, error: `Cannot write: ${e.message}` };
       }
       const diff = generateDiffSummary(content, newContent, filePath);
-      return { status: 'applied', file: filePath, matchLevel: 2, diff, backup: undo ? (filePath + '.apply.bak') : undefined };
+      return { status: 'applied', file: filePath, matchLevel: 2, diff, backup };
     }
     const lineNum = cl.slice(0, content.substring(0, exactIdx).split('\n').length).length;
     const before = content.substring(0, exactIdx);
@@ -1095,12 +1105,14 @@ export function applyPartial(filePath, block, opts = {}) {
       return { status: 'conflict', file: filePath, error: sanity.error, details: { ratio: sanity.ratio, originalLength: content.length, newLength: newContent.length } };
     }
 
-    if (undo) { try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* */ } }
-    try { writeFileSync(filePath, newContent, 'utf-8'); } catch (e) {
+    let backup;
+    try {
+      backup = stagingWrite(filePath, newContent, undo);
+    } catch (e) {
       return { status: 'error', file: filePath, error: `Cannot write: ${e.message}` };
     }
     const diff = generateDiffSummary(content, newContent, filePath);
-    return { status: 'applied', file: filePath, matchLevel: 2, diff, backup: undo ? (filePath + '.apply.bak') : undefined };
+    return { status: 'applied', file: filePath, matchLevel: 2, diff, backup };
   }
 
   // 2. Try fuzzy match through all levels (L1-L3)
@@ -1128,12 +1140,14 @@ export function applyPartial(filePath, block, opts = {}) {
       const matchedRegion = cl.slice(fm.line - 1, fm.line - 1 + sl.length).join('\n');
       const actualNewContent = content.substring(0, actualStart) + replace + content.substring(actualStart + matchedRegion.length);
 
-      if (undo) { try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* */ } }
-      try { writeFileSync(filePath, actualNewContent, 'utf-8'); } catch (e) {
+      let backup;
+      try {
+        backup = stagingWrite(filePath, actualNewContent, undo);
+      } catch (e) {
         return { status: 'error', file: filePath, error: `Cannot write: ${e.message}` };
       }
       const diff = generateDiffSummary(content, actualNewContent, filePath);
-      return { status: 'applied', file: filePath, matchLevel: fm.level, diff, backup: undo ? (filePath + '.apply.bak') : undefined };
+      return { status: 'applied', file: filePath, matchLevel: fm.level, diff, backup };
     }
   }
 
@@ -1158,24 +1172,16 @@ export function applyWholeFile(filePath, content, opts = {}) {
   let original;
   try { original = readFileSync(filePath, 'utf-8'); } catch { original = ''; }
 
-  if (undo) {
-    try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* */ }
-  }
-
+  let backup;
   try {
-    writeFileSync(filePath, content, 'utf-8');
+    backup = stagingWrite(filePath, content, undo);
   } catch (e) {
     return { status: 'error', file: filePath, error: `Cannot write: ${e.message}` };
   }
 
   const diff = generateDiffSummary(original, content, filePath);
-  return { status: 'applied', file: filePath, matchLevel: 0, diff, backup: undo ? (filePath + '.apply.bak') : undefined };
+  return { status: 'applied', file: filePath, matchLevel: 0, diff, backup };
 }
-
-// ---------------------------------------------------------------------------
-// Apply: Unified diff
-// ---------------------------------------------------------------------------
-
 /**
  * Apply unified diff hunks to a file.
  * @param {string} filePath
@@ -1190,9 +1196,7 @@ export function applyUnifiedDiff(filePath, hunks, opts = {}) {
     return { status: 'error', file: filePath, error: `Cannot read: ${e.message}` };
   }
 
-  if (undo) {
-    try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* */ }
-  }
+
 
   const lines = content.split('\n');
   let offset = 0; // tracks line number shift from previous hunks
@@ -1220,12 +1224,15 @@ export function applyUnifiedDiff(filePath, hunks, opts = {}) {
     return { status: 'conflict', file: filePath, error: sanity.error, details: { ratio: sanity.ratio, originalLength: content.length, newLength: newContent.length } };
   }
 
-  try { writeFileSync(filePath, newContent, 'utf-8'); } catch (e) {
+  let backup;
+  try {
+    backup = stagingWrite(filePath, newContent, undo);
+  } catch (e) {
     return { status: 'error', file: filePath, error: `Cannot write: ${e.message}` };
   }
 
   const diff = generateDiffSummary(content, newContent, filePath);
-  return { status: 'applied', file: filePath, matchLevel: 0, diff, backup: undo ? (filePath + '.apply.bak') : undefined };
+  return { status: 'applied', file: filePath, matchLevel: 0, diff, backup };
 }
 
 // ---------------------------------------------------------------------------
@@ -1366,12 +1373,9 @@ export function applySed(filePath, sedExpr, opts = {}) {
     return { status: 'nochange', file: filePath, sed: sedExpr, message: 'No matches found — content unchanged' };
   }
 
-  if (undo) {
-    try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* best effort */ }
-  }
-
+  let backup;
   try {
-    writeFileSync(filePath, newContent, 'utf-8');
+    backup = stagingWrite(filePath, newContent, undo);
   } catch (e) {
     return { status: 'error', file: filePath, error: `Cannot write: ${e.message}` };
   }
@@ -1384,7 +1388,7 @@ export function applySed(filePath, sedExpr, opts = {}) {
     sed: sedExpr,
     operation: parsed.operation,
     diff,
-    backup: undo ? (filePath + '.apply.bak') : undefined,
+    backup,
   };
 }
 
@@ -1492,12 +1496,9 @@ export function applyMultiHunk(filePath, hunks, opts = {}) {
     return { status: 'nochange', file: filePath, results, message: 'No changes applied' };
   }
 
-  if (undo) {
-    try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* best effort */ }
-  }
-
+  let backup;
   try {
-    writeFileSync(filePath, currentContent, 'utf-8');
+    backup = stagingWrite(filePath, currentContent, undo);
   } catch (e) {
     return { status: 'error', file: filePath, error: `Cannot write: ${e.message}` };
   }
@@ -1511,7 +1512,7 @@ export function applyMultiHunk(filePath, hunks, opts = {}) {
     appliedCount: results.filter(r => r.status === 'applied').length,
     results,
     diff,
-    backup: undo ? (filePath + '.apply.bak') : undefined,
+    backup,
   };
 }
 
