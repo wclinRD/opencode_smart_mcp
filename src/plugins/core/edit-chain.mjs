@@ -12,8 +12,8 @@
 //
 // Inline mode: runs in current process (no subagent).
 
-import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, writeFileSync, existsSync, unlinkSync, readdirSync, statSync } from 'node:fs';
+import { resolve, relative, dirname } from 'node:path';
 import { cwd } from 'node:process';
 import { extractSymbol, detectLanguage, parseDeclarations } from '../../lib/smart-read.mjs';
 import {
@@ -128,9 +128,67 @@ async function resolveEdit(e, idx) {
   }
 }
 
+// ── Import dependency scanner (P3-3) ────────────────────────────────────────
+
+function findImporters(modifiedFiles, root) {
+  const importers = new Map(); // file → [{from, imported}]
+  const absModified = new Set(modifiedFiles.map(f => resolve(root, f)));
+
+  // Collect all source files to scan
+  const sourceFiles = [];
+  function scanDir(dir, depth = 0) {
+    if (depth > 6) return;
+    try {
+      for (const entry of readdirSync(dir)) {
+        if (entry === 'node_modules' || entry === '.git' || entry === 'tmp-arch-*' || entry === 'tmp-test-*') continue;
+        const full = resolve(dir, entry);
+        try {
+          const st = statSync(full);
+          if (st.isDirectory()) scanDir(full, depth + 1);
+          else if (/\.(m?js|ts|tsx|jsx)$/.test(entry) && !entry.endsWith('.test.mjs') && !entry.endsWith('.test.js')) {
+            sourceFiles.push(full);
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+  scanDir(resolve(root, 'src'));
+
+  // Scan each source file for imports referencing modified files
+  const importRe = /(?:import|from|require)\s*\(?['"]([^'"]+)['"]\)?/g;
+  for (const sf of sourceFiles) {
+    if (absModified.has(sf)) continue;
+    try {
+      const content = readFileSync(sf, 'utf-8');
+      let m;
+      importRe.lastIndex = 0;
+      while ((m = importRe.exec(content)) !== null) {
+        const spec = m[1];
+        if (spec.startsWith('.') || spec.startsWith('/')) {
+          const resolved = resolve(dirname(sf), spec);
+          // Check if resolved matches any modified file
+          for (const mod of absModified) {
+            for (const ext of ['', '.mjs', '.js', '.ts', '/index.mjs', '/index.js']) {
+              if (resolved + ext === mod || resolved === mod) {
+                const relFrom = relative(root, sf);
+                const relMod = relative(root, mod);
+                if (!importers.has(relMod)) importers.set(relMod, []);
+                importers.get(relMod).push({ file: relFrom, spec });
+                break;
+              }
+            }
+          }
+        }
+      }
+    } catch {}
+  }
+
+  return importers;
+}
+
 // ── Render result ──────────────────────────────────────────────────────────
 
-function renderResults(results, allOk, elapsed) {
+function renderResults(results, allOk, elapsed, importImpact) {
   const out = [];
   const applied = results.filter(r => r.status === 'applied' || r.status === 'ok').length;
 
@@ -164,6 +222,19 @@ function renderResults(results, allOk, elapsed) {
   }
 
   if (elapsed) out.push(`\n\u23F1 ${elapsed}ms`);
+
+  // P3-3: Import dependency impact
+  if (importImpact && importImpact.size > 0) {
+    out.push('\n\uD83D\uDD17 Import dependency impact:');
+    for (const [modFile, deps] of importImpact) {
+      out.push(`   \u26A0\uFE0F ${modFile} is imported by:`);
+      for (const d of deps) {
+        out.push(`      \u2192 ${d.file} (${d.spec})`);
+      }
+    }
+    out.push('   \uD83D\uDCA1 Consider updating these files if exports changed.');
+  }
+
   return out.join('\n');
 }
 
@@ -354,6 +425,18 @@ Key benefits:
         try { unlinkSync(b.backup); } catch {}
       }
     }
+
+    // ── P3-3: Import dependency impact check ──
+    let importImpact = null;
+    if (allOk && results.length > 0) {
+      const modifiedFiles = [...new Set(results.filter(r => r.status === 'applied').map(r => r.file))];
+      if (modifiedFiles.length > 0) {
+        try {
+          importImpact = findImporters(modifiedFiles, root);
+        } catch { /* best effort */ }
+      }
+    }
+
     // ── P1: Post-apply LSP diagnostics validation ──
     if (allOk && results.length > 0) {
       const appliedResults = results.filter(r => r.status === 'applied' || r.status === 'ok');
@@ -373,6 +456,6 @@ Key benefits:
       }
     }
 
-    return renderResults(results, allOk, Date.now() - t0);
+    return renderResults(results, allOk, Date.now() - t0, importImpact);
   },
 };
