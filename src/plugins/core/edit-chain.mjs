@@ -19,6 +19,7 @@ import { extractSymbol, detectLanguage, parseDeclarations } from '../../lib/smar
 import {
   applyHashline, applySearchReplace, applySed,
 } from '../../lib/apply-engine.mjs';
+import { validatePostApply } from './fast-apply.mjs';
 import { findSymbolAST, initTreeSitter, isTreeSitterAvailable, isTreeSitterLang } from '../../lib/tree-sitter-edit.mjs';
 
 // Lazy-init tree-sitter at module load
@@ -351,6 +352,24 @@ Key benefits:
     if (doAtomic && backups) {
       for (const b of backups) {
         try { unlinkSync(b.backup); } catch {}
+      }
+    }
+    // ── P1: Post-apply LSP diagnostics validation ──
+    if (allOk && results.length > 0) {
+      const appliedResults = results.filter(r => r.status === 'applied' || r.status === 'ok');
+      const diagResult = await validatePostApply(appliedResults, cwd());
+      if (!diagResult.ok) {
+        // Rollback from .chain.bak
+        if (doAtomic && backups) {
+          for (const b of backups) {
+            try {
+              const orig = readFileSync(b.backup, 'utf-8');
+              writeFileSync(b.path, orig, 'utf-8');
+              unlinkSync(b.backup);
+            } catch {}
+          }
+        }
+        return JSON.stringify({ ok: false, error: diagResult.error, diagnostics: diagResult.diagnostics });
       }
     }
 

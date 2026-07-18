@@ -661,7 +661,7 @@ Dry-run by default — safe to use without side effects.`,
 // For each applied file, query LSP diagnostics. If errors found:
 //   1. Try auto-fix via LSP code_action (max 3 rounds)
 //   2. If still errors after fix attempts → rollback from .apply.bak
-async function validatePostApply(appliedResults, root, opts = {}) {
+export async function validatePostApply(appliedResults, root, opts = {}) {
   const maxFixRounds = opts.maxFixRounds ?? 3;
   const extMap = { '.ts': 'typescript', '.tsx': 'typescriptreact', '.js': 'javascript', '.jsx': 'javascriptreact', '.py': 'python', '.go': 'go', '.rs': 'rust', '.java': 'java', '.rb': 'ruby', '.php': 'php' };
   let bridge = null;
