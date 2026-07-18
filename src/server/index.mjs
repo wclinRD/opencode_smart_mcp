@@ -2283,9 +2283,11 @@ function invokeTool(def, args, timeoutOverride, signal, opts = {}) {
     ? timeoutOverride
     : (typeof args._timeout === 'number' && args._timeout > 0)
       ? args._timeout
-      : runtimeConfig.timeoutMs;
+      : (typeof def.timeout === 'number' && def.timeout > 0)
+        ? def.timeout
+        : runtimeConfig.timeoutMs;
 
-  debugLog('Invoke:', def.name, 'args:', JSON.stringify(allArgs));
+  debugLog('Invoke:', def.name, 'timeout:', msTimeout, 'args:', JSON.stringify(allArgs));
 
   // Inject context into environment for CLI tools
   const contextEnv = contextManager.getEnv();
@@ -2478,7 +2480,9 @@ async function invokeToolAsync(def, args, timeoutOverride, signal, opts = {}) {
     ? timeoutOverride
     : (typeof args._timeout === 'number' && args._timeout > 0)
       ? args._timeout
-      : runtimeConfig.timeoutMs;
+      : (typeof def.timeout === 'number' && def.timeout > 0)
+        ? def.timeout
+        : runtimeConfig.timeoutMs;
 
   try {
     const { code, stdout, stderr: capturedStderr } = await spawnToolAsync(cliPath, cliArgs, msTimeout, signal);

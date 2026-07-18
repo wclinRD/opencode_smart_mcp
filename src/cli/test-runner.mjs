@@ -331,10 +331,9 @@ function main() {
     result.relFile = relFile;
     results.push(result);
     if (opts.summary) {
-      // Compact progress: dots for pass, X for fail
-      process.stdout.write(result.passed ? '.' : 'X');
-      if ((idx + 1) % 50 === 0 || idx === totalFiles - 1) {
-        process.stdout.write(` ${idx + 1}/${totalFiles}\n`);
+      // Minimal progress: only show count every 100 files to keep output compact
+      if ((idx + 1) % 100 === 0 || idx === totalFiles - 1) {
+        process.stdout.write(`  ${idx + 1}/${totalFiles} files...\n`);
       }
     } else {
       process.stdout.write(result.passed ? 'OK\n' : 'FAIL\n');

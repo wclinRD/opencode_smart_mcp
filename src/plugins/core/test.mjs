@@ -17,6 +17,7 @@ export default {
     },
   },
   cli: 'test-runner.mjs',
+  timeout: 120_000, // Test runner can take 30s+ for large suites
   mapArgs(a) {
     const cli = [];
     if (a.root) cli.push('--root', String(a.root));
