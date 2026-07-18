@@ -29,7 +29,7 @@ const RG_TIMEOUT = 30_000; // 30s timeout for rg
 
 // ── Parse CLI args ─────────────────────────────────────────────────────
 const args = process.argv.slice(2);
-const pattern = args[0];
+const patternRaw = args[0];
 const flags = {};
 for (let i = 1; i < args.length; i++) {
   if (args[i] === '--path' && i + 1 < args.length) {
@@ -45,15 +45,20 @@ for (let i = 1; i < args.length; i++) {
     flags.type = args[++i];
   } else if (args[i] === '--sort' && i + 1 < args.length) {
     flags.sort = args[++i];
+  } else if (args[i] === '--format' && i + 1 < args.length) {
+    flags.format = args[++i];
   } else if (args[i] === '--no-color') {
     // accepted, no-op
   }
 }
 
+// Support comma-separated patterns: "*.ts,*.tsx" → ["*.ts", "*.tsx"]
+const patterns = patternRaw ? patternRaw.split(',').map(p => p.trim()).filter(Boolean) : [];
+
 const maxResults = flags.maxFiles || DEFAULT_MAX_RESULTS;
 
 // ── Validate ───────────────────────────────────────────────────────────
-if (!pattern) {
+if (patterns.length === 0) {
   process.stderr.write('Error: pattern is required\n');
   process.exit(1);
 }
@@ -78,51 +83,49 @@ if (rgCheck.error && rgCheck.error.code === 'ENOENT') {
 
 // ── Build rg command ───────────────────────────────────────────────────
 // rg --files lists all non-ignored files, output order matches built-in glob
-const rgArgs = ['--files', '--glob', pattern, '--no-messages'];
-
-// Add depth limit
-if (flags.depth !== undefined && !isNaN(flags.depth)) {
-  rgArgs.push('--max-depth', String(flags.depth));
-}
-
-// Add exclude patterns
-if (flags.exclude && flags.exclude.length > 0) {
-  for (const ex of flags.exclude) {
-    rgArgs.push('--glob', `!${ex}`);
+// For multiple patterns, run rg once per pattern and merge+deduplicate
+function buildRgArgs(pattern) {
+  const rgArgs = ['--files', '--glob', pattern, '--no-messages'];
+  if (flags.depth !== undefined && !isNaN(flags.depth)) {
+    rgArgs.push('--max-depth', String(flags.depth));
   }
-}
-
-// Add type filter (convert extension to rg type)
-if (flags.type) {
-  const types = flags.type.split(',').map(t => t.trim().toLowerCase());
-  for (const t of types) {
-    // rg uses type names like js, py, etc.
-    rgArgs.push('--type', t);
+  if (flags.exclude && flags.exclude.length > 0) {
+    for (const ex of flags.exclude) {
+      rgArgs.push('--glob', `!${ex}`);
+    }
   }
-}
-
-// ── Execute rg ─────────────────────────────────────────────────────────
-const result = spawnSync('rg', rgArgs, {
-  cwd,
-  encoding: 'utf-8',
-  timeout: RG_TIMEOUT,
-  maxBuffer: 10 * 1024 * 1024, // 10MB
-});
-
-if (result.error) {
-  if (result.error.code === 'ETIMEDOUT') {
-    process.stderr.write(`Error: search timed out after ${RG_TIMEOUT / 1000}s\n`);
-  } else {
-    process.stderr.write(`Error: ${result.error.message}\n`);
+  if (flags.type) {
+    const types = flags.type.split(',').map(t => t.trim().toLowerCase());
+    for (const t of types) {
+      rgArgs.push('--type', t);
+    }
   }
-  process.exit(1);
+  return rgArgs;
 }
 
-if (result.status !== 0 && result.status !== null) {
-    // rg returns 1 when no files found — that's not an error for us
+// ── Execute rg (single or multiple patterns) ───────────────────────────
+let files = [];
+for (const pat of patterns) {
+  const rgArgs = buildRgArgs(pat);
+  const result = spawnSync('rg', rgArgs, {
+    cwd,
+    encoding: 'utf-8',
+    timeout: RG_TIMEOUT,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+
+  if (result.error) {
+    if (result.error.code === 'ETIMEDOUT') {
+      process.stderr.write(`Error: search timed out after ${RG_TIMEOUT / 1000}s\n`);
+    } else {
+      process.stderr.write(`Error: ${result.error.message}\n`);
+    }
+    process.exit(1);
+  }
+
+  if (result.status !== 0 && result.status !== null) {
     if (result.status === 2) {
-      // Exit 2 = glob pattern syntax error (e.g. unclosed character class)
-      process.stderr.write(`Error: invalid glob pattern "${pattern}"\n`);
+      process.stderr.write(`Error: invalid glob pattern "${pat}"\n`);
       process.stderr.write(`Tip: Check for unclosed brackets [], unmatched quotes, or special characters.\n`);
       process.exit(2);
     } else if (result.status !== 1 || result.stdout.trim()) {
@@ -131,15 +134,21 @@ if (result.status !== 0 && result.status !== null) {
     }
   }
 
-// ── Process output ─────────────────────────────────────────────────────
-// Convert to absolute paths to match built-in glob behavior
-// resolve() handles both absolute and relative --path; normalize() removes
-// trailing slashes, ./ segments, and // duplicates for consistency
-let files = result.stdout
-  .trim()
-  .split('\n')
-  .filter(Boolean)
-  .map(f => normalize(resolve(cwd, f)));
+  const batch = result.stdout
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map(f => normalize(resolve(cwd, f)));
+  files.push(...batch);
+}
+
+// Deduplicate across patterns
+const seen = new Set();
+files = files.filter(f => {
+  if (seen.has(f)) return false;
+  seen.add(f);
+  return true;
+});
 
 // ── Type extension filter (post-process for multi-extension) ───────────
 // rg --type only supports single type, so we filter here for "js,ts" etc.
@@ -177,7 +186,22 @@ if (truncated) {
 }
 
 // ── Output ─────────────────────────────────────────────────────────────
-if (files.length === 0) {
+if (flags.format === 'json') {
+  // JSON output: structured metadata per file
+  const entries = files.map(f => {
+    const entry = { path: f };
+    try {
+      const stat = statSync(f);
+      entry.size = stat.size;
+      entry.mtime = new Date(stat.mtimeMs).toISOString();
+    } catch {
+      // stat may fail for broken symlinks
+    }
+    return entry;
+  });
+  const output = { total: entries.length, truncated, files: entries };
+  process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+} else if (files.length === 0) {
   process.stdout.write('No files found\n');
 } else {
   process.stdout.write(files.join('\n') + '\n');
