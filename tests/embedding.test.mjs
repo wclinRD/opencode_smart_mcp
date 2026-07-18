@@ -38,8 +38,10 @@ describe('tokenize (internal via vectorizer)', () => {
   it('removes punctuation and lowercases', () => {
     const vec = createVectorizer();
     const tokens = vec.tokenize('TypeError: Cannot read property "foo"!!');
-    // "TypeError", "cannot", "read", "property", "foo" (short tokens like "x" filtered)
-    assert.ok(tokens.includes('typeerror'), 'should lowercase and normalize');
+    // BM25 tokenizer splits camelCase: "TypeError" → "type" + "error"
+    // Punctuation removed, tokens lowercased
+    assert.ok(tokens.includes('type'), 'should split camelCase and lowercase');
+    assert.ok(tokens.includes('error'), 'should split camelCase');
     assert.ok(tokens.includes('cannot'));
     assert.ok(tokens.includes('property'));
     assert.ok(!tokens.some(t => t.includes(':')), 'should remove colons');
@@ -63,9 +65,13 @@ describe('tokenize (internal via vectorizer)', () => {
   it('handles numbers and underscores', () => {
     const vec = createVectorizer();
     const tokens = vec.tokenize('error_404 not_found foo2');
-    assert.ok(tokens.includes('error_404'), 'underscore and digits kept');
-    assert.ok(tokens.includes('not_found'));
-    assert.ok(tokens.includes('foo2'));
+    // BM25 tokenizer splits snake_case: "error_404" → "error" + "404"
+    // "not" is a stop word and gets filtered out
+    assert.ok(tokens.includes('error'), 'snake_case split: error');
+    assert.ok(tokens.includes('404'), 'snake_case split: 404');
+    assert.ok(!tokens.includes('not'), 'stop word "not" filtered');
+    assert.ok(tokens.includes('found'), 'snake_case split: found');
+    assert.ok(tokens.includes('foo2'), 'camelCase with digits kept');
   });
 });
 

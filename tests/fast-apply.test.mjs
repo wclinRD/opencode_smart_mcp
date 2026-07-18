@@ -218,24 +218,23 @@ line6`;
     assert.equal(r.level, 3); // unique content line match
   });
 
-  it('L4: whitespace tolerant matching', () => {
-    // L3 won't match (different trimmed content), L4 handles WS tolerance
+  it('L3 (merged L4): whitespace tolerant matching', () => {
+    // L3 now uses normalizeWS for whitespace-tolerant matching (formerly L4)
     const content2 = 'a\nb\nc\n  spaced  text\nd';
     const search = ' spaced text'; // different spacing
     const r = fuzzyMatch(content2, search);
     assert.equal(r.line, 4);
-    assert.equal(r.level, 4);
+    assert.equal(r.level, 3); // L4 merged into L3
   });
 
-  it('L4: matches despite different indentation and spacing', () => {
+  it('L3 (merged L4): matches despite different indentation and spacing', () => {
     // L2: 'spaced out' not found as substring of '  spaced  out'
-    // L3: trimmed content differs
-    // L4: after WS normalization, they match
+    // L3: after WS normalization, they match (formerly L4)
     const content2 = 'a\n  spaced  out\nc';
     const search = 'spaced out'; // single space
     const r = fuzzyMatch(content2, search);
     assert.equal(r.line, 2);
-    assert.equal(r.level, 4);
+    assert.equal(r.level, 3); // L4 merged into L3
   });
 
   it('returns null for no match', () => {
@@ -822,10 +821,10 @@ describe('applyPartial', () => {
     assert.ok(r.error.includes('Cannot read'));
   });
 
-  it('applies with L5 partial matching (gapped context)', () => {
+  it('applies with L3 partial matching (consecutive lines)', () => {
     const fp = tempFile('line A\nline B\nline C\nline D\nline E\n');
-    // Abbreviated SEARCH with only first and last line
-    const r = applyPartial(fp, { search: 'line A\nline E', replace: 'line A\nline Z\nline E' });
+    // L3 matches consecutive lines via whitespace-normalized anchor
+    const r = applyPartial(fp, { search: 'line B\nline C', replace: 'line B\nline Z\nline C' });
     assert.equal(r.status, 'applied');
     const got = readFileSync(fp, 'utf-8');
     assert.ok(got.includes('line Z'));

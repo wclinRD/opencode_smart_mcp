@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-18T13:26:02.386Z",
+  "generatedAt": "2026-07-18T14:00:27.222Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -1202,7 +1202,7 @@
     },
     {
       "name": "smart_fast_apply",
-      "description": "Unified editing tool — replaces write + edit + edit_ast.\nSupports 7 input formats (ordered by token efficiency):\n  - block-diff: symbol-aware block editing (NEW, most reliable). Specify {file, symbol, newContent, action?}. No fuzzy matching needed.\n  - unified-diff: git diff format — MOST token-efficient (40-60% savings). Use +/- lines only, no unchanged lines needed.\n  - lazy: SEARCH/REPLACE with // ... existing code ... markers (80-98% savings for large files)\n  - hashline: line-number + content-hash addressing — MOST ROBUST for large files (>400 lines). Specify line range directly. No fuzzy match ambiguity.\n  - partial: abbreviated SEARCH context (fewer lines, L5 fuzzy matching)\n  - search-replace: standard SEARCH/REPLACE blocks (Aider-compatible)\n  - whole-file: full file replacement (most tokens)\n💡 Tip: block-diff for symbol-level edits, unified-diff for small edits, hashline for >400 line files, lazy for large files with few changes.\nFeatures: 6-level fuzzy matching (L6 = gap-tolerant subsequence), hashline addressing with content verification, atomic multi-file apply, undo snapshots, binary/access checks.\nDry-run by default — safe to use without side effects.",
+      "description": "Unified editing tool — replaces write + edit + edit_ast.\nSupports 7 input formats (ordered by token efficiency):\n  - unified-diff: git diff format — MOST token-efficient (40-60% savings). ⭐ RECOMMENDED: use +/- lines only, no unchanged lines needed. LLM 3x less lazy with this format.\n  - block-diff: symbol-aware block editing (NEW, most reliable). Specify {file, symbol, newContent, action?}. No fuzzy matching needed.\n  - lazy: SEARCH/REPLACE with // ... existing code ... markers (80-98% savings for large files)\n  - hashline: line-number + content-hash addressing — MOST ROBUST for large files (>400 lines). Specify line range directly. No fuzzy match ambiguity.\n  - partial: abbreviated SEARCH context (fewer lines, L5 fuzzy matching)\n  - search-replace: standard SEARCH/REPLACE blocks (Aider-compatible)\n  - whole-file: full file replacement (most tokens)\n⭐ Tip: unified-diff is preferred for most edits — LLM doesn't need to reproduce old code exactly, only output +/- lines.\n   block-diff for symbol-level edits, hashline for >400 line files, lazy for large files with few changes.\nFeatures: 6-level fuzzy matching (L6 = gap-tolerant subsequence), hashline addressing with content verification, atomic multi-file apply, undo snapshots, binary/access checks.\nDry-run by default — safe to use without side effects.",
       "category": "edit",
       "domain": "edit",
       "safetyLevel": "high",
@@ -2187,6 +2187,10 @@
           "failFast": {
             "type": "boolean",
             "description": "Stop on first failure"
+          },
+          "verbose": {
+            "type": "boolean",
+            "description": "Show full per-file output (default: summary only)"
           }
         }
       }
