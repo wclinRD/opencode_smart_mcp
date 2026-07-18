@@ -146,6 +146,69 @@ export function getPatternsForLanguage(lang) {
       { re: /^const\s+(\w+)\s*:/gm,                          type: 'constant',  nameGroup: 1 },
       { re: /^(?:pub\s+)?(?:async\s+)?fn\s+(\w+)/gm,        type: 'function',  nameGroup: 1 },
     ],
+    java: [
+      { re: /^(?:public|private|protected)\s+(?:static\s+)?(?:abstract\s+)?(?:final\s+)?class\s+(\w+)/gm,           type: 'class',     nameGroup: 1 },
+      { re: /^(?:public|private|protected)\s+(?:static\s+)?(?:abstract\s+)?interface\s+(\w+)/gm,                    type: 'interface', nameGroup: 1 },
+      { re: /^(?:public|private|protected)\s+(?:static\s+)?enum\s+(\w+)/gm,                                          type: 'enum',      nameGroup: 1 },
+      { re: /^(?:public|private|protected)\s+(?:static\s+)?(?:abstract\s+)?(?:final\s+)?(?:synchronized\s+)?(?:\w+(?:<[^>]+>)?)\s+(\w+)\s*\(/gm, type: 'function', nameGroup: 2 },
+      { re: /^\s*(?:@\w+(?:\([^)]*\))?\s*)*(?:public|private|protected)\s+(?:static\s+)?(?:\w+(?:<[^>]+>)?)\s+(\w+)\s*\(/gm, type: 'function', nameGroup: 1 },
+    ],
+    csharp: [
+      { re: /^(?:public|private|protected|internal)\s+(?:static\s+)?(?:abstract\s+)?(?:sealed\s+)?class\s+(\w+)/gm,  type: 'class',     nameGroup: 1 },
+      { re: /^(?:public|private|protected|internal)\s+interface\s+(\w+)/gm,                                           type: 'interface', nameGroup: 1 },
+      { re: /^(?:public|private|protected|internal)\s+struct\s+(\w+)/gm,                                               type: 'struct',    nameGroup: 1 },
+      { re: /^(?:public|private|protected|internal)\s+(?:enum)\s+(\w+)/gm,                                              type: 'enum',      nameGroup: 1 },
+      { re: /^(?:public|private|protected|internal)\s+(?:static\s+)?(?:async\s+)?(?:virtual\s+)?(?:override\s+)?(?:\w+(?:<[^>]+>)?)\s+(\w+)\s*\(/gm, type: 'function', nameGroup: 2 },
+    ],
+    php: [
+      { re: /^class\s+(\w+)/gm,                                                     type: 'class',     nameGroup: 1 },
+      { re: /^interface\s+(\w+)/gm,                                                 type: 'interface', nameGroup: 1 },
+      { re: /^trait\s+(\w+)/gm,                                                     type: 'trait',     nameGroup: 1 },
+      { re: /^enum\s+(\w+)/gm,                                                      type: 'enum',      nameGroup: 1 },
+      { re: /^(?:public|private|protected|static)\s+function\s+(\w+)\s*\(/gm,   type: 'function',  nameGroup: 1 },
+      { re: /^function\s+(\w+)\s*\(/gm,                                            type: 'function',  nameGroup: 1 },
+    ],
+    ruby: [
+      { re: /^class\s+([A-Z]\w*)/gm,        type: 'class',    nameGroup: 1 },
+      { re: /^module\s+([A-Z]\w*)/gm,       type: 'module',   nameGroup: 1 },
+      { re: /^def\s+(?:self\.)?(\w+)/gm,    type: 'function', nameGroup: 1 },
+      { re: /^def\s+(\w+)[!?]?\s*\(/gm,    type: 'function', nameGroup: 1 },
+    ],
+    swift: [
+      { re: /^(?:public|private|internal|open)\s+class\s+(\w+)/gm,                type: 'class',     nameGroup: 1 },
+      { re: /^(?:public|private|internal|open)\s+struct\s+(\w+)/gm,              type: 'struct',    nameGroup: 1 },
+      { re: /^(?:public|private|internal|open)\s+enum\s+(\w+)/gm,                type: 'enum',      nameGroup: 1 },
+      { re: /^(?:public|private|internal|open)\s+protocol\s+(\w+)/gm,            type: 'interface', nameGroup: 1 },
+      { re: /^(?:public|private|internal|open)\s+extension\s+(\w+)/gm,           type: 'extension', nameGroup: 1 },
+      { re: /^(?:public|private|internal|open)?\s*(?:static\s+)?func\s+(\w+)/gm, type: 'function', nameGroup: 1 },
+    ],
+    kotlin: [
+      { re: /^(?:public|private|protected|internal)\s+(?:data\s+)?class\s+(\w+)/gm,  type: 'class',     nameGroup: 1 },
+      { re: /^(?:public|private|protected|internal)\s+(?:data\s+)?sealed\s+class\s+(\w+)/gm, type: 'class', nameGroup: 1 },
+      { re: /^(?:public|private|protected|internal)\s+interface\s+(\w+)/gm,             type: 'interface', nameGroup: 1 },
+      { re: /^(?:public|private|protected|internal)\s+object\s+(\w+)/gm,                type: 'object',    nameGroup: 1 },
+      { re: /^(?:public|private|protected|internal)\s+enum\s+(\w+)/gm,                  type: 'enum',      nameGroup: 1 },
+      { re: /^(?:public|private|protected|internal)?\s*(?:suspend\s+)?fun\s+(\w+)/gm,  type: 'function',  nameGroup: 1 },
+    ],
+    scala: [
+      { re: /^(?:case\s+)?class\s+(\w+)/gm,                  type: 'class',     nameGroup: 1 },
+      { re: /^trait\s+(\w+)/gm,                                type: 'trait',     nameGroup: 1 },
+      { re: /^object\s+(\w+)/gm,                               type: 'object',    nameGroup: 1 },
+      { re: /^def\s+(\w+)/gm,                                  type: 'function',  nameGroup: 1 },
+      { re: /^val\s+(\w+)/gm,                                  type: 'constant',  nameGroup: 1 },
+      { re: /^var\s+(\w+)/gm,                                  type: 'variable',  nameGroup: 1 },
+    ],
+    c: [
+      { re: /^(?:typedef\s+)?struct\s+(\w+)/gm,              type: 'struct',    nameGroup: 1 },
+      { re: /^(?:typedef\s+)?enum\s+(\w+)/gm,                type: 'enum',      nameGroup: 1 },
+      { re: /^(?:static\s+)?(?:inline\s+)?(?:\w+\s+)+(\w+)\s*\(/gm, type: 'function', nameGroup: 1 },
+    ],
+    cpp: [
+      { re: /^(?:class|struct)\s+(?:\w+\s+)*(\w+)/gm,       type: 'class',     nameGroup: 1 },
+      { re: /^namespace\s+(\w+)/gm,                            type: 'namespace', nameGroup: 1 },
+      { re: /^template\s*<[^>]+>\s*(?:class|struct)\s+(\w+)/gm, type: 'class', nameGroup: 1 },
+      { re: /^(?:static\s+)?(?:inline\s+)?(?:virtual\s+)?(?:\w+(?:<[^>]+>)?\s+)+(\w+)\s*\(/gm, type: 'function', nameGroup: 1 },
+    ],
     // For other languages, use generic patterns
   };
 
@@ -385,53 +448,30 @@ function findBodyEnd(lines, startLine, lang) {
 
   if (braceLangs.has(lang)) {
     // Find opening brace — could be on same line or next lines
-    let braceDepth = 0;
-    let foundOpen = false;
-    let startFrom = idx;
-
-    while (startFrom < lines.length && !foundOpen) {
-      const line = lines[startFrom];
-      for (const ch of line) {
-        if (ch === '{') {
-          braceDepth++;
-          foundOpen = true;
-          break;
+    // Single-pass: find first {, then count all braces from that position
+    for (let lineIdx = idx; lineIdx < lines.length; lineIdx++) {
+      const line = lines[lineIdx];
+      for (let ci = 0; ci < line.length; ci++) {
+        if (line[ci] !== '{') continue;
+        // Found first { — count it and all remaining braces on this line
+        let depth = 1;
+        for (let cj = ci + 1; cj < line.length; cj++) {
+          if (line[cj] === '{') depth++;
+          if (line[cj] === '}') depth--;
         }
-      }
-      if (!foundOpen) startFrom++;
-    }
-
-    if (!foundOpen) return startLine + 1; // No braces found, single-line
-
-    // Track depth from the open brace
-    // Count braces on the startFrom line from the first { position
-    let lineText = lines[startFrom];
-    let braceStarted = false;
-    for (const ch of lineText) {
-      if (ch === '{' && !braceStarted) {
-        braceStarted = true;
-        // Don't count this first brace (already accounted)
-        continue;
-      }
-      if (ch === '{') braceDepth++;
-      if (ch === '}') braceDepth--;
-    }
-
-    if (braceDepth <= 0) return startFrom + 1; // Balanced on same line: exclusive end
-
-    // Continue scanning subsequent lines
-    for (let i = startFrom + 1; i < lines.length; i++) {
-      const line = lines[i];
-      for (const ch of line) {
-        if (ch === '{') braceDepth++;
-        if (ch === '}') braceDepth--;
-      }
-      if (braceDepth <= 0) {
-        return i + 1; // Return 1-indexed end line (exclusive: line after closing brace)
+        if (depth <= 0) return lineIdx + 1; // Balanced on same line
+        // Scan subsequent lines
+        for (let i = lineIdx + 1; i < lines.length; i++) {
+          for (const ch of lines[i]) {
+            if (ch === '{') depth++;
+            if (ch === '}') depth--;
+          }
+          if (depth <= 0) return i + 1;
+        }
+        return lines.length; // Unclosed brace — goes to end
       }
     }
-
-    return lines.length; // Unclosed brace — goes to end
+    return startLine + 1; // No braces found, single-line
   }
 
   // For unknown languages: try brace matching as fallback
@@ -509,6 +549,45 @@ function getImportPatterns(lang) {
       return [/^import\s+(?!"|`)/];
     case 'rust':
       return [/^use\s+/];
+    case 'java':
+      return [
+        /^import\s+(?:static\s+)?[a-z]/,
+        /^package\s+/,
+      ];
+    case 'csharp':
+      return [
+        /^using\s+(?:static\s+)?[A-Z]/,
+        /^namespace\s+/,
+      ];
+    case 'php':
+      return [
+        /^use\s+(?:function\s+|const\s+)?[A-Z\\]/,
+        /^namespace\s+/,
+        /^require(?:_once)?\s+/,
+        /^include(?:_once)?\s+/,
+      ];
+    case 'ruby':
+      return [
+        /^require\s/,
+        /^require_relative\s/,
+        /^load\s/,
+      ];
+    case 'swift':
+      return [/^import\s+(?:@_exported\s+)?[A-Z]/];
+    case 'kotlin':
+      return [
+        /^import\s+[a-z]/,
+      ];
+    case 'scala':
+      return [
+        /^import\s+[a-z]/,
+      ];
+    case 'c':
+    case 'cpp':
+      return [
+        /^#\s*include\s+[<"]/,
+        /^#\s*import\s+[<"]/,
+      ];
     default:
       return [
         /^import\s+/,
