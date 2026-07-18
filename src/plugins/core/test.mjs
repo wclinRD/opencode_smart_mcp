@@ -13,6 +13,7 @@ export default {
       related: { type: 'string', description: 'Find tests related to a file (e.g. "src/auth.ts")' },
       grep: { type: 'string', description: 'Filter tests by name pattern' },
       failFast: { type: 'boolean', description: 'Stop on first failure' },
+      verbose: { type: 'boolean', description: 'Show full per-file output (default: summary only)' },
     },
   },
   cli: 'test-runner.mjs',
@@ -25,6 +26,8 @@ export default {
     if (a.related) cli.push('--related', String(a.related));
     if (a.grep) cli.push('--grep', String(a.grep));
     if (a.failFast) cli.push('--fail-fast');
+    // Default: summary mode (compact). Pass verbose:true for full output.
+    if (!a.verbose) cli.push('--summary');
     cli.push('--no-color');
     return cli;
   },

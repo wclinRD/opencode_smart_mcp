@@ -208,6 +208,7 @@ function parseArgs() {
     format: 'text',
     list: false,
     failFast: false,
+    summary: false,
     color: undefined,
     coverage: false,
     related: null,
@@ -224,6 +225,7 @@ function parseArgs() {
       case '--format': opts.format = args[++i]; break;
       case '--list': opts.list = true; break;
       case '--fail-fast': opts.failFast = true; break;
+      case '--summary': opts.summary = true; break;
       case '--coverage': opts.coverage = true; break;
       case '--related': opts.related = args[++i]; break;
       case '--grep': opts.grep = args[++i]; break;
@@ -262,6 +264,7 @@ Options:
   --coverage            Run with coverage report
   --related <file>      Find tests related to a file
   --grep <pattern>      Filter tests by name pattern
+  --summary             Compact output: only show failures + summary
   --no-color            Disable color output
   -h, --help            Show this help
 
@@ -317,32 +320,67 @@ function main() {
   }
 
   const results = [];
-  for (const filePath of testFiles) {
+  const totalFiles = testFiles.length;
+  for (let idx = 0; idx < testFiles.length; idx++) {
+    const filePath = testFiles[idx];
     const relFile = relative(root, filePath);
-    process.stdout.write(`  Running: ${relFile} ... `);
+    if (!opts.summary) {
+      process.stdout.write(`  Running: ${relFile} ... `);
+    }
     const result = runTest(filePath, opts.runner, opts.timeout, opts.grep, opts.coverage);
     result.relFile = relFile;
     results.push(result);
-    process.stdout.write(result.passed ? 'OK\n' : 'FAIL\n');
+    if (opts.summary) {
+      // Compact progress: dots for pass, X for fail
+      process.stdout.write(result.passed ? '.' : 'X');
+      if ((idx + 1) % 50 === 0 || idx === totalFiles - 1) {
+        process.stdout.write(` ${idx + 1}/${totalFiles}\n`);
+      }
+    } else {
+      process.stdout.write(result.passed ? 'OK\n' : 'FAIL\n');
+    }
 
     if (!result.passed && opts.failFast) {
-      console.log('\nFail-fast: stopping on first failure.');
+      if (!opts.summary) console.log('\nFail-fast: stopping on first failure.');
       break;
     }
   }
 
   // Output
-  switch (opts.format) {
-    case 'json':
-      console.log(formatJSON(results));
-      break;
-    case 'tap':
-      console.log(formatTAP(results));
-      break;
-    case 'text':
-    default:
-      console.log(formatText(results, opts, color));
-      break;
+  if (opts.summary) {
+    // Summary mode: compact output
+    const passed = results.filter(r => r.passed);
+    const failed = results.filter(r => !r.passed);
+    console.log('');
+    console.log(color
+      ? `${COLORS.bold}Summary:${COLORS.reset} ${COLORS.green}${passed.length} passed${COLORS.reset}, ${COLORS.red}${failed.length} failed${COLORS.reset}, ${results.length} total`
+      : `Summary: ${passed.length} passed, ${failed.length} failed, ${results.length} total`);
+    if (failed.length > 0) {
+      console.log('');
+      console.log(color ? `${COLORS.red}Failed:${COLORS.reset}` : 'Failed:');
+      for (const r of failed) {
+        console.log(`  ✗ ${r.relFile}`);
+        if (r.error) console.log(`    Error: ${r.error}`);
+        if (r.stderr) {
+          for (const line of r.stderr.split('\n').filter(Boolean).slice(0, 5)) {
+            console.log(`    ${color ? COLORS.red + line + COLORS.reset : line}`);
+          }
+        }
+      }
+    }
+  } else {
+    switch (opts.format) {
+      case 'json':
+        console.log(formatJSON(results));
+        break;
+      case 'tap':
+        console.log(formatTAP(results));
+        break;
+      case 'text':
+      default:
+        console.log(formatText(results, opts, color));
+        break;
+    }
   }
 
   const failed = results.filter(r => !r.passed).length;
