@@ -2133,3 +2133,118 @@ export function sanitizeFileEdit(originalContent, newContent, filePath, ctx = {}
 
   return { ok: true, ratio };
 }
+
+/**
+ * suggestFormat — P4-2 model-adaptive format recommendation
+ *
+ * Returns the optimal edit format given context about the model, file, and edit.
+ * Factors: modelSize, fileLines, editLines, language, treeSitterAvailable, budget.
+ *
+ * @param {object} ctx
+ * @param {string} ctx.modelSize - "large" | "small" | "micro"
+ * @param {number} ctx.fileLines - total lines in target file
+ * @param {number} ctx.editLines - lines being edited
+ * @param {string} ctx.lang - file language (e.g. "javascript", "python")
+ * @param {boolean} ctx.treeSitterAvailable - whether tree-sitter WASM is loaded
+ * @param {string} ctx.budget - "tight" | "normal" | "generous"
+ * @returns {{ format: string, reason: string, tokenEstimate: number }}
+ */
+export function suggestFormat(ctx) {
+  const {
+    modelSize = 'large',
+    fileLines = 100,
+    editLines = 10,
+    lang = '',
+    treeSitterAvailable = false,
+    budget = 'normal',
+  } = ctx;
+
+  const isJsTs = /^(javascript|typescript|jsx|tsx|mjs|cjs)$/.test(lang);
+  const isLargeFile = fileLines > 400;
+  const isSmallEdit = editLines <= 5;
+  const isMediumEdit = editLines > 5 && editLines <= 30;
+  const isLargeEdit = editLines > 30;
+
+  // Token estimates per format (approximate)
+  const TOKENS = {
+    'block-diff': 40,   // file + symbol + newContent
+    'unified-diff': 20, // +/- lines only
+    'hashline': 50,     // line ranges + content
+    'search-replace': 60, // search + replace blocks
+    'lazy': 30,         // compressed markers
+    'partial': 45,      // abbreviated search
+    'whole-file': 0,    // entire file (unbounded)
+  };
+
+  // Priority 1: Budget-critical → most compact
+  if (budget === 'tight') {
+    return {
+      format: 'unified-diff',
+      reason: 'Context budget tight — unified-diff is most token-efficient (only +/- lines)',
+      tokenEstimate: TOKENS['unified-diff'] + editLines * 2,
+    };
+  }
+
+  // Priority 2: Small models → simpler formats (less likely to produce invalid syntax)
+  if (modelSize === 'small' || modelSize === 'micro') {
+    if (isSmallEdit) {
+      return {
+        format: 'search-replace',
+        reason: `${modelSize} model + small edit — search-replace is simplest format`,
+        tokenEstimate: TOKENS['search-replace'] + editLines * 4,
+      };
+    }
+    if (isLargeFile) {
+      return {
+        format: 'hashline',
+        reason: `${modelSize} model + large file (${fileLines} lines) — hashline is most robust`,
+        tokenEstimate: TOKENS['hashline'] + editLines * 3,
+      };
+    }
+    return {
+      format: 'search-replace',
+      reason: `${modelSize} model — search-replace is safest default`,
+      tokenEstimate: TOKENS['search-replace'] + editLines * 4,
+    };
+  }
+
+  // Priority 3: Large models → best format for the situation
+  if (treeSitterAvailable && isJsTs && isMediumEdit) {
+    return {
+      format: 'block-diff',
+      reason: 'Large model + JS/TS + medium edit — block-diff is most reliable (AST-aware)',
+      tokenEstimate: TOKENS['block-diff'] + editLines * 3,
+    };
+  }
+
+  if (isLargeFile && isSmallEdit) {
+    return {
+      format: 'hashline',
+      reason: `Large file (${fileLines} lines) + small edit — hashline avoids fuzzy match ambiguity`,
+      tokenEstimate: TOKENS['hashline'] + editLines * 3,
+    };
+  }
+
+  if (isSmallEdit) {
+    return {
+      format: 'unified-diff',
+      reason: 'Small edit — unified-diff is most token-efficient',
+      tokenEstimate: TOKENS['unified-diff'] + editLines * 2,
+    };
+  }
+
+  if (isLargeEdit) {
+    return {
+      format: 'lazy',
+      reason: 'Large edit — lazy markers compress unchanged code (80-98% savings)',
+      tokenEstimate: TOKENS['lazy'] + editLines * 2,
+    };
+  }
+
+  // Default: search-replace (safest, most compatible)
+  return {
+    format: 'search-replace',
+    reason: 'Default — search-replace is safest and most compatible',
+    tokenEstimate: TOKENS['search-replace'] + editLines * 4,
+  };
+}

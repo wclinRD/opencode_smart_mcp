@@ -45,6 +45,7 @@ import {
   expandLazyMarkers,
   computeLineFingerprints,
   verifyLineFingerprint,
+  suggestFormat,
 } from '../../lib/apply-engine.mjs';
 import { getLspBridge } from '../../lib/lsp-bridge.mjs';
 import { extractFunctionAST, isTreeSitterAvailable, isTreeSitterLang } from '../../lib/tree-sitter-edit.mjs';
@@ -103,6 +104,16 @@ Dry-run by default — safe to use without side effects.`,
           insertAt: { type: 'string', enum: ['after', 'before', 'end'], description: 'Where to insert the function definition (default: after enclosing scope)' },
         },
         required: ['file', 'funcName', 'startLine', 'endLine'],
+      },
+      suggestFormat: {
+        type: 'object',
+        description: 'Get model-adaptive format recommendation. Returns optimal format + reason + token estimate. No edits performed.',
+        properties: {
+          file: { type: 'string', description: 'Target file path (optional, improves recommendation)' },
+          modelSize: { type: 'string', enum: ['large', 'small', 'micro'], description: 'Model size (default: large)' },
+          editLines: { type: 'number', description: 'Number of lines being edited (default: 10)' },
+          budget: { type: 'string', enum: ['tight', 'normal', 'generous'], description: 'Context budget (default: normal)' },
+        },
       },
       text: {
         type: 'string',
@@ -269,6 +280,29 @@ Dry-run by default — safe to use without side effects.`,
     let changes = [];
 
     try {
+      // ── P4-2: suggestFormat action (model-adaptive format recommendation) ──
+      if (args.suggestFormat) {
+        const sf = args.suggestFormat;
+        const fp = sf.file ? resolve(root, sf.file) : null;
+        let fileLines = 100;
+        let lang = '';
+        if (fp && existsSync(fp)) {
+          const content = readFileSync(fp, 'utf-8');
+          fileLines = content.split('\n').length;
+          lang = detectLanguage(fp);
+        }
+        const tsAvail = isTreeSitterAvailable();
+        const recommendation = suggestFormat({
+          modelSize: sf.modelSize || 'large',
+          fileLines,
+          editLines: sf.editLines || 10,
+          lang,
+          treeSitterAvailable: tsAvail,
+          budget: sf.budget || 'normal',
+        });
+        return JSON.stringify({ ok: true, ...recommendation }, null, 2);
+      }
+
       // ── Format auto-detect: infer format from args when not explicitly set ──
       let effectiveFormat = format;
 
