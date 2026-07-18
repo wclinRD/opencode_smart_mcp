@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-17T17:52:35.378Z",
+  "generatedAt": "2026-07-18T05:40:33.747Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -1533,7 +1533,7 @@
     },
     {
       "name": "smart_glob",
-      "description": "Fast file pattern matching tool that works with any codebase size. Supports glob patterns like \"**/*.js\" or \"src/**/*.ts\". Returns matching file paths. Use when: need to find files by name patterns. Avoid when: doing open-ended search requiring multiple rounds of globbing and grepping (use Task tool instead).",
+      "description": "Fast file pattern matching tool that works with any codebase size. Supports glob patterns like \"**/*.js\" or \"src/**/*.ts\". Also supports comma-separated multiple patterns like \"*.ts,*.tsx\" for batch matching in one call. Returns matching file paths. Use when: need to find files by name patterns. Avoid when: doing open-ended search requiring multiple rounds of globbing and grepping (use Task tool instead).",
       "category": "search",
       "domain": "general",
       "safetyLevel": "medium",
@@ -1553,7 +1553,7 @@
         "properties": {
           "pattern": {
             "type": "string",
-            "description": "The glob pattern to match files against"
+            "description": "The glob pattern to match files against. Supports comma-separated multiple patterns (e.g. \"*.ts,*.tsx\") for batch matching."
           },
           "path": {
             "type": "string",
@@ -1583,6 +1583,14 @@
               "mtime"
             ],
             "description": "Sort results: name (default), size, mtime"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "json"
+            ],
+            "description": "Output format. text (default) = plain path list. json = structured output with path, size, mtime per file."
           }
         },
         "required": [
@@ -1743,7 +1751,7 @@
     },
     {
       "name": "smart_lsp",
-      "description": "[lsp] Use when: need type-aware code understanding — find definitions, references, hover types, symbols, or diagnostics. Auto-detects language from file extension. Supports TypeScript/JS, Python, Rust, Swift, PHP. Avoid when: searching by text pattern (use smart_grep instead).",
+      "description": "[lsp] Use when: need type-aware code understanding — find definitions, references, hover types, symbols, diagnostics, or code actions (quick fixes/refactorings). Auto-detects language from file extension. Supports TypeScript/JS, Python, Rust, Swift, PHP. Avoid when: searching by text pattern (use smart_grep instead).",
       "category": "code",
       "domain": "lsp",
       "safetyLevel": "low",
@@ -1768,9 +1776,11 @@
               "references",
               "hover",
               "definition",
-              "diagnostics"
+              "diagnostics",
+              "code_action",
+              "apply_edit"
             ],
-            "description": "LSP operation: symbols (list all), references (find usages), hover (type info), definition (jump to def), diagnostics (errors/warnings)"
+            "description": "LSP operation: symbols (list all), references (find usages), hover (type info), definition (jump to def), diagnostics (errors/warnings), code_action (quick fixes/refactorings), apply_edit (apply workspace edit)"
           },
           "file": {
             "type": "string",
@@ -1783,6 +1793,82 @@
           "character": {
             "type": "number",
             "description": "Character offset (0-indexed). Required for references, hover, definition."
+          },
+          "diagnostics": {
+            "type": "array",
+            "description": "Array of diagnostics for code_action operation (optional, helps LSP find relevant fixes)",
+            "items": {
+              "type": "object",
+              "properties": {
+                "line": {
+                  "type": "number",
+                  "description": "Line number (1-indexed)"
+                },
+                "col": {
+                  "type": "number",
+                  "description": "Column (0-indexed)"
+                },
+                "endLine": {
+                  "type": "number",
+                  "description": "End line (1-indexed)"
+                },
+                "endCol": {
+                  "type": "number",
+                  "description": "End column (0-indexed)"
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "error",
+                    "warning",
+                    "info"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "code": {
+                  "type": "string"
+                },
+                "source": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "action": {
+            "type": "object",
+            "description": "CodeAction object for apply_edit operation (from code_action results)",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "edit": {
+                "type": "object",
+                "description": "WorkspaceEdit object"
+              },
+              "command": {
+                "type": "object",
+                "description": "Command to execute"
+              },
+              "_filePath": {
+                "type": "string",
+                "description": "Original file path for language detection"
+              }
+            }
+          },
+          "edit": {
+            "type": "object",
+            "description": "WorkspaceEdit object for apply_edit operation (alternative to action)",
+            "properties": {
+              "changes": {
+                "type": "object",
+                "description": "Map of URI to TextEdit[]"
+              }
+            }
           },
           "root": {
             "type": "string",

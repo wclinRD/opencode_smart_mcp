@@ -140,4 +140,72 @@ export { InternalHelper };
       'isReady should be a boolean or undefined');
   });
 
+  // ── 6. Code Actions ──
+  it('6.1 getCodeActions returns actions for a file', { timeout: 15000, skip: !hasTsLsp }, async () => {
+    // Create a file with an error (unused import)
+    writeFileSync(resolve(TEST_DIR, 'code-action-test.ts'), `
+import { existsSync } from 'node:fs';
+export function doNothing(): void {
+  console.log('hello');
+}
+`.trimStart());
+
+    // Wait for LSP to index
+    await new Promise(r => setTimeout(r, 1000));
+
+    const result = await bridge.getCodeActions('code-action-test.ts', 2, 0);
+    assert.ok(result, 'should return result');
+    assert.ok(Array.isArray(result.actions), 'should have actions array');
+    // Note: Actions depend on LSP server, might be empty if no quickfix available
+  });
+
+  it('6.2 getCodeActions with diagnostics filter', { timeout: 15000, skip: !hasTsLsp }, async () => {
+    const result = await bridge.getCodeActions('code-action-test.ts', 2, 0, [
+      {
+        line: 2,
+        col: 0,
+        severity: 'warning',
+        message: "'existsSync' is declared but its value is never read.",
+        code: '6133',
+        source: 'typescript'
+      }
+    ]);
+    assert.ok(result, 'should return result');
+    assert.ok(Array.isArray(result.actions), 'should have actions array');
+  });
+
+  it('6.3 applyWorkspaceEdit applies changes', { timeout: 15000, skip: !hasTsLsp }, async () => {
+    // Create a simple file
+    writeFileSync(resolve(TEST_DIR, 'edit-test.ts'), `
+export const x = 1;
+export const y = 2;
+`.trimStart());
+
+    await new Promise(r => setTimeout(r, 500));
+
+    // Create a workspace edit (use file:/// for absolute paths)
+    const edit = {
+      changes: {
+        [`file:///${resolve(TEST_DIR, 'edit-test.ts').slice(1)}`]: [
+          {
+            range: {
+              start: { line: 1, character: 0 },
+              end: { line: 1, character: 16 }
+            },
+            newText: 'export const x = 100;'
+          }
+        ]
+      }
+    };
+
+    const result = await bridge.applyWorkspaceEdit(edit);
+    assert.equal(result.applied, 1, 'should apply 1 edit');
+    assert.equal(result.errors.length, 0, 'should have no errors');
+
+    // Verify the change
+    const { readFileSync } = await import('node:fs');
+    const content = readFileSync(resolve(TEST_DIR, 'edit-test.ts'), 'utf8');
+    assert.ok(content.includes('x = 100'), 'should have updated value');
+  });
+
 });

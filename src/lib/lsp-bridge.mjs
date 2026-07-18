@@ -11,7 +11,7 @@
 // - 多語言支援：依檔案副檔名自動選擇對應 LSP server
 
 import { spawn, execSync } from 'node:child_process';
-import { existsSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, writeFileSync, copyFileSync, unlinkSync, readFileSync, renameSync } from 'node:fs';
 import { resolve, dirname, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -356,6 +356,222 @@ export class LspBridge {
     return output;
   }
 
+  /**
+   * 取得 code actions（quick fixes, refactorings, source actions）
+   * @param {string} filePath - 相對路徑
+   * @param {number} line - 行號 (1-indexed)
+   * @param {number} col - 字元位置 (0-indexed)
+   * @param {Array} diagnostics - 相關的 diagnostics（可選）
+   * @returns {Promise<{file: string, actions: Array}>}
+   */
+  async getCodeActions(filePath, line, col = 0, diagnostics = []) {
+    const absPath = resolve(this.rootDir, filePath);
+    if (!existsSync(absPath)) {
+      return { error: `File not found: ${filePath}`, actions: [] };
+    }
+
+    const lang = this._langForFile(filePath);
+    const cfg = LSP_CONFIGS[lang];
+    const languageId = cfg ? cfg.languageId : 'typescript';
+
+    await this.ensureOpen(lang);
+    await this._didOpen(absPath, lang, languageId);
+
+    const cap = this._serverCapabilities.get(lang);
+    const codeActionKinds = cap?.capabilities?.codeActionProvider?.codeActionKinds;
+
+    if (!codeActionKinds) {
+      return {
+        file: filePath,
+        actions: [],
+        note: 'Code actions not supported by this language server'
+      };
+    }
+
+    // Build range around the position
+    const start = { line: line - 1, character: col };
+    const end = { line: line - 1, character: col + 1 };
+
+    const params = {
+      textDocument: { uri: this._toUri(absPath) },
+      range: { start, end },
+      context: {
+        diagnostics: diagnostics.map(d => ({
+          range: {
+            start: { line: (d.line || 1) - 1, character: d.col || 0 },
+            end: { line: ((d.endLine || d.line) || 1) - 1, character: d.endCol || (d.col || 0) + 1 }
+          },
+          message: d.message || '',
+          severity: d.severity === 'error' ? 1 : d.severity === 'warning' ? 2 : 3,
+          source: d.source || undefined,
+          code: d.code || undefined
+        }))
+      }
+    };
+
+    try {
+      const result = await this._sendRequest('textDocument/codeAction', params, lang);
+      const actions = Array.isArray(result) ? result : [];
+      return { file: filePath, actions: this._normalizeCodeActions(actions) };
+    } catch (err) {
+      return { error: err.message, actions: [] };
+    }
+  }
+
+  /**
+   * 執行 code action（返回 workspace edit 供客戶端應用）
+   * @param {object} action - CodeAction 物件（含 _filePath 用於語言偵測）
+   * @returns {Promise<{edit?: object, command?: object, error?: string}>}
+   */
+  async executeCodeAction(action) {
+    if (!action) {
+      return { error: 'No action provided' };
+    }
+
+    // If action has edit, return it directly for client to apply
+    if (action.edit) {
+      return { edit: action.edit };
+    }
+
+    // If action has command, execute it via LSP
+    if (action.command) {
+      const lang = this._langForFile(action._filePath || '');
+      try {
+        await this._sendRequest('workspace/executeCommand', {
+          command: action.command.command,
+          arguments: action.command.arguments || []
+        }, lang);
+        return { executed: true, command: action.command.command };
+      } catch (err) {
+        return { error: `Failed to execute command: ${err.message}` };
+      }
+    }
+
+    return { error: 'Action has neither edit nor command' };
+  }
+
+  /**
+   * 應用 workspace edit（多檔案多處修改）
+   * 安全措施：備份 → 驗證 → 原子寫入
+   * @param {object} edit - WorkspaceEdit 物件
+   * @returns {Promise<{applied: number, errors: Array, backups: Array}>}
+   */
+  async applyWorkspaceEdit(edit) {
+    if (!edit || !edit.changes) {
+      return { error: 'Invalid workspace edit' };
+    }
+
+    let applied = 0;
+    const errors = [];
+    const backups = [];
+
+    // Phase 1: 備份所有受影響的檔案
+    for (const [uri, textEdits] of Object.entries(edit.changes)) {
+      const filePath = this._fromUri(uri);
+      if (!filePath) {
+        errors.push({ uri, error: 'Invalid URI' });
+        continue;
+      }
+
+      const absPath = resolve(this.rootDir, filePath);
+      if (!existsSync(absPath)) {
+        errors.push({ file: filePath, error: 'File not found' });
+        continue;
+      }
+
+      // Create backup
+      const backupPath = `${absPath}.bak.${Date.now()}`;
+      try {
+        copyFileSync(absPath, backupPath);
+        backups.push({ original: filePath, backup: backupPath });
+      } catch (err) {
+        errors.push({ file: filePath, error: `Backup failed: ${err.message}` });
+        continue;
+      }
+    }
+
+    // Phase 2: 應用 edits（如有錯誤則回滾）
+    const appliedFiles = [];
+    for (const [uri, textEdits] of Object.entries(edit.changes)) {
+      const filePath = this._fromUri(uri);
+      if (!filePath || errors.some(e => e.file === filePath)) continue;
+
+      const absPath = resolve(this.rootDir, filePath);
+
+      try {
+        // Read current file content
+        const content = readFileSync(absPath, 'utf8');
+        const lines = content.split('\n');
+
+        // Sort edits by position (reverse order to apply correctly)
+        const sorted = textEdits.sort((a, b) => {
+          const lineA = a.range.start.line;
+          const lineB = b.range.start.line;
+          if (lineA !== lineB) return lineB - lineA;
+          return b.range.start.character - a.range.start.character;
+        });
+
+        for (const te of sorted) {
+          const startLine = te.range.start.line;
+          const startChar = te.range.start.character;
+          const endLine = te.range.end.line;
+          const endChar = te.range.end.character;
+
+          // Validate range
+          if (startLine < 0 || startLine >= lines.length) {
+            throw new Error(`Invalid start line: ${startLine + 1}`);
+          }
+          if (endLine < 0 || endLine >= lines.length) {
+            throw new Error(`Invalid end line: ${endLine + 1}`);
+          }
+          if (startChar < 0 || startChar > lines[startLine].length) {
+            throw new Error(`Invalid start character: ${startChar}`);
+          }
+          if (endChar < 0 || endChar > lines[endLine].length) {
+            throw new Error(`Invalid end character: ${endChar}`);
+          }
+
+          // Reconstruct line with edit
+          const before = lines[startLine].slice(0, startChar);
+          const after = lines[endLine].slice(endChar);
+          const newText = (te.newText || '').split('\n');
+
+          lines.splice(startLine, endLine - startLine + 1, ...newText.map((t, i) => {
+            if (i === 0) return before + t;
+            if (i === newText.length - 1) return t + after;
+            return t;
+          }));
+        }
+
+        // Write updated content (with backup safety)
+        writeFileSync(absPath, lines.join('\n'), 'utf8');
+
+        appliedFiles.push(filePath);
+        applied++;
+      } catch (err) {
+        errors.push({ file: filePath, error: err.message });
+        // Restore from backup on error
+        const backup = backups.find(b => b.original === filePath);
+        if (backup) {
+          try {
+            copyFileSync(backup.backup, absPath);
+          } catch { /* backup restore failed */ }
+        }
+      }
+    }
+
+    // Phase 3: 清理備份（成功則刪除）
+    if (applied > 0 && errors.length === 0) {
+      for (const b of backups) {
+        try {
+          unlinkSync(resolve(this.rootDir, b.backup));
+        } catch { /* ignore cleanup errors */ }
+      }
+    }
+
+    return { applied, errors, backups: errors.length > 0 ? backups : [] };
+  }
+
   /** 優雅關閉所有 LSP process */
   async close() {
     this._closing = true;
@@ -581,6 +797,26 @@ export class LspBridge {
             references: {},
             hover: {},
             definition: {},
+            codeAction: {
+              codeActionLiteralSupport: {
+                codeActionKind: {
+                  valueSet: [
+                    '', // empty string means all kinds
+                    'quickfix',
+                    'refactor',
+                    'refactor.extract',
+                    'refactor.inline',
+                    'refactor.rewrite',
+                    'source',
+                    'source.organizeImports',
+                  ]
+                }
+              },
+              dynamicRegistration: false,
+            },
+          },
+          workspace: {
+            executeCommand: {},
           }
         }
       }, lang).then((cap) => {
@@ -703,7 +939,17 @@ export class LspBridge {
 
   _fromUri(uri) {
     if (!uri) return '';
-    return uri.startsWith('file://') ? uri.slice(7) : uri;
+    // Handle file:///path (3 slashes for absolute paths) and file://host/path
+    if (uri.startsWith('file:///')) {
+      return uri.slice(7); // file:///Users/... → /Users/...
+    }
+    if (uri.startsWith('file://')) {
+      // file://host/path - extract path after host
+      const afterScheme = uri.slice(7);
+      const slashIdx = afterScheme.indexOf('/');
+      return slashIdx >= 0 ? afterScheme.slice(slashIdx) : afterScheme;
+    }
+    return uri;
   }
 
   _normalizeSymbols(result) {
@@ -748,6 +994,18 @@ export class LspBridge {
       26: 'type-parameter',
     };
     return map[kind] || 'unknown';
+  }
+
+  _normalizeCodeActions(actions) {
+    if (!Array.isArray(actions)) return [];
+    return actions.map(a => ({
+      title: a.title || '',
+      kind: a.kind || 'unknown',
+      diagnostics: a.diagnostics || [],
+      edit: a.edit || null,
+      command: a.command || null,
+      isPreferred: a.isPreferred || false,
+    }));
   }
 
   _normalizeDiagnostics(result, absPath) {

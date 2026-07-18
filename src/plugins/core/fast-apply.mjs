@@ -450,6 +450,7 @@ Dry-run by default — safe to use without side effects.`,
           fileLines: lines.length,
           contentVerified: verified,
           fingerprintMatch: fpMatch,
+          ...(ch.warning ? { warning: ch.warning } : {}),
           error: !rangeOk
             ? `Line range ${ch.startLine}-${ch.endLine} exceeds file (${lines.length} lines)`
             : (!verified && ch.oldContent ? `Content mismatch at line ${ch.startLine} — file has drifted` : undefined),
@@ -802,10 +803,39 @@ export function parseBlockDiff(blocks, root) {
     const fc = readFileSafe(filePath);
     if (fc === null) throw new Error(`File not found: ${b.file}`);
     const lang = detectLanguage(filePath);
-    const sym = extractSymbol(fc, lang, b.symbol);
+    let sym = extractSymbol(fc, lang, b.symbol);
+    let symbolAutoResolved = false;
     if (!sym) {
-      const suggestions = suggestSimilarSymbols(fc, lang, b.symbol);
-      throw new Error(`Symbol "${b.symbol}" not found in ${b.file}.${suggestions}`);
+      // Auto fuzzy-resolve: try to match similar symbol name
+      const decls = parseDeclarations(fc, lang);
+      const lower = b.symbol.toLowerCase();
+      let bestMatch = null;
+      let bestScore = 0;
+      for (const d of decls) {
+        const nl = d.name.toLowerCase();
+        // Score: exact > startsWith > includes > subsequence
+        let score = 0;
+        if (nl === lower) score = 100;
+        else if (nl.startsWith(lower) || lower.startsWith(nl)) score = 80;
+        else if (nl.includes(lower) || lower.includes(nl)) score = 60;
+        else {
+          // subsequence match
+          let si = 0;
+          for (let ci = 0; ci < nl.length && si < lower.length; ci++) {
+            if (nl[ci] === lower[si]) si++;
+          }
+          score = si === lower.length ? 30 + (si / nl.length) * 20 : 0;
+        }
+        if (score > bestScore) { bestScore = score; bestMatch = d; }
+      }
+      if (bestMatch && bestScore >= 60) {
+        sym = extractSymbol(fc, lang, bestMatch.name);
+        if (sym) symbolAutoResolved = true;
+      }
+      if (!sym) {
+        const suggestions = suggestSimilarSymbols(fc, lang, b.symbol);
+        throw new Error(`Symbol "${b.symbol}" not found in ${b.file}.${suggestions}`);
+      }
     }
 
     // 🛡️ Body range validation — P0: braces balance check.
@@ -881,16 +911,17 @@ export function parseBlockDiff(blocks, root) {
 
     const act = b.action || 'replace';
     const nc = b.newContent;
+    const warn = symbolAutoResolved ? { warning: `Symbol "${b.symbol}" auto-resolved to "${sym.name}"` } : {};
     if (act === 'prepend') {
-      changes.push({ file: b.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineStart, newContent: nc, action: 'insert-before' });
+      changes.push({ ...warn, file: b.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineStart, newContent: nc, action: 'insert-before' });
     } else if (act === 'append') {
-      changes.push({ file: b.file, type: 'hashline', startLine: sym.lineEnd, endLine: sym.lineEnd, newContent: nc, action: 'insert-after' });
+      changes.push({ ...warn, file: b.file, type: 'hashline', startLine: sym.lineEnd, endLine: sym.lineEnd, newContent: nc, action: 'insert-after' });
     } else {
       // ⚠️ NOTE: oldContent verification in applyHashline does NOT catch
       // wrong lineEnd here because oldContent was sliced from the SAME
       // (potentially wrong) range. Braces balance validation above is
       // the real protection.
-      changes.push({ file: b.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineEnd, oldContent: actualBody, newContent: nc, action: 'replace' });
+      changes.push({ ...warn, file: b.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineEnd, oldContent: actualBody, newContent: nc, action: 'replace' });
     }
   }
   return changes;
@@ -1082,6 +1113,7 @@ function formatOutput(data, format) {
         }
         if (p.matchLevel > 2) out.push(`   \u26A1 Fuzzy match level ${p.matchLevel}`);
         if (p.balanced === false) out.push(`   \u26A0\uFE0F  Brace balance issue detected`);
+        if (p.warning) out.push(`   \u2139\uFE0F  ${p.warning}`);
       } else if (p.status === 'conflict') {
         out.push(`${icon} ${p.file}${matchInfo}`);
         out.push(`   \u274C Cannot find search block`);

@@ -107,15 +107,15 @@ function detectLang(filePath) {
 export default {
   name: 'smart_lsp',
   category: 'code',
-  description: `[lsp] Use when: need type-aware code understanding — find definitions, references, hover types, symbols, or diagnostics. Auto-detects language from file extension. Supports TypeScript/JS, Python, Rust, Swift, PHP. Avoid when: searching by text pattern (use smart_grep instead).`,
+  description: `[lsp] Use when: need type-aware code understanding — find definitions, references, hover types, symbols, diagnostics, or code actions (quick fixes/refactorings). Auto-detects language from file extension. Supports TypeScript/JS, Python, Rust, Swift, PHP. Avoid when: searching by text pattern (use smart_grep instead).`,
   responsePolicy: { maxLevel: 0 }, // Small output, keep raw
   inputSchema: {
     type: 'object',
     properties: {
       operation: {
         type: 'string',
-        enum: ['symbols', 'references', 'hover', 'definition', 'diagnostics'],
-        description: 'LSP operation: symbols (list all), references (find usages), hover (type info), definition (jump to def), diagnostics (errors/warnings)',
+        enum: ['symbols', 'references', 'hover', 'definition', 'diagnostics', 'code_action', 'apply_edit'],
+        description: 'LSP operation: symbols (list all), references (find usages), hover (type info), definition (jump to def), diagnostics (errors/warnings), code_action (quick fixes/refactorings), apply_edit (apply workspace edit)',
       },
       file: {
         type: 'string',
@@ -128,6 +128,41 @@ export default {
       character: {
         type: 'number',
         description: 'Character offset (0-indexed). Required for references, hover, definition.',
+      },
+      diagnostics: {
+        type: 'array',
+        description: 'Array of diagnostics for code_action operation (optional, helps LSP find relevant fixes)',
+        items: {
+          type: 'object',
+          properties: {
+            line: { type: 'number', description: 'Line number (1-indexed)' },
+            col: { type: 'number', description: 'Column (0-indexed)' },
+            endLine: { type: 'number', description: 'End line (1-indexed)' },
+            endCol: { type: 'number', description: 'End column (0-indexed)' },
+            severity: { type: 'string', enum: ['error', 'warning', 'info'] },
+            message: { type: 'string' },
+            code: { type: 'string' },
+            source: { type: 'string' },
+          }
+        }
+      },
+      action: {
+        type: 'object',
+        description: 'CodeAction object for apply_edit operation (from code_action results)',
+        properties: {
+          title: { type: 'string' },
+          kind: { type: 'string' },
+          edit: { type: 'object', description: 'WorkspaceEdit object' },
+          command: { type: 'object', description: 'Command to execute' },
+          _filePath: { type: 'string', description: 'Original file path for language detection' },
+        }
+      },
+      edit: {
+        type: 'object',
+        description: 'WorkspaceEdit object for apply_edit operation (alternative to action)',
+        properties: {
+          changes: { type: 'object', description: 'Map of URI to TextEdit[]' }
+        }
       },
       root: {
         type: 'string',
@@ -206,10 +241,50 @@ export default {
           return JSON.stringify(result);
         }
 
+        case 'code_action': {
+          if (!args.line) {
+            return JSON.stringify({ error: 'line parameter required for code_action operation' });
+          }
+          const result = await bridge.getCodeActions(
+            file,
+            args.line,
+            args.character || 0,
+            args.diagnostics || []
+          );
+          return JSON.stringify(result);
+        }
+
+        case 'apply_edit': {
+          // Execute code action if provided
+          if (args.action) {
+            const execResult = await bridge.executeCodeAction(args.action);
+            if (execResult.error) {
+              return JSON.stringify(execResult);
+            }
+            // If action produced an edit, apply it
+            if (execResult.edit) {
+              const applyResult = await bridge.applyWorkspaceEdit(execResult.edit);
+              return JSON.stringify({
+                ...execResult,
+                ...applyResult
+              });
+            }
+            return JSON.stringify(execResult);
+          }
+
+          // Or apply edit directly
+          if (args.edit) {
+            const applyResult = await bridge.applyWorkspaceEdit(args.edit);
+            return JSON.stringify(applyResult);
+          }
+
+          return JSON.stringify({ error: 'Either action or edit parameter required for apply_edit operation' });
+        }
+
         default:
           return JSON.stringify({
             error: `Unknown operation: ${args.operation}`,
-            supported: ['symbols', 'references', 'hover', 'definition', 'diagnostics'],
+            supported: ['symbols', 'references', 'hover', 'definition', 'diagnostics', 'code_action', 'apply_edit'],
           });
       }
     } catch (err) {

@@ -224,7 +224,7 @@ Golden Rules（機械化執行）：
 - `{file, content}` — 創建/覆寫
 - `{file, search, replace}` — 字串取代（`fuzzy:false` 強制走 DMP）
 - `{format:"sed", file, sed:"s/foo/bar/"}` — sed 取代
-- `{format:"block-diff", file, symbol, newContent}` — symbol 區塊編輯（最可靠）
+- `{format:"block-diff", file, symbol, newContent}` — symbol 區塊編輯（最可靠）。symbol name 不精確時自動 fuzzy match（score≥60 自動套用，output 會顯示 `ℹ️ auto-resolved` 警告）
 - `{format:"hashline", changes:[{file,startLine,endLine,newContent}]}` — 大檔案精確編輯
 
 ## ⛓ edit_chain 速查
