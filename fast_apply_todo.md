@@ -24,10 +24,10 @@
 - [x] multi-occurrence 自動消歧（startLine hint + context retry）
 - [x] DMP 結果 tree-sitter parse 驗證（parseCheck + graceful degradation）
 
-## 🟩 P3 — 架構優化
-- [ ] 簡化 fuzzy 降級管線（≤ 4 層）
-- [ ] transactional edit (staging dir)
-- [ ] import_graph 整合 multi-file dependency
+## ✅ P3 — 架構優化
+- [x] 簡化 fuzzy 降級管線（≤ 4 層）— 7→3 層（L1/L2/L3）+ structural fallback
+- [x] transactional edit (staging dir) — stagingWrite(): backup → staging → atomic rename
+- [x] import_graph 整合 multi-file dependency — findImporters() + 🔗 impact report
 
 ## 🟦 P4 — 長期規劃
 - [ ] tree-sitter code action（extract function / rename / move）
