@@ -18,7 +18,8 @@
 import { readFileSync, writeFileSync, existsSync, copyFileSync, unlinkSync, renameSync, statSync, openSync, readSync, closeSync, globSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
-import { parseCheck } from './tree-sitter-edit.mjs';
+import { parseCheck, findSymbolAST, isTreeSitterAvailable, isTreeSitterLang } from './tree-sitter-edit.mjs';
+import { getEditStats } from './edit-telemetry.mjs';
 import { diff_match_patch } from 'diff-match-patch';
 
 // ---------------------------------------------------------------------------
@@ -301,9 +302,9 @@ function matchL3(contentLines, searchLines) {
 function matchL6(contentLines, searchLines) {
   if (searchLines.length === 0) return -1;
 
-  // ── Fast guard: skip for large inputs ──
-  // L6 uses O(n·m) greedy subsequence matching, too slow for large files.
-  if (contentLines.length > 500 || searchLines.length > 50) return -1;
+  // ── Fast guard: skip for extremely large inputs ──
+  // L6 uses O(n·m) greedy subsequence matching. Raised limit for better coverage.
+  if (contentLines.length > 2000 || searchLines.length > 100) return -1;
 
   // Compute fingerprints: trimmed, whitespace-normalized, non-empty meaningful lines
   const searchSig = searchLines
@@ -706,6 +707,44 @@ function tryStructuralMatch(content, search, lang) {
   const lines = content.split('\n');
   const searchLines = search.split('\n');
 
+  // Strategy 0: tree-sitter AST-based structural match (P2-6)
+  // If tree-sitter is available, parse search text to find the symbol name,
+  // then locate it in the file by AST — completely whitespace-insensitive.
+  if (lang && isTreeSitterAvailable() && isTreeSitterLang(lang)) {
+    try {
+      // Extract symbol name from search text declaration
+      const firstLine = searchLines[0]?.trim() || '';
+      let symName = null;
+      const nameMatch = firstLine.match(/^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|class|struct|def|func|fn)\s+(\w+)/)
+        || firstLine.match(/^(?:export\s+)?(?:default\s+)?(?:const|let|var)\s+(\w+)\s*[=:]\s*(?:async\s+)?(?:function|\()/);
+      if (nameMatch) symName = nameMatch[1];
+
+      if (symName) {
+        const sym = findSymbolAST(content, lang, symName);
+        if (sym) {
+          // Found symbol by AST — verify body content matches (normalized)
+          const astBodyNorm = sym.body.replace(/\s+/g, ' ').trim();
+          const searchBodyNorm = search.replace(/\s+/g, ' ').trim();
+          if (astBodyNorm === searchBodyNorm || astBodyNorm.includes(searchBodyNorm) || searchBodyNorm.includes(astBodyNorm)) {
+            return { line: sym.lineStart, level: 7, method: 'ast' };
+          }
+          // Lenient: at least 70% of search lines found in AST body
+          const astLines = sym.body.split('\n').map(l => l.trim()).filter(l => l);
+          const searchSig = searchLines.map(l => l.trim()).filter(l => l);
+          if (searchSig.length > 0 && astLines.length > 0) {
+            let matchCount = 0;
+            for (const sl of searchSig) {
+              if (astLines.some(al => al === sl || al.includes(sl) || sl.includes(al))) matchCount++;
+            }
+            if (matchCount >= Math.ceil(searchSig.length * 0.7)) {
+              return { line: sym.lineStart, level: 7, method: 'ast-lenient' };
+            }
+          }
+        }
+      }
+    } catch { /* tree-sitter not available — fall through */ }
+  }
+
   // Strategy 1: trimmed text match
   const normSearch = search.replace(/\s+/g, ' ').trim();
   for (let i = 0; i < lines.length; i++) {
@@ -726,7 +765,7 @@ function tryStructuralMatch(content, search, lang) {
     }
   }
 
-  // Strategy 3: symbol-level matching
+  // Strategy 3: symbol-level matching (regex fallback)
   // If search starts with a function/class/def declaration, find it by name
   // and compare bodies.
   const firstLine = searchLines[0]?.trim();
@@ -1952,7 +1991,7 @@ export function suggestNearest(content, search, opts = {}) {
 // Matches comment-prefix + optional "... existing code ..." variants.
 // Examples matched: "// ... existing code ...", "# ...", "<!-- ... -->", "/* ... */"
 // Key: must contain "..." somewhere after the comment prefix.
-const LAZY_MARKER_RE = /^\s*(\/\/|#|--|;|%|<!--|\/\*)\s*(\.\.\.\s*)?(existing\s+code\s*)?(\.\.\.\s*)?(\*\/|-->)?\s*$/i;
+const LAZY_MARKER_RE = /^\s*(\/\/|#|--|;|%|<!--|\/\*|~>)\s*(\.\.\.\s*)?([\w\s]*(?:existing|unchanged|skip|context|rest\s+of|rest\s+here|original)\s*(?:code)?\s*)?(\.\.\.\s*)?(\*\/|-->)?\s*$/i;
 
 /**
  * Parse lines into alternating marker/real segments.
@@ -2148,25 +2187,55 @@ function getDMP() {
 export function applyByDiffMatchPatch(content, search, replace) {
   try {
     const dmp = getDMP();
+
+    // P2-3: 三向 Diff Mapping — map search↔file differences to produce cleaner replace
+    // When LLM's search text differs from file content, compute the delta
+    // and apply it to the replace text so the final result is correct.
+    let adjustedReplace = replace;
+    const idxDirect = content.indexOf(search);
+    if (idxDirect === -1 && search && content) {
+      // search not found exactly — compute 3-way mapping
+      const dmpLocal = getDMP();
+      const diffS_F = dmpLocal.diff_main(search, content);
+      dmpLocal.diff_cleanupSemantic(diffS_F);
+      // Build a replacement that accounts for file drift
+      // Find the region in content closest to search using DMP
+      const patchSearchToFile = dmpLocal.patch_make(search, diffS_F);
+      // Apply patches to replace text to get adjustedReplace
+      const [adjusted] = dmpLocal.patch_apply(patchSearchToFile, replace);
+      if (adjusted && adjusted !== replace) {
+        adjustedReplace = adjusted;
+      }
+    }
+
     // Strategy 1: Use DMP patch_make + patch_apply for fuzzy patching
-    // patch_make creates patches from search→replace
-    const patchObj = dmp.patch_make(search, replace);
+    // patch_make creates patches from search→adjustedReplace
+    const patchObj = dmp.patch_make(search, adjustedReplace);
     // patch_apply applies patches to content with fuzzy matching
     const [result, results] = dmp.patch_apply(patchObj, content);
 
     // If some patches failed (e.g., context changed significantly),
-    // fall back to indexOf replacement
+    // fall back to indexOf replacement with adjustedReplace
     const allApplied = results.every(r => r === true);
     if (allApplied && result !== content) {
       return { ok: true, result };
     }
 
-    // Strategy 2: indexOf-based fallback
-    const idx = content.indexOf(search);
-    if (idx === -1) return { ok: false, error: 'Search block not found in content for DMP fallback' };
-    const before = content.substring(0, idx);
-    const after = content.substring(idx + search.length);
-    const fallbackResult = before + replace + after;
+    // Strategy 2: indexOf-based fallback with adjustedReplace
+    const idxFallback = content.indexOf(search);
+    if (idxFallback === -1) {
+      // Last resort: try fuzzy DMP on the adjusted replace
+      const patchObj2 = dmp.patch_make(search, adjustedReplace);
+      const [result2, results2] = dmp.patch_apply(patchObj2, content);
+      const allApplied2 = results2.every(r => r === true);
+      if (allApplied2 && result2 !== content) {
+        return { ok: true, result: result2 };
+      }
+      return { ok: false, error: 'Search block not found in content for DMP fallback' };
+    }
+    const before = content.substring(0, idxFallback);
+    const after = content.substring(idxFallback + search.length);
+    const fallbackResult = before + adjustedReplace + after;
     return { ok: true, result: fallbackResult };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -2334,10 +2403,29 @@ export function suggestFormat(ctx) {
     };
   }
 
-  // Default: search-replace (safest, most compatible)
-  return {
-    format: 'search-replace',
-    reason: 'Default — search-replace is safest and most compatible',
-    tokenEstimate: TOKENS['search-replace'] + editLines * 4,
+  // Default: unified-diff (most token-efficient, LLM 3x less lazy)
+  const defaultResult = {
+    format: 'unified-diff',
+    reason: 'Default — unified-diff is most token-efficient and reduces lazy edits',
+    tokenEstimate: TOKENS['unified-diff'] + editLines * 2,
   };
+
+  // P2-7: Telemetry feedback loop — check if default format has high failure rate
+  try {
+    const stats = getEditStats({ lang: lang || undefined });
+    if (stats.total >= 5) {
+      const fmtStats = stats.byFormat[defaultResult.format];
+      if (fmtStats && fmtStats.successRate < 70 && fmtStats.total >= 3) {
+        // Default format is failing often — suggest safer alternative
+        const safeFormat = isLargeFile ? 'hashline' : 'search-replace';
+        return {
+          format: safeFormat,
+          reason: `Telemetry: ${defaultResult.format} has ${fmtStats.successRate}% success rate (${fmtStats.total} tries) — switching to ${safeFormat} for reliability`,
+          tokenEstimate: TOKENS[safeFormat] + editLines * 4,
+        };
+      }
+    }
+  } catch { /* telemetry not available */ }
+
+  return defaultResult;
 }

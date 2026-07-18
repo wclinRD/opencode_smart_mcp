@@ -57,17 +57,17 @@ export default {
   cli: 'fast-apply.mjs',
   description: `Unified editing tool — replaces write + edit + edit_ast.
 Supports 7 input formats (ordered by token efficiency):
+  - unified-diff: git diff format — MOST token-efficient (40-60% savings). ⭐ RECOMMENDED: use +/- lines only, no unchanged lines needed. LLM 3x less lazy with this format.
   - block-diff: symbol-aware block editing (NEW, most reliable). Specify {file, symbol, newContent, action?}. No fuzzy matching needed.
-  - unified-diff: git diff format — MOST token-efficient (40-60% savings). Use +/- lines only, no unchanged lines needed.
   - lazy: SEARCH/REPLACE with // ... existing code ... markers (80-98% savings for large files)
   - hashline: line-number + content-hash addressing — MOST ROBUST for large files (>400 lines). Specify line range directly. No fuzzy match ambiguity.
   - partial: abbreviated SEARCH context (fewer lines, L5 fuzzy matching)
   - search-replace: standard SEARCH/REPLACE blocks (Aider-compatible)
   - whole-file: full file replacement (most tokens)
-💡 Tip: block-diff for symbol-level edits, unified-diff for small edits, hashline for >400 line files, lazy for large files with few changes.
+⭐ Tip: unified-diff is preferred for most edits — LLM doesn't need to reproduce old code exactly, only output +/- lines.
+   block-diff for symbol-level edits, hashline for >400 line files, lazy for large files with few changes.
 Features: 6-level fuzzy matching (L6 = gap-tolerant subsequence), hashline addressing with content verification, atomic multi-file apply, undo snapshots, binary/access checks.
 Dry-run by default — safe to use without side effects.`,
-
   inputSchema: {
     type: 'object',
     properties: {
@@ -286,7 +286,7 @@ Dry-run by default — safe to use without side effects.`,
     const outputFormat = args.output || 'text';
     const root = args.root || process.cwd();
     const allowedFiles = args.files;
-    const validateLevel = args.validate || 'none';
+    const validateLevel = args.validate || 'balance';
     // ---- Step 1: Parse input into normalized change list ----
     let changes = [];
 
@@ -611,13 +611,27 @@ Dry-run by default — safe to use without side effects.`,
         let verified = false;
         let fpMatch = false;
         if (rangeOk && ch.oldContent) {
-          const v = verifyLineFingerprint(
-            lines.slice(ch.startLine - 1, ch.endLine).join('\n'),
-            1, // relative line 1 within the range
-            ch.oldContent.split('\n')[0] // verify first line of oldContent
-          );
-          verified = v.ok;
-          fpMatch = v.fuzzy;
+          // P1-3: Full oldContent verification — check ALL lines, not just first
+          const actualRange = lines.slice(ch.startLine - 1, ch.endLine).join('\n');
+          const oldLines = ch.oldContent.split('\n');
+          const actualLines = actualRange.split('\n');
+          const mismatches = [];
+          const checkLen = Math.min(oldLines.length, actualLines.length);
+          for (let i = 0; i < checkLen; i++) {
+            const v = verifyLineFingerprint(actualLines[i], 1, oldLines[i]);
+            // Note: verifyLineFingerprint expects (content, lineNum, expected) but here we compare directly
+            const oldNorm = oldLines[i]?.trim() || '';
+            const actualNorm = actualLines[i]?.trim() || '';
+            if (oldNorm && oldNorm !== actualNorm) {
+              mismatches.push({ line: ch.startLine + i, expected: oldLines[i], actual: actualLines[i] });
+            }
+          }
+          // Also check length match
+          if (oldLines.length !== actualLines.length) {
+            mismatches.push({ line: ch.startLine, expected: `${oldLines.length} lines`, actual: `${actualLines.length} lines` });
+          }
+          verified = mismatches.length === 0;
+          fpMatch = verified; // No fuzzy — strict match only for preview
         } else if (rangeOk && !ch.oldContent) {
           verified = true; // no oldContent to verify, trust line numbers
         }
