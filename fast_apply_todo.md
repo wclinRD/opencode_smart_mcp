@@ -20,8 +20,8 @@
 - [x] Lazy init tree-sitter at module load
 
 ## 🟨 P2 — 效能與體驗
-- [ ] fuzzy matching 預計算共享 contentLines
-- [ ] multi-occurrence 自動消歧
+- [x] fuzzy matching 預計算共享 contentLines（reduce 5x split per apply）
+- [x] multi-occurrence 自動消歧（startLine hint + context retry）
 - [ ] DMP 結果 tree-sitter parse 驗證
 
 ## 🟩 P3 — 架構優化

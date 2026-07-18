@@ -604,7 +604,7 @@ function matchL5(contentLines, searchLines) {
 export function fuzzyMatch(content, search, opts = {}) {
   if (!content || !search) return null;
   const sl = search.split('\n');
-  const cl = content.split('\n');
+  const cl = opts.cl || content.split('\n');
 
   let r;
   r = matchL1(cl, sl, opts.startLine); if (r !== -1) return { line: r, level: 1 };
@@ -651,15 +651,16 @@ export function detectMultiOccurrence(content, search, opts = {}) {
     }
 
     if (count > 1) {
+      // Use pre-split cl if available, otherwise split once
+      const cl = opts.cl || content.split('\n');
       const lines = offsets.map(o => content.substring(0, o).split('\n').length);
       const contexts = offsets.map(o => {
         const lineNum = content.substring(0, o).split('\n').length;
-        const allLines = content.split('\n');
         const start = Math.max(0, lineNum - 2);
-        const end = Math.min(allLines.length, lineNum + 2);
+        const end = Math.min(cl.length, lineNum + 2);
         return {
           line: lineNum,
-          context: allLines.slice(start, end).map((l, i) => `${start + i + 1}: ${l}`).join('\n'),
+          context: cl.slice(start, end).map((l, i) => `${start + i + 1}: ${l}`).join('\n'),
         };
       });
       return { multi: true, count, lines, contexts };
@@ -670,7 +671,7 @@ export function detectMultiOccurrence(content, search, opts = {}) {
 
   // Fuzzy levels (L3, L4): check anchor line uniqueness
   const sl = search.split('\n');
-  const cl = content.split('\n');
+  const cl = opts.cl || content.split('\n');
   const anchorLines = sl.filter(l => l.trim() && !/^[{}\s]*$/.test(l.trim()));
 
   if (anchorLines.length === 0) return { multi: false, count: 0 };
@@ -678,6 +679,7 @@ export function detectMultiOccurrence(content, search, opts = {}) {
   // Pick first non-trivial line as anchor
   const anchor = anchorLines[0].trim();
   const matchLineNums = [];
+
   for (let i = 0; i < cl.length; i++) {
     if (cl[i].trim() === anchor) {
       matchLineNums.push(i + 1);
@@ -785,16 +787,81 @@ function tryStructuralMatch(content, search, lang) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Multi-occurrence disambiguation
+// ---------------------------------------------------------------------------
+
+/**
+ * Attempt to disambiguate multi-occurrence search matches.
+ *
+ * Strategy 1: If startLine hint provided, pick closest occurrence.
+ * Strategy 2: Context retry — prepend 2 lines before first match to narrow search.
+ *
+ * @param {string} content — full file content
+ * @param {string} search — original search text
+ * @param {{ multi: boolean, count: number, lines?: number[], contexts?: Array<{line:number, context:string}> }} multiCheck
+ * @param {number|undefined} startLine — optional line hint from caller
+ * @param {string[]} cl — pre-split content lines
+ * @returns {{ line: number, level: number }|null} — resolved match, or null if disambiguation failed
+ */
+function disambiguateMultiOccurrence(content, search, multiCheck, startLine, cl) {
+  if (!multiCheck.multi) return null;
+
+  const matchLines = multiCheck.lines || [];
+
+  // Strategy 1: startLine hint → pick closest
+  if (startLine && matchLines.length > 0) {
+    let bestLine = matchLines[0];
+    let bestDist = Math.abs(bestLine - startLine);
+    for (let i = 1; i < matchLines.length; i++) {
+      const dist = Math.abs(matchLines[i] - startLine);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestLine = matchLines[i];
+      }
+    }
+    // Only use if reasonably close (within 50 lines)
+    if (bestDist <= 50) {
+      return { line: bestLine, level: 2 };
+    }
+  }
+
+  // Strategy 2: Context retry — prepend 2 lines before first match
+  if (matchLines.length > 0) {
+    const firstMatchLine = matchLines[0];
+    if (firstMatchLine >= 3) {
+      const contextStart = Math.max(0, firstMatchLine - 3); // 0-indexed, 2 lines before
+      const contextPrefix = cl.slice(contextStart, firstMatchLine - 1).join('\n');
+      const enrichedSearch = contextPrefix + (contextPrefix ? '\n' : '') + search;
+      const recheck = detectMultiOccurrence(content, enrichedSearch, { level: 2, cl });
+      if (!recheck.multi) {
+        // Context-enriched search is unique — find its position
+        const enrichedIdx = content.indexOf(enrichedSearch);
+        if (enrichedIdx !== -1) {
+          const lineNum = cl.slice(0, content.substring(0, enrichedIdx).split('\n').length).length;
+          // Adjust line to account for the prepended context
+          const searchLineCount = search.split('\n').length;
+          const adjustedLine = lineNum + (contextPrefix ? contextPrefix.split('\n').length : 0);
+          // The actual match starts where the original search begins (after context prefix)
+          return { line: adjustedLine - searchLineCount + 1, level: 2 };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
 /**
  * Apply a SEARCH/REPLACE block to a single file.
  *
  * @param {string} filePath
  * @param {{ search: string, replace: string }} block
- * @param {{ fuzzy?: boolean, validate?: boolean, undo?: boolean }} [opts]
+ * @param {{ fuzzy?: boolean, validate?: boolean, undo?: boolean, startLine?: number }} [opts]
  * @returns {{ status: 'applied'|'conflict'|'error', file: string, matchLevel?: number, diff?: string, backup?: string, error?: string }}
  */
 export function applySearchReplace(filePath, block, opts = {}) {
-  const { fuzzy = true, undo = false, validate = false } = opts;
+  const { fuzzy = true, undo = false, validate = false, startLine } = opts;
 
   // Read file
   let content;
@@ -809,6 +876,9 @@ export function applySearchReplace(filePath, block, opts = {}) {
     return applyWholeFile(filePath, replace, opts);
   }
 
+  // Pre-split content lines once — shared across all sub-functions
+  const cl = content.split('\n');
+
   // Detect language from file extension for structural fallback
   const lang = detectApplyLang(filePath);
 
@@ -818,19 +888,26 @@ export function applySearchReplace(filePath, block, opts = {}) {
   // Try exact match first
   const exactIdx = content.indexOf(search);
   if (exactIdx !== -1) {
-    const multiCheck = detectMultiOccurrence(content, search, { level: 2 });
+    const multiCheck = detectMultiOccurrence(content, search, { level: 2, cl });
     if (multiCheck.multi) {
-      return {
-        status: 'conflict',
-        file: filePath,
-        error: `Search block appears ${multiCheck.count} times in ${filePath}. Be more specific — add surrounding context lines.`,
-        multiOccurrence: multiCheck.contexts,
-      };
+      // Auto-disambiguate: pick closest to startLine, or context retry
+      const resolved = disambiguateMultiOccurrence(content, search, multiCheck, startLine, cl);
+      if (resolved) {
+        match = resolved;
+      } else {
+        return {
+          status: 'conflict',
+          file: filePath,
+          error: `Search block appears ${multiCheck.count} times in ${filePath}. Be more specific — add surrounding context lines.`,
+          multiOccurrence: multiCheck.contexts,
+        };
+      }
+    } else {
+      const lineNum = cl.slice(0, content.substring(0, exactIdx).split('\n').length).length;
+      match = { line: lineNum, level: 2 };
     }
-    const lineNum = content.substring(0, exactIdx).split('\n').length;
-    match = { line: lineNum, level: 2 };
   } else if (fuzzy) {
-    match = fuzzyMatch(content, search, { lang });
+    match = fuzzyMatch(content, search, { lang, cl });
   }
 
   // Level 7 → try structural retry
@@ -886,14 +963,17 @@ export function applySearchReplace(filePath, block, opts = {}) {
 
   // For fuzzy matches (L3+), check if anchor line occurs in multiple places
   if (match.level >= 3) {
-    const multiCheck = detectMultiOccurrence(content, search, { level: match.level });
+    const multiCheck = detectMultiOccurrence(content, search, { level: match.level, cl });
     if (multiCheck.multi) {
-      return {
-        status: 'conflict',
-        file: filePath,
-        error: `Fuzzy search anchor "${search.split('\n').filter(l => l.trim() && !/^[{}\s]*$/.test(l.trim()))[0]?.trim() || ''}" appears ${multiCheck.count} times in ${filePath} (lines ${multiCheck.lines?.join(', ')}). Add more unique context lines.`,
-        multiOccurrence: multiCheck,
-      };
+      const resolved = disambiguateMultiOccurrence(content, search, multiCheck, startLine, cl);
+      if (!resolved) {
+        return {
+          status: 'conflict',
+          file: filePath,
+          error: `Fuzzy search anchor "${search.split('\n').filter(l => l.trim() && !/^[{}\s]*$/.test(l.trim()))[0]?.trim() || ''}" appears ${multiCheck.count} times in ${filePath} (lines ${multiCheck.lines?.join(', ')}). Add more unique context lines.`,
+          multiOccurrence: multiCheck,
+        };
+      }
     }
   }
 
@@ -904,7 +984,6 @@ export function applySearchReplace(filePath, block, opts = {}) {
     actualStart = exactIdx;
   } else {
     // Fuzzy match: reconstruct byte offset from line number
-    const cl = content.split('\n');
     const before = cl.slice(0, match.line - 1);
     actualStart = before.length > 0 ? before.join('\n').length + 1 : 0;
   }
@@ -914,7 +993,6 @@ export function applySearchReplace(filePath, block, opts = {}) {
   if (exactIdx !== -1) {
     actualSearchLen = search.length;
   } else {
-    const cl = content.split('\n');
     const matched = cl.slice(match.line - 1, match.line - 1 + searchLines.length).join('\n');
     actualSearchLen = matched.length;
   }
@@ -991,11 +1069,11 @@ export function applySearchReplace(filePath, block, opts = {}) {
  *
  * @param {string} filePath
  * @param {{ search: string, replace: string }} block — search can be abbreviated
- * @param {{ fuzzy?: boolean, undo?: boolean }} [opts]
+ * @param {{ fuzzy?: boolean, undo?: boolean, startLine?: number }} [opts]
  * @returns {object} same shape as applySearchReplace
  */
 export function applyPartial(filePath, block, opts = {}) {
-  const { fuzzy = true, undo = false } = opts;
+  const { fuzzy = true, undo = false, startLine } = opts;
   const { search: partial, replace } = block;
 
   if (!partial) {
@@ -1010,20 +1088,38 @@ export function applyPartial(filePath, block, opts = {}) {
     return { status: 'error', file: filePath, error: `Cannot read: ${e.message}` };
   }
 
+  // Pre-split content lines once — shared across all sub-functions
+  const cl = content.split('\n');
+
   // 1. Try exact match
   const exactIdx = content.indexOf(partial);
   if (exactIdx !== -1) {
     // Stricter multi-occurrence check: level 2 even for partial
-    const multiCheck = detectMultiOccurrence(content, partial, { level: 2 });
+    const multiCheck = detectMultiOccurrence(content, partial, { level: 2, cl });
     if (multiCheck.multi) {
-      return {
-        status: 'conflict',
-        file: filePath,
-        error: `Partial search appears ${multiCheck.count} times in ${filePath}. Need more context.`,
-        multiOccurrence: multiCheck.contexts,
-      };
+      const resolved = disambiguateMultiOccurrence(content, partial, multiCheck, startLine, cl);
+      if (!resolved) {
+        return {
+          status: 'conflict',
+          file: filePath,
+          error: `Partial search appears ${multiCheck.count} times in ${filePath}. Need more context.`,
+          multiOccurrence: multiCheck.contexts,
+        };
+      }
+      // Use resolved line for offset calculation
+      const matchedLine = resolved.line;
+      const before = cl.slice(0, matchedLine - 1);
+      const actualStart = before.length > 0 ? before.join('\n').length + 1 : 0;
+      const matchedRegion = cl.slice(matchedLine - 1, matchedLine - 1 + partial.split('\n').length).join('\n');
+      const newContent = content.substring(0, actualStart) + replace + content.substring(actualStart + matchedRegion.length);
+      if (undo) { try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* */ } }
+      try { writeFileSync(filePath, newContent, 'utf-8'); } catch (e) {
+        return { status: 'error', file: filePath, error: `Cannot write: ${e.message}` };
+      }
+      const diff = generateDiffSummary(content, newContent, filePath);
+      return { status: 'applied', file: filePath, matchLevel: 2, diff, backup: undo ? (filePath + '.apply.bak') : undefined };
     }
-    const lineNum = content.substring(0, exactIdx).split('\n').length;
+    const lineNum = cl.slice(0, content.substring(0, exactIdx).split('\n').length).length;
     const before = content.substring(0, exactIdx);
     const after = content.substring(exactIdx + partial.length);
     const newContent = before + replace + after;
@@ -1044,12 +1140,12 @@ export function applyPartial(filePath, block, opts = {}) {
 
   // 2. Try fuzzy match through all levels (L1-L4 + L5)
   if (fuzzy) {
-    const fm = fuzzyMatch(content, partial);
+    const fm = fuzzyMatch(content, partial, { cl });
     if (fm) {
       // Stricter multi-occurrence check: for partial (< 5 lines) require L4+ only
       const partialLines = partial.split('\n').filter(l => l.trim()).length;
       if (partialLines < 5) {
-        const multiCheck = detectMultiOccurrence(content, partial, { level: Math.min(fm.level, 3) });
+        const multiCheck = detectMultiOccurrence(content, partial, { level: Math.min(fm.level, 3), cl });
         if (multiCheck.multi) {
           return {
             status: 'conflict',
@@ -1062,7 +1158,6 @@ export function applyPartial(filePath, block, opts = {}) {
 
       // Apply replacement at fuzzy match location — same approach as applySearchReplace
       const sl = partial.split('\n');
-      const cl = content.split('\n');
       const beforeOffset = cl.slice(0, fm.line - 1);
       const actualStart = beforeOffset.length > 0 ? beforeOffset.join('\n').length + 1 : 0;
       const matchedRegion = cl.slice(fm.line - 1, fm.line - 1 + sl.length).join('\n');
@@ -1078,7 +1173,7 @@ export function applyPartial(filePath, block, opts = {}) {
   }
 
   // 3. Not found — report with nearest suggestions
-  const nearest = suggestNearest(content, partial);
+  const nearest = suggestNearest(content, partial, { cl });
   const detailMsg = nearest ? nearest.map(n =>
     n.diffHint || `Line ${n.line}: "${n.text}"`
   ).join('; ') : '';
@@ -1735,9 +1830,9 @@ export function checkFileAccess(filePath) {
  * Scores by: exact line match > substring match > word-level match
  * @returns {Array<{line:number, score:number, text:string, diffHint?:string}>|null}
  */
-export function suggestNearest(content, search) {
+export function suggestNearest(content, search, opts = {}) {
   const searchLines = search.trim().split('\n');
-  const contentLines = content.split('\n');
+  const contentLines = opts.cl || content.split('\n');
   const searchUnique = searchLines.filter(l => l.trim() && !/^[{}\s]*$/.test(l.trim()));
 
   if (searchUnique.length === 0) return null;
