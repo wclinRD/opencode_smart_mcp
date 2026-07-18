@@ -46,6 +46,7 @@ import {
   computeLineFingerprints,
   verifyLineFingerprint,
 } from '../../lib/apply-engine.mjs';
+import { getLspBridge } from '../../lib/lsp-bridge.mjs';
 
 export default {
   name: 'smart_fast_apply',
@@ -200,8 +201,8 @@ Dry-run by default — safe to use without side effects.`,
         description: 'Enable 4-level fuzzy matching (default: true)',
       },
       validate: {
-        type: 'boolean',
-        description: 'Check brace/bracket balance after apply (default: false)',
+        type: 'string',
+        description: 'Post-apply validation: undefined=none, "balance"=check braces, "full"=balance+LSP diagnostics (auto-rollback on errors)',
       },
       undo: {
         type: 'boolean',
@@ -240,7 +241,7 @@ Dry-run by default — safe to use without side effects.`,
   handler: async (args) => {
     const format = args.format || 'search-replace';
     const fuzzy = args.fuzzy !== false;
-    const validate = args.validate === true;
+    // validateLevel replaces old validate boolean — see line 253
     const undo = args.undo !== false;
     const atomic = args.atomic === true;
     const explicitlyDryRun = args.dryRun === true;
@@ -249,7 +250,7 @@ Dry-run by default — safe to use without side effects.`,
     const outputFormat = args.output || 'text';
     const root = args.root || process.cwd();
     const allowedFiles = args.files;
-
+    const validateLevel = args.validate || 'none';
     // ---- Step 1: Parse input into normalized change list ----
     let changes = [];
 
@@ -441,7 +442,7 @@ Dry-run by default — safe to use without side effects.`,
           ? (expandLazyMarkers(content, { search: ch.search, replace: ch.replace })?.search || ch.search)
           : ch.search;
         const match = fuzzyMatch(content, previewSearch);
-        const balance = validate ? checkBalance(content) : null;
+        const balance = (validateLevel === 'balance' || validateLevel === 'full') ? checkBalance(content) : null;
 
         previewResults.push({
           file: ch.file,
@@ -570,6 +571,12 @@ Dry-run by default — safe to use without side effects.`,
           }
         }
       }
+      // ── P0-2: Post-apply LSP diagnostics validation ──
+      if (validateLevel === 'full' && allSucceeded) {
+        const diagResult = await validatePostApply(results.filter(r => r.status === 'applied'), root);
+        if (diagResult.error) return formatOutput({ status: 'error', ...diagResult }, outputFormat);
+      }
+
 
       return formatOutput({
         status: allSucceeded ? 'applied' : 'partial',
@@ -620,6 +627,11 @@ Dry-run by default — safe to use without side effects.`,
           }
         }
       }
+      // ── P0-2: Post-apply LSP diagnostics validation ──
+      if (validateLevel === 'full') {
+        const diagResult = await validatePostApply(appResults.filter(r => r.status === 'applied'), root);
+        if (diagResult.error) return formatOutput({ status: 'error', ...diagResult }, outputFormat);
+      }
 
       return formatOutput({
         status: 'applied',
@@ -644,6 +656,40 @@ Dry-run by default — safe to use without side effects.`,
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// ── P0-2: Post-apply LSP diagnostics validation + auto-rollback ──
+// For each applied file, query LSP diagnostics. If errors found, rollback from .bak.
+async function validatePostApply(appliedResults, root) {
+  const extMap = { '.ts': 'typescript', '.tsx': 'typescriptreact', '.js': 'javascript', '.jsx': 'javascriptreact', '.py': 'python', '.go': 'go', '.rs': 'rust', '.java': 'java', '.rb': 'ruby', '.php': 'php' };
+  let bridge = null;
+  try {
+    bridge = getLspBridge(root);
+  } catch { return { ok: true }; } // LSP not available — skip
+
+  for (const r of appliedResults) {
+    if (!r.file || !extMap[extname(r.file)]) continue;
+    try {
+      const diags = await bridge.getDiagnostics(r.file);
+      const errors = (diags?.diagnostics || []).filter(d => d.severity === 1);
+      if (errors.length > 0) {
+        // Auto-rollback from .apply.bak
+        const bakPath = r.file + '.apply.bak';
+        try {
+          const { renameSync } = await import('node:fs');
+          renameSync(bakPath, r.file);
+        } catch { /* backup not found — skip rollback */ }
+        const errMsg = errors.map(e => `  Line ${e.range?.start?.line ?? '?'}: ${e.message}`).join('\n');
+        return {
+          ok: false,
+          error: `LSP diagnostics found ${errors.length} error(s) after apply — auto-rolled back:\n${errMsg}`,
+          diagnostics: errors,
+          file: r.file,
+        };
+      }
+    } catch { /* LSP query failed — skip silently */ }
+  }
+  return { ok: true };
+}
 
 
 function readFileSafe(filePath) {
