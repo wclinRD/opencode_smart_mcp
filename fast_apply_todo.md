@@ -29,7 +29,7 @@
 - [x] transactional edit (staging dir) — stagingWrite(): backup → staging → atomic rename
 - [x] import_graph 整合 multi-file dependency — findImporters() + 🔗 impact report
 
-## 🟦 P4 — 長期規劃
-- [ ] tree-sitter code action（extract function / rename / move）
-- [ ] model-adaptive format（根據 LLM 模型選擇最佳 edit format）
-- [ ] edit telemetry（追蹤 matchLevel / 成功率 / 延遲）
+## ✅ P4 — 長期規劃
+- [x] tree-sitter code action（extractFunctionAST — AST-aware extract function）
+- [x] model-adaptive format（suggestFormat — 根據 model/file/budget 推薦最佳格式）
+- [x] edit telemetry（recordEdit/getEditStats — 追蹤 format/lang/success rate）
