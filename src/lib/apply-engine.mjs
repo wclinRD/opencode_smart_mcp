@@ -18,6 +18,7 @@
 import { readFileSync, writeFileSync, existsSync, copyFileSync, unlinkSync, statSync, openSync, readSync, closeSync, globSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
+import { parseCheck } from './tree-sitter-edit.mjs';
 import { diff_match_patch } from 'diff-match-patch';
 
 // ---------------------------------------------------------------------------
@@ -929,23 +930,29 @@ export function applySearchReplace(filePath, block, opts = {}) {
       if (!dmpBalance.balanced) {
         // DMP produced unbalanced output — reject and fall through to suggestNearest
       } else {
-        if (undo) {
-          try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* best effort */ }
+        // Tree-sitter syntax validation (P2-3)
+        const dmpParse = parseCheck(dmpResult.result, lang);
+        if (!dmpParse.ok) {
+          // DMP produced syntactically invalid output — reject
+        } else {
+          if (undo) {
+            try { copyFileSync(filePath, filePath + '.apply.bak'); } catch { /* best effort */ }
+          }
+          try {
+            writeFileSync(filePath, dmpResult.result, 'utf-8');
+          } catch (e) {
+            return { status: 'error', file: filePath, error: `Cannot write (DMP): ${e.message}` };
+          }
+          const diff = generateDiffSummary(content, dmpResult.result, filePath);
+          return {
+            status: 'applied',
+            file: filePath,
+            matchLevel: 7,
+            method: 'dmp-patch',
+            diff,
+            backup: undo ? (filePath + '.apply.bak') : undefined,
+          };
         }
-        try {
-          writeFileSync(filePath, dmpResult.result, 'utf-8');
-        } catch (e) {
-          return { status: 'error', file: filePath, error: `Cannot write (DMP): ${e.message}` };
-        }
-        const diff = generateDiffSummary(content, dmpResult.result, filePath);
-        return {
-          status: 'applied',
-          file: filePath,
-          matchLevel: 7,
-          method: 'dmp-patch',
-          diff,
-          backup: undo ? (filePath + '.apply.bak') : undefined,
-        };
       }
     }
 
@@ -1032,19 +1039,24 @@ export function applySearchReplace(filePath, block, opts = {}) {
       if (retryResult.ok && retryResult.result !== content) {
         const retryBalance = checkBalance(retryResult.result);
         if (retryBalance.balanced) {
-          // Write cleaned version
-          try {
-            writeFileSync(filePath, retryResult.result, 'utf-8');
-          } catch { /* best effort - original write already done */ }
-          const retryDiff = generateDiffSummary(content, retryResult.result, filePath);
-          return {
-            status: 'applied',
-            file: filePath,
-            matchLevel: match.level,
-            method: 'dmp-retry',
-            diff: retryDiff,
-            backup: undo ? (filePath + '.apply.bak') : undefined,
-          };
+          // Tree-sitter syntax validation (P2-3)
+          const retryParse = parseCheck(retryResult.result, lang);
+          if (retryParse.ok) {
+            // Write cleaned version
+            try {
+              writeFileSync(filePath, retryResult.result, 'utf-8');
+            } catch { /* best effort - original write already done */ }
+            const retryDiff = generateDiffSummary(content, retryResult.result, filePath);
+            return {
+              status: 'applied',
+              file: filePath,
+              matchLevel: match.level,
+              method: 'dmp-retry',
+              diff: retryDiff,
+              backup: undo ? (filePath + '.apply.bak') : undefined,
+            };
+          }
+          // If DMP retry syntax invalid, keep original result
         }
         // If DMP retry also unbalanced, keep original result
       }

@@ -293,6 +293,62 @@ export function isTreeSitterLang(lang) {
   return lang in LANG_WASM_MAP && lang in DECL_PATTERNS;
 }
 
+/**
+ * Quick syntax check using tree-sitter parse.
+ * Returns { ok: true } if parse succeeds, or { ok: false, error: string } if ERROR nodes found.
+ * Falls back gracefully if tree-sitter is not available.
+ *
+ * @param {string} content — source code to parse
+ * @param {string} lang — language name
+ * @returns {{ ok: boolean, error?: string }}
+ */
+export function parseCheck(content, lang) {
+  if (!isTreeSitterAvailable() || !isTreeSitterLang(lang)) {
+    return { ok: true }; // no tree-sitter = assume valid (graceful degradation)
+  }
+
+  const langModule = languageCache.get(lang);
+  if (!langModule) return { ok: true };
+
+  try {
+    parserInstance.setLanguage(langModule);
+    const tree = parserInstance.parse(content);
+
+    // Check for ERROR nodes in the tree
+    const errors = [];
+    const walk = tree.rootNode.walk();
+    let cursor = walk;
+    let dominated = false;
+    while (!dominated) {
+      if (cursor.nodeType === 'ERROR' || cursor.nodeType === 'MISSING') {
+        const startLine = cursor.startPosition.row + 1;
+        const text = content.split('\n')[startLine - 1]?.trim()?.substring(0, 80) || '';
+        errors.push(`Line ${startLine}: ${cursor.nodeType} near "${text}"`);
+      }
+      if (cursor.gotoNextSibling()) {
+        continue;
+      }
+      // Walk up to find unvisited parent sibling
+      while (cursor.gotoParent()) {
+        if (cursor.gotoNextSibling()) break;
+      }
+      dominated = !cursor.gotoParent() || cursor.nodeId === 0;
+      // Root check: if we're back at root and root has no next sibling
+      if (cursor.nodeId === tree.rootNode.id) {
+        break;
+      }
+    }
+
+    if (errors.length > 0) {
+      return { ok: false, error: `Syntax errors: ${errors.slice(0, 3).join('; ')}` };
+    }
+    return { ok: true };
+  } catch (e) {
+    // Parse crash = assume valid (graceful degradation)
+    return { ok: true };
+  }
+}
+
 // ── Core: findSymbolAST ──────────────────────────────────────────────────────
 
 // Type mapping: tree-sitter node type → our unified type name

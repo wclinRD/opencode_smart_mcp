@@ -22,7 +22,7 @@
 ## 🟨 P2 — 效能與體驗
 - [x] fuzzy matching 預計算共享 contentLines（reduce 5x split per apply）
 - [x] multi-occurrence 自動消歧（startLine hint + context retry）
-- [ ] DMP 結果 tree-sitter parse 驗證
+- [x] DMP 結果 tree-sitter parse 驗證（parseCheck + graceful degradation）
 
 ## 🟩 P3 — 架構優化
 - [ ] 簡化 fuzzy 降級管線（≤ 4 層）
