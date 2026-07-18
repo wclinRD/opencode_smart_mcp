@@ -6,7 +6,7 @@
 //   3. Whole file replacement
 //
 // Key features:
-//   - 4-level fuzzy matching
+//   - 3-level fuzzy matching (L1/L2/L3) + structural fallback
 //   - Atomic multi-file apply
 //   - Git-based undo snapshots
 //
@@ -208,7 +208,8 @@ export function parseUnifiedDiff(diff) {
 }
 
 // ---------------------------------------------------------------------------
-// Fuzzy Matching — 4 levels
+// Fuzzy Matching — 3 levels (L1/L2/L3)
+// L4 merged into L3, L5 removed (replaced by L7 structural)
 // ---------------------------------------------------------------------------
 
 /** Normalize whitespace (CRLF→LF, collapse spaces, trim) */
@@ -251,6 +252,7 @@ function matchL2(contentLines, searchStr) {
 
 /**
  * Level 3: Find via unique content line + context verification.
+ * Whitespace-normalized matching (merged from L4).
  */
 function matchL3(contentLines, searchLines) {
   if (searchLines.length === 0) return -1;
@@ -260,46 +262,31 @@ function matchL3(contentLines, searchLines) {
   let bestIdx = -1;
   let bestScore = Infinity;
   for (let i = 0; i < searchLines.length; i++) {
-    const t = searchLines[i].trim();
+    const t = normalizeWS(searchLines[i]);
     if (!t || /^[{}\s]*$/.test(t)) continue;
     const s = freq[t] || 1;
     if (s < bestScore) { bestScore = s; bestIdx = i; }
   }
   if (bestIdx === -1) return -1;
 
-  const anchor = searchLines[bestIdx].trim();
+  const anchor = normalizeWS(searchLines[bestIdx]);
   for (let i = 0; i < contentLines.length; i++) {
-    if (contentLines[i].trim() !== anchor) continue;
+    if (normalizeWS(contentLines[i]) !== anchor) continue;
     const offset = i - bestIdx;
     if (offset < 0 || offset + searchLines.length > contentLines.length) continue;
     let ok = true;
     for (let j = 0; j < searchLines.length; j++) {
-      if (contentLines[offset + j].trim() !== searchLines[j].trim()) { ok = false; break; }
+      if (normalizeWS(contentLines[offset + j]) !== normalizeWS(searchLines[j])) { ok = false; break; }
     }
     if (ok) return offset + 1;
   }
   return -1;
 }
 
-/**
- * Level 4: Line-by-line with whitespace tolerance.
- */
-function matchL4(contentLines, searchLines) {
-  if (searchLines.length === 0) return -1;
-  const sn = searchLines.map(normalizeWS);
-  const cn = contentLines.map(normalizeWS);
-  for (let i = 0; i <= cn.length - sn.length; i++) {
-    let ok = true;
-    for (let j = 0; j < sn.length; j++) {
-      if (cn[i + j] !== sn[j]) { ok = false; break; }
-    }
-    if (ok) return i + 1;
-  }
-  return -1;
-}
+// L4 removed: merged into L3 (whitespace-normalized matching)
 
 /**
- * 4-level fuzzy match: find search block in content.
+ * 3-level fuzzy match: find search block in content.
  * @param {string} content — full file content
  * @param {string} search — search block text
  * @param {{ startLine?: number }} [opts]
@@ -570,37 +557,7 @@ export function applyHashline(filePath, change, opts = {}) {
   return { status: 'applied', file: filePath, matchLevel: 6, diff, backup: undo ? (filePath + '.apply.bak') : undefined };
 }
 
-/**
- * Level 5: Partial/lenient matching for abbreviated context.
- * Matches meaningful lines independently — allows gaps.
- * Returns 1-indexed line of best anchor match.
- */
-function matchL5(contentLines, searchLines) {
-  const meaningful = searchLines.map(l => l.trim()).filter(l => l && !/^[{}\s]*$/.test(l));
-  if (meaningful.length === 0) return -1;
-
-  const fileMeaningful = contentLines.map(l => l.trim());
-
-  // Find first anchor line in file
-  const anchor = meaningful[0];
-  for (let i = 0; i < fileMeaningful.length; i++) {
-    if (fileMeaningful[i] === anchor) {
-      // Verify remaining meaningful lines appear after this point in order
-      let searchIdx = 1;
-      let fileIdx = i + 1;
-      while (searchIdx < meaningful.length && fileIdx < fileMeaningful.length) {
-        if (fileMeaningful[fileIdx] === meaningful[searchIdx]) {
-          searchIdx++;
-        }
-        fileIdx++;
-      }
-      if (searchIdx >= meaningful.length) {
-        return i + 1;
-      }
-    }
-  }
-  return -1;
-}
+// L5 removed: replaced by L7 structural matching + DMP fallback
 
 export function fuzzyMatch(content, search, opts = {}) {
   if (!content || !search) return null;
@@ -611,10 +568,6 @@ export function fuzzyMatch(content, search, opts = {}) {
   r = matchL1(cl, sl, opts.startLine); if (r !== -1) return { line: r, level: 1 };
   r = matchL2(cl, search);            if (r !== -1) return { line: r, level: 2 };
   r = matchL3(cl, sl);                if (r !== -1) return { line: r, level: 3 };
-  r = matchL4(cl, sl);                if (r !== -1) return { line: r, level: 4 };
-  r = matchL5(cl, sl);                if (r !== -1) return { line: r, level: 5 };
-  // L6 removed: O(n·m) gap-tolerant subsequence matching caused 300-3000ms latency
-  // for large files. Edits reaching L6 fall through to structural (L7) or DMP instead.
 
   // Level 7 hint: structural fallback may find it. Set level:7 to trigger retry in calling code.
   if (opts.lang) return { line: -1, level: 7, hint: 'structural fallback available', lang: opts.lang };
@@ -670,7 +623,7 @@ export function detectMultiOccurrence(content, search, opts = {}) {
     return { multi: false, count };
   }
 
-  // Fuzzy levels (L3, L4): check anchor line uniqueness
+  // Fuzzy level L3: check anchor line uniqueness
   const sl = search.split('\n');
   const cl = opts.cl || content.split('\n');
   const anchorLines = sl.filter(l => l.trim() && !/^[{}\s]*$/.test(l.trim()));
@@ -1076,7 +1029,7 @@ export function applySearchReplace(filePath, block, opts = {}) {
  * Apply a partial-context SEARCH/REPLACE block.
  *
  * Designed for LLMs that output fewer surrounding context lines.
- * Uses same 4-level + L5 matching, but with stricter multi-occurrence
+ * Uses same 3-level matching (L1/L2/L3), but with stricter multi-occurrence
  * detection since abbreviated context increases collision risk.
  *
  * @param {string} filePath
@@ -1150,7 +1103,7 @@ export function applyPartial(filePath, block, opts = {}) {
     return { status: 'applied', file: filePath, matchLevel: 2, diff, backup: undo ? (filePath + '.apply.bak') : undefined };
   }
 
-  // 2. Try fuzzy match through all levels (L1-L4 + L5)
+  // 2. Try fuzzy match through all levels (L1-L3)
   if (fuzzy) {
     const fm = fuzzyMatch(content, partial, { cl });
     if (fm) {
