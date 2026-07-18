@@ -14,7 +14,7 @@
 // 其他語言以通用 pattern 作為 fallback。
 
 import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
-import { extname, resolve, relative, basename, join } from 'node:path';
+import { extname, resolve, relative, basename, join, dirname } from 'node:path';
 import { cwd } from 'node:process';
 import { createHash } from 'node:crypto';
 
@@ -292,6 +292,93 @@ export function parseDeclarations(content, lang) {
  * Extract the body of a specific symbol by name.
  * Returns { name, type, lineStart, lineEnd, signature, body } or null.
  */
+/**
+ * Calculate content complexity score (0-10).
+ * Used for auto-mode decision: high complexity → more conservative mode.
+ */
+function calculateComplexity(content, lang) {
+  const lines = content.split('\n');
+  let importCount = 0;
+  let functionCount = 0;
+  let classCount = 0;
+  let maxNesting = 0;
+  let currentNesting = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    
+    // Count imports
+    if (trimmed.startsWith('import ') || trimmed.includes('require(')) {
+      importCount++;
+    }
+    
+    // Count functions (language-specific patterns)
+    if (lang === 'javascript' || lang === 'typescript') {
+      if (trimmed.match(/^(?:export\s+)?(?:async\s+)?function\s+/)) functionCount++;
+      if (trimmed.match(/^(?:export\s+)?class\s+/)) classCount++;
+    } else if (lang === 'python') {
+      if (trimmed.match(/^def\s+/) || trimmed.match(/^async\s+def\s+/)) functionCount++;
+      if (trimmed.match(/^class\s+/)) classCount++;
+    }
+    
+    // Track nesting depth (simplified: count { or indentation)
+    if (trimmed.endsWith('{')) {
+      currentNesting++;
+      maxNesting = Math.max(maxNesting, currentNesting);
+    } else if (trimmed === '}' || trimmed.startsWith('}')) {
+      currentNesting = Math.max(0, currentNesting - 1);
+    }
+  }
+
+  // Calculate score (0-10)
+  let score = 0;
+  score += Math.min(3, Math.floor(importCount / 5));  // 0-3 points for imports
+  score += Math.min(3, Math.floor(functionCount / 10)); // 0-3 points for functions
+  score += Math.min(2, Math.floor(classCount / 5));    // 0-2 points for classes
+  score += Math.min(2, Math.floor(maxNesting / 4));    // 0-2 points for nesting
+
+  return {
+    score: Math.min(10, score),
+    importCount,
+    functionCount,
+    classCount,
+    maxNesting,
+  };
+}
+
+/**
+ * Calculate Levenshtein distance between two strings.
+ * Used for typo tolerance in symbol matching.
+ */
+function levenshteinDistance(a, b) {
+  const matrix = Array(b.length + 1).fill(null).map(() => Array(a.length + 1).fill(null));
+  
+  for (let i = 0; i <= a.length; i++) matrix[0][i] = i;
+  for (let j = 0; j <= b.length; j++) matrix[j][0] = j;
+  
+  for (let j = 1; j <= b.length; j++) {
+    for (let i = 1; i <= a.length; i++) {
+      const indicator = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[j][i] = Math.min(
+        matrix[j][i - 1] + 1,     // deletion
+        matrix[j - 1][i] + 1,     // insertion
+        matrix[j - 1][i - 1] + indicator  // substitution
+      );
+    }
+  }
+  
+  return matrix[b.length][a.length];
+}
+
+/**
+ * Check if two strings are similar within a given threshold.
+ */
+function isSimilar(a, b, threshold = 2) {
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > threshold) return false;
+  return levenshteinDistance(a.toLowerCase(), b.toLowerCase()) <= threshold;
+}
+
 export function extractSymbol(content, lang, symbolName) {
   const declarations = parseDeclarations(content, lang);
 
@@ -309,6 +396,14 @@ export function extractSymbol(content, lang, symbolName) {
     const lines = content.split('\n');
     const body = lines.slice(fuzzy.lineStart - 1, fuzzy.lineEnd).join('\n');
     return { ...fuzzy, body };
+  }
+
+  // Typo tolerance: find similar symbols (Levenshtein distance <= 2)
+  const typoMatch = declarations.find(d => isSimilar(d.name, symbolName, 2));
+  if (typoMatch) {
+    const lines = content.split('\n');
+    const body = lines.slice(typoMatch.lineStart - 1, typoMatch.lineEnd).join('\n');
+    return { ...typoMatch, body, _typoMatch: true, _originalQuery: symbolName };
   }
 
   return null;
@@ -650,6 +745,67 @@ export function extractCallers(content, symbolData, _lang) {
   return callers;
 }
 
+/**
+ * Extract callers from cross-file (within same directory).
+ * Scans related files for symbol usage.
+ * Returns [{ file, line, text }].
+ */
+export function extractCallersCrossFile(symbolName, currentFile, rootDir, lang) {
+  const callers = [];
+  const currentDir = dirname(currentFile);
+  const escaped = symbolName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`\\b${escaped}\\s*\\(`, 'g');
+  
+  // Get file extension patterns for the language
+  const extPatterns = {
+    javascript: ['.js', '.jsx', '.mjs', '.cjs'],
+    typescript: ['.ts', '.tsx', '.mts', '.cts'],
+    python: ['.py', '.pyw'],
+    go: ['.go'],
+    rust: ['.rs'],
+  };
+  
+  const extensions = extPatterns[lang] || ['.js', '.ts', '.py', '.go', '.rs'];
+  
+  try {
+    // Scan files in same directory (max 20 files for performance)
+    const files = readdirSync(currentDir)
+      .filter(file => {
+        const ext = extname(file).toLowerCase();
+        return extensions.includes(ext) && file !== basename(currentFile);
+      })
+      .slice(0, 20);
+    
+    for (const file of files) {
+      const filePath = resolve(currentDir, file);
+      try {
+        const stat = statSync(filePath);
+        if (!stat.isFile()) continue;
+        
+        const content = readFileSync(filePath, 'utf-8');
+        const lines = content.split('\n');
+        
+        for (let i = 0; i < lines.length; i++) {
+          const trimmed = lines[i].trim();
+          // Skip comments
+          if (trimmed.startsWith('//') || trimmed.startsWith('#') || trimmed.startsWith('/*') || trimmed.startsWith('*')) continue;
+          
+          re.lastIndex = 0;
+          if (re.test(lines[i])) {
+            callers.push({
+              file: relative(rootDir || currentDir, filePath),
+              line: i + 1,
+              text: trimmed.length > 80 ? trimmed.slice(0, 80) + '…' : trimmed,
+            });
+          }
+        }
+      } catch { /* ignore read errors */ }
+    }
+  } catch { /* ignore directory read errors */ }
+  
+  return callers;
+}
+
 // ---------------------------------------------------------------------------
 // Content hash for integrity verification
 // ---------------------------------------------------------------------------
@@ -823,14 +979,34 @@ export class SmartReader {
 
     try {
       switch (mode) {
-        // ── Auto: select best mode by file size ──
+        // ── Auto: select best mode by file size + content complexity ──
         case 'auto': {
           const thresholds = opts.thresholds || {};
           const fullThreshold = thresholds.full ?? 50;
           const sigThreshold = thresholds.signatures ?? 300;
-          const autoMode = totalLines < fullThreshold ? 'full'
-            : totalLines < sigThreshold ? 'signatures'
+          
+          // 計算內容複雜度（import 數量、函數/類別數量）
+          const complexity = calculateComplexity(content, lang);
+          
+          // 根據複雜度調整閾值
+          // 高複雜度檔案使用更保守的模式（避免 token 浪費）
+          let adjustedFullThreshold = fullThreshold;
+          let adjustedSigThreshold = sigThreshold;
+          
+          if (complexity.score > 7) {
+            // 高複雜度：降低閾值，傾向使用更精簡的模式
+            adjustedFullThreshold = Math.floor(fullThreshold * 0.6);
+            adjustedSigThreshold = Math.floor(sigThreshold * 0.6);
+          } else if (complexity.score > 4) {
+            // 中複雜度：稍微降低閾值
+            adjustedFullThreshold = Math.floor(fullThreshold * 0.8);
+            adjustedSigThreshold = Math.floor(sigThreshold * 0.8);
+          }
+          
+          const autoMode = totalLines < adjustedFullThreshold ? 'full'
+            : totalLines < adjustedSigThreshold ? 'signatures'
             : 'outline';
+          
           // Re-call with determined mode (OS cache makes re-read negligible)
           return this.read({ ...opts, mode: autoMode });
         }
@@ -870,7 +1046,7 @@ export class SmartReader {
           break;
         }
 
-        // ── Explain: symbol + imports + callers ──
+        // ── Explain: symbol + imports + callers (cross-file) ──
         case 'explain': {
           if (!opts.symbol) {
             return { ...result, status: 'error', error: 'symbol name required for explain mode' };
@@ -882,6 +1058,16 @@ export class SmartReader {
           // Extract dependencies
           const imports = extractImports(content, lang);
           const callers = extractCallers(content, symbolData, lang);
+          
+          // Cross-file callers (within same directory)
+          const rootDir = opts.root || cwd();
+          const crossFileCallers = extractCallersCrossFile(
+            symbolData.name,
+            filePath,
+            rootDir,
+            lang
+          );
+          
           result.data = {
             name: symbolData.name,
             type: symbolData.type,
@@ -891,8 +1077,9 @@ export class SmartReader {
             body: symbolData.body,
             imports,
             callers,
+            crossFileCallers,  // 新增：跨檔案 callers
           };
-          result.lines = (symbolData.body || '').split('\n').length + imports.length + callers.length;
+          result.lines = (symbolData.body || '').split('\n').length + imports.length + callers.length + crossFileCallers.length;
           break;
         }
 
@@ -971,15 +1158,15 @@ export class SmartReader {
       };
     }
 
-    const results = [];
-    for (const entry of entries) {
+    // 並行讀取所有檔案（Promise.all）以提升效能
+    const readPromises = entries.map(entry => {
       const entryOpts = typeof entry === 'string'
         ? { filePath: entry, mode: opts.entryMode || opts.mode || 'auto', root: opts.root }
         : { ...entry, root: opts.root };
+      return this.read(entryOpts);
+    });
 
-      const r = await this.read(entryOpts);
-      results.push(r);
-    }
+    const results = await Promise.all(readPromises);
 
     const okCount = results.filter(r => r.status === 'ok').length;
     return {

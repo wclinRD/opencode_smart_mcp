@@ -30,12 +30,65 @@ import { cwd } from 'node:process';
 import { SmartReader, hashContent } from '../../lib/smart-read.mjs';
 
 // =========================================================================
-// Session Memory Cache — 零磁碟重複讀取
+// LRU Cache — 改進的快取策略（取代 FIFO）
 // =========================================================================
 
-const _readCache = new Map();
+class LRUCache {
+  constructor(maxSize = 500) {
+    this.maxSize = maxSize;
+    this.cache = new Map();
+    this.accessOrder = []; // 追蹤存取順序
+  }
+
+  get(key) {
+    if (!this.cache.has(key)) return undefined;
+    // 更新存取順序
+    this._touchAccess(key);
+    return this.cache.get(key);
+  }
+
+  set(key, value) {
+    if (this.cache.has(key)) {
+      this._touchAccess(key);
+    } else {
+      this.accessOrder.push(key);
+    }
+    this.cache.set(key, value);
+    this._evictIfNeeded();
+  }
+
+  _touchAccess(key) {
+    const idx = this.accessOrder.indexOf(key);
+    if (idx > -1) {
+      this.accessOrder.splice(idx, 1);
+    }
+    this.accessOrder.push(key);
+  }
+
+  _evictIfNeeded() {
+    while (this.cache.size > this.maxSize) {
+      const oldest = this.accessOrder.shift();
+      if (oldest) this.cache.delete(oldest);
+    }
+  }
+
+  has(key) {
+    return this.cache.has(key);
+  }
+
+  delete(key) {
+    this.cache.delete(key);
+    const idx = this.accessOrder.indexOf(key);
+    if (idx > -1) this.accessOrder.splice(idx, 1);
+  }
+
+  get size() {
+    return this.cache.size;
+  }
+}
+
+const _readCache = new LRUCache(500);
 const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
-const MAX_CACHE_ENTRIES = 500;
 
 function getCacheKey(filePath, opts) {
   const mode = opts.mode || 'auto';
@@ -48,15 +101,20 @@ function getCacheKey(filePath, opts) {
 
 function cacheWrap(reader, filePath, opts) {
   const key = getCacheKey(filePath, opts);
-  try {
-    if (existsSync(filePath)) {
-      const stat = statSync(filePath);
-      const cached = _readCache.get(key);
-      if (cached && cached.mtime === stat.mtimeMs && (Date.now() - cached.timestamp) < CACHE_TTL) {
-        return cached.result;
+  const cached = _readCache.get(key);
+  
+  // 快速路徑：TTL 內的快取直接返回（避免 stat 系統呼叫）
+  if (cached && (Date.now() - cached.timestamp) < CACHE_TTL) {
+    // TTL 內但需要驗證 mtime（檔案可能被外部修改）
+    try {
+      if (existsSync(filePath)) {
+        const stat = statSync(filePath);
+        if (cached.mtime === stat.mtimeMs) {
+          return cached.result;
+        }
       }
-    }
-  } catch { /* ignore perms issues */ }
+    } catch { /* ignore perms issues */ }
+  }
 
   // Cache miss: read fresh (async or sync)
   const raw = reader.read(opts);
@@ -77,12 +135,7 @@ function storeInCache(key, filePath, result) {
     if (existsSync(filePath) && result?.status === 'ok') {
       const stat = statSync(filePath);
       _readCache.set(key, { mtime: stat.mtimeMs, result, timestamp: Date.now() });
-      // Evict oldest entries when over limit (FIFO — simplest, no LRU overhead)
-      if (_readCache.size > MAX_CACHE_ENTRIES) {
-        const entries = [..._readCache.entries()].sort((a, b) => a[1].timestamp - b[1].timestamp);
-        const toEvict = entries.slice(0, entries.length - MAX_CACHE_ENTRIES);
-        for (const [k] of toEvict) _readCache.delete(k);
-      }
+      // LRU Cache 自動處理淘汰（LRUCache._evictIfNeeded）
     }
   } catch { /* ignore */ }
 }
@@ -431,6 +484,14 @@ function formatOutput(result, args) {
       } else {
         text += `\n  (no internal callers found)\n`;
       }
+      
+      // Cross-file callers section
+      if (d.crossFileCallers && d.crossFileCallers.length > 0) {
+        text += `\n  Callers in other files:\n`;
+        for (const c of d.crossFileCallers) {
+          text += `    ${c.file}:${c.line}  ${c.text}\n`;
+        }
+      }
       break;
     }
 
@@ -535,6 +596,9 @@ function formatCompact(result, args) {
       out += `\n${d.body}`;
       if (d.callers && d.callers.length > 0) {
         out += `\n  callers: ${d.callers.map(c => `${c.text} (:${c.line})`).join('; ')}`;
+      }
+      if (d.crossFileCallers && d.crossFileCallers.length > 0) {
+        out += `\n  cross-file callers: ${d.crossFileCallers.map(c => `${c.file}:${c.line} ${c.text}`).join('; ')}`;
       }
       return out;
     }
