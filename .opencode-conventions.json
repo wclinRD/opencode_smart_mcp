@@ -8,14 +8,14 @@
         "kebabCase": 160
       },
       "variable": {
-        "camelCase": 12549,
+        "camelCase": 12613,
         "PascalCase": 61,
         "other": 87,
         "UPPER_CASE": 465,
         "snake_case": 1
       },
       "function": {
-        "camelCase": 1870,
+        "camelCase": 1872,
         "other": 2,
         "PascalCase": 4
       },
@@ -26,7 +26,7 @@
       }
     },
     "imports": {
-      "commonjs": 8,
+      "commonjs": 9,
       "esm": 346,
       "mixed": true
     },
@@ -47,9 +47,9 @@
     ],
     "exports": {
       "default": 114,
-      "named": 565
+      "named": 569
     }
   },
   "preferences": {},
-  "lastAnalyzed": "2026-07-18T04:54:36.620Z"
+  "lastAnalyzed": "2026-07-18T05:52:51.885Z"
 }

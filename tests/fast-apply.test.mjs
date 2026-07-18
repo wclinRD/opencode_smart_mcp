@@ -915,6 +915,88 @@ describe('parseBlockDiff', () => {
     assert.equal(changes[0].action, 'insert-before');
     rmSync(dirname(fp), { recursive: true, force: true });
   });
+
+  it('auto-resolves fuzzy symbol name (startsWith, score>=80)', () => {
+    const content = 'function getUserName() { return "alice"; }\nfunction getAllData() { return []; }\n';
+    const fp = symFile(content);
+    const root = dirname(fp);
+    const blocks = [{ file: 'test.js', symbol: 'get', newContent: 'function get() { return 1; }' }];
+    const changes = parseBlockDiff(blocks, root);
+    assert.equal(changes.length, 1);
+    assert.ok(changes[0].warning, 'should have auto-resolve warning');
+    assert.ok(changes[0].warning.includes('auto-resolved'));
+    rmSync(dirname(fp), { recursive: true, force: true });
+  });
+
+  it('picks shorter name when multiple candidates have same score', () => {
+    // handleClick=11, handleChange=12, handleSubmit=12 — should pick handleClick (shortest)
+    const content = 'function handleClick() { return 1; }\nfunction handleChange() { return 2; }\nfunction handleSubmit() { return 3; }\n';
+    const fp = symFile(content);
+    const root = dirname(fp);
+    const blocks = [{ file: 'test.js', symbol: 'handle', newContent: 'function handle() { return 0; }' }];
+    const changes = parseBlockDiff(blocks, root);
+    assert.equal(changes.length, 1);
+    assert.ok(changes[0].warning.includes('handleClick'), 'should pick shortest name (handleClick=11 chars)');
+    rmSync(dirname(fp), { recursive: true, force: true });
+  });
+
+
+  it('rejects auto-resolve below threshold 80 (subsequence only)', () => {
+    const content = 'function renderItem() { return null; }\n';
+    const fp = symFile(content);
+    const root = dirname(fp);
+    const blocks = [{ file: 'test.js', symbol: 'rm', newContent: 'const rm = 1;' }];
+    assert.throws(() => parseBlockDiff(blocks, root), /not found/);
+    rmSync(dirname(fp), { recursive: true, force: true });
+  });
+
+  it('sets oldContent for replace action', () => {
+    const content = 'function greet() { return "hi"; }\n';
+    const fp = symFile(content);
+    const root = dirname(fp);
+    const blocks = [{ file: 'test.js', symbol: 'greet', newContent: 'function greet() { return "bye"; }' }];
+    const changes = parseBlockDiff(blocks, root);
+    assert.equal(changes.length, 1);
+    assert.ok(changes[0].oldContent, 'should have oldContent for replace');
+    assert.ok(changes[0].oldContent.includes('function greet()'));
+    rmSync(dirname(fp), { recursive: true, force: true });
+  });
+
+  it('append action adds trailing newline to content', () => {
+    const content = 'function test() { return 1; }\n';
+    const fp = symFile(content);
+    const root = dirname(fp);
+    const blocks = [{ file: 'test.js', symbol: 'test', newContent: 'console.log("appended");', action: 'append' }];
+    const changes = parseBlockDiff(blocks, root);
+    assert.equal(changes.length, 1);
+    assert.ok(changes[0].newContent.endsWith('\n'), 'appended content should have trailing newline');
+    rmSync(dirname(fp), { recursive: true, force: true });
+  });
+
+  it('append action preserves existing trailing newline', () => {
+    const content = 'function test() { return 1; }\n';
+    const fp = symFile(content);
+    const root = dirname(fp);
+    const blocks = [{ file: 'test.js', symbol: 'test', newContent: 'console.log("done");\n', action: 'append' }];
+    const changes = parseBlockDiff(blocks, root);
+    assert.ok(!changes[0].newContent.endsWith('\n\n'), 'should not double trailing newline');
+    rmSync(dirname(fp), { recursive: true, force: true });
+  });
+
+  it('handles multiple blocks in one call', () => {
+    const content = 'function a() { return 1; }\nfunction b() { return 2; }\n';
+    const fp = symFile(content);
+    const root = dirname(fp);
+    const blocks = [
+      { file: 'test.js', symbol: 'a', newContent: 'function a() { return 10; }' },
+      { file: 'test.js', symbol: 'b', newContent: 'function b() { return 20; }' },
+    ];
+    const changes = parseBlockDiff(blocks, root);
+    assert.equal(changes.length, 2);
+    assert.equal(changes[0].action, 'replace');
+    assert.equal(changes[1].action, 'replace');
+    rmSync(dirname(fp), { recursive: true, force: true });
+  });
 });
 
 describe('checkFileAccess', () => {

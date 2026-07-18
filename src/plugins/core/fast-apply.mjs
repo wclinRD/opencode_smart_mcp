@@ -254,31 +254,58 @@ Dry-run by default — safe to use without side effects.`,
     let changes = [];
 
     try {
-      if (format === 'block-diff' && args.blocks) {
+      // ── Format auto-detect: infer format from args when not explicitly set ──
+      let effectiveFormat = format;
+      if (!args.format) {
+        // No explicit format → infer from arg shape
+        if (args.blocks) {
+          // blocks array present → detect block format
+          const b0 = args.blocks[0] || {};
+          if (b0.symbol && b0.newContent !== undefined) effectiveFormat = 'block-diff';
+          else if (b0.search !== undefined && b0.replace !== undefined) effectiveFormat = 'search-replace';
+        } else if (args.file && args.symbol && args.newContent !== undefined && !args.search) {
+          // Flat symbol-edit: {file, symbol, newContent} without search/replace
+          effectiveFormat = '__flat_symbol';
+        } else if (args.diff || (args.text && /^@@/.test(args.text))) {
+          effectiveFormat = 'unified-diff';
+        } else if (args.changes) {
+          effectiveFormat = 'hashline';
+        } else if (args.whole) {
+          effectiveFormat = 'whole-file';
+        } else if (args.sed && (args.file || args.glob)) {
+          effectiveFormat = args.glob ? 'batch' : 'sed';
+        }
+      }
+
+      if (effectiveFormat === 'block-diff' && args.blocks) {
         changes = parseBlockDiff(args.blocks, root);
-      } else if (format === 'search-replace' && args.blocks) {
+      } else if (effectiveFormat === '__flat_symbol' || (effectiveFormat === 'block-diff' && !args.blocks && args.file && args.symbol)) {
+        // Auto-route to flat symbol-edit path (skip block-diff parsing)
+        // This handles: {file, symbol, newContent} without explicit format
+        // Also handles: format=block-diff but no blocks array (symbol is on flat args)
+      } else if (effectiveFormat === 'search-replace' && args.blocks) {
         changes = parseSearchReplace(args.blocks).map(b => ({ ...b, type: 'search-replace' }));
-      } else if (format === 'lazy' && args.blocks) {
+      } else if (effectiveFormat === 'lazy' && args.blocks) {
         changes = parseSearchReplace(args.blocks).map(b => ({ ...b, type: 'lazy' }));
-      } else if (format === 'partial' && args.blocks) {
+      } else if (effectiveFormat === 'partial' && args.blocks) {
         changes = parseSearchReplace(args.blocks).map(b => ({ ...b, type: 'partial' }));
-      } else if (format === 'search-replace' && args.text) {
+      } else if (effectiveFormat === 'search-replace' && args.text) {
         changes = parseSearchReplaceText(args.text).map(b => ({ ...b, type: 'search-replace' }));
-      } else if ((format === 'lazy' || format === 'partial') && args.text) {
-        changes = parseSearchReplaceText(args.text).map(b => ({ ...b, type: format }));
-      } else if (format === 'unified-diff') {
+      } else if ((effectiveFormat === 'lazy' || effectiveFormat === 'partial') && args.text) {
+        changes = parseSearchReplaceText(args.text).map(b => ({ ...b, type: effectiveFormat }));
+      } else if (effectiveFormat === 'unified-diff') {
         const diffInput = args.diff || args.text || '';
         const parsed = parseUnifiedDiff(diffInput);
         changes = parsed.map(f => ({ file: f.file, type: 'diff', hunks: f.hunks }));
-      } else if (format === 'hashline' && args.changes) {
+      } else if (effectiveFormat === 'hashline' && args.changes) {
         changes = args.changes.map(c => ({ ...c, type: 'hashline' }));
-      } else if (format === 'whole-file' && args.whole) {
+      } else if (effectiveFormat === 'whole-file' && args.whole) {
         changes = [{ ...args.whole, type: 'whole' }];
-      } else if (format === 'sed' && args.file && args.sed) {
+      } else if (effectiveFormat === 'sed' && args.file && args.sed) {
         changes = [{ file: args.file, sed: args.sed, line: args.line, endLine: args.endLine, type: 'sed' }];
-      } else if (format === 'multi-hunk') {
+      } else if (effectiveFormat === 'multi-hunk') {
         changes = [{ file: args.file, hunks: args.hunks, type: 'multi-hunk' }];
-      } else if (format === 'batch') {
+      } else if (effectiveFormat === 'batch') {
         changes = [{ glob: args.glob, sed: args.sed, line: args.line, endLine: args.endLine, root, type: 'batch' }];
       } else if (args.text) {
         // Auto-detect: try SEARCH/REPLACE blocks first, then unified diff
@@ -306,6 +333,7 @@ Dry-run by default — safe to use without side effects.`,
           changes = [{ file: args.file, search: args.search, replace: args.replace, type: 'search-replace' }];
         } else if (args.symbol) {
           // file+symbol+action+newContent → symbol-edit (取代 edit_ast)
+          // Uses shared validateSymbolBody for braces balance + size guard
           const filePath = resolve(root, args.file);
           const symContent = readFileSafe(filePath);
           if (symContent === null) {
@@ -317,15 +345,26 @@ Dry-run by default — safe to use without side effects.`,
             const suggestions = suggestSimilarSymbols(symContent, lang, args.symbol);
             return formatOutput({ status: 'error', error: `Symbol "${args.symbol}" not found in ${args.file}.${suggestions}` }, outputFormat);
           }
+          // 🛡️ Apply same validation as parseBlockDiff (braces balance + size guard)
+          let warning;
+          try {
+            validateSymbolBody(sym, symContent, lang, args.symbol, false);
+          } catch (e) {
+            return formatOutput({ status: 'error', error: e.message }, outputFormat);
+          }
           const act = args.action || 'replace';
           const nc = args.newContent || '';
           if (act === 'prepend') {
             changes = [{ file: args.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineStart, newContent: nc, action: 'insert-before' }];
           } else if (act === 'append') {
-            changes = [{ file: args.file, type: 'hashline', startLine: sym.lineEnd, endLine: sym.lineEnd, newContent: nc, action: 'insert-after' }];
+            // Ensure trailing newline so appended content doesn't merge with last line
+            const safeNc = nc && !nc.endsWith('\n') ? nc + '\n' : nc;
+            changes = [{ file: args.file, type: 'hashline', startLine: sym.lineEnd, endLine: sym.lineEnd, newContent: safeNc, action: 'insert-after' }];
           } else {
-            // replace: replace entire symbol body
-            changes = [{ file: args.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineEnd, newContent: nc, action: 'replace' }];
+            // replace: replace entire symbol body (with oldContent for verification)
+            const lines = symContent.split('\n');
+            const actualBody = lines.slice(sym.lineStart - 1, sym.lineEnd).join('\n');
+            changes = [{ file: args.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineEnd, oldContent: actualBody, newContent: nc, action: 'replace' }];
           }
         } else if (args.action && ['insert-before','insert-after','delete'].includes(args.action)) {
           // file+action+startLine+newContent → block-boundary action
@@ -355,13 +394,20 @@ Dry-run by default — safe to use without side effects.`,
     } catch (e) {
       // Add format-specific hints to help LLM self-correct
       const hints = [];
-      if (format === 'block-diff') {
-        hints.push('block-diff format: {file:"path", symbol:"name", newContent:"code"}');
-      } else if (format === 'search-replace' || format === 'lazy' || format === 'partial') {
+      if (effectiveFormat === 'block-diff' || effectiveFormat === '__flat_symbol') {
+        // block-diff failed — often because target is not a top-level declaration
+        // (e.g. object property method, getter/setter, nested function)
+        const isNotSymbol = e.message && (e.message.includes('not found') || e.message.includes('unbalanced'));
+        if (isNotSymbol) {
+          hints.push('Target is not a top-level symbol. Use search-replace or hashline format instead:\n  search-replace: {file:"path", search:"existing code block", replace:"new code"}\n  hashline: {file:"path", startLine:N, endLine:N, newContent:"code"}');
+        } else {
+          hints.push('block-diff format: {file:"path", symbol:"name", newContent:"code"}');
+        }
+      } else if (effectiveFormat === 'search-replace' || effectiveFormat === 'lazy' || effectiveFormat === 'partial') {
         hints.push('search-replace format: {file:"path", search:"old code", replace:"new code"}');
-      } else if (format === 'hashline') {
+      } else if (effectiveFormat === 'hashline') {
         hints.push('hashline format: {file:"path", startLine:N, endLine:N, newContent:"code"}');
-      } else if (format === 'unified-diff') {
+      } else if (effectiveFormat === 'unified-diff') {
         hints.push('unified-diff: use ---/+++ file headers with @@ hunk markers');
       }
       // Only add generic hint if error doesn't already have 💡 guidance
@@ -790,9 +836,76 @@ function suggestSimilarSymbols(content, lang, name) {
   // Detect if name looks like a comment (contains spaces, common header patterns)
   const looksLikeComment = name.includes(' ') || /^(?:section|header|part|region|area)/i.test(name);
   const formatHint = looksLikeComment
-    ? `\n  💡 "${name}" looks like a section header, not a code symbol.\n     To replace a comment section, use search-replace:\n       search: "// ${name}"  (or the actual comment text)\n       replace: <your new code>`
-    : `\n  💡 block-diff only accepts code symbols (function/class/const/let/var).\n     To insert new code, use search-replace or hashline format.`;
+    ? `\n  \uD83D\uDCA1 "${name}" looks like a section header, not a code symbol.\n     To replace a comment section, use search-replace:\n       search: "// ${name}"  (or the actual comment text)\n       replace: <your new code>`
+    : `\n  \uD83D\uDCA1 block-diff only accepts code symbols (function/class/const/let/var).\n     To insert new code, use search-replace or hashline format.`;
   return `${formatHint}\n  Available symbols: ${display}${extra}`;
+}
+
+// ── Shared: validate symbol body range (braces balance + size guard) ──
+// Used by both parseBlockDiff and flat shortcut path.
+// Returns { ok, actualBody, sym (mutated), warning? } or throws on unrecoverable error.
+function validateSymbolBody(sym, fc, lang, symbolName, symbolAutoResolved) {
+  const lines = fc.split('\n');
+  const totalLines = lines.length;
+  let actualBody = lines.slice(sym.lineStart - 1, sym.lineEnd).join('\n');
+  let warning = symbolAutoResolved ? `Symbol "${symbolName}" auto-resolved to "${sym.name}"` : undefined;
+
+  // Phase 1: Braces balance check (skip strings/comments for accuracy)
+  const balance = checkBalance(actualBody);
+
+  if (!balance.balanced) {
+    // Braces unbalanced — extractSymbol returned wrong lineEnd.
+    // Try to correct using parseDeclarations (next declaration boundary).
+    let corrected = false;
+    try {
+      const allDecls = parseDeclarations(fc, lang);
+      const myIdx = allDecls.findIndex(d => d.name === sym.name && d.lineStart === sym.lineStart);
+      if (myIdx !== -1 && myIdx + 1 < allDecls.length) {
+        const next = allDecls[myIdx + 1];
+        if (next.lineStart > sym.lineStart) {
+          sym.lineEnd = next.lineStart - 1;
+          const correctedBody = lines.slice(sym.lineStart - 1, sym.lineEnd).join('\n');
+          const correctedBalance = checkBalance(correctedBody);
+          if (correctedBalance.balanced && correctedBody.trimEnd().length > 0) {
+            sym.body = correctedBody;
+            actualBody = correctedBody;
+            corrected = true;
+          }
+        }
+      }
+    } catch { /* fall through to error */ }
+
+    if (!corrected) {
+      throw new Error(
+        `Symbol "${symbolName}" has unbalanced braces ` +
+        `(expected "${balance.expected || '?'}" but found "${balance.found || '?'}" at position ${balance.position ?? '?'}). ` +
+        `Use search-replace or hashline format instead.`
+      );
+    }
+  }
+
+  // Phase 2: Size guard — if body covers >50% of file, try next-declaration cap.
+  if (sym.lineEnd - sym.lineStart > Math.max(5, totalLines * 0.5)) {
+    try {
+      const allDecls = parseDeclarations(fc, lang);
+      const myIdx = allDecls.findIndex(d => d.name === sym.name && d.lineStart === sym.lineStart);
+      if (myIdx !== -1 && myIdx + 1 < allDecls.length) {
+        const next = allDecls[myIdx + 1];
+        const safeEnd = Math.min(sym.lineEnd, next.lineStart - 1);
+        if (safeEnd > sym.lineStart) {
+          const cappedBody = lines.slice(sym.lineStart - 1, safeEnd).join('\n');
+          const cappedBalance = checkBalance(cappedBody);
+          if (cappedBalance.balanced && cappedBody.trimEnd().length > 0) {
+            sym.lineEnd = safeEnd;
+            sym.body = cappedBody;
+            actualBody = cappedBody;
+          }
+        }
+      }
+    } catch { /* size guard failed — applyHashline oldContent check is last resort */ }
+  }
+
+  return { ok: true, actualBody, sym, warning };
 }
 
 export function parseBlockDiff(blocks, root) {
@@ -841,9 +954,13 @@ export function parseBlockDiff(blocks, root) {
           }
           score = si === lower.length ? 30 + (si / nl.length) * 20 : 0;
         }
-        if (score > bestScore) { bestScore = score; bestMatch = d; }
+        // Prefer higher score, then shorter name (more precise match)
+        if (score > bestScore || (score === bestScore && bestMatch && d.name.length < bestMatch.name.length)) {
+          bestScore = score; bestMatch = d;
+        }
       }
-      if (bestMatch && bestScore >= 60) {
+      // Threshold 80: requires startsWith/includes match (not just subsequence)
+      if (bestMatch && bestScore >= 80) {
         sym = extractSymbol(fc, lang, bestMatch.name);
         if (sym) symbolAutoResolved = true;
       }
@@ -857,80 +974,18 @@ export function parseBlockDiff(blocks, root) {
       }
     }
 
-    // 🛡️ Body range validation — P0: braces balance check.
-    // findBodyEnd can miscount braces inside strings/regexes/comments,
-    // returning wrong lineEnd. This causes silent corruption because
-    // oldContent (sliced from the same wrong range) passes verification
-    // in applyHashline. We validate BEFORE passing to applyHashline.
-    const lines = fc.split('\n');
-    const totalLines = lines.length;
-    let actualBody = lines.slice(sym.lineStart - 1, sym.lineEnd).join('\n');
-
-    // Phase 1: Braces balance check (skip strings/comments for accuracy)
-    const balance = checkBalance(actualBody);
-
-    if (!balance.balanced) {
-      // Braces unbalanced — extractSymbol returned wrong lineEnd.
-      // Try to correct using parseDeclarations (next declaration boundary).
-      let corrected = false;
-      try {
-        const allDecls = parseDeclarations(fc, lang);
-        const myIdx = allDecls.findIndex(d => d.name === sym.name && d.lineStart === sym.lineStart);
-        if (myIdx !== -1 && myIdx + 1 < allDecls.length) {
-          const next = allDecls[myIdx + 1];
-          if (next.lineStart > sym.lineStart) {
-            // Cap or extend to next declaration boundary
-            sym.lineEnd = next.lineStart - 1;
-            const correctedBody = lines.slice(sym.lineStart - 1, sym.lineEnd).join('\n');
-            const correctedBalance = checkBalance(correctedBody);
-            if (correctedBalance.balanced && correctedBody.trimEnd().length > 0) {
-              sym.body = correctedBody;
-              actualBody = correctedBody;
-              corrected = true;
-            }
-          }
-        }
-      } catch { /* fall through to error */ }
-
-      if (!corrected) {
-        throw new Error(
-          `Symbol "${b.symbol}" in ${b.file} has unbalanced braces ` +
-          `(expected "${balance.expected || '?'}" but found "${balance.found || '?'}" at position ${balance.position ?? '?'}). ` +
-          `Use search-replace or hashline format instead.`
-        );
-      }
-    }
-
-    // Phase 2: Size guard — if body still covers >50% of file, try next-declaration cap.
-    // (Catches cases where braces happen to balance but range is still wrong,
-    //  e.g. extra { and } in strings that happen to pair.)
-    if (sym.lineEnd - sym.lineStart > Math.max(5, totalLines * 0.5)) {
-      try {
-        const allDecls = parseDeclarations(fc, lang);
-        const myIdx = allDecls.findIndex(d => d.name === sym.name && d.lineStart === sym.lineStart);
-        if (myIdx !== -1 && myIdx + 1 < allDecls.length) {
-          const next = allDecls[myIdx + 1];
-          const safeEnd = Math.min(sym.lineEnd, next.lineStart - 1);
-          if (safeEnd > sym.lineStart) {
-            const cappedBody = lines.slice(sym.lineStart - 1, safeEnd).join('\n');
-            const cappedBalance = checkBalance(cappedBody);
-            if (cappedBalance.balanced && cappedBody.trimEnd().length > 0) {
-              sym.lineEnd = safeEnd;
-              sym.body = cappedBody;
-              actualBody = cappedBody;
-            }
-          }
-        }
-      } catch { /* size guard failed — applyHashline oldContent check is last resort */ }
-    }
+    // 🛡️ Shared body range validation (braces balance + size guard)
+    const { actualBody, warning } = validateSymbolBody(sym, fc, lang, b.symbol, symbolAutoResolved);
 
     const act = b.action || 'replace';
     const nc = b.newContent;
-    const warn = symbolAutoResolved ? { warning: `Symbol "${b.symbol}" auto-resolved to "${sym.name}"` } : {};
+    const warn = warning ? { warning } : {};
     if (act === 'prepend') {
       changes.push({ ...warn, file: b.file, type: 'hashline', startLine: sym.lineStart, endLine: sym.lineStart, newContent: nc, action: 'insert-before' });
     } else if (act === 'append') {
-      changes.push({ ...warn, file: b.file, type: 'hashline', startLine: sym.lineEnd, endLine: sym.lineEnd, newContent: nc, action: 'insert-after' });
+      // Ensure trailing newline so appended content doesn't merge with last line
+      const safeNc = nc && !nc.endsWith('\n') ? nc + '\n' : nc;
+      changes.push({ ...warn, file: b.file, type: 'hashline', startLine: sym.lineEnd, endLine: sym.lineEnd, newContent: safeNc, action: 'insert-after' });
     } else {
       // ⚠️ NOTE: oldContent verification in applyHashline does NOT catch
       // wrong lineEnd here because oldContent was sliced from the SAME
