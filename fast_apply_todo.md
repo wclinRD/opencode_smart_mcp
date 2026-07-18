@@ -12,9 +12,14 @@
 - [x] `validatePostApply()` 函式：query LSP diagnostics → error → auto rollback from `.apply.bak`
 - [x] 整合到 atomic + sequential apply 兩個 return 路徑
 - [x] 語法檢查 + 括號平衡通過
+## ✅ P1: auto-fix loop（已整合到 P0-2）
+- [x] `validatePostApply()` 擴展：auto-fix loop（max 3 rounds）
+- [x] LSP `getCodeActions` → `executeCodeAction` → `applyWorkspaceEdit` 流程
+- [x] LSP diagnostic 格式轉換（range → normalized）
+- [x] isPreferred quick fix 優先選擇
+- [x] Error 數量不減 → 停止並 rollback
 
-## 📋 P1 (next)
-- [ ] 編輯後自動修復 diagnostics（auto-fix loop）
+## 📋 P1 (remaining)
 - [ ] `smart_edit_chain` 整合 tree-sitter
 - [ ] multi-file apply 後批次 diagnostics 驗證
 

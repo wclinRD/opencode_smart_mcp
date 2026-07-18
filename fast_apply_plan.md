@@ -1,13 +1,10 @@
 # smart_fast_apply 設計分析與改進計畫
 
-## P0 完成狀態
+## 完成狀態
 
 - ✅ **tree-sitter AST-aware editing** — `src/lib/tree-sitter-edit.mjs` 建立完成，整合到 `parseBlockDiff()`
 - ✅ **LSP diagnostics 驗證 + auto-rollback** — `validate:"full"` 選項，apply 後自動 query diagnostics，error 時 rollback
-
----
-
-## 二、主要缺點（按嚴重程度排序）
+- ✅ **Auto-fix loop** — 最多 3 輪 LSP code_action 自動修復，isPreferred quick fix 優先
 
 ### 1. 缺少真正的 AST-level editing（最大缺口）
 

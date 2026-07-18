@@ -657,9 +657,12 @@ Dry-run by default — safe to use without side effects.`,
 // Helpers
 // ---------------------------------------------------------------------------
 
-// ── P0-2: Post-apply LSP diagnostics validation + auto-rollback ──
-// For each applied file, query LSP diagnostics. If errors found, rollback from .bak.
-async function validatePostApply(appliedResults, root) {
+// ── P0-2: Post-apply LSP diagnostics validation + auto-rollback + auto-fix ──
+// For each applied file, query LSP diagnostics. If errors found:
+//   1. Try auto-fix via LSP code_action (max 3 rounds)
+//   2. If still errors after fix attempts → rollback from .apply.bak
+async function validatePostApply(appliedResults, root, opts = {}) {
+  const maxFixRounds = opts.maxFixRounds ?? 3;
   const extMap = { '.ts': 'typescript', '.tsx': 'typescriptreact', '.js': 'javascript', '.jsx': 'javascriptreact', '.py': 'python', '.go': 'go', '.rs': 'rust', '.java': 'java', '.rb': 'ruby', '.php': 'php' };
   let bridge = null;
   try {
@@ -667,26 +670,84 @@ async function validatePostApply(appliedResults, root) {
   } catch { return { ok: true }; } // LSP not available — skip
 
   for (const r of appliedResults) {
-    if (!r.file || !extMap[extname(r.file)]) continue;
-    try {
-      const diags = await bridge.getDiagnostics(r.file);
+    if (!r.file || !extMap[r.file.match(/\.[^.]+$/)?.[0]]) continue;
+
+    // ── Phase 1: Auto-fix loop ──
+    let fixed = false;
+    for (let round = 0; round < maxFixRounds; round++) {
+      let diags;
+      try {
+        diags = await bridge.getDiagnostics(r.file);
+      } catch { break; } // LSP query failed
       const errors = (diags?.diagnostics || []).filter(d => d.severity === 1);
-      if (errors.length > 0) {
-        // Auto-rollback from .apply.bak
-        const bakPath = r.file + '.apply.bak';
+      if (errors.length === 0) { fixed = true; break; } // All errors resolved
+
+
+      // Try to get code actions for the first error
+      const errDiag = errors[0];
+      // Convert LSP range format → normalized format for getCodeActions
+      const normDiag = {
+        line: (errDiag.range?.start?.line ?? 0) + 1,
+        col: errDiag.range?.start?.character ?? 0,
+        endLine: (errDiag.range?.end?.line ?? errDiag.range?.start?.line ?? 0) + 1,
+        endCol: errDiag.range?.end?.character ?? (errDiag.range?.start?.character ?? 0) + 1,
+        message: errDiag.message || '',
+        severity: 'error',
+        source: errDiag.source,
+        code: errDiag.code,
+      };
+      let actions;
+      try {
+        actions = await bridge.getCodeActions(
+          r.file,
+          normDiag.line,
+          normDiag.col,
+          [normDiag]
+        );
+      } catch { break; } // codeAction not supported
+      if (!actions?.actions?.length) break; // No quick fixes available
+
+      // Prefer isPreferred quick fixes
+      const quickFix = actions.actions.find(a => a.isPreferred) || actions.actions[0];
+      if (!quickFix) break;
+
+      // Execute the code action
+      let execResult;
+      try {
+        execResult = await bridge.executeCodeAction(quickFix);
+      } catch { break; }
+
+      if (execResult?.error) break;
+
+      // Apply workspace edit if present
+      if (execResult?.edit) {
         try {
-          const { renameSync } = await import('node:fs');
-          renameSync(bakPath, r.file);
-        } catch { /* backup not found — skip rollback */ }
-        const errMsg = errors.map(e => `  Line ${e.range?.start?.line ?? '?'}: ${e.message}`).join('\n');
-        return {
-          ok: false,
-          error: `LSP diagnostics found ${errors.length} error(s) after apply — auto-rolled back:\n${errMsg}`,
-          diagnostics: errors,
-          file: r.file,
-        };
+          await bridge.applyWorkspaceEdit(execResult.edit);
+        } catch { break; }
       }
-    } catch { /* LSP query failed — skip silently */ }
+    }
+
+    // ── Phase 2: Final diagnostics check ──
+    let finalDiags;
+    try {
+      finalDiags = await bridge.getDiagnostics(r.file);
+    } catch { continue; }
+    const remainingErrors = (finalDiags?.diagnostics || []).filter(d => d.severity === 1);
+    if (remainingErrors.length > 0) {
+      // Still errors after fix attempts — rollback
+      const bakPath = r.file + '.apply.bak';
+      try {
+        const { renameSync } = await import('node:fs');
+        renameSync(bakPath, r.file);
+      } catch { /* backup not found — skip rollback */ }
+      const errMsg = remainingErrors.map(e => `  Line ${e.range?.start?.line ?? '?'}: ${e.message}`).join('\n');
+      return {
+        ok: false,
+        error: `LSP diagnostics found ${remainingErrors.length} error(s) after apply (auto-fix attempted ${maxFixRounds} rounds) — auto-rolled back:\n${errMsg}`,
+        diagnostics: remainingErrors,
+        file: r.file,
+      };
+    }
   }
   return { ok: true };
 }
