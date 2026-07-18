@@ -17,10 +17,13 @@
 - [x] LSP `getCodeActions` → `executeCodeAction` → `applyWorkspaceEdit` 流程
 - [x] LSP diagnostic 格式轉換（range → normalized）
 - [x] isPreferred quick fix 優先選擇
-- [x] Error 數量不減 → 停止並 rollback
+## ✅ P1: smart_edit_chain 整合 tree-sitter
+- [x] `resolveEdit()` 改為 async
+- [x] block-diff 路徑：`findSymbolAST()` 優先，fallback `extractSymbol()`
+- [x] Lazy init tree-sitter at module load
+- [x] 語法檢查通過
 
 ## 📋 P1 (remaining)
-- [ ] `smart_edit_chain` 整合 tree-sitter
 - [ ] multi-file apply 後批次 diagnostics 驗證
 
   - 整合 tree-sitter 到 apply-engine.mjs

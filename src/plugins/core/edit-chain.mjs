@@ -19,6 +19,10 @@ import { extractSymbol, detectLanguage, parseDeclarations } from '../../lib/smar
 import {
   applyHashline, applySearchReplace, applySed,
 } from '../../lib/apply-engine.mjs';
+import { findSymbolAST, initTreeSitter, isTreeSitterAvailable, isTreeSitterLang } from '../../lib/tree-sitter-edit.mjs';
+
+// Lazy-init tree-sitter at module load
+const _tsInit = initTreeSitter().catch(() => ({ ok: false }));
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -38,7 +42,7 @@ function countDiffStats(diff) {
 
 // ── Resolve a single edit to internal format ───────────────────────────────
 
-function resolveEdit(e, idx) {
+async function resolveEdit(e, idx) {
   const root = cwd();
   const fp = resolve(root, e.file);
 
@@ -50,11 +54,17 @@ function resolveEdit(e, idx) {
       return { ok: true, type: 'search-replace', index: idx, file: e.file, path: fp, search: e.search, replace: e.replace };
     }
 
-    // block-diff
+    // block-diff (try tree-sitter first, fallback to regex)
     if (e.symbol && e.content !== undefined) {
       const content = readFileSync(fp, 'utf-8');
       const lang = detectLanguage(fp);
-      const sym = extractSymbol(content, lang, e.symbol);
+      let sym = null;
+      // Try tree-sitter AST first
+      if (isTreeSitterAvailable() && isTreeSitterLang(lang)) {
+        sym = await findSymbolAST(content, lang, e.symbol);
+      }
+      // Fallback to regex
+      if (!sym) sym = extractSymbol(content, lang, e.symbol);
       if (!sym) return { ok: false, error: `Symbol "${e.symbol}" not found in ${e.file}`, index: idx };
 
       // Braces balance check (P0: same pattern as fast-apply)
@@ -223,7 +233,7 @@ Key benefits:
     const errors = [];
 
     for (let i = 0; i < edits.length; i++) {
-      const r = resolveEdit(edits[i], i);
+      const r = await resolveEdit(edits[i], i);
       if (r.ok) resolved.push(r);
       else errors.push(`[${i}] ${r.error}`);
     }
