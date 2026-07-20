@@ -24,7 +24,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, relative, basename, dirname, join } from 'node:path';
-import { execSync, spawnSync } from 'node:child_process';
+import { execSync, spawnSync, spawn } from 'node:child_process';
 import { COLORS, useColor, globToRegex, matchGlob, findFiles } from '../lib/utils.mjs';
 
 // ---------------------------------------------------------------------------
@@ -205,6 +205,7 @@ function parseArgs() {
     runner: null,
     patterns: [],
     timeout: 30000,
+    hardTimeout: 25000, // Total execution cap to avoid MCP client timeout (~30s)
     format: 'text',
     list: false,
     failFast: false,
@@ -222,6 +223,7 @@ function parseArgs() {
       case '--runner': opts.runner = args[++i]; break;
       case '--pattern': opts.patterns.push(args[++i]); break;
       case '--timeout': opts.timeout = parseInt(args[++i], 10); break;
+      case '--hard-timeout': opts.hardTimeout = parseInt(args[++i], 10); break;
       case '--format': opts.format = args[++i]; break;
       case '--list': opts.list = true; break;
       case '--fail-fast': opts.failFast = true; break;
@@ -258,6 +260,7 @@ Options:
   --runner <type>       Test runner: node, mocha, jest, ava (default: auto)
   --pattern <glob>      Test file pattern (repeatable)
   --timeout <ms>        Per-test timeout (default: 30000)
+  --hard-timeout <ms>    Total execution cap (default: 25000). Kills remaining tests if exceeded.
   --format <fmt>        Output: text, json, tap (default: text)
   --list                Only list tests, don't run them
   --fail-fast           Stop on first failure
@@ -282,7 +285,7 @@ Examples:
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
-function main() {
+async function main() {
   const opts = parseArgs();
   const root = resolve(opts.root);
   const color = useColor(opts);
@@ -319,9 +322,68 @@ function main() {
     return;
   }
 
+  // ── Fast path: run all tests in one Node.js process (parallel by default) ──
+  // When no --related, --grep, or specific patterns are given, delegate to
+  // `node --test` which runs files in parallel internally — much faster than
+  // running each file as a separate process via spawnSync.
+  // Hard timeout: use async spawn + Promise.race to cap total execution time
+  // so the MCP client (~30s) never times out.
+  const isFullRun = !opts.related && !opts.grep && opts.patterns.length === 0;
+  if (isFullRun && opts.runner === 'node') {
+    const nodeArgs = ['--test'];
+    if (opts.coverage) nodeArgs.push('--experimental-test-coverage');
+    nodeArgs.push(...testFiles.map(f => relative(root, f)));
+
+    const hardTimeoutMs = opts.hardTimeout || 25000;
+    const result = await new Promise((resolve) => {
+      const child = spawn('node', nodeArgs, {
+        cwd: root,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (d) => { stdout += d; });
+      child.stderr.on('data', (d) => { stderr += d; });
+
+      const timer = setTimeout(() => {
+        try { child.kill('SIGTERM'); } catch { /* ok */ }
+        // Force kill after 2s if still alive
+        setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* ok */ } }, 2000);
+        resolve({ stdout, stderr, status: -1, timedOut: true });
+      }, hardTimeoutMs);
+
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        resolve({ stdout, stderr, status: code ?? 1, timedOut: false });
+      });
+      child.on('error', (err) => {
+        clearTimeout(timer);
+        resolve({ stdout, stderr: stderr + '\n' + err.message, status: 1, timedOut: false });
+      });
+    });
+
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    if (result.timedOut) {
+      console.error(`\n[smart_test] Hard timeout: killed after ${hardTimeoutMs}ms. Partial results shown above.`);
+    }
+    process.exit(result.timedOut ? 0 : (result.status ?? 1));
+  }
+
+  // ── Per-file execution (for --related, --grep, or non-node runners) ──
   const results = [];
   const totalFiles = testFiles.length;
+  const hardTimeoutMs = opts.hardTimeout || 25000;
+  const perFileStart = Date.now();
+  let timedOut = false;
   for (let idx = 0; idx < testFiles.length; idx++) {
+    // Hard timeout check: skip remaining files if time budget exhausted
+    if (Date.now() - perFileStart > hardTimeoutMs) {
+      timedOut = true;
+      if (!opts.summary) console.log(`\n[smart_test] Hard timeout: skipping remaining ${totalFiles - idx} file(s) after ${hardTimeoutMs}ms`);
+      break;
+    }
     const filePath = testFiles[idx];
     const relFile = relative(root, filePath);
     if (!opts.summary) {
@@ -331,7 +393,6 @@ function main() {
     result.relFile = relFile;
     results.push(result);
     if (opts.summary) {
-      // Minimal progress: only show count every 100 files to keep output compact
       if ((idx + 1) % 100 === 0 || idx === totalFiles - 1) {
         process.stdout.write(`  ${idx + 1}/${totalFiles} files...\n`);
       }
@@ -347,7 +408,6 @@ function main() {
 
   // Output
   if (opts.summary) {
-    // Summary mode: compact output
     const passed = results.filter(r => r.passed);
     const failed = results.filter(r => !r.passed);
     console.log('');
@@ -383,6 +443,11 @@ function main() {
   }
 
   const failed = results.filter(r => !r.passed).length;
+  if (timedOut) {
+    console.log(color
+      ? `\n⚠️  Partial results (hard timeout: ${hardTimeoutMs}ms — ${results.length}/${totalFiles} files completed)`
+      : `\n[Partial results: hard timeout ${hardTimeoutMs}ms — ${results.length}/${totalFiles} files completed]`);
+  }
   process.exit(failed > 0 ? 1 : 0);
 }
 

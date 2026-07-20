@@ -17,7 +17,7 @@ export default {
     },
   },
   cli: 'test-runner.mjs',
-  timeout: 120_000, // Test runner can take 30s+ for large suites
+  timeout: 30_000, // Must stay under MCP client timeout (~30s). CLI hard timeout handles partial results.
   mapArgs(a) {
     const cli = [];
     if (a.root) cli.push('--root', String(a.root));
