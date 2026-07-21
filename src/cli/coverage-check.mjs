@@ -360,7 +360,7 @@ function parseArgs() {
   }
 
   const opts = {
-    filePath: args[0],
+    filePath: args[0]?.startsWith('--') ? null : args[0],
     root: '.',
     format: 'text',
     threshold: 80,
@@ -410,6 +410,10 @@ Examples:
 // ---------------------------------------------------------------------------
 function main() {
   const opts = parseArgs();
+  if (!opts.filePath) {
+    console.error('Error: file argument is required.\nUsage: node coverage-check.mjs <file> [--threshold N] [--format text|json|markdown] [--no-color]');
+    process.exit(1);
+  }
   const root = resolve(opts.root);
   const color = useColor(opts);
 
