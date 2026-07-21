@@ -227,9 +227,12 @@ permission:
 ```
 任務來 → 複雜度 > 4 →
   1. todowrite 建立 Todos
-  2. 逐一 task({subagent_type:"general"}) 分派
-  3. 接收結果 → 更新 Todos
-  4. 全部完成 → 總結回報
+  2. smart_think 驗證拆分品質（~100 tok）
+  3. 逐一 task({subagent_type:"general"}) 分派
+  4. 接收結果 → 更新 Todos
+  5. smart_deep_think 整合所有結果 → 產出結論
+  6. 迭代判斷：需要下一輪？→ 回到步驟 1
+  7. 完成 → 總結回報
 ```
 
 ### 委派流程（強制步驟）
@@ -237,6 +240,15 @@ permission:
 ```
 Step 1: 分析任務 → 拆解為 Todos
   └─ 使用 todowrite 建立任務清單（含驗證標準）
+
+Step 1.5: 🔍 拆分品質驗證（~100 tok，強制）
+  └─ smart_think({mode:"cit", thought:...})
+     檢查：
+     a) 是否有遺漏的依賴步驟？
+     b) 步驟順序是否合理（有無前置依賴被排在後面）？
+     c) 每個 subtask 粒度是否恰當（太粗→拆更細，太細→合併）？
+     d) 是否有重疊的 subtask 可以合併？
+     → 發現問題 → 更新 todowrite → 重新驗證（最多 2 輪）
 
 Step 2: 逐一分派 Subagent
   ├─ 使用 task({subagent_type:"general"})
@@ -253,7 +265,25 @@ Step 4: 主 Agent 驗證
   ├─ 未使用 → 要求重新執行
   └─ 更新 todo 為 completed/failed
 
-Step 5: 全部完成後總結回報
+Step 5: 🧠 結論整合（強制，~200 tok）
+  └─ smart_deep_think({template:"analyze", topic:...})
+     整合所有 subtask 結果：
+     a) 交叉驗證：各 subtask 結果是否一致？
+     b) 缺口分析：是否有未覆蓋的面向？
+     c) 矛盾偵測：不同 subtask 是否有衝突結論？
+     d) 產出統一結論 + 信心分數
+
+Step 6: 🔄 迭代判斷（強制）
+  └─ smart_think({mode:"cit", thought:...})
+     判斷：
+     a) Step 5 的缺口分析是否發現重大遺漏？
+     b) 信心分數 < 7 是否需要補充研究？
+     c) 使用者原始需求是否完全被滿足？
+     → 需要迭代 → 回到 Step 1（帶入新發現的缺口）
+     → 不需要 → 進入 Step 7
+
+Step 7: 全部完成後總結回報
+  └─ 附帶：迭代摘要（第幾輪、每輪解決了什麼）
 ```
 
 ---
@@ -353,12 +383,30 @@ LSP timeout → retry 一次（縮小 scope），仍 timeout 才用 smart_grep
 |------|------|------|
 | Brainstorming | 🟢 | `smart_think({mode:"cit"})` 確認需求 → 列出 acceptance criteria → `ssr(design_doc)` |
 | TDD 循環 | 🟢 | RED：寫測試看 fail → GREEN：最小實作測試 pass → REFACTOR：清理 → 再驗證 |
-| 修 Bug | 🔴 | `todowrite` → `task(error_diagnose) → task(debug) → task(smart_fast_apply) → task(smart_test) → task(memory_store)` |
-| 重構 | 🔴 | `todowrite` → `task(import_graph) → task(code_impact) → task(smart_fast_apply) → task(smart_test)` |
-| 新功能 | 🔴 | `smart_think(確認spec) → todowrite → task(planner) → task(smart_fast_apply) → task(smart_test)` |
+| 修 Bug | 🔴 | `smart_think(拆分)` → `todowrite` → `task(error_diagnose) → task(debug) → task(smart_fast_apply) → task(smart_test)` → `smart_deep_think(整合)` → 迭代判斷 |
+| 重構 | 🔴 | `smart_think(拆分)` → `todowrite` → `task(import_graph) → task(code_impact) → task(smart_fast_apply) → task(smart_test)` → `smart_deep_think(整合)` → 迭代判斷 |
+| 新功能 | 🔴 | `smart_think(確認spec)` → `smart_think(拆分)` → `todowrite` → `task(planner) → task(smart_fast_apply) → task(smart_test)` → `smart_deep_think(整合)` → 迭代判斷 |
 | 批次編輯 | 🟢 | `smart_edit_chain({chain:[{file,search,replace}]})` → `smart_test`（1 次 MCP 呼叫完成 N 編輯，省 40-60% token） |
 | Git 流程 | 🟢 | `ssr(git_context) → ssr(git_commit) → smart_test → ssr(git_pr)` |
-| 安全修復 | 🔴 | `smart_security → smart_think({mode:"beam"}) → todowrite → task(smart_fast_apply) → task(smart_test) → task(rescan)` |
+| 安全修復 | 🔴 | `smart_security` → `smart_think({mode:"beam"})` → `smart_think(拆分)` → `todowrite` → `task(smart_fast_apply) → task(smart_test) → task(rescan)` → `smart_deep_think(整合)` → 迭代判斷 |
+
+### 🔄 迭代機制說明
+
+```
+迭代觸發條件（Step 6 判斷）：
+  ├─ smart_deep_think 信心分數 < 7
+  ├─ 缺口分析發現重大遺漏（≥2 個未覆蓋面向）
+  ├─ 矛盾偵測發現衝突結論（需補充研究釐清）
+  └─ 使用者原始需求有部分未滿足
+
+迭代上限：最多 3 輪（防止無限迴圈）
+  ├─ 第 1 輪：初始分析
+  ├─ 第 2 輪：補充缺口 + 釐清矛盾
+  └─ 第 3 輪：最終驗證（即使信心不足也停止，標記為「需人工確認」）
+
+每輪迭代帶入：
+  └─ 上一輪的缺口分析 + 未解決矛盾清單
+```
 
 ---
 
