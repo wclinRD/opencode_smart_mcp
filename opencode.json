@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "default_agent": "smart-mcp",
+  "default_agent": "smart-hybrid",
   "model": "opencode/big-pickle",
   "mcp": {
     "smart": {
