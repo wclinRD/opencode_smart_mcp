@@ -56,7 +56,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEBUG = env.DEBUG === 'smart' || env.DEBUG === 'smart-mcp' || argv.includes('--debug');
 const MAX_OUTPUT_SIZE = 512 * 1024;
 const MAX_OUTPUT_CHARS = 200_000;
-const TOOL_TIMEOUT = 30_000;
+const TOOL_TIMEOUT = 180_000; // 3 minutes for long-running tools like smart_test
 
 // P0 MicroCompact: auto-trigger after tool call
 const MICRO_COMPACT_KEEP = 5;      // Keep last N results as-is
