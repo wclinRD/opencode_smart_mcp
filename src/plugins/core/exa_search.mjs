@@ -33,8 +33,8 @@ export default {
       },
       compress: {
         type: 'string',
-        enum: ['none', 'caveman'],
-        description: 'Compress output to save tokens. "caveman" strips grammar, keeps facts (15-30% token savings). Default: none.',
+        enum: ['none', 'caveman', 'auto'],
+        description: 'Compress output to save tokens. "caveman" strips grammar, keeps facts (15-30% token savings). "auto" enables auto-upgrade compression level + auto-increase maxChars. Default: none.',
       },
       compressLevel: {
         type: 'string',
@@ -93,9 +93,13 @@ export default {
     if (a.excludeDomains) cli.push('--exclude-domains', JSON.stringify(a.excludeDomains));
     if (a.startDate) cli.push('--start-date', String(a.startDate));
     if (a.endDate) cli.push('--end-date', String(a.endDate));
-    if (a.compress === 'caveman') {
+    if (a.compress === 'caveman' || a.compress === 'auto') {
       cli.push('--caveman');
-      if (a.compressLevel) cli.push('--caveman-level', String(a.compressLevel));
+      if (a.compress === 'auto') {
+        cli.push('auto');  // Pass 'auto' as positional arg
+      } else if (a.compressLevel) {
+        cli.push('--caveman-level', String(a.compressLevel));
+      }
     }
     cli.push('--no-color');
     return cli;

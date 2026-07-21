@@ -127,6 +127,8 @@ permission:
 ```
 任務進入
   │
+  ├─ 🔍 GitHub URL？ → 直接走「GitHub Repo 研究流程」（見下方）
+  │
   ├─ 快速分析（1 step）
   │   └─ 複雜度評分：步驟數 + 工具數 + 檔案數 + 風險等級
   │
@@ -391,7 +393,7 @@ LSP timeout → retry 一次（縮小 scope），仍 timeout 才用 smart_grep
 | 批次編輯 | 🟢 | `smart_edit_chain({chain:[{file,search,replace}]})` → `smart_test`（1 次 MCP 呼叫完成 N 編輯，省 40-60% token） |
 | Git 流程 | 🟢 | `ssr(git_context) → ssr(git_commit) → smart_test → ssr(git_pr)` |
 | 安全修復 | 🔴 | `smart_security` → `smart_think({mode:"beam"})` → `smart_think(拆分)` → `todowrite` → `task(smart_fast_apply) → task(smart_test) → task(rescan)` → `smart_deep_think(整合)` → 迭代判斷 |
-| GitHub Repo 研究 | 🟢 | `git clone` → `smart_learn` → `smart_think` 分析 → 回報 |
+| GitHub Repo 研究 | 🔴 | `git clone --depth 1` → `smart_learn({root})` → `smart_think({mode:"cit"})` 架構分析 → `smart_read({mode:"outline"})` 結構 → `smart_grep({pattern})` 搜尋 → 回報摘要 |
 
 ### 🔄 迭代機制說明
 

@@ -8,7 +8,7 @@
         "kebabCase": 162
       },
       "variable": {
-        "camelCase": 12956,
+        "camelCase": 12967,
         "PascalCase": 64,
         "other": 91,
         "UPPER_CASE": 469,
@@ -51,5 +51,5 @@
     }
   },
   "preferences": {},
-  "lastAnalyzed": "2026-07-18T14:25:39.852Z"
+  "lastAnalyzed": "2026-07-21T15:32:35.615Z"
 }

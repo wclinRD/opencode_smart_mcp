@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-21T09:15:38.214Z",
+  "generatedAt": "2026-07-21T16:40:58.763Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -1032,9 +1032,10 @@
             "type": "string",
             "enum": [
               "none",
-              "caveman"
+              "caveman",
+              "auto"
             ],
-            "description": "Compress output to save tokens. \"caveman\" strips grammar, keeps facts (15-30% token savings). Default: none."
+            "description": "Compress output to save tokens. \"caveman\" strips grammar, keeps facts (15-30% token savings). \"auto\" enables auto-upgrade compression level + auto-increase maxChars. Default: none."
           },
           "compressLevel": {
             "type": "string",
@@ -1131,9 +1132,10 @@
             "type": "string",
             "enum": [
               "none",
-              "caveman"
+              "caveman",
+              "auto"
             ],
-            "description": "Compress output to save tokens. \"caveman\" strips grammar, keeps facts (15-30% token savings). Default: none."
+            "description": "Compress output to save tokens. \"caveman\" strips grammar, keeps facts (15-30% token savings). \"auto\" enables auto-upgrade compression level + auto-increase maxChars. Default: none."
           },
           "compressLevel": {
             "type": "string",

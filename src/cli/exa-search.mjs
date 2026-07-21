@@ -19,6 +19,7 @@
 //   --fetch-only          Force native HTTP fetch (skip Exa, no API key needed)
 //   --no-cache            Bypass cache
 //   --caveman             Apply Caveman compression (strip grammar, keep facts)
+//   --caveman auto        Auto mode: auto-upgrade compression + auto-increase maxChars
 //   --caveman-level <lvl> Compression level: light, semantic, aggressive (default: semantic)
 //   -h, --help            Show this help
 
@@ -289,24 +290,64 @@ function isContentTruncated(text) {
 }
 
 /**
- * Truncate text to maxChars, preserving word boundaries.
+ * Truncate text to maxChars, preserving semantic boundaries (paragraph > sentence > word).
+ * Smart truncation attempts to break at natural boundaries to maintain meaning.
  * @param {string} text
  * @param {number} maxChars
  * @returns {string}
  */
 function truncateTo(text, maxChars) {
   if (!text || text.length <= maxChars) return text;
-  return text.slice(0, maxChars).replace(/\s+\S*$/, '') + '\n\n[Content truncated at ' + maxChars + ' chars]';
+  
+  const truncated = text.slice(0, maxChars);
+  
+  // 1. Try paragraph boundary (double newline) — best for preserving topics
+  const lastParagraph = truncated.lastIndexOf('\n\n');
+  if (lastParagraph > maxChars * 0.7) {
+    return truncated.slice(0, lastParagraph) + '\n\n[Content truncated at paragraph boundary]';
+  }
+  
+  // 2. Try sentence boundary (period/question/exclamation followed by space)
+  // Support both Western (.!?) and CJK (。！？) punctuation
+  const sentenceEndRegex = /[.!?。！？]\s*$/;
+  const lastSentence = truncated.search(sentenceEndRegex);
+  if (lastSentence > maxChars * 0.6) {
+    return truncated.slice(0, lastSentence + 1) + '\n\n[Content truncated at sentence boundary]';
+  }
+  
+  // 3. Fallback: word boundary (existing behavior)
+  return truncated.replace(/\s+\S*$/, '') + '\n\n[Content truncated at word boundary]';
 }
 
 /**
  * Apply Caveman compression to text output if enabled.
+ * Supports auto mode: detects content length and auto-upgrades compression level.
  * @param {string} text - The text to potentially compress
- * @param {object} opts - Options with caveman/cavemanLevel
+ * @param {object} opts - Options with caveman/cavemanLevel/maxChars
  * @returns {string} - Compressed or original text
  */
 function applyCaveman(text, opts) {
-  if (!opts.caveman || !text) return text;
+  if (!text) return text;
+  
+  // Auto mode: detect content length and upgrade compression if needed
+  if (opts.caveman === 'auto') {
+    const maxChars = opts.maxChars || 5000;
+    const ratio = text.length / maxChars;
+    
+    // Content exceeds threshold → auto-upgrade compression level
+    if (ratio > 0.8) {
+      const levels = ['light', 'semantic', 'aggressive', 'ultra'];
+      const currentLevel = opts.cavemanLevel || 'semantic';
+      const currentIdx = levels.indexOf(currentLevel);
+      const newLevel = currentIdx < levels.length - 1 ? levels[currentIdx + 1] : currentLevel;
+      
+      const result = cavemanCompress(text, newLevel);
+      return result.text;
+    }
+  }
+  
+  // Manual mode: apply specified level (or default semantic)
+  if (!opts.caveman) return text;
   const level = opts.cavemanLevel || 'semantic';
   const result = cavemanCompress(text, level);
   return result.text;
@@ -534,12 +575,20 @@ function isFetchableUrl(url) {
  * Web search
  */
 async function cmdSearch(query, opts) {
+  // Auto-adjust maxChars: when caveman compression is enabled, request more content
+  // since compression will reduce token usage anyway
+  let effectiveMaxChars = opts.maxChars || 5000;
+  if (opts.caveman && !opts.maxChars) {
+    // Caveman enabled + no explicit maxChars → increase by 50% to get more raw content
+    effectiveMaxChars = Math.min(effectiveMaxChars * 1.5, 15000);
+  }
+  
   const body = {
     query,
     numResults: opts.numResults || 10,
     type: opts.searchType || 'auto',
     contents: {
-      text: { maxCharacters: opts.maxChars || 3000 },
+      text: { maxCharacters: effectiveMaxChars },
     },
   };
   if (opts.category) body.category = opts.category;
@@ -895,8 +944,13 @@ async function cmdCrawl(urls, opts) {
   }
 
   // --- Standard Exa crawl ---
+  // Auto-adjust maxChars: when caveman compression is enabled, request more content
+  let effectiveMaxChars = opts.maxChars || 3000;
+  if (opts.caveman && !opts.maxChars) {
+    effectiveMaxChars = Math.min(effectiveMaxChars * 1.5, 12000);
+  }
   const body = {
-    urls: urls.map(u => ({ url: u, text: { maxCharacters: opts.maxChars || 3000 } })),
+    urls: urls.map(u => ({ url: u, text: { maxCharacters: effectiveMaxChars } })),
   };
 
   const data = await exaFetch('/contents', body);
@@ -1007,13 +1061,19 @@ async function cmdCrawlRendered(urls, opts) {
  * Code search
  */
 async function cmdCode(query, opts) {
+  // Auto-adjust maxChars: when caveman compression is enabled, request more content
+  let effectiveMaxChars = opts.maxChars || 3000;
+  if (opts.caveman && !opts.maxChars) {
+    effectiveMaxChars = Math.min(effectiveMaxChars * 1.5, 10000);
+  }
+  
   const body = {
     query,
     numResults: opts.numResults || 8,
     type: opts.searchType || 'auto',
     category: 'code',
     contents: {
-      text: { maxCharacters: opts.maxChars || 3000 },
+      text: { maxCharacters: effectiveMaxChars },
     },
   };
 
@@ -1059,7 +1119,7 @@ function parseArgs() {
   const cmdArgs = [];
   const opts = {
     numResults: 10,
-    maxChars: 3000,
+    maxChars: 5000,
     format: 'text',
     render: false,
     extended: false,
@@ -1119,7 +1179,13 @@ function parseArgs() {
         opts.stealth = true;
         break;
       case '--caveman':
-        opts.caveman = true;
+        // Check if next arg is 'auto' (positional)
+        if (args[i + 1] === 'auto') {
+          opts.caveman = 'auto';
+          i++;  // skip 'auto'
+        } else {
+          opts.caveman = true;
+        }
         break;
       case '--caveman-level':
         opts.cavemanLevel = args[++i];
@@ -1209,6 +1275,11 @@ Advanced Search (MCP free tier supported):
   --exclude-domains [d] JSON array of domains to exclude
   --start-date <date>   Only results published after (YYYY-MM-DD)
   --end-date <date>     Only results published before (YYYY-MM-DD)
+
+Caveman Compression (token savings):
+  --caveman             Apply Caveman compression (strip grammar, keep facts)
+  --caveman auto        Auto mode: auto-upgrade compression + auto-increase maxChars
+  --caveman-level <lvl> Compression level: light, semantic, aggressive, ultra (default: semantic)
 
 Combinations:
   --clean --markdown    Best combo: Readability article → Markdown output

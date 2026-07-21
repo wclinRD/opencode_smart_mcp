@@ -55,8 +55,8 @@ export default {
       },
       compress: {
         type: 'string',
-        enum: ['none', 'caveman'],
-        description: 'Compress output to save tokens. "caveman" strips grammar, keeps facts (15-30% token savings). Default: none.',
+        enum: ['none', 'caveman', 'auto'],
+        description: 'Compress output to save tokens. "caveman" strips grammar, keeps facts (15-30% token savings). "auto" enables auto-upgrade compression level + auto-increase maxChars. Default: none.',
       },
       compressLevel: {
         type: 'string',
@@ -100,9 +100,13 @@ export default {
     if (a.searchType) cli.push('--search-type', String(a.searchType));
     if (a.category) cli.push('--category', String(a.category));
     if (a.highlights) cli.push('--highlights');
-    if (a.compress === 'caveman') {
+    if (a.compress === 'caveman' || a.compress === 'auto') {
       cli.push('--caveman');
-      if (a.compressLevel) cli.push('--caveman-level', String(a.compressLevel));
+      if (a.compress === 'auto') {
+        cli.push('auto');  // Pass 'auto' as positional arg
+      } else if (a.compressLevel) {
+        cli.push('--caveman-level', String(a.compressLevel));
+      }
     }
     cli.push('--no-color');
     return cli;
