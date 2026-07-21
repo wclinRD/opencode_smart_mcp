@@ -45,6 +45,7 @@ permission:
     node: allow
     npm: allow
     git: allow          # git 操作
+    curl: allow         # 下載檔案 / GitHub API
   todowrite: allow
   skill: allow          # Skill 載入
   subagent: allow       # 允許啟動 Subagent（複雜任務委派用）
@@ -359,7 +360,8 @@ LSP timeout → retry 一次（縮小 scope），仍 timeout 才用 smart_grep
     - 搜尋：`smart_exa_search` > `smart_grep` > raw
     - 編輯：`smart_fast_apply` / `smart_edit_chain`
     - 讀取：`smart_read`
-    - 執行：`bash` (受限於 node/npm/git)
+    - 執行：`bash` (受限於 node/npm/git/curl)
+    - 下載 Repo：`git clone --depth 1` 或 `curl -L` 下載 zip
 2.  **禁止**：直接使用被 deny 的工具。
 
 **回報要求**：
@@ -389,6 +391,7 @@ LSP timeout → retry 一次（縮小 scope），仍 timeout 才用 smart_grep
 | 批次編輯 | 🟢 | `smart_edit_chain({chain:[{file,search,replace}]})` → `smart_test`（1 次 MCP 呼叫完成 N 編輯，省 40-60% token） |
 | Git 流程 | 🟢 | `ssr(git_context) → ssr(git_commit) → smart_test → ssr(git_pr)` |
 | 安全修復 | 🔴 | `smart_security` → `smart_think({mode:"beam"})` → `smart_think(拆分)` → `todowrite` → `task(smart_fast_apply) → task(smart_test) → task(rescan)` → `smart_deep_think(整合)` → 迭代判斷 |
+| GitHub Repo 研究 | 🟢 | `git clone` → `smart_learn` → `smart_think` 分析 → 回報 |
 
 ### 🔄 迭代機制說明
 
@@ -406,6 +409,60 @@ LSP timeout → retry 一次（縮小 scope），仍 timeout 才用 smart_grep
 
 每輪迭代帶入：
   └─ 上一輪的缺口分析 + 未解決矛盾清單
+```
+
+---
+
+## 📦 GitHub Repo 研究流程
+
+當使用者提供 GitHub repo 網址時，自動下載並研究：
+
+```
+觸發條件：使用者提供 GitHub URL（如 https://github.com/user/repo）
+  │
+  ├─ Step 1: 解析 URL → 提取 user/repo
+  │   └─ 支援格式：
+  │       https://github.com/user/repo
+  │       https://github.com/user/repo.git
+  │       git@github.com:user/repo.git
+  │
+  ├─ Step 2: 下載 repo 到暫存目錄
+  │   ├─ 方法 A（優先）：git clone --depth 1
+  │   │   └─ bash: git clone --depth 1 https://github.com/user/repo /tmp/{repo-name}
+  │   │       --depth 1：只抓最新 commit，省時省空間
+  │   └─ 方法 B（Fallback）：curl 下載 zip
+  │       └─ bash: curl -L https://github.com/user/repo/archive/refs/heads/main.zip -o /tmp/{repo-name}.zip
+  │           unzip /tmp/{repo-name}.zip -d /tmp/{repo-name}
+  │           適用：git 不可用或需要特定 branch
+  │
+  ├─ Step 3: smart_learn({root: "/tmp/{repo-name}"})
+  │   └─ 自動分析：專案結構、tech stack、dependencies、coding style
+  │
+  ├─ Step 4: 根據使用者需求進一步研究
+  │   ├─ 架構分析 → smart_read({file, mode:"outline"})
+  │   ├─ 程式碼搜尋 → smart_grep({pattern})
+  │   ├─ 深度推理 → smart_think({mode:"cit"})
+  │   └─ 完整分析 → smart_deep_think({template:"analyze"})
+  │
+  └─ Step 5: 回報研究結果
+      └─ 附帶：repo 結構摘要 + 關鍵發現 + 建議
+```
+
+### 注意事項
+
+```
+⚠️ 暫存目錄：
+  - macOS: /var/folders/.../tmp/（由 $TMPDIR 決定）
+  - 使用者臨時目錄：用 bash 建立子目錄
+  - 研究完成後不自動刪除（保留供後續參考）
+
+⚠️ 大型 Repo：
+  - 預設 --depth 1（shallow clone）
+  - 如果需要完整歷史，使用者會明確要求
+
+⚠️ 私有 Repo：
+  - 需要使用者已設定 GitHub SSH key 或 token
+  - git clone 失敗時，回報錯誤並建議解決方案
 ```
 
 ---
