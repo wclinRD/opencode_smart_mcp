@@ -320,6 +320,68 @@ function truncateTo(text, maxChars) {
 }
 
 /**
+ * Analyze content volume of search results to determine optimal compression and snippet length.
+ * Auto-detects content density and adjusts settings accordingly.
+ * @param {Array} results - Search results array
+ * @param {object} opts - Options parameters
+ * @returns {object} { compressionLevel, snippetLength, avgCharsPerResult, totalChars }
+ */
+function analyzeContentVolume(results, opts) {
+  const numResults = results.length || 1;
+  const maxChars = opts.maxChars || 8000;
+  
+  // Calculate total content volume
+  let totalChars = 0;
+  for (const r of results) {
+    if (r.text) {
+      totalChars += r.text.replace(/\s+/g, ' ').trim().length;
+    }
+  }
+  
+  // Calculate average content per result
+  const avgCharsPerResult = totalChars / numResults;
+  
+  // Determine compression level based on content density
+  let compressionLevel = opts.cavemanLevel || 'semantic';
+  if (opts.caveman === 'auto' || opts.caveman) {
+    if (avgCharsPerResult > 3000) {
+      compressionLevel = 'aggressive';  // High density: heavy compression
+    } else if (avgCharsPerResult > 1500) {
+      compressionLevel = 'semantic';    // Medium density: medium compression
+    } else {
+      compressionLevel = 'light';       // Low density: light compression
+    }
+  }
+  
+  // Dynamically adjust snippet length based on content volume and result count
+  // Target: each result shows maxChars / numResults, but with bounds
+  let snippetLength = Math.floor(maxChars / numResults);
+  
+  // Adjust snippet length based on content density
+  if (avgCharsPerResult > 3000) {
+    // High density: show more content (70%)
+    snippetLength = Math.floor(snippetLength * 0.7);
+  } else if (avgCharsPerResult > 1500) {
+    // Medium density: show moderate content (50%)
+    snippetLength = Math.floor(snippetLength * 0.5);
+  } else {
+    // Low density: show less content (30%)
+    snippetLength = Math.floor(snippetLength * 0.3);
+  }
+  
+  // Apply bounds (300-2000 chars)
+  snippetLength = Math.max(300, Math.min(2000, snippetLength));
+  
+  return {
+    compressionLevel,
+    snippetLength,
+    avgCharsPerResult,
+    totalChars,
+    numResults,
+  };
+}
+
+/**
  * Apply Caveman compression to text output if enabled.
  * Supports auto mode: detects content length and auto-upgrades compression level.
  * @param {string} text - The text to potentially compress
@@ -331,19 +393,33 @@ function applyCaveman(text, opts) {
   
   // Auto mode: detect content length and upgrade compression if needed
   if (opts.caveman === 'auto') {
-    const maxChars = opts.maxChars || 5000;
+    const maxChars = opts.maxChars || 8000;  // Updated default
     const ratio = text.length / maxChars;
     
-    // Content exceeds threshold → auto-upgrade compression level
-    if (ratio > 0.8) {
+    // Dynamically adjust compression level based on ratio
+    let targetLevel = opts.cavemanLevel || 'semantic';
+    
+    if (ratio > 1.2) {
+      // Content exceeds maxChars by 120%: use ultra compression
+      targetLevel = 'ultra';
+    } else if (ratio > 0.8) {
+      // Content exceeds maxChars by 80%: upgrade one level
       const levels = ['light', 'semantic', 'aggressive', 'ultra'];
-      const currentLevel = opts.cavemanLevel || 'semantic';
-      const currentIdx = levels.indexOf(currentLevel);
-      const newLevel = currentIdx < levels.length - 1 ? levels[currentIdx + 1] : currentLevel;
-      
-      const result = cavemanCompress(text, newLevel);
-      return result.text;
+      const currentIdx = levels.indexOf(targetLevel);
+      if (currentIdx < levels.length - 1) {
+        targetLevel = levels[currentIdx + 1];
+      }
+    } else if (ratio < 0.5) {
+      // Content is less than 50% of maxChars: downgrade one level (save tokens)
+      const levels = ['light', 'semantic', 'aggressive', 'ultra'];
+      const currentIdx = levels.indexOf(targetLevel);
+      if (currentIdx > 0) {
+        targetLevel = levels[currentIdx - 1];
+      }
     }
+    
+    const result = cavemanCompress(text, targetLevel);
+    return result.text;
   }
   
   // Manual mode: apply specified level (or default semantic)
@@ -576,11 +652,11 @@ function isFetchableUrl(url) {
  */
 async function cmdSearch(query, opts) {
   // Auto-adjust maxChars: when caveman compression is enabled, request more content
-  // since compression will reduce token usage anyway
-  let effectiveMaxChars = opts.maxChars || 5000;
+  let effectiveMaxChars = opts.maxChars || 8000;  // Increased default
+  
   if (opts.caveman && !opts.maxChars) {
-    // Caveman enabled + no explicit maxChars → increase by 50% to get more raw content
-    effectiveMaxChars = Math.min(effectiveMaxChars * 1.5, 15000);
+    // Caveman enabled + no explicit maxChars → increase by 100% to get more raw content
+    effectiveMaxChars = Math.min(effectiveMaxChars * 2.0, 20000);
   }
   
   const body = {
@@ -607,6 +683,15 @@ async function cmdSearch(query, opts) {
     return JSON.stringify({ query, results }, null, 2);
   }
 
+  // Auto-detect content volume to determine optimal compression and snippet length
+  const contentAnalysis = analyzeContentVolume(results, opts);
+  
+  // Update opts cavemanLevel based on content analysis
+  const adjustedOpts = {
+    ...opts,
+    cavemanLevel: contentAnalysis.compressionLevel,
+  };
+
   const lines = [];
   lines.push(`Search results for: "${query}"`);
   lines.push('='.repeat(60));
@@ -619,13 +704,25 @@ async function cmdSearch(query, opts) {
     if (r.author) lines.push(`   Author: ${r.author}`);
     if (r.publishedDate) lines.push(`   Published: ${r.publishedDate}`);
     if (r.text) {
-      const snippet = r.text.replace(/\s+/g, ' ').trim().substring(0, 250);
-      lines.push(`   ${snippet}${snippet.length >= 250 ? '...' : ''}`);
+      // Use dynamic snippet length (auto-adjusted based on content volume)
+      const snippet = truncateTo(r.text.replace(/\s+/g, ' ').trim(), contentAnalysis.snippetLength);
+      lines.push(`   ${snippet}`);
     }
     lines.push('');
   }
+  
+  // Add content analysis debug info if requested
+  if (opts.debug) {
+    lines.push('');
+    lines.push('--- Content Analysis ---');
+    lines.push(`Total chars: ${contentAnalysis.totalChars}`);
+    lines.push(`Avg chars/result: ${Math.round(contentAnalysis.avgCharsPerResult)}`);
+    lines.push(`Compression level: ${contentAnalysis.compressionLevel}`);
+    lines.push(`Snippet length: ${contentAnalysis.snippetLength}`);
+  }
+  
   lines.push(`Total: ${results.length} result(s)`);
-  return applyCaveman(lines.join('\n'), opts);
+  return applyCaveman(lines.join('\n'), adjustedOpts);
 }
 
 /**
