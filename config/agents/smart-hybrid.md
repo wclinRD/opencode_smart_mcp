@@ -15,6 +15,7 @@ permission:
     node: allow
     npm: allow
     git: allow
+    curl: allow
 
   todowrite: allow
   skill: allow
@@ -191,9 +192,42 @@ EDA → smart_eda_search(auto) → 不足再 smart_exa_search
 
 ## ⚡ 常用工作流
 
+### 📥 下載檔案工作流（curl）
+
+**適用情境**：下載 PDF、壓縮檔、驅動程式、韌體、規格書等檔案
+
+**路由**：🟢 直接執行（單一 bash curl call）
+
+**標準 curl 模板**：
+```bash
+curl -L -# -C - \
+  -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" \
+  -H "Referer: https://example.com/source-page" \
+  -o OUTPUT_FILENAME \
+  "DOWNLOAD_URL"
+```
+
+**參數說明**：
+| 參數 | 用途 |
+|------|------|
+| `-L` | 跟隨 redirect |
+| `-#` | 顯示進度條（簡潔版） |
+| `-C -` | 支援斷點續傳 |
+| `-H "User-Agent: ..."` | 模擬瀏覽器（繞過 UAG 檢查） |
+| `-H "Referer: ..."` | 偽造來源頁（繞過 hotlink 保護） |
+| `-o FILE` | 輸出檔名 |
+
+**注意事項**：
+1. 某些網站需要特定 User-Agent 或 Referer 才能下載
+2. 大檔案（>100MB）加 `-C -` 支援斷點續傳
+3. 下載後用 `ls -lh FILE` 驗證檔案大小是否合理
+4. 若 curl 失敗，嘗試降級到 `smart_exa_crawl` 取得下載連結
+5. 產出目錄：預設在當前工作目錄，可用 `-o /path/to/file` 指定
+
 | 情境 | 路由 | 步驟 |
 |------|------|------|
 | 單一搜尋/查詢 | 🟢 | smart_exa_search → 直接回覆 |
+| 下載檔案 | 🟢 | bash curl (含 User-Agent/Referer) → ls -lh 驗證 |
 | 多源搜尋+整合 | 🟡 | 並行 smart_exa_search×2 → 各自摘要 → smart_think 整合 |
 | 讀多檔案比較 | 🟡 | 並行 smart_read×N → smart_think 分析比較 |
 | 批次編輯 | 🟢 | smart_edit_chain → smart_test |
