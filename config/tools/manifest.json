@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-23T14:23:17.136Z",
+  "generatedAt": "2026-07-24T02:34:47.386Z",
   "tools": [
     {
       "name": "smart_compact",
@@ -979,7 +979,7 @@
       "interceptorRules": [],
       "qualityGates": [],
       "responsePolicy": {
-        "maxLevel": 0
+        "maxLevel": 1
       },
       "inputSchema": {
         "type": "object",
@@ -1047,6 +1047,85 @@
             ],
             "description": "Caveman compression level. light=stop-words only, semantic=content selection, aggressive=full lemmatization, ultra=abbreviations+arrows (50-70% savings). Default: semantic."
           },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Custom HTTP headers as key-value pairs. E.g. {\"Authorization\": \"Bearer xxx\", \"X-Token\": \"yyy\"}. Merged with defaults."
+          },
+          "cookie": {
+            "type": "string",
+            "description": "Cookie string (curl -b). E.g. \"session=abc123; token=xyz\". Sent in Cookie header."
+          },
+          "referer": {
+            "type": "string",
+            "description": "Referer header (curl -e). Bypasses hotlink protection. E.g. \"https://example.com/source-page\"."
+          },
+          "userAgent": {
+            "type": "string",
+            "description": "Custom User-Agent string (curl -A). Overrides default Smart-MCP UA."
+          },
+          "retry": {
+            "type": "number",
+            "description": "Max retry attempts on 429/502/503/504 (curl --retry). Default: 0 (no retry)."
+          },
+          "retryDelay": {
+            "type": "number",
+            "description": "Delay between retries in ms (curl --retry-delay). Default: 1000. Uses exponential backoff."
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Transfer timeout in ms (curl --max-time). Default: 15000."
+          },
+          "connectTimeout": {
+            "type": "number",
+            "description": "Connection timeout in ms (curl --connect-timeout). Default: 5000."
+          },
+          "followRedirects": {
+            "type": "boolean",
+            "description": "Follow HTTP redirects (curl -L). Default: true."
+          },
+          "maxRedirects": {
+            "type": "number",
+            "description": "Max redirect hops (curl --max-redirs). Default: 10. Set 0 to disable."
+          },
+          "proxy": {
+            "type": "string",
+            "description": "HTTP/HTTPS/SOCKS5 proxy URL (curl -x). E.g. \"http://proxy:8080\" or \"socks5://proxy:1080\"."
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST",
+              "HEAD",
+              "PUT",
+              "DELETE",
+              "PATCH"
+            ],
+            "description": "HTTP method (curl -X). Default: GET."
+          },
+          "body": {
+            "type": "string",
+            "description": "Request body for POST/PUT/PATCH (curl -d). Sent as-is with Content-Type: application/json."
+          },
+          "auth": {
+            "type": "string",
+            "description": "Basic auth \"user:pass\" (curl -u). Encoded to Base64 Authorization header."
+          },
+          "resolve": {
+            "type": "string",
+            "description": "DNS override \"domain:port:ip\" (curl --resolve). E.g. \"example.com:443:1.2.3.4\"."
+          },
+          "headersOnly": {
+            "type": "boolean",
+            "description": "Only fetch response headers, skip body (curl -I). Useful for checking status/content-type."
+          },
+          "insecure": {
+            "type": "boolean",
+            "description": "Skip TLS certificate verification (curl -k). Use only for testing."
+          },
           "searchType": {
             "type": "string",
             "enum": [
@@ -1095,7 +1174,7 @@
       "interceptorRules": [],
       "qualityGates": [],
       "responsePolicy": {
-        "maxLevel": 0
+        "maxLevel": 1
       },
       "inputSchema": {
         "type": "object",

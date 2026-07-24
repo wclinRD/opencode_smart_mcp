@@ -54,6 +54,7 @@
     "mammoth": "1.12.0",
     "node-xlsx": "0.24.0",
     "pdf-parse": "2.4.5",
+    "playwright": "1.61.1",
     "sqlite-vec": "0.1.9",
     "tree-sitter-wasms": "0.1.13",
     "turndown": "7.2.4",

@@ -521,16 +521,216 @@ async function htmlToMarkdown(html) {
 }
 
 // ---------------------------------------------------------------------------
+// Curl-like advanced fetch helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Status codes eligible for automatic retry (server errors / rate limit).
+ */
+const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
+
+/**
+ * Build fetch headers from opts (merges curl-like options into defaults).
+ * @param {object} opts
+ * @returns {object} headers object
+ */
+function buildCustomHeaders(opts = {}) {
+  const headers = {
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  };
+  // User-Agent: custom > default
+  headers['User-Agent'] = opts.userAgent
+    || 'Mozilla/5.0 (compatible; Smart-MCP/1.0; +https://github.com/wclin/smart-mcp)';
+  // Cookie
+  if (opts.cookie) headers['Cookie'] = opts.cookie;
+  // Referer
+  if (opts.referer) headers['Referer'] = opts.referer;
+  // Basic Auth
+  if (opts.auth) {
+    const b64 = Buffer.from(opts.auth).toString('base64');
+    headers['Authorization'] = `Basic ${b64}`;
+  }
+  // Custom headers (merged last, can override defaults)
+  if (opts.headers && typeof opts.headers === 'object') {
+    Object.assign(headers, opts.headers);
+  }
+  return headers;
+}
+
+/**
+ * Build fetch options for a single attempt.
+ * Handles: timeout, connectTimeout, followRedirects, maxRedirects, proxy, method, body, insecure, resolve.
+ * @param {string} url
+ * @param {object} opts
+ * @returns {object} fetch options
+ */
+function buildFetchOpts(url, opts = {}) {
+  const headers = buildCustomHeaders(opts);
+  const method = opts.method || 'GET';
+
+  const fetchOpts = {
+    method,
+    headers,
+    redirect: opts.followRedirects === false ? 'manual' : 'follow',
+  };
+
+  // Timeout: prefer connectTimeout for connection phase, timeout for overall
+  const timeoutMs = opts.timeout || 15000;
+  const connectMs = opts.connectTimeout || 5000;
+  // Use the shorter of the two for the signal (simplified; real connect-timeout needs a different approach)
+  fetchOpts.signal = AbortSignal.timeout(Math.min(timeoutMs, connectMs > 0 ? connectMs + timeoutMs : timeoutMs));
+
+  // Body (for POST/PUT/PATCH)
+  if (opts.body && method !== 'GET' && method !== 'HEAD') {
+    fetchOpts.body = opts.body;
+    // Auto-set Content-Type if not already in headers
+    if (!headers['Content-Type'] && !headers['content-type']) {
+      headers['Content-Type'] = 'application/json';
+    }
+  }
+
+  // Proxy support via undici (dynamic import)
+  if (opts.proxy) {
+    fetchOpts._proxy = opts.proxy; // Used by proxyFetch wrapper
+  }
+
+  // DNS resolve override
+  if (opts.resolve) {
+    fetchOpts._resolve = opts.resolve; // Used by resolveFetch wrapper
+  }
+
+  // TLS insecure mode
+  if (opts.insecure) {
+    fetchOpts._insecure = true; // Used by proxyFetch wrapper
+  }
+
+  return fetchOpts;
+}
+
+/**
+ * Execute a fetch with proxy/resolve/insecure support via undici (dynamic import).
+ * Falls back to native fetch if undici is not available or not needed.
+ * @param {string} url
+ * @param {object} fetchOpts - options from buildFetchOpts
+ * @returns {Promise<Response>}
+ */
+async function smartFetchWithProxy(url, fetchOpts) {
+  const needsUndici = fetchOpts._proxy || fetchOpts._resolve || fetchOpts._insecure;
+
+  if (!needsUndici) {
+    // Native fetch — zero deps
+    return fetch(url, fetchOpts);
+  }
+
+  // Dynamic import undici (not a hard dependency)
+  let undici;
+  try {
+    undici = await import('undici');
+  } catch {
+    throw new Error(
+      'undici is required for --proxy / --resolve / --insecure modes.\n' +
+      'Install it with: npm install undici\n' +
+      'Or remove --proxy / --resolve / --insecure to use native fetch.'
+    );
+  }
+
+  const undiciOpts = {
+    method: fetchOpts.method,
+    headers: fetchOpts.headers,
+    body: fetchOpts.body,
+    maxRedirections: fetchOpts.maxRedirects ?? 10,
+  };
+
+  // Proxy dispatcher
+  if (fetchOpts._proxy) {
+    const { ProxyAgent } = undici;
+    undiciOpts.dispatcher = new ProxyAgent(fetchOpts._proxy);
+  }
+
+  // TLS insecure via dispatcher options
+  if (fetchOpts._insecure) {
+    undiciOpts.dispatcher = undiciOpts.dispatcher || new undici.Agent({
+      connect: { rejectUnauthorized: false },
+    });
+    if (undiciOpts.dispatcher instanceof undici.Agent) {
+      undiciOpts.dispatcher = new undici.Agent({ connect: { rejectUnauthorized: false } });
+    }
+  }
+
+  const resp = await undici.fetch(url, undiciOpts);
+  return resp;
+}
+
+/**
+ * Execute fetch with automatic retry (exponential backoff).
+ * Retries on network errors + HTTP 429/502/503/504.
+ * @param {string} url
+ * @param {object} opts - all fetch options
+ * @returns {Promise<{response: Response, attempts: number}>}
+ */
+async function fetchWithRetry(url, opts = {}) {
+  const maxRetries = opts.retry || 0;
+  const baseDelay = opts.retryDelay || 1000;
+  const fetchOpts = buildFetchOpts(url, opts);
+  let lastError;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const resp = await smartFetchWithProxy(url, fetchOpts);
+      // Check retryable status codes
+      if (RETRYABLE_STATUS.has(resp.status) && attempt < maxRetries) {
+        const delay = baseDelay * Math.pow(2, attempt);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      return { response: resp, attempts: attempt + 1 };
+    } catch (err) {
+      lastError = err;
+      // AbortError / TimeoutError are retryable
+      const isRetryable = err.name === 'AbortError'
+        || err.name === 'TimeoutError'
+        || err.message?.includes('ECONNRESET')
+        || err.message?.includes('ECONNREFUSED')
+        || err.message?.includes('fetch failed');
+      if (isRetryable && attempt < maxRetries) {
+        const delay = baseDelay * Math.pow(2, attempt);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError;
+}
+
+// ---------------------------------------------------------------------------
 // Native fetch crawl (zero deps, no API key needed)
 // ---------------------------------------------------------------------------
 
 /**
- * Crawl a URL using native Node.js fetch.
+ * Crawl a URL using native Node.js fetch with curl-like advanced options.
  * No API key required. Supports Readability + turndown via --clean / --markdown.
  * @param {string} url
  * @param {object} opts
  * @param {number} opts.maxChars
- * @returns {Promise<string>} - fetched text content
+ * @param {object} [opts.headers] - Custom HTTP headers
+ * @param {string} [opts.cookie] - Cookie string
+ * @param {string} [opts.referer] - Referer header
+ * @param {string} [opts.userAgent] - Custom User-Agent
+ * @param {number} [opts.retry] - Max retries (0 = no retry)
+ * @param {number} [opts.retryDelay] - Retry delay in ms (default: 1000)
+ * @param {number} [opts.timeout] - Transfer timeout in ms
+ * @param {number} [opts.connectTimeout] - Connection timeout in ms
+ * @param {boolean} [opts.followRedirects] - Follow redirects
+ * @param {number} [opts.maxRedirects] - Max redirect hops
+ * @param {string} [opts.proxy] - HTTP/SOCKS5 proxy URL
+ * @param {string} [opts.method] - HTTP method
+ * @param {string} [opts.body] - Request body
+ * @param {string} [opts.auth] - Basic auth "user:pass"
+ * @param {string} [opts.resolve] - DNS override "domain:port:ip"
+ * @param {boolean} [opts.headersOnly] - Only fetch response headers
+ * @param {boolean} [opts.insecure] - Skip TLS verification
+ * @returns {Promise<{text: string, isHtml: boolean, engine?: string, responseHeaders?: object, attempts?: number}>}
  */
 async function fetchCrawl(url, opts = {}) {
   // --crawlee mode: use Crawlee AdaptivePlaywrightCrawler
@@ -546,16 +746,23 @@ async function fetchCrawl(url, opts = {}) {
     // Fall through to native fetch
   }
 
-  const resp = await fetch(url, {
-    signal: AbortSignal.timeout(15000),
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (compatible; Smart-MCP/1.0; +https://github.com/wclin/smart-mcp)',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    },
-  });
+  // Execute fetch with retry support
+  const { response: resp, attempts } = await fetchWithRetry(url, opts);
 
   if (!resp.ok) {
     throw new Error(`HTTP ${resp.status}${resp.statusText ? ': ' + resp.statusText : ''}`);
+  }
+
+  // --headers-only mode: return response headers only
+  if (opts.headersOnly) {
+    const respHeaders = {};
+    resp.headers.forEach((v, k) => { respHeaders[k] = v; });
+    return {
+      text: JSON.stringify({ status: resp.status, headers: respHeaders }, null, 2),
+      isHtml: false,
+      responseHeaders: respHeaders,
+      attempts,
+    };
   }
 
   const contentType = resp.headers.get('content-type') || '';
@@ -563,7 +770,11 @@ async function fetchCrawl(url, opts = {}) {
   const rawText = await resp.text();
   const maxChars = opts.maxChars || 8000;
 
-  return { text: rawText, isHtml };
+  // Collect response headers for JSON output
+  const respHeaders = {};
+  resp.headers.forEach((v, k) => { respHeaders[k] = v; });
+
+  return { text: rawText, isHtml, responseHeaders: respHeaders, attempts };
 }
 
 /**
@@ -757,7 +968,7 @@ async function cmdCrawlFetch(urls, opts) {
       }
 
       // Fetch raw HTML
-      const { text: rawHtml, isHtml, engine: rEngine } = await fetchCrawl(url, opts);
+      const { text: rawHtml, isHtml, engine: rEngine, responseHeaders, attempts } = await fetchCrawl(url, opts);
 
       // Process through cleanup pipeline (--clean, --markdown, or basic stripping)
       const text = await processContent(rawHtml, isHtml, { ...opts, url });
@@ -776,7 +987,7 @@ async function cmdCrawlFetch(urls, opts) {
         cacheSet(cKey, text, 300);
       }
 
-      results.push({ url, text, cached: false, chunks, chunkMeta, ...(rEngine ? { crawleeEngine: rEngine } : {}) });
+      results.push({ url, text, cached: false, chunks, chunkMeta, responseHeaders, attempts, ...(rEngine ? { crawleeEngine: rEngine } : {}) });
     } catch (err) {
       results.push({ url, error: err.message });
     }
@@ -1232,6 +1443,24 @@ function parseArgs() {
     stealth: false,
     caveman: false,
     cavemanLevel: 'semantic',
+    // Curl-like advanced options
+    headers: {},
+    cookie: undefined,
+    referer: undefined,
+    userAgent: undefined,
+    retry: 0,
+    retryDelay: 1000,
+    timeout: 15000,
+    connectTimeout: 5000,
+    followRedirects: true,
+    maxRedirects: 10,
+    proxy: undefined,
+    method: undefined,
+    body: undefined,
+    auth: undefined,
+    resolve: undefined,
+    headersOnly: false,
+    insecure: false,
     // Advanced search options
     searchType: undefined,
     category: undefined,
@@ -1318,6 +1547,65 @@ function parseArgs() {
       case '--end-date':
         opts.endDate = args[++i];
         break;
+      // Curl-like advanced options
+      case '--header': {
+        const hdr = args[++i];
+        const colonIdx = hdr.indexOf(':');
+        if (colonIdx > 0) {
+          const key = hdr.slice(0, colonIdx).trim();
+          const val = hdr.slice(colonIdx + 1).trim();
+          opts.headers[key] = val;
+        }
+        break;
+      }
+      case '--cookie':
+        opts.cookie = args[++i];
+        break;
+      case '--referer':
+        opts.referer = args[++i];
+        break;
+      case '--user-agent':
+        opts.userAgent = args[++i];
+        break;
+      case '--retry':
+        opts.retry = parseInt(args[++i], 10);
+        break;
+      case '--retry-delay':
+        opts.retryDelay = parseInt(args[++i], 10);
+        break;
+      case '--max-time':
+        opts.timeout = parseInt(args[++i], 10);
+        break;
+      case '--connect-timeout':
+        opts.connectTimeout = parseInt(args[++i], 10);
+        break;
+      case '--no-follow':
+        opts.followRedirects = false;
+        break;
+      case '--max-redirs':
+        opts.maxRedirects = parseInt(args[++i], 10);
+        break;
+      case '--proxy':
+        opts.proxy = args[++i];
+        break;
+      case '--method':
+        opts.method = args[++i];
+        break;
+      case '--body':
+        opts.body = args[++i];
+        break;
+      case '--auth':
+        opts.auth = args[++i];
+        break;
+      case '--resolve':
+        opts.resolve = args[++i];
+        break;
+      case '--headers-only':
+        opts.headersOnly = true;
+        break;
+      case '--insecure':
+        opts.insecure = true;
+        break;
       case '--no-color':
         // no-op, kept for interface parity
         break;
@@ -1380,6 +1668,25 @@ Caveman Compression (token savings):
   --caveman             Apply Caveman compression (strip grammar, keep facts)
   --caveman auto        Auto mode: auto-upgrade compression + auto-increase maxChars
   --caveman-level <lvl> Compression level: light, semantic, aggressive, ultra (default: semantic)
+
+Curl-like Advanced Options (HTTP control):
+  --header "K: V"      Custom HTTP header (curl -H), repeatable
+  --cookie <str>       Cookie string (curl -b): "session=abc; token=xyz"
+  --referer <url>      Referer header (curl -e): bypass hotlink protection
+  --user-agent <str>   Custom User-Agent (curl -A), overrides default
+  --retry <n>          Max retry on 429/502/503/504 (curl --retry), default: 0
+  --retry-delay <ms>   Delay between retries (curl --retry-delay), default: 1000
+  --max-time <ms>      Transfer timeout (curl --max-time), default: 15000
+  --connect-timeout <ms> Connection timeout (curl --connect-timeout), default: 5000
+  --no-follow          Don't follow redirects (curl --no-location)
+  --max-redirs <n>     Max redirect hops (curl --max-redirs), default: 10
+  --proxy <url>        HTTP/SOCKS5 proxy (curl -x), requires: npm install undici
+  --method <method>    HTTP method (curl -X): GET, POST, HEAD, PUT, DELETE, PATCH
+  --body <str>         Request body (curl -d) for POST/PUT/PATCH
+  --auth <user:pass>   Basic auth (curl -u)
+  --resolve <spec>     DNS override (curl --resolve): "domain:port:ip"
+  --headers-only       Only fetch response headers (curl -I)
+  --insecure           Skip TLS verification (curl -k)
 
 Combinations:
   --clean --markdown    Best combo: Readability article → Markdown output

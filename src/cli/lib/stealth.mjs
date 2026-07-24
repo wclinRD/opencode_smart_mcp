@@ -125,13 +125,8 @@ async function tlsImpersonateFetch(url, opts = {}) {
   const startTime = Date.now();
 
   try {
-    const response = await impers.get(url, {
-      impersonate: target,
-      timeout,
-      followRedirects: true,
-      maxRedirects: 5,
-      // Minimal but realistic browser headers
-      headers: {
+      // Merge custom headers (curl-like options override defaults)
+      const baseHeaders = {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
         'Accept-Encoding': 'gzip, deflate, br',
@@ -140,8 +135,24 @@ async function tlsImpersonateFetch(url, opts = {}) {
         'Sec-Fetch-Site': 'none',
         'Sec-Fetch-User': '?1',
         'Upgrade-Insecure-Requests': '1',
-      },
-    });
+      };
+      if (opts.userAgent) baseHeaders['User-Agent'] = opts.userAgent;
+      if (opts.cookie) baseHeaders['Cookie'] = opts.cookie;
+      if (opts.referer) baseHeaders['Referer'] = opts.referer;
+      if (opts.auth) {
+        baseHeaders['Authorization'] = 'Basic ' + Buffer.from(opts.auth).toString('base64');
+      }
+      if (opts.headers && typeof opts.headers === 'object') {
+        Object.assign(baseHeaders, opts.headers);
+      }
+
+      const response = await impers.get(url, {
+        impersonate: target,
+        timeout,
+        followRedirects: opts.followRedirects !== false,
+        maxRedirects: opts.maxRedirects ?? 5,
+        headers: baseHeaders,
+      });
 
     const html = response.text || '';
     const duration = Date.now() - startTime;
@@ -168,7 +179,7 @@ async function tlsImpersonateWithFallback(url, opts = {}) {
 
   for (let i = 0; i < Math.min(maxRetries, IMPERSONATE_TARGETS.length); i++) {
     const target = IMPERSONATE_TARGETS[i];
-    const result = await tlsImpersonateFetch(url, { impersonate: target, timeout });
+    const result = await tlsImpersonateFetch(url, { ...opts, impersonate: target, timeout });
 
     if (!result) {
       attempts.push({ target, error: 'connection-failed' });
@@ -306,7 +317,7 @@ async function stealthPlaywrightRender(url, opts = {}) {
 
     const context = await browser.newContext({
       viewport: { width: 1920, height: 1080 },
-      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
+      userAgent: opts.userAgent || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
       locale: 'zh-TW',
       timezoneId: 'Asia/Taipei',
       // Spoof permissions
@@ -319,6 +330,30 @@ async function stealthPlaywrightRender(url, opts = {}) {
     });
 
     const page = await context.newPage();
+
+    // Set cookies if provided
+    if (opts.cookie) {
+      const cookies = opts.cookie.split(';').map(c => c.trim()).filter(Boolean).map(c => {
+        const [name, ...rest] = c.split('=');
+        return {
+          name: name.trim(),
+          value: rest.join('='),
+          domain: new URL(url).hostname,
+          path: '/',
+        };
+      }).filter(c => c.name);
+      if (cookies.length > 0) await context.addCookies(cookies);
+    }
+
+    // Set referer via extra HTTP headers
+    const extraHeaders = {};
+    if (opts.referer) extraHeaders['Referer'] = opts.referer;
+    if (opts.headers && typeof opts.headers === 'object') {
+      Object.assign(extraHeaders, opts.headers);
+    }
+    if (Object.keys(extraHeaders).length > 0) {
+      await page.setExtraHTTPHeaders(extraHeaders);
+    }
 
     // Inject stealth JS before any page navigation
     await page.addInitScript(STEALTH_JS);
@@ -364,7 +399,7 @@ export async function stealthFetch(url, opts = {}) {
   const perAttemptTimeout = Math.ceil(timeout / 2000); // seconds per attempt
 
   // --- Layer 1: TLS impersonation ---
-  const tlsResult = await tlsImpersonateWithFallback(url, { timeout: perAttemptTimeout });
+  const tlsResult = await tlsImpersonateWithFallback(url, { ...opts, timeout: perAttemptTimeout });
 
   if (tlsResult && hasMeaningfulContent(tlsResult.html)) {
     return {
@@ -382,7 +417,7 @@ export async function stealthFetch(url, opts = {}) {
     return null;
   }
 
-  const browserResult = await stealthPlaywrightRender(url, { timeout });
+  const browserResult = await stealthPlaywrightRender(url, { timeout, headers: opts.headers, cookie: opts.cookie, referer: opts.referer, userAgent: opts.userAgent });
 
   if (browserResult) {
     return {

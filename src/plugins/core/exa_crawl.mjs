@@ -64,6 +64,77 @@ export default {
         enum: ['light', 'semantic', 'aggressive', 'ultra'],
         description: 'Caveman compression level. light=stop-words only, semantic=content selection, aggressive=full lemmatization, ultra=abbreviations+arrows (50-70% savings). Default: semantic.',
       },
+      // ---- Curl-like advanced options ----
+      headers: {
+        type: 'object',
+        additionalProperties: { type: 'string' },
+        description: 'Custom HTTP headers as key-value pairs. E.g. {"Authorization": "Bearer xxx", "X-Token": "yyy"}. Merged with defaults.',
+      },
+      cookie: {
+        type: 'string',
+        description: 'Cookie string (curl -b). E.g. "session=abc123; token=xyz". Sent in Cookie header.',
+      },
+      referer: {
+        type: 'string',
+        description: 'Referer header (curl -e). Bypasses hotlink protection. E.g. "https://example.com/source-page".',
+      },
+      userAgent: {
+        type: 'string',
+        description: 'Custom User-Agent string (curl -A). Overrides default Smart-MCP UA.',
+      },
+      retry: {
+        type: 'number',
+        description: 'Max retry attempts on 429/502/503/504 (curl --retry). Default: 0 (no retry).',
+      },
+      retryDelay: {
+        type: 'number',
+        description: 'Delay between retries in ms (curl --retry-delay). Default: 1000. Uses exponential backoff.',
+      },
+      timeout: {
+        type: 'number',
+        description: 'Transfer timeout in ms (curl --max-time). Default: 15000.',
+      },
+      connectTimeout: {
+        type: 'number',
+        description: 'Connection timeout in ms (curl --connect-timeout). Default: 5000.',
+      },
+      followRedirects: {
+        type: 'boolean',
+        description: 'Follow HTTP redirects (curl -L). Default: true.',
+      },
+      maxRedirects: {
+        type: 'number',
+        description: 'Max redirect hops (curl --max-redirs). Default: 10. Set 0 to disable.',
+      },
+      proxy: {
+        type: 'string',
+        description: 'HTTP/HTTPS/SOCKS5 proxy URL (curl -x). E.g. "http://proxy:8080" or "socks5://proxy:1080".',
+      },
+      method: {
+        type: 'string',
+        enum: ['GET', 'POST', 'HEAD', 'PUT', 'DELETE', 'PATCH'],
+        description: 'HTTP method (curl -X). Default: GET.',
+      },
+      body: {
+        type: 'string',
+        description: 'Request body for POST/PUT/PATCH (curl -d). Sent as-is with Content-Type: application/json.',
+      },
+      auth: {
+        type: 'string',
+        description: 'Basic auth "user:pass" (curl -u). Encoded to Base64 Authorization header.',
+      },
+      resolve: {
+        type: 'string',
+        description: 'DNS override "domain:port:ip" (curl --resolve). E.g. "example.com:443:1.2.3.4".',
+      },
+      headersOnly: {
+        type: 'boolean',
+        description: 'Only fetch response headers, skip body (curl -I). Useful for checking status/content-type.',
+      },
+      insecure: {
+        type: 'boolean',
+        description: 'Skip TLS certificate verification (curl -k). Use only for testing.',
+      },
       // ---- Advanced search options (for search-then-crawl workflow) ----
       searchType: {
         type: 'string',
@@ -101,6 +172,29 @@ export default {
     if (a.searchType) cli.push('--search-type', String(a.searchType));
     if (a.category) cli.push('--category', String(a.category));
     if (a.highlights) cli.push('--highlights');
+    // Curl-like advanced options
+    if (a.headers) {
+      for (const [k, v] of Object.entries(a.headers)) {
+        cli.push('--header', `${k}: ${v}`);
+      }
+    }
+    if (a.cookie) cli.push('--cookie', String(a.cookie));
+    if (a.referer) cli.push('--referer', String(a.referer));
+    if (a.userAgent) cli.push('--user-agent', String(a.userAgent));
+    if (a.retry != null) cli.push('--retry', String(a.retry));
+    if (a.retryDelay != null) cli.push('--retry-delay', String(a.retryDelay));
+    if (a.timeout != null) cli.push('--max-time', String(a.timeout));
+    if (a.connectTimeout != null) cli.push('--connect-timeout', String(a.connectTimeout));
+    if (a.followRedirects === false) cli.push('--no-follow');
+    if (a.maxRedirects != null) cli.push('--max-redirs', String(a.maxRedirects));
+    if (a.proxy) cli.push('--proxy', String(a.proxy));
+    if (a.method) cli.push('--method', String(a.method));
+    if (a.body) cli.push('--body', String(a.body));
+    if (a.auth) cli.push('--auth', String(a.auth));
+    if (a.resolve) cli.push('--resolve', String(a.resolve));
+    if (a.headersOnly) cli.push('--headers-only');
+    if (a.insecure) cli.push('--insecure');
+    if (a.noCache) cli.push('--no-cache');
     if (a.compress === 'caveman' || a.compress === 'auto') {
       cli.push('--caveman');
       if (a.compress === 'auto') {

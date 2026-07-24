@@ -71,7 +71,7 @@ async function doCommand(command, args = {}) {
       const url = args.url || args;
       if (!url) throw new Error('url is required for navigate');
       await _page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      return { ok: true, url: _page.url(), title: await _page.title() };
+      return { ok: true, output: `Navigated to ${_page.url()} — title: ${await _page.title()}` };
     }
 
     case 'snapshot': {
@@ -84,13 +84,8 @@ async function doCommand(command, args = {}) {
           href: a.getAttribute('href'),
         }))
       );
-      return {
-        ok: true,
-        url,
-        title,
-        text: text.substring(0, 10000),
-        links,
-      };
+      const output = `[${title}](${url})\n\n${text.substring(0, 10000)}\n\nLinks:\n${links.map(l => `  ${l.text} → ${l.href}`).join('\n')}`;
+      return { ok: true, output };
     }
 
     // ── 元素互動 ──────────────────────────────────────────────
@@ -102,7 +97,7 @@ async function doCommand(command, args = {}) {
         const byText = _page.locator(`text=${selector}`).first();
         if (await byText.isVisible({ timeout: 2000 }).catch(() => false)) {
           await byText.click();
-          return { ok: true, url: _page.url(), title: await _page.title(), matchedBy: 'text' };
+          return { ok: true, output: `Clicked '${selector}' (by text) → ${_page.url()}` };
         }
       } catch { /* fall through to CSS selector */ }
 
@@ -110,7 +105,7 @@ async function doCommand(command, args = {}) {
       const byCss = _page.locator(selector).first();
       await byCss.waitFor({ state: 'visible', timeout: 5000 });
       await byCss.click();
-      return { ok: true, url: _page.url(), title: await _page.title(), matchedBy: 'css' };
+      return { ok: true, output: `Clicked '${selector}' (by CSS) → ${_page.url()}` };
     }
 
     case 'fill': {
@@ -120,7 +115,7 @@ async function doCommand(command, args = {}) {
       const element = _page.locator(selector).first();
       await element.waitFor({ state: 'visible', timeout: 5000 });
       await element.fill(value);
-      return { ok: true, url: _page.url(), title: await _page.title() };
+      return { ok: true, output: `Filled '${selector}' → ${_page.url()}` };
     }
 
     case 'select': {
@@ -141,7 +136,7 @@ async function doCommand(command, args = {}) {
         const opt = sel.options[sel.selectedIndex];
         return opt ? { value: opt.value, label: opt.text, index: sel.selectedIndex } : null;
       });
-      return { ok: true, selected, url: _page.url() };
+      return { ok: true, output: `Selected '${selector}' → ${JSON.stringify(selected)}` };
     }
 
     case 'hover': {
@@ -150,7 +145,7 @@ async function doCommand(command, args = {}) {
       const hoverEl = _page.locator(selector).first();
       await hoverEl.waitFor({ state: 'visible', timeout: 5000 });
       await hoverEl.hover();
-      return { ok: true, url: _page.url(), title: await _page.title() };
+      return { ok: true, output: `Hovered '${selector}' → ${_page.url()}` };
     }
 
     case 'drag': {
@@ -162,7 +157,7 @@ async function doCommand(command, args = {}) {
       await source.waitFor({ state: 'visible', timeout: 5000 });
       await target.waitFor({ state: 'visible', timeout: 5000 });
       await source.dragTo(target);
-      return { ok: true, url: _page.url(), title: await _page.title() };
+      return { ok: true, output: `Dragged '${from}' → '${to}' → ${_page.url()}` };
     }
 
     // ── 鍵盤操作 ──────────────────────────────────────────────
