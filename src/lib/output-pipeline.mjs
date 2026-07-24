@@ -27,7 +27,7 @@ import { getDefaultCache } from './cache-manager.mjs';
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-const DEFAULT_MAX_CHARS = 50000;
+const DEFAULT_MAX_CHARS = 200000;
 const TRUNCATE_HEAD_ROOM = 0.8; // Truncate at 80% of max to leave metadata room
 
 // ---------------------------------------------------------------------------

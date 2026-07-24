@@ -195,6 +195,7 @@ async function callMcp(command, cmdArgs, opts) {
       mcpArgs = {
         query,
         numResults: opts.numResults || (command === 'code' ? 8 : 10),
+        maxCharacters: opts.maxChars || 5000,
       };
       // Advanced search options (MCP free tier supported)
       if (command === 'search') {
@@ -226,10 +227,13 @@ async function callMcp(command, cmdArgs, opts) {
 
   const text = await mcpToolCall(tool, mcpArgs);
 
+  // Apply caveman compression if enabled (MCP free tier path)
+  const compressed = applyCaveman(text, opts);
+
   if (opts.format === 'json') {
-    return JSON.stringify({ mode: 'free', tool, args: mcpArgs, results: text }, null, 2);
+    return JSON.stringify({ mode: 'free', tool, args: mcpArgs, results: compressed }, null, 2);
   }
-  return text;
+  return compressed;
 }
 
 // ---------------------------------------------------------------------------
@@ -353,24 +357,23 @@ function analyzeContentVolume(results, opts) {
     }
   }
   
-  // Dynamically adjust snippet length based on content volume and result count
-  // Target: each result shows maxChars / numResults, but with bounds
-  let snippetLength = Math.floor(maxChars / numResults);
+  // Snippet length: each result gets up to maxChars (API already limits per-result)
+  let snippetLength = maxChars;
   
-  // Adjust snippet length based on content density
+  // Adjust based on content density (how much raw content Exa returned)
   if (avgCharsPerResult > 3000) {
-    // High density: show more content (70%)
-    snippetLength = Math.floor(snippetLength * 0.7);
+    // Rich content: show full maxChars
+    snippetLength = maxChars;
   } else if (avgCharsPerResult > 1500) {
-    // Medium density: show moderate content (50%)
-    snippetLength = Math.floor(snippetLength * 0.5);
+    // Medium: show 80% of maxChars
+    snippetLength = Math.floor(maxChars * 0.8);
   } else {
-    // Low density: show less content (30%)
-    snippetLength = Math.floor(snippetLength * 0.3);
+    // Sparse: show 60% of maxChars
+    snippetLength = Math.floor(maxChars * 0.6);
   }
   
-  // Apply bounds (300-2000 chars)
-  snippetLength = Math.max(300, Math.min(2000, snippetLength));
+  // Apply bounds (500-10000 chars per result)
+  snippetLength = Math.max(500, Math.min(10000, snippetLength));
   
   return {
     compressionLevel,

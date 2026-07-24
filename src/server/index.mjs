@@ -696,7 +696,7 @@ function applyOptimization(text, policy, opts = {}) {
     const chain = policy.responsePipeline || null;
     const pipe = createPipeline({
       maxLevel,
-      maxChars: 50000,
+      maxChars: 200000,
       chain,
     });
 
@@ -2880,11 +2880,15 @@ function respond(id, result, opts = {}) {
     const originalSize = result.content[0].text.length;
 
     // Context budget: auto-increase compression when budget is low
+    // BUT: respect plugin's maxLevel cap — if plugin says 0, budget can't override
     const budget = getContextBudget();
     const compressionDecision = budget.decideCompression(originalSize, policy.maxLevel || 0);
-    const effectivePolicy = compressionDecision.shouldCompress
-      ? { ...policy, maxLevel: compressionDecision.level }
-      : policy;
+    const effectiveMaxLevel = compressionDecision.shouldCompress
+      ? Math.min(compressionDecision.level, policy.maxLevel ?? 0) // Cap: don't exceed plugin's declared max
+      : 0; // No compression requested → stay at 0
+    const effectivePolicy = effectiveMaxLevel > 0
+      ? { ...policy, maxLevel: effectiveMaxLevel }
+      : policy; // maxLevel 0 → skip pipeline entirely
 
     const opt = applyOptimization(result.content[0].text, effectivePolicy, { ...opts, chain: pipeline });
     if (opt.meta) {
@@ -3383,8 +3387,10 @@ function handleRequest(req) {
           // Async handler — resolve Promise and respond
           if (result && result.__async) {
             const { promise, toolName: tName, origArgs, startTime: st, _responsePolicy } = result;
+            if (tName === 'smart_pw_browser') console.error(`[PW_DEBUG] __async detected, tName=${tName}`);
             promise
               .then(resolvedOutput => {
+                if (tName === 'smart_pw_browser') console.error(`[PW_DEBUG] promise resolved, type=${typeof resolvedOutput}, keys=${Object.keys(resolvedOutput||{})}`);
                 const elapsedMs = Number(process.hrtime.bigint() - st) / 1_000_000;
                 if (controller.signal.aborted) {
                   captureAndReturn(tName, origArgs, { ok: false, error: `Tool ${tName} was cancelled` }, elapsedMs);
@@ -3417,6 +3423,7 @@ function handleRequest(req) {
                   return;
                 }
                 const cr = captureAndReturn(tName, origArgs, { ok: true, output }, elapsedMs);
+                if (tName === 'smart_pw_browser') console.error(`[PW_DEBUG] resolvedOutput=${JSON.stringify(resolvedOutput).slice(0,200)} output=${JSON.stringify(output).slice(0,200)} cr.output=${JSON.stringify(cr.output).slice(0,200)}`);
                 const resp1 = { content: [{ type: 'text', text: cr.output }] };
                 const rp = cr._responsePolicy || _responsePolicy;
                 if (rp) resp1._responsePolicy = rp;

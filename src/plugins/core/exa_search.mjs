@@ -1,6 +1,7 @@
 export default {
   name: 'smart_exa_search',
   category: 'search',
+  responsePolicy: { maxLevel: 1 }, // L1 lossless compression (whitespace/formatting)
   description: 'Search the web or code/documentation with natural language queries. Returns structured results with URLs and summaries.\n\n'
     + 'Use for:\n'
     + '  - Web search: finding recent articles, docs, news (command: "search")\n'

@@ -1,6 +1,7 @@
 export default {
   name: 'smart_exa_crawl',
   category: 'search',
+  responsePolicy: { maxLevel: 1 }, // L1 lossless compression (whitespace/formatting)
   description: 'Crawl web pages and extract their content. Auto-detects static vs JS sites (no need to specify renderer).\n\n'
     + 'Use with options for better results:\n'
     + '  - clean: (recommended) For news, blogs, articles — removes nav/ads/footer, saves 40-60% tokens\n'
