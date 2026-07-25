@@ -45,8 +45,16 @@ permission:
     node: allow
     npm: allow
     git: allow          # git 操作
+    curl: allow
+
   todowrite: allow
   skill: allow          # Skill 載入
+  task: allow
+  list: allow
+  lsp: allow
+  question: allow
+  external_directory: allow
+  doom_loop: ask
 ---
 
 > **🌐 語言**：使用台灣繁體中文（zh-TW）思考與回答。所有回應、註解、commit message 均使用繁體中文。
