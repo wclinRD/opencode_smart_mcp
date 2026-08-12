@@ -1,7 +1,43 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-25T15:27:05.649Z",
+  "generatedAt": "2026-08-12T22:01:55.345Z",
   "tools": [
+    {
+      "name": "get_current_time",
+      "description": "Get the current date and time (today's date, weekday, time, timezone).\nLLMs have no built-in clock — use this tool whenever you need to know today's date,\nthe current time, weekday, timezone, or when the user asks about dates, times,\nschedules, deadlines, holidays, or anything time-sensitive.",
+      "category": "core",
+      "domain": "general",
+      "safetyLevel": "medium",
+      "routingRules": {
+        "autoRoute": false,
+        "interceptorRequired": false,
+        "directCall": true,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "timezone": {
+            "type": "string",
+            "description": "IANA timezone name (e.g. \"Asia/Taipei\", \"America/New_York\"). Default: local system timezone."
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "full",
+              "date",
+              "iso"
+            ],
+            "description": "Output format: \"full\" = date + weekday + time (default), \"date\" = YYYY-MM-DD only, \"iso\" = ISO 8601 timestamp."
+          }
+        }
+      }
+    },
     {
       "name": "smart_compact",
       "description": "[compact] Use when: need to analyze tool history and identify which outputs can be safely dropped or summarized to free context budget. Rules-based (zero LLM cost). Returns droppable indices, summarizable entries, recovery context, and estimated token savings.",
@@ -3987,6 +4023,72 @@
       }
     },
     {
+      "name": "smart_edit",
+      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
+      "category": "standard",
+      "domain": "edit",
+      "safetyLevel": "high",
+      "routingRules": {
+        "autoRoute": true,
+        "interceptorRequired": false,
+        "directCall": false,
+        "triggerKeywords": []
+      },
+      "interceptorRules": [],
+      "qualityGates": [],
+      "responsePolicy": {
+        "maxLevel": 0
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "File path to edit (required)"
+          },
+          "oldString": {
+            "type": "string",
+            "description": "Text to find and replace (exact match by default, regex if regex=true)"
+          },
+          "newString": {
+            "type": "string",
+            "description": "Replacement text"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Multiple files to edit (alternative to file)"
+          },
+          "regex": {
+            "type": "boolean",
+            "description": "Use regex matching instead of exact (default: false)"
+          },
+          "apply": {
+            "type": "boolean",
+            "description": "Apply changes (default: false — dry run)"
+          },
+          "root": {
+            "type": "string",
+            "description": "Project root (default: current dir)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "description": "Output format (default: json — includes nextCommand)"
+          }
+        },
+        "required": [
+          "oldString",
+          "newString"
+        ]
+      }
+    },
+    {
       "name": "smart_exec",
       "description": "Execute code in a sandboxed environment. Supports bash, node, python, deno.\nSafety: deno --allow-none by default (no fs, no net). Other languages run with limited permissions.\nUse when: need to verify code works, run tests, or execute small scripts safely.\nAvoid when: running production services, long-running processes, or untrusted third-party code.",
       "category": "standard",
@@ -4336,41 +4438,6 @@
           "maxComments": {
             "type": "number",
             "description": "Max review comments per file (default: 5)"
-          }
-        }
-      }
-    },
-    {
-      "name": "setup",
-      "description": "Project onboarding — detect project type and generate configuration.\nAnalyzes the project directory to determine language, framework, and conventions.\nOptionally generates a minimal opencode.json config for the project.\nUse when: entering a new project, setting up agent config for a project.",
-      "category": "standard",
-      "domain": "general",
-      "safetyLevel": "medium",
-      "routingRules": {
-        "autoRoute": true,
-        "interceptorRequired": false,
-        "directCall": false,
-        "triggerKeywords": []
-      },
-      "interceptorRules": [],
-      "qualityGates": [],
-      "responsePolicy": {
-        "maxLevel": 0
-      },
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "root": {
-            "type": "string",
-            "description": "Project root directory (default: current working directory)"
-          },
-          "generate": {
-            "type": "boolean",
-            "description": "Actually write the setup config (default: false, preview only)"
-          },
-          "dryRun": {
-            "type": "boolean",
-            "description": "Preview detected info without writing (default: true when generate is false)"
           }
         }
       }
@@ -4791,11 +4858,11 @@
       }
     },
     {
-      "name": "smart_edit",
-      "description": "Use when: need to edit a file with exact string replacement. Supports dry-run (default), exact matching, regex mode, and multi-file editing. Returns nextCommand for LLM to directly apply changes.",
+      "name": "setup",
+      "description": "Project onboarding — detect project type and generate configuration.\nAnalyzes the project directory to determine language, framework, and conventions.\nOptionally generates a minimal opencode.json config for the project.\nUse when: entering a new project, setting up agent config for a project.",
       "category": "standard",
-      "domain": "edit",
-      "safetyLevel": "high",
+      "domain": "general",
+      "safetyLevel": "medium",
       "routingRules": {
         "autoRoute": true,
         "interceptorRequired": false,
@@ -4810,50 +4877,19 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "file": {
-            "type": "string",
-            "description": "File path to edit (required)"
-          },
-          "oldString": {
-            "type": "string",
-            "description": "Text to find and replace (exact match by default, regex if regex=true)"
-          },
-          "newString": {
-            "type": "string",
-            "description": "Replacement text"
-          },
-          "files": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Multiple files to edit (alternative to file)"
-          },
-          "regex": {
-            "type": "boolean",
-            "description": "Use regex matching instead of exact (default: false)"
-          },
-          "apply": {
-            "type": "boolean",
-            "description": "Apply changes (default: false — dry run)"
-          },
           "root": {
             "type": "string",
-            "description": "Project root (default: current dir)"
+            "description": "Project root directory (default: current working directory)"
           },
-          "format": {
-            "type": "string",
-            "enum": [
-              "json",
-              "text"
-            ],
-            "description": "Output format (default: json — includes nextCommand)"
+          "generate": {
+            "type": "boolean",
+            "description": "Actually write the setup config (default: false, preview only)"
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "Preview detected info without writing (default: true when generate is false)"
           }
-        },
-        "required": [
-          "oldString",
-          "newString"
-        ]
+        }
       }
     },
     {
